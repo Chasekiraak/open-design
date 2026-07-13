@@ -9,17 +9,19 @@
 // attribute the visit to Open Design (per-product revenue/traffic attribution).
 export const AMR_CONSOLE_URL =
   'https://open-design.ai/amr/wallet?source=open_design';
-export const AMR_RECHARGE_URL = AMR_CONSOLE_URL;
+export const DEFAULT_AMR_RECHARGE_URL = AMR_CONSOLE_URL;
+export const AMR_RECHARGE_URL = DEFAULT_AMR_RECHARGE_URL;
 
 const AMR_CONSOLE_URL_BY_PROFILE: Record<string, string> = {
-  prod: AMR_CONSOLE_URL,
+  prod: DEFAULT_AMR_RECHARGE_URL,
   test: 'https://vela.powerformer.net/wallet?source=open_design',
+  'feature-test': 'https://amr-feature.powerformer.net/wallet?source=open_design',
   local: 'http://localhost:5173/wallet?source=open_design',
 };
 
 export function amrConsoleUrlForProfile(profile: string | null | undefined): string {
   const normalized = profile?.trim() || 'prod';
-  return AMR_CONSOLE_URL_BY_PROFILE[normalized] ?? AMR_CONSOLE_URL;
+  return AMR_CONSOLE_URL_BY_PROFILE[normalized] ?? DEFAULT_AMR_RECHARGE_URL;
 }
 
 export function amrRechargeUrlForProfile(profile: string | null | undefined): string {
@@ -35,6 +37,7 @@ export function amrPlansUrlForProfile(profile: string | null | undefined): strin
 
 export function amrProfileBadgeLabel(profile: string | null | undefined): string | null {
   if (profile === 'test') return 'TEST';
+  if (profile === 'feature-test') return 'FEATURE TEST';
   if (profile === 'local') return 'LOCAL';
   return null;
 }

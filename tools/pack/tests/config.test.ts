@@ -33,15 +33,15 @@ afterEach(() => {
 
 describe("resolveToolPackConfig AMR profile", () => {
   it("bakes OPEN_DESIGN_AMR_PROFILE into packaged config when set at build time", () => {
-    process.env.OPEN_DESIGN_AMR_PROFILE = "test";
+    process.env.OPEN_DESIGN_AMR_PROFILE = "feature-test";
     const config = resolveToolPackConfig("mac", { namespace: "amr-profile-test" });
-    expect(config.amrProfile).toBe("test");
+    expect(config.amrProfile).toBe("feature-test");
   });
 
   it("rejects unsupported AMR profiles before packaging", () => {
     process.env.OPEN_DESIGN_AMR_PROFILE = "staging";
     expect(() => resolveToolPackConfig("mac")).toThrow(
-      /OPEN_DESIGN_AMR_PROFILE must be prod, test, or local/,
+      /OPEN_DESIGN_AMR_PROFILE must be prod, test, feature-test, or local/,
     );
   });
 });
