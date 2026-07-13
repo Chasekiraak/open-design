@@ -15,7 +15,7 @@ import {
 } from "@open-design/sidecar-proto";
 import { bootstrapSidecarRuntime, createJsonIpcServer, resolveAppIpcPath } from "@open-design/sidecar";
 
-import { PACKAGED_NAMESPACE_ENV, type PackagedConfig } from "./config.js";
+import { PACKAGED_NAMESPACE_ENV, resolvePackagedAmrProfile, type PackagedConfig } from "./config.js";
 import { writePackagedDesktopIdentity, writePackagedWebIdentity } from "./identity.js";
 import { confirmPackagedLauncherRuntime, resolvePackagedLauncherRuntime } from "./launcher-runtime.js";
 import { resolvePackagedNamespacePaths } from "./paths.js";
@@ -37,10 +37,7 @@ function resolveHeadlessNamespaceBaseRoot(): string {
 }
 
 function resolveHeadlessAmrProfile(): PackagedConfig["amrProfile"] {
-  const value = process.env.OPEN_DESIGN_AMR_PROFILE?.trim();
-  if (value == null || value.length === 0) return null;
-  if (value === "prod" || value === "test" || value === "local") return value;
-  throw new Error(`unsupported packaged AMR profile: ${value}`);
+  return resolvePackagedAmrProfile(process.env.OPEN_DESIGN_AMR_PROFILE);
 }
 
 function resolveHeadlessConfig(): PackagedConfig {

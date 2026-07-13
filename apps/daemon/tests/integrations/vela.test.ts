@@ -76,6 +76,7 @@ describe('resolveAmrProfile', () => {
     expect(resolveAmrProfile({ OPEN_DESIGN_AMR_PROFILE: 'prod' })).toBe('prod');
     expect(resolveAmrProfile({ OPEN_DESIGN_AMR_PROFILE: 'local' })).toBe('local');
     expect(resolveAmrProfile({ OPEN_DESIGN_AMR_PROFILE: 'test' })).toBe('test');
+    expect(resolveAmrProfile({ OPEN_DESIGN_AMR_PROFILE: 'feature-test' })).toBe('feature-test');
   });
 
   it('ignores lower-priority VELA_PROFILE values', () => {
@@ -390,12 +391,12 @@ describe('spawnVelaLogin', () => {
     }
   });
 
-  it('spawns the configured vela binary and writes only the resolved AMR profile', async () => {
+  it('spawns the configured vela binary and writes/reads only the feature-test AMR profile', async () => {
     const result = await spawnVelaLogin({
       baseEnv: {
         ...process.env,
         HOME: tmpHome,
-        OPEN_DESIGN_AMR_PROFILE: 'test',
+        OPEN_DESIGN_AMR_PROFILE: 'feature-test',
         VELA_PROFILE: 'prod',
         FAKE_VELA_LOGIN_USER_EMAIL: 'spawn-login@example.com',
       },
@@ -405,7 +406,7 @@ describe('spawnVelaLogin', () => {
     });
 
     expect(result.pid).toBeGreaterThan(0);
-    expect(result.profile).toBe('test');
+    expect(result.profile).toBe('feature-test');
 
     const file = path.join(tmpHome, '.amr', 'config.json');
     for (let i = 0; i < 20; i += 1) {
@@ -414,8 +415,15 @@ describe('spawnVelaLogin', () => {
     }
 
     const next = JSON.parse(readFileSync(file, 'utf8'));
-    expect(next.profiles.test.user.email).toBe('spawn-login@example.com');
+    expect(Object.keys(next.profiles)).toEqual(['feature-test']);
+    expect(next.profiles['feature-test'].user.email).toBe('spawn-login@example.com');
     expect(next.profiles.prod).toBeUndefined();
+    expect(next.profiles.test).toBeUndefined();
+    expect(readVelaLoginStatus({ OPEN_DESIGN_AMR_PROFILE: 'feature-test' })).toMatchObject({
+      loggedIn: true,
+      profile: 'feature-test',
+      user: { email: 'spawn-login@example.com' },
+    });
   });
 
   it('spawns login with the Settings-configured AMR profile over daemon env', async () => {

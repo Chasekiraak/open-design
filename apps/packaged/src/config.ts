@@ -19,7 +19,7 @@ export const PACKAGED_WEB_STANDALONE_ROOT_ENV = "OD_WEB_STANDALONE_ROOT";
 export const PACKAGED_WEB_OUTPUT_MODE_ENV = "OD_WEB_OUTPUT_MODE";
 
 export type PackagedWebOutputMode = "server" | "standalone";
-export type PackagedAmrProfile = "prod" | "test" | "local";
+export type PackagedAmrProfile = "prod" | "test" | "feature-test" | "local";
 
 export type RawPackagedConfig = {
   amrProfile?: string;
@@ -117,11 +117,13 @@ function resolvePackagedWebOutputMode(value: string | undefined): PackagedWebOut
   throw new Error(`unsupported packaged web output mode: ${value}`);
 }
 
-function resolvePackagedAmrProfile(value: string | undefined): PackagedAmrProfile | null {
+export function resolvePackagedAmrProfile(value: string | undefined): PackagedAmrProfile | null {
   const cleaned = cleanOptionalString(value);
   if (cleaned == null) return null;
-  if (cleaned === "prod" || cleaned === "test" || cleaned === "local") return cleaned;
-  throw new Error(`unsupported packaged AMR profile: ${value}`);
+  if (cleaned === "prod" || cleaned === "test" || cleaned === "feature-test" || cleaned === "local") {
+    return cleaned;
+  }
+  throw new Error(`unsupported packaged AMR profile; expected prod, test, feature-test, or local: ${value}`);
 }
 
 function isTruthyEnv(value: string | undefined): boolean {

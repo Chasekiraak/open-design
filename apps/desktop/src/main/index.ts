@@ -92,7 +92,7 @@ export {
 const TOOLS_DEV_PARENT_PID_ENV = SIDECAR_ENV.TOOLS_DEV_PARENT_PID;
 const AMR_PROFILE_ENV_KEY = "OPEN_DESIGN_AMR_PROFILE";
 const AMR_PROFILE_AGENT_ID = "amr";
-const AMR_ENVIRONMENT_PROFILES = ["prod", "test", "local"] as const;
+const AMR_ENVIRONMENT_PROFILES = ["prod", "test", "feature-test", "local"] as const;
 const APP_CONFIG_CHANGED_IPC_CHANNEL = "od:app-config-changed";
 type AmrEnvironmentProfile = (typeof AMR_ENVIRONMENT_PROFILES)[number];
 type DesktopAppConfigPrefs = {
@@ -243,7 +243,9 @@ export function mergeAmrEnvironmentProfileConfig(
   profile: AmrEnvironmentProfile,
 ): DesktopAppConfigPrefs {
   if (!AMR_ENVIRONMENT_PROFILES.includes(profile)) {
-    throw new Error(`Unsupported AMR Environment Profile: ${String(profile)}`);
+    throw new Error(
+      `AMR Environment Profile must be prod, test, feature-test, or local: ${String(profile)}`,
+    );
   }
   const currentProfile = normalizeAmrEnvironmentProfile(
     config.agentCliEnv?.[AMR_PROFILE_AGENT_ID]?.[AMR_PROFILE_ENV_KEY],
