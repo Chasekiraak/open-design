@@ -55,7 +55,6 @@ describe('model context budget', () => {
       error: { code: 'AGENT_PROMPT_TOO_LARGE' },
     });
   });
-
   it('uses provider metadata and preserves output plus safety headroom', () => {
     const decision = evaluateModelContextBudget({
       prompt: 'short prompt',

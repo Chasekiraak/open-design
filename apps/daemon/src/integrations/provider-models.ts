@@ -141,7 +141,7 @@ function openAiModelOption(item: unknown): ProviderModelOption | null {
   const obj = item as { id?: unknown; metadata?: unknown };
   const id = typeof obj?.id === 'string' ? obj.id : '';
   if (!id || !isOpenAiChatModelId(id)) return null;
-  const metadata = extractModelMetadata(obj.metadata);
+  const metadata = extractModelMetadata(obj);
   return {
     id,
     label: id,
@@ -151,14 +151,36 @@ function openAiModelOption(item: unknown): ProviderModelOption | null {
 
 function extractModelMetadata(value: unknown): ModelMetadata | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const metadata = value as { cost?: unknown; capability?: unknown };
+  const record = value as Record<string, unknown>;
+  const metadata = (
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? record.metadata
+      : record
+  ) as Record<string, unknown>;
   const cost = parseModelCost(metadata.cost);
   const capability = parseModelCapability(metadata.capability);
-  if (!cost && !capability) return null;
+  const contextWindowTokens = positiveInteger(
+    metadata.contextWindowTokens ??
+      metadata.context_window_tokens ??
+      record.context_length ??
+      record.contextWindow,
+  );
+  const maxOutputTokens = positiveInteger(
+    metadata.maxOutputTokens ?? metadata.max_output_tokens ?? record.max_output_tokens,
+  );
+  if (!cost && !capability && !contextWindowTokens && !maxOutputTokens) return null;
   return {
     ...(cost ? { cost } : {}),
     ...(capability ? { capability } : {}),
+    ...(contextWindowTokens ? { contextWindowTokens } : {}),
+    ...(maxOutputTokens ? { maxOutputTokens } : {}),
   };
+}
+
+function positiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 function parseModelCost(value: unknown): ModelCost | null {

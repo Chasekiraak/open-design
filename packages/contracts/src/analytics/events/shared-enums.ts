@@ -266,6 +266,15 @@ export type TrackingRunFailureDetail =
   | 'execution_failed'
   | 'user_cancelled'
   | 'unknown';
+export type TrackingContextBudgetAction =
+  | 'unmeasured'
+  | 'within_budget'
+  | 'blocked'
+  | 'rollover';
+export type TrackingContextBudgetSource =
+  | 'model_metadata'
+  | 'known_model_family'
+  | 'unknown';
 export type TrackingRunFailureStage =
   | 'preflight'
   | 'spawn'

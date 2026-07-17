@@ -192,6 +192,7 @@ import {
   spawnEnvForAgent,
 } from './agents.js';
 import {
+  getKnownModelOption,
   getRememberedLiveModels,
   preferFreshLiveModels,
   rememberLiveModels,

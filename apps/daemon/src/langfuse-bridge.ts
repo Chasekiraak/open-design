@@ -1100,6 +1100,7 @@ export async function reportRunCompletedFromDaemon(
         ...(stderr ? { stderr } : {}),
         ...(stdout ? { stdout } : {}),
         diagnostics,
+        ...(run.contextBudget ? { contextBudget: run.contextBudget } : {}),
       },
       message: {
         messageId: run.assistantMessageId ?? '',

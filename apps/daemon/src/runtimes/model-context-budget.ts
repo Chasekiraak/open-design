@@ -132,7 +132,6 @@ export function compactTranscriptForSessionRollover(
     omittedMessageBlocks,
   };
 }
-
 export function evaluateModelContextBudget({
   prompt,
   modelId,

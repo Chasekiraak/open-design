@@ -198,11 +198,43 @@ function extractModelMetadata(item: unknown): ModelMetadata | null {
   const metadata = isRecord(item.metadata) ? item.metadata : item;
   const cost = parseModelCost(metadata.cost);
   const capability = parseModelCapability(metadata.capability);
-  if (!cost && !capability) return null;
+  const contextWindowTokens = extractPositiveModelLimit(item, [
+    'contextWindowTokens',
+    'context_window_tokens',
+    'context_length',
+    'contextLength',
+    'context',
+  ]);
+  const maxOutputTokens = extractPositiveModelLimit(item, [
+    'maxOutputTokens',
+    'max_output_tokens',
+    'output',
+  ]);
+  if (!cost && !capability && !contextWindowTokens && !maxOutputTokens) return null;
   return {
     ...(cost ? { cost } : {}),
     ...(capability ? { capability } : {}),
+    ...(contextWindowTokens ? { contextWindowTokens } : {}),
+    ...(maxOutputTokens ? { maxOutputTokens } : {}),
   };
+}
+
+function extractPositiveModelLimit(
+  item: Record<string, unknown>,
+  keys: string[],
+): number | null {
+  const metadata = isRecord(item.metadata) ? item.metadata : null;
+  const limit = isRecord(item.limit) ? item.limit : null;
+  for (const source of [metadata, limit, item]) {
+    if (!source) continue;
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+        return value;
+      }
+    }
+  }
+  return null;
 }
 
 function withPriceDerivedCostMetadata(
@@ -462,14 +494,20 @@ function openCodeModelPrice(
 > | null {
   if (!isRecord(model)) return null;
   const inputPriceUsdPerMillion = extractInputPriceUsdPerMillion(model);
-  if (inputPriceUsdPerMillion === undefined) return null;
   const outputPriceUsdPerMillion = extractOutputPriceUsdPerMillion(model);
   const metadata = withPriceDerivedCostMetadata(
     extractModelMetadata(model),
     inputPriceUsdPerMillion,
   );
+  if (
+    inputPriceUsdPerMillion === undefined &&
+    outputPriceUsdPerMillion === undefined &&
+    metadata === null
+  ) {
+    return null;
+  }
   return {
-    inputPriceUsdPerMillion,
+    ...(inputPriceUsdPerMillion === undefined ? {} : { inputPriceUsdPerMillion }),
     ...(outputPriceUsdPerMillion === undefined ? {} : { outputPriceUsdPerMillion }),
     ...(metadata === null ? {} : { metadata }),
   };
