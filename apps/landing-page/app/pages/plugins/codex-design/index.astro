@@ -51,6 +51,7 @@ const jsonLd = [
 ---
 
 <Layout title={title} description={description} active="plugins" jsonLd={jsonLd}>
+  <div class="codex-page">
   <section class="codex-hero">
     <div class="codex-hero-copy">
       <nav class="label detail-crumb" aria-label="Breadcrumb">
@@ -58,7 +59,7 @@ const jsonLd = [
         <span class="crumb-sep" aria-hidden="true">·</span>
         <span aria-current="page">{c.eyebrow}</span>
       </nav>
-      <p class="codex-eyebrow">{c.eyebrow}</p>
+      <p class="codex-eyebrow">Curated collection</p>
       <h1 class="display">{c.heading}<span class="dot">.</span></h1>
       <p class="lead">{c.lede}</p>
       <ul class="codex-stats" aria-hidden="true">
@@ -128,8 +129,15 @@ const jsonLd = [
       </div>
     </div>
   </section>
+  </div>
 
   <style>
+    /* Center the whole collection in the shared 1180px safe area and
+       neutralize the global `section { padding: 130px 0 }` rule that
+       otherwise blows the gaps wide open. */
+    .codex-page { max-width: 1180px; margin-inline: auto; }
+    .codex-page > section { padding-block: 0; }
+
     .detail-crumb a { color: inherit; text-decoration: none; }
     .detail-crumb a:hover { color: var(--ink, #262626); text-decoration: underline; }
     .detail-crumb .crumb-sep { margin: 0 0.45em; opacity: 0.55; }
