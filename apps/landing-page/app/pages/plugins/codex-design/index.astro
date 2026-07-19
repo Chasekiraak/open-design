@@ -1,0 +1,262 @@
+---
+/*
+ * /plugins/codex-design/ — curated "Codex design" collection.
+ *
+ * A standalone editorial board (NOT bundled-plugin driven) of the best
+ * real, external skills for doing design with OpenAI Codex. Positions
+ * Open Design as the home for designing with Codex and drives to the
+ * client download + the awesome-codex-design list. Content comes from
+ * `_lib/codex-design.ts`; page chrome (breadcrumb, nav) from
+ * `getPluginsCopy(locale)`.
+ */
+import Layout from '../../../_components/sub-page-layout.astro';
+import { getPluginsCopy } from '../../../_lib/plugins-i18n';
+import { localeFromPath, localizedHref } from '../../../i18n';
+import {
+  CODEX_COLLECTION,
+  CODEX_SKILLS,
+  AWESOME_REPO_URL,
+  OD_DOWNLOAD_URL,
+  OD_GUIDE_HREF,
+} from '../../../_lib/codex-design';
+
+const locale = localeFromPath(Astro.url.pathname);
+const pcopy = getPluginsCopy(locale);
+const href = (path: string) => localizedHref(path, locale);
+
+const c = CODEX_COLLECTION;
+const title = `${c.eyebrow} · ${c.heading} · Open Design`;
+const description = c.lede;
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: `${c.eyebrow} — ${c.heading}`,
+    description: c.lede,
+    url: new URL('/plugins/codex-design/', Astro.site).toString(),
+    numberOfItems: CODEX_SKILLS.length,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    itemListElement: CODEX_SKILLS.map((s, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: s.name,
+      url: new URL(`/plugins/codex-design/${s.slug}/`, Astro.site).toString(),
+    })),
+  },
+];
+---
+
+<Layout title={title} description={description} active="plugins" jsonLd={jsonLd}>
+  <section class="codex-hero">
+    <div class="codex-hero-copy">
+      <nav class="label detail-crumb" aria-label="Breadcrumb">
+        <a href={href('/plugins/')}>{pcopy.hubLabel}</a>
+        <span class="crumb-sep" aria-hidden="true">·</span>
+        <span aria-current="page">{c.eyebrow}</span>
+      </nav>
+      <p class="codex-eyebrow">{c.eyebrow}</p>
+      <h1 class="display">{c.heading}<span class="dot">.</span></h1>
+      <p class="lead">{c.lede}</p>
+      <ul class="codex-stats" aria-hidden="true">
+        {c.stats.map((s) => (
+          <li><b>{s.value}</b><span>{s.label}</span></li>
+        ))}
+      </ul>
+      <div class="codex-hero-cta">
+        <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Download Open Design</a>
+        <a class="btn btn-ghost" href={AWESOME_REPO_URL} target="_blank" rel="noopener">
+          Star the list on GitHub
+        </a>
+        <a class="codex-textlink" href={href(OD_GUIDE_HREF)}>Read the Codex design guide →</a>
+      </div>
+    </div>
+    <div class="codex-hero-art" aria-hidden="true">
+      <img src="/plugins/codex-design/hero.webp" alt="" width="960" height="640" loading="eager" />
+    </div>
+  </section>
+
+  <section class="codex-why" aria-label="Why these skills">
+    <p class="codex-why-intro">{c.intro}</p>
+    <ul class="codex-cat-strip">
+      {c.categories.map((cat) => (
+        <li>
+          <span class="codex-cat-key">{cat.key}</span>
+          <span class="codex-cat-blurb">{cat.blurb}</span>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="codex-grid" aria-label="Codex design skills">
+    <ol>
+      {CODEX_SKILLS.map((s) => (
+        <li class="codex-card">
+          <a href={href(`/plugins/codex-design/${s.slug}/`)}>
+            <span class="codex-card-art">
+              <img src={s.image} alt="" width="480" height="480" loading="lazy" />
+            </span>
+            <span class="codex-card-body">
+              <span class="codex-card-meta">
+                <span class="codex-card-cat">{s.category}</span>
+                <span class="codex-badge">{s.badge}</span>
+              </span>
+              <span class="codex-card-name">{s.name}</span>
+              <span class="codex-card-tagline">{s.tagline}</span>
+              <span class="codex-card-cta" aria-hidden="true">View skill →</span>
+            </span>
+          </a>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  <section class="codex-closer">
+    <div class="codex-closer-inner">
+      <h2>Skip the setup — design with Codex inside Open Design</h2>
+      <p>
+        Open Design is the open-source, agent-native design workspace that runs around Codex:
+        it keeps your systems, skills, and templates consistent so the agent ships work you own.
+        Bring your own key, own your output.
+      </p>
+      <div class="codex-closer-cta">
+        <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Download Open Design</a>
+        <a class="btn btn-ghost" href={href('/plugins/')}>Browse all plugins</a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .detail-crumb a { color: inherit; text-decoration: none; }
+    .detail-crumb a:hover { color: var(--ink, #262626); text-decoration: underline; }
+    .detail-crumb .crumb-sep { margin: 0 0.45em; opacity: 0.55; }
+
+    /* Hero */
+    .codex-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      gap: clamp(24px, 4vw, 64px);
+      align-items: center;
+      padding: 0;
+      margin-bottom: clamp(40px, 6vw, 72px);
+    }
+    .codex-eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #ed6f5c;
+      margin: 0 0 0.4em;
+    }
+    .codex-hero .display { margin-top: 0.1em; text-wrap: balance; }
+    .codex-hero .lead { max-width: 42ch; }
+    .codex-stats {
+      list-style: none; padding: 0; margin: 1.4em 0 0;
+      display: flex; flex-wrap: wrap; gap: 0.6em;
+    }
+    .codex-stats li {
+      display: inline-flex; align-items: baseline; gap: 0.4em;
+      padding: 0.4em 0.85em;
+      border: 1px solid rgba(20, 18, 11, 0.14);
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+    .codex-stats b { font-weight: 700; }
+    .codex-stats span { opacity: 0.62; }
+    .codex-hero-cta {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.7em;
+      margin-top: 1.8em;
+    }
+    .codex-textlink {
+      font-size: 0.9rem; color: inherit; opacity: 0.72;
+      text-decoration: none; margin-left: 0.2em;
+    }
+    .codex-textlink:hover { opacity: 1; text-decoration: underline; }
+    .codex-hero-art img {
+      width: 100%; height: auto; display: block;
+      border-radius: 18px;
+    }
+
+    /* Why strip */
+    .codex-why { margin: 0 0 clamp(36px, 5vw, 60px); }
+    .codex-why-intro {
+      max-width: 62ch; font-size: 1.02rem; line-height: 1.6; opacity: 0.86;
+      margin: 0 0 1.6em;
+    }
+    .codex-cat-strip {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    }
+    .codex-cat-strip li {
+      padding: 18px 20px;
+      border: 1px solid rgba(20, 18, 11, 0.12);
+      border-radius: 14px;
+      background: rgba(247, 247, 244, 0.6);
+    }
+    .codex-cat-key {
+      display: block; font-weight: 700; font-size: 0.95rem;
+      margin-bottom: 0.5em;
+    }
+    .codex-cat-blurb { display: block; font-size: 0.9rem; line-height: 1.5; opacity: 0.72; }
+
+    /* Skills grid */
+    .codex-grid { margin: 0 0 clamp(48px, 7vw, 88px); }
+    .codex-grid ol {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px;
+    }
+    .codex-card a {
+      display: flex; flex-direction: column; height: 100%;
+      text-decoration: none; color: inherit;
+      border: 1px solid rgba(20, 18, 11, 0.12);
+      border-radius: 16px; overflow: hidden;
+      background: #fff;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+    .codex-card a:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 14px 40px -18px rgba(20, 18, 11, 0.35);
+      border-color: rgba(237, 111, 92, 0.5);
+    }
+    .codex-card-art { display: block; background: #f7f7f4; aspect-ratio: 3 / 2; }
+    .codex-card-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .codex-card-body { display: flex; flex-direction: column; gap: 0.5em; padding: 18px 20px 20px; flex: 1; }
+    .codex-card-meta { display: flex; align-items: center; gap: 0.6em; }
+    .codex-card-cat {
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+      opacity: 0.6; font-weight: 600;
+    }
+    .codex-badge {
+      font-size: 0.68rem; font-weight: 600;
+      padding: 0.16em 0.5em; border-radius: 999px;
+      background: rgba(237, 111, 92, 0.12); color: #c9503c;
+      margin-left: auto;
+    }
+    .codex-card-name { font-weight: 700; font-size: 1.08rem; }
+    .codex-card-tagline { font-size: 0.9rem; line-height: 1.45; opacity: 0.72; flex: 1; }
+    .codex-card-cta { font-size: 0.85rem; font-weight: 600; color: #ed6f5c; margin-top: 0.3em; }
+
+    /* Closer */
+    .codex-closer {
+      border-top: 1px solid rgba(20, 18, 11, 0.1);
+      padding-top: clamp(36px, 5vw, 56px);
+    }
+    .codex-closer-inner { max-width: 60ch; }
+    .codex-closer h2 { font-size: clamp(1.4rem, 2.6vw, 1.9rem); margin: 0 0 0.5em; text-wrap: balance; }
+    .codex-closer p { font-size: 1rem; line-height: 1.6; opacity: 0.82; margin: 0 0 1.4em; }
+    .codex-closer-cta { display: flex; flex-wrap: wrap; gap: 0.7em; }
+
+    @media (max-width: 900px) {
+      .codex-hero { grid-template-columns: 1fr; }
+      .codex-hero-art { order: -1; max-width: 460px; }
+      .codex-cat-strip { grid-template-columns: 1fr; }
+      .codex-grid ol { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 560px) {
+      .codex-grid ol { grid-template-columns: 1fr; }
+    }
+  </style>
+</Layout>

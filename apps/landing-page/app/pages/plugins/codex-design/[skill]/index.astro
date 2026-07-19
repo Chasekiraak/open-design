@@ -1,0 +1,268 @@
+---
+/*
+ * /plugins/codex-design/<skill>/ — detail page for one curated Codex
+ * design skill. Editorial (not bundled-plugin driven): what it is, why
+ * it matters for design, how to run it with Codex, source links, and a
+ * strong Open Design CTA. One static page per entry in CODEX_SKILLS.
+ */
+import Layout from '../../../../_components/sub-page-layout.astro';
+import { getPluginsCopy } from '../../../../_lib/plugins-i18n';
+import { localeFromPath, localizedHref } from '../../../../i18n';
+import {
+  CODEX_SKILLS,
+  CODEX_COLLECTION,
+  AWESOME_REPO_URL,
+  OD_DOWNLOAD_URL,
+  OD_GUIDE_HREF,
+  type CodexSkill,
+} from '../../../../_lib/codex-design';
+
+export function getStaticPaths() {
+  return CODEX_SKILLS.map((skill) => ({ params: { skill: skill.slug }, props: { skill } }));
+}
+
+interface Props {
+  skill: CodexSkill;
+}
+const { skill } = Astro.props as Props;
+
+const locale = localeFromPath(Astro.url.pathname);
+const pcopy = getPluginsCopy(locale);
+const href = (path: string) => localizedHref(path, locale);
+
+const related = CODEX_SKILLS.filter((s) => s.slug !== skill.slug).slice(0, 3);
+
+const title = `${skill.name} · Codex design · Open Design`;
+const description = `${skill.tagline} ${skill.whatIsIt}`;
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'TechArticle',
+    headline: `${skill.name} — a Codex design skill`,
+    description: skill.whatIsIt,
+    url: new URL(Astro.url.pathname, Astro.site).toString(),
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: pcopy.hubLabel, item: new URL('/plugins/', Astro.site).toString() },
+      { '@type': 'ListItem', position: 2, name: CODEX_COLLECTION.eyebrow, item: new URL('/plugins/codex-design/', Astro.site).toString() },
+      { '@type': 'ListItem', position: 3, name: skill.name, item: new URL(Astro.url.pathname, Astro.site).toString() },
+    ],
+  },
+];
+---
+
+<Layout title={title} description={description} active="plugins" jsonLd={jsonLd}>
+  <article class="codex-detail">
+    <nav class="label detail-crumb" aria-label="Breadcrumb">
+      <a href={href('/plugins/')}>{pcopy.hubLabel}</a>
+      <span class="crumb-sep" aria-hidden="true">·</span>
+      <a href={href('/plugins/codex-design/')}>{CODEX_COLLECTION.eyebrow}</a>
+      <span class="crumb-sep" aria-hidden="true">·</span>
+      <span aria-current="page">{skill.name}</span>
+    </nav>
+
+    <header class="codex-detail-hero">
+      <div class="codex-detail-copy">
+        <p class="codex-meta">
+          <span class="codex-detail-cat">{skill.category}</span>
+          <span class="codex-badge">{skill.badge}</span>
+        </p>
+        <h1 class="display">{skill.name}<span class="dot">.</span></h1>
+        <p class="lead">{skill.tagline}</p>
+        <div class="codex-detail-cta">
+          <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Use it in Open Design</a>
+          <a class="btn btn-ghost" href={skill.source.url} target="_blank" rel="noopener">
+            View source
+          </a>
+        </div>
+      </div>
+      <div class="codex-detail-art" aria-hidden="true">
+        <img src={skill.image} alt="" width="640" height="640" loading="eager" />
+      </div>
+    </header>
+
+    <section class="codex-section">
+      <h2>What it is</h2>
+      <p>{skill.whatIsIt}</p>
+    </section>
+
+    <section class="codex-section">
+      <h2>Why it matters for design</h2>
+      <ul class="codex-points">
+        {skill.whyForDesign.map((p) => <li>{p}</li>)}
+      </ul>
+    </section>
+
+    <section class="codex-section">
+      <h2>How to run it with Codex</h2>
+      <ol class="codex-steps">
+        {skill.howWithCodex.map((s) => <li>{s}</li>)}
+      </ol>
+    </section>
+
+    {skill.example && (
+      <aside class="codex-example">
+        <span class="codex-example-tag">When to reach for it</span>
+        <p>{skill.example}</p>
+      </aside>
+    )}
+
+    <section class="codex-section codex-links">
+      <h2>Source</h2>
+      <ul>
+        <li>
+          <a href={skill.source.url} target="_blank" rel="noopener">{skill.source.label}</a>
+        </li>
+        {skill.reference && (
+          <li>
+            <a href={skill.reference.url} target="_blank" rel="noopener">{skill.reference.label}</a>
+          </li>
+        )}
+        <li>
+          <a href={AWESOME_REPO_URL} target="_blank" rel="noopener">
+            More on the awesome-codex-design list
+          </a>
+        </li>
+      </ul>
+    </section>
+
+    <section class="codex-detail-closer">
+      <h2>Design with Codex, without the setup</h2>
+      <p>
+        You can install this skill yourself — or run a curated design layer around Codex with
+        Open Design: an open-source, agent-native workspace that keeps your systems, skills, and
+        templates consistent. Bring your own key, own your output.
+      </p>
+      <div class="codex-closer-cta">
+        <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Download Open Design</a>
+        <a class="btn btn-ghost" href={href(OD_GUIDE_HREF)}>Read the Codex design guide</a>
+      </div>
+    </section>
+
+    {related.length > 0 && (
+      <section class="codex-related" aria-label="More Codex design skills">
+        <h2>More Codex design skills</h2>
+        <ul>
+          {related.map((r) => (
+            <li>
+              <a href={href(`/plugins/codex-design/${r.slug}/`)}>
+                <img src={r.image} alt="" width="120" height="120" loading="lazy" />
+                <span>
+                  <b>{r.name}</b>
+                  <em>{r.tagline}</em>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </article>
+
+  <style>
+    .codex-detail { max-width: 860px; margin: 0 auto; }
+    .detail-crumb a { color: inherit; text-decoration: none; }
+    .detail-crumb a:hover { color: var(--ink, #262626); text-decoration: underline; }
+    .detail-crumb .crumb-sep { margin: 0 0.45em; opacity: 0.55; }
+
+    .codex-detail-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 0.75fr);
+      gap: clamp(20px, 4vw, 52px);
+      align-items: center;
+      margin: 0.6em 0 clamp(32px, 5vw, 52px);
+    }
+    .codex-meta { display: flex; align-items: center; gap: 0.6em; margin: 0 0 0.4em; }
+    .codex-detail-cat {
+      font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.09em;
+      opacity: 0.6; font-weight: 600;
+    }
+    .codex-badge {
+      font-size: 0.7rem; font-weight: 600;
+      padding: 0.18em 0.55em; border-radius: 999px;
+      background: rgba(237, 111, 92, 0.12); color: #c9503c;
+    }
+    .codex-detail-hero .display { margin: 0.1em 0 0.25em; }
+    .codex-detail-hero .lead { margin: 0; }
+    .codex-detail-cta { display: flex; flex-wrap: wrap; gap: 0.7em; margin-top: 1.4em; }
+    .codex-detail-art img {
+      width: 100%; height: auto; display: block;
+      border-radius: 16px; background: #f7f7f4;
+    }
+
+    .codex-section { margin: 0 0 clamp(26px, 4vw, 40px); }
+    .codex-section h2 { font-size: 1.25rem; margin: 0 0 0.6em; }
+    .codex-section p { font-size: 1.02rem; line-height: 1.65; opacity: 0.88; margin: 0; max-width: 68ch; }
+    .codex-points, .codex-steps { margin: 0; padding-left: 0; list-style: none; max-width: 68ch; }
+    .codex-points li, .codex-steps li {
+      position: relative; padding-left: 1.7em; margin-bottom: 0.7em;
+      font-size: 1rem; line-height: 1.6; opacity: 0.9;
+    }
+    .codex-points li::before {
+      content: ''; position: absolute; left: 0; top: 0.55em;
+      width: 8px; height: 8px; border-radius: 2px; background: #ed6f5c;
+    }
+    .codex-steps { counter-reset: step; }
+    .codex-steps li { counter-increment: step; }
+    .codex-steps li::before {
+      content: counter(step); position: absolute; left: 0; top: 0;
+      width: 1.5em; height: 1.5em; border-radius: 50%;
+      background: rgba(237, 111, 92, 0.14); color: #c9503c;
+      font-size: 0.78rem; font-weight: 700;
+      display: grid; place-items: center;
+    }
+
+    .codex-example {
+      border-left: 3px solid #ed6f5c;
+      background: rgba(247, 247, 244, 0.7);
+      padding: 16px 20px; border-radius: 0 12px 12px 0;
+      margin: 0 0 clamp(26px, 4vw, 40px);
+    }
+    .codex-example-tag {
+      display: block; font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.09em; font-weight: 700; color: #c9503c; margin-bottom: 0.4em;
+    }
+    .codex-example p { margin: 0; font-size: 0.98rem; line-height: 1.6; }
+
+    .codex-links ul { list-style: none; padding: 0; margin: 0; }
+    .codex-links li { margin-bottom: 0.5em; }
+    .codex-links a { color: #ed6f5c; text-decoration: none; font-weight: 500; }
+    .codex-links a:hover { text-decoration: underline; }
+
+    .codex-detail-closer {
+      border-top: 1px solid rgba(20, 18, 11, 0.1);
+      padding-top: clamp(28px, 4vw, 44px);
+      margin-top: clamp(8px, 2vw, 20px);
+    }
+    .codex-detail-closer h2 { font-size: clamp(1.3rem, 2.4vw, 1.7rem); margin: 0 0 0.5em; }
+    .codex-detail-closer p { font-size: 1rem; line-height: 1.6; opacity: 0.82; margin: 0 0 1.3em; max-width: 62ch; }
+    .codex-closer-cta { display: flex; flex-wrap: wrap; gap: 0.7em; }
+
+    .codex-related { margin-top: clamp(36px, 5vw, 56px); }
+    .codex-related h2 { font-size: 1.1rem; margin: 0 0 1em; }
+    .codex-related ul {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    }
+    .codex-related a {
+      display: flex; gap: 0.7em; align-items: center;
+      text-decoration: none; color: inherit;
+      border: 1px solid rgba(20, 18, 11, 0.12); border-radius: 12px;
+      padding: 12px; transition: border-color 0.18s ease;
+    }
+    .codex-related a:hover { border-color: rgba(237, 111, 92, 0.5); }
+    .codex-related img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: #f7f7f4; flex-shrink: 0; }
+    .codex-related b { display: block; font-size: 0.9rem; }
+    .codex-related em { display: block; font-size: 0.78rem; font-style: normal; opacity: 0.66; line-height: 1.35; margin-top: 0.15em; }
+
+    @media (max-width: 780px) {
+      .codex-detail-hero { grid-template-columns: 1fr; }
+      .codex-detail-art { order: -1; max-width: 360px; }
+      .codex-related ul { grid-template-columns: 1fr; }
+    }
+  </style>
+</Layout>
