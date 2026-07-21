@@ -27,6 +27,15 @@ describe('teamConsoleUrl', () => {
     );
   });
 
+  // Creating a workspace is a console flow whose dialog hangs off B's sidebar;
+  // `workspace=create` (vela components/layout/sidebar-actions.tsx) opens it on
+  // arrival so the entry lands on the dialog rather than a page.
+  it('deep-links create-team straight into the create dialog', () => {
+    expect(teamConsoleUrl(base, 'create-team')).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&workspace=create',
+    );
+  });
+
   it('falls back to the raw URL when it cannot be parsed', () => {
     expect(teamConsoleUrl('not-a-url', 'members')).toBe('not-a-url');
   });

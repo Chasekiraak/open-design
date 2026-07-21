@@ -122,7 +122,7 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
 // segment, falling back to the raw settings URL when the path can't be rewritten.
 export function teamConsoleUrl(
   base: string,
-  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade',
+  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team',
 ): string {
   // B's console routes: members live at /team, the (global) wallet backs the
   // billing entry. The settings URL the context carries includes the
@@ -139,6 +139,7 @@ export function teamConsoleUrl(
     section === 'members' ? 'team'
     : section === 'billing' ? 'wallet'
     : section === 'upgrade' ? 'settings'
+    : section === 'create-team' ? 'dashboard'
     : section;
   try {
     const url = new URL(base);
@@ -150,6 +151,10 @@ export function teamConsoleUrl(
     }
     url.pathname = `/${segments.join('/')}`;
     if (section === 'upgrade') url.searchParams.set('billing', 'checkout');
+    // Creating a workspace is a console flow whose dialog hangs off B's sidebar.
+    // `workspace=create` opens it on arrival, so this entry lands ON the dialog
+    // instead of dropping the user on a page to find it themselves.
+    if (section === 'create-team') url.searchParams.set('workspace', 'create');
     return url.toString();
   } catch {
     return base;
@@ -767,7 +772,7 @@ export function EntryNavRail({
                     <a
                       className="entry-nav-rail__menu-item"
                       role="menuitem"
-                      href={teamConsoleUrl(workspaceSettingsUrl, 'dashboard')}
+                      href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
                       {...externalLinkProps}
                       data-testid="entry-nav-create-team"
                       onClick={() => setTeamOpen(false)}
