@@ -121,6 +121,14 @@ export interface ManualEditHistoryEntry {
   patch: ManualEditPatch;
   beforeSource: string;
   afterSource: string;
+  /**
+   * Runtime-only targets have no element markup in before/afterSource. Keep
+   * the live content snapshots that correspond to those source states so
+   * undo/redo can replay them through the in-place bridge instead of forcing
+   * a srcDoc reload.
+   */
+  runtimeBeforeFields?: Record<string, unknown>;
+  runtimeAfterFields?: Record<string, unknown>;
   createdAt: number;
 }
 

@@ -6548,6 +6548,7 @@ function HtmlViewer({
   }, []);
   const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([]);
   const [selectedManualEditTarget, setSelectedManualEditTarget] = useState<ManualEditTarget | null>(null);
+  const selectedManualEditTargetRef = useRef<ManualEditTarget | null>(null);
   const [manualEditPageStylesOpen, setManualEditPageStylesOpen] = useState(false);
   const [manualEditPanelPosition, setManualEditPanelPosition] = useState<{ left: number; top: number } | null>(null);
   const [manualEditDraftDirty, setManualEditDraftDirty] = useState(false);
@@ -6562,6 +6563,9 @@ function HtmlViewer({
   const manualEditTextCommitInFlightRef = useRef<Promise<unknown> | null>(null);
   const manualEditTextCommitSequenceRef = useRef(0);
   const [manualEditDraft, setManualEditDraft] = useState<ManualEditDraft>(() => emptyManualEditDraft());
+  useEffect(() => {
+    selectedManualEditTargetRef.current = selectedManualEditTarget;
+  }, [selectedManualEditTarget]);
   // Direct-manipulation chrome: crop mode on the selected image, and the live
   // caret/selection state of the inline text session (drives whether toolbar
   // formatting applies to the range or the whole element).
@@ -8991,6 +8995,60 @@ function HtmlViewer({
     return null;
   }
 
+  function manualEditTargetContentFields(
+    patch: ManualEditPatch,
+    target: ManualEditTarget | null,
+  ): Record<string, unknown> | null {
+    if (!target || !('id' in patch) || target.id !== patch.id) return null;
+    if (patch.kind === 'set-text') {
+      return { text: target.fields.text ?? target.text };
+    }
+    if (patch.kind === 'set-link') {
+      return {
+        text: target.fields.text ?? target.text,
+        href: target.fields.href ?? '',
+      };
+    }
+    if (patch.kind === 'set-image') {
+      return {
+        src: target.fields.src ?? '',
+        alt: target.fields.alt ?? '',
+      };
+    }
+    if (patch.kind === 'set-inner-html') {
+      const doc = new DOMParser().parseFromString(target.outerHtml, 'text/html');
+      return { html: doc.body.firstElementChild?.innerHTML ?? target.text };
+    }
+    if (patch.kind === 'set-attributes') {
+      const attributes = Object.fromEntries(
+        Object.keys(patch.attributes).map((name) => [name, target.attributes[name] ?? '']),
+      );
+      return { attributes };
+    }
+    if (patch.kind === 'set-outer-html') return { html: target.outerHtml };
+    return null;
+  }
+
+  function manualEditRuntimeContentSnapshot(
+    patch: ManualEditPatch,
+    source: string,
+    target: ManualEditTarget | null,
+  ): Record<string, unknown> | null {
+    if (!('id' in patch) || readManualEditOuterHtml(source, patch.id)) return null;
+    return manualEditTargetContentFields(patch, target);
+  }
+
+  function manualEditSavedRuntimeContentFields(
+    patch: ManualEditPatch,
+    destSource: string,
+  ): Record<string, unknown> | null {
+    if (patch.kind === 'set-outer-html') {
+      const html = readManualEditRuntimeOuterHtml(destSource, patch.id);
+      return html ? { html } : null;
+    }
+    return manualEditPatchContentFields(patch, destSource);
+  }
+
   /**
    * Reflect a just-saved content patch in the live iframe WITHOUT a srcDoc
    * reload — the reload flashes white, resets scroll to the top, and re-runs
@@ -9089,6 +9147,11 @@ function HtmlViewer({
     setManualEditError(null);
     try {
       const baseSource = sourceRef.current;
+      const runtimeBeforeFields = manualEditRuntimeContentSnapshot(
+        patch,
+        baseSource,
+        selectedManualEditTargetRef.current,
+      );
       const result = applyManualEditPatch(baseSource, patch);
       if (!result.ok) {
         setManualEditError(result.error ?? 'Could not apply edit.');
@@ -9118,6 +9181,13 @@ function HtmlViewer({
         patch,
         beforeSource: baseSource,
         afterSource: result.source,
+        ...(runtimeBeforeFields ? { runtimeBeforeFields } : {}),
+        ...(runtimeBeforeFields
+          ? {
+              runtimeAfterFields: manualEditSavedRuntimeContentFields(patch, result.source)
+                ?? runtimeBeforeFields,
+            }
+          : {}),
         createdAt: Date.now(),
       };
       setSource(result.source);
@@ -9337,7 +9407,34 @@ function HtmlViewer({
       patch.kind === 'set-outer-html'
     ) {
       const html = readManualEditOuterHtml(destSource, patch.id);
-      if (!html) return false;
+      if (!html) {
+        const runtimeFields = (isUndo ? entry.runtimeBeforeFields : entry.runtimeAfterFields)
+          ?? manualEditSavedRuntimeContentFields(patch, destSource);
+        if (!runtimeFields) return false;
+        if (patch.kind === 'set-outer-html') {
+          const runtimeHtml = runtimeFields.html;
+          if (typeof runtimeHtml !== 'string') return false;
+          const ok = await applyManualEditDomOp(patch.id, runtimeHtml, 'replace');
+          if (ok && selectedManualEditTargetIdRef.current === patch.id) {
+            setManualEditDraft((current) => ({ ...current, outerHtml: runtimeHtml }));
+          }
+          return ok;
+        }
+        const ok = await applyManualEditDomOp(patch.id, '', 'apply-content', runtimeFields);
+        if (ok && selectedManualEditTargetIdRef.current === patch.id) {
+          setManualEditDraft((current) => ({
+            ...current,
+            ...(typeof runtimeFields.text === 'string' ? { text: runtimeFields.text } : {}),
+            ...(typeof runtimeFields.href === 'string' ? { href: runtimeFields.href } : {}),
+            ...(typeof runtimeFields.src === 'string' ? { src: runtimeFields.src } : {}),
+            ...(typeof runtimeFields.alt === 'string' ? { alt: runtimeFields.alt } : {}),
+            ...(runtimeFields.attributes && typeof runtimeFields.attributes === 'object'
+              ? { attributesText: JSON.stringify(runtimeFields.attributes, null, 2) }
+              : {}),
+          }));
+        }
+        return ok;
+      }
       const ok = await applyManualEditDomOp(patch.id, html, 'replace');
       if (!ok) return false;
       if (selectedManualEditTargetIdRef.current === patch.id) {

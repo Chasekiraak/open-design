@@ -1204,6 +1204,7 @@ describe('FileViewer manual edit regressions', () => {
       id: 'brand-name',
       label: 'Brand name',
       text: 'Acme',
+      fields: { text: 'Acme' },
       attributes: { 'data-od-id': 'brand-name' },
       outerHtml: '<h1 data-od-id="brand-name">Acme</h1>',
     });
@@ -1224,6 +1225,64 @@ describe('FileViewer manual edit regressions', () => {
     // The edit persisted into the brand payload…
     expect(savedBodies[0]!.content).toContain('Acme Studios');
     // …and the canvas was NOT reloaded.
+    expect(frame.srcdoc).toBe(srcdocBefore);
+  });
+
+  it('replays runtime-only brand-kit text history in place without reloading', async () => {
+    const source = '<!doctype html><html><head><script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script></head><body><div id="root"></div></body></html>';
+    const { fetchMock, savedBodies } = manualEditWriteMock(source);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={htmlPreviewFile()}
+        liveHtml={source}
+      />,
+    );
+    clickManualTool('manual-edit-mode-toggle');
+    const frame = await previewFrame();
+    const postSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+    await selectManualEditTarget({
+      ...heroTarget(),
+      id: 'brand-name',
+      label: 'Brand name',
+      text: 'Acme',
+      fields: { text: 'Acme' },
+      attributes: { 'data-od-id': 'brand-name' },
+      outerHtml: '<h1 data-od-id="brand-name">Acme</h1>',
+    });
+    const srcdocBefore = frame.srcdoc;
+
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'od-edit-text-commit', id: 'brand-name', value: 'Acme Studios' },
+        source: frame.contentWindow,
+      }));
+    });
+    await ackApplyDom(frame, postSpy);
+    await waitFor(() => expect(savedBodies).toHaveLength(1));
+
+    postSpy.mockClear();
+    fireEvent.click(screen.getByTestId('manual-edit-undo'));
+    const undoApplied = await ackApplyDom(frame, postSpy);
+    expect(undoApplied).toMatchObject({
+      id: 'brand-name',
+      op: 'apply-content',
+      fields: { text: 'Acme' },
+    });
+    await waitFor(() => expect(savedBodies).toHaveLength(2));
+    expect(savedBodies[1]!.content).toBe(source);
+    expect(frame.srcdoc).toBe(srcdocBefore);
+
+    postSpy.mockClear();
+    fireEvent.click(screen.getByTestId('manual-edit-redo'));
+    const redoApplied = await ackApplyDom(frame, postSpy);
+    expect(redoApplied).toMatchObject({
+      id: 'brand-name',
+      op: 'apply-content',
+      fields: { text: 'Acme Studios' },
+    });
+    await waitFor(() => expect(savedBodies).toHaveLength(3));
+    expect(savedBodies[2]!.content).toContain('Acme Studios');
     expect(frame.srcdoc).toBe(srcdocBefore);
   });
 
