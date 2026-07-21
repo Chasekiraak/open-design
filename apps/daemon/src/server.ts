@@ -638,6 +638,13 @@ import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-s
 import { resolveWorkspaceScope } from './collab/workspace-scope.js';
 import { createWorkspaceContextProviderFromEnv } from './collab/vela-workspace-context.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
+import { createSyncDigestReader } from './collab/sync-digest.js';
+import {
+  createCollabSyncSnapshotStore,
+  parseMemberDirectorySnapshot,
+  parseTeamProjectSnapshot,
+} from './collab/sync-snapshot-store.js';
+import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
@@ -2533,6 +2540,17 @@ export async function startServer({
   const activeWorkspace = createActiveWorkspaceSelectionStore(RUNTIME_DATA_DIR);
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
   const getActiveWorkspaceId = () => activeWorkspace.get();
+  // Persistent half of the sync design: a cheap digest GET decides whether the
+  // catalog / member payload this daemon already has on disk is still current,
+  // so a cold start (or a workspace not touched in a while) can skip the real
+  // round-trip entirely. Snapshots live in the daemon database, which was
+  // opened from the resolved runtime data root. See collab/persistent-sync-cache.ts.
+  const collabSyncSnapshots = createCollabSyncSnapshotStore(db);
+  const readCollabSyncDigest = createSyncDigestReader({
+    env: process.env,
+    getWorkspaceId: () => activeWorkspace.get(),
+    onError: (error) => console.warn('[od] collab sync digest error:', error),
+  });
   const velaCliCollabClient = createVelaCliCollabClientFromEnv(process.env, {
     getWorkspaceId: getActiveWorkspaceId,
   });
@@ -2746,6 +2764,34 @@ export async function startServer({
     workspaceContext: collab.workspaceContext,
     ...(velaCliTeamProjectCatalog ? { teamProjectCatalog: velaCliTeamProjectCatalog } : {}),
   });
+  /**
+   * Is this daemon's workspace context far enough along for a collab read to be
+   * authoritative?
+   *
+   * Both the team catalog and the member directory answer `[]` rather than
+   * failing while there is no team identity — at startup, signed out, or on a
+   * personal workspace. Snapshotting that empty would be indistinguishable from
+   * snapshotting a genuinely empty team, so the persistent caches below use this
+   * to bypass themselves entirely until the context resolves.
+   */
+  const hasTeamIdentity = async (): Promise<boolean> =>
+    contextToResourceHubPrincipal(await collab.workspaceContext.current({})) != null;
+  // Persistent snapshot layer for the display catalog, underneath the in-memory
+  // cache below. The in-memory layer collapses repeat reads inside one page
+  // load; this one survives process restarts, so a freshly started daemon whose
+  // team catalog is unchanged serves the first paint from disk after a digest
+  // GET instead of a full catalog round-trip. Only the DISPLAY path is wrapped —
+  // `teamProjectsLister` itself stays raw so the pull gate and comment/presence
+  // relays keep observing an unshare immediately.
+  const teamProjectsCatalogSnapshot = createPersistentSyncCache({
+    face: 'catalog',
+    fetch: teamProjectsLister,
+    readDigest: readCollabSyncDigest,
+    store: collabSyncSnapshots,
+    parseSnapshot: parseTeamProjectSnapshot,
+    shouldCache: hasTeamIdentity,
+    onError: (error) => console.warn('[od] team projects snapshot cache error:', error),
+  });
   // Short-TTL, single-flight cache for the read-only DISPLAY path
   // (GET /api/workspace/projects/team). Keyed on the active workspace id, so it
   // can never serve another workspace's list and a workspace switch is an
@@ -2774,7 +2820,7 @@ export async function startServer({
     const refresh = (key: string) => {
       if (!entry || entry.key !== key) entry = { key, value: null, settledAt: 0, inflight: null };
       const cur = entry;
-      const value = teamProjectsLister();
+      const value = teamProjectsCatalogSnapshot();
       cur.inflight = value;
       value.then(
         (list) => {
@@ -2798,8 +2844,12 @@ export async function startServer({
     // refetch those moments trigger is served the pre-change list straight out
     // of this cache, and the new row only appears on some later poll — up to
     // 60s later once SSE lowers the client's cadence (acceptance #53).
+    // Drops the persisted snapshot too, so an invalidation cannot be undone by a
+    // restart. The digest compare would already defeat reuse (a catalog change
+    // moves B's token), but leaving a known-dead row on disk is pointless.
     const invalidate = () => {
       entry = null;
+      teamProjectsCatalogSnapshot.invalidate();
     };
     const read = () => {
       const key = activeWorkspace.get() ?? '';
@@ -2996,9 +3046,23 @@ export async function startServer({
   // 6-connection cap. SWR serves the roster instantly after the first load and
   // refreshes in the background, so a member who joins still resolves within a
   // poll tick.
-  const teamMembersCache = collabCloud
+  // Same two-layer split as the catalog above: the persistent snapshot answers
+  // the cold read (digest token unchanged -> serve the roster off disk), the SWR
+  // above it answers the burst of consumers one navigation mounts at once.
+  const teamMembersSnapshot = collabCloud
+    ? createPersistentSyncCache({
+        face: 'members',
+        fetch: () => collabCloud.listMembers(),
+        readDigest: readCollabSyncDigest,
+        store: collabSyncSnapshots,
+        parseSnapshot: parseMemberDirectorySnapshot,
+        shouldCache: hasTeamIdentity,
+        onError: (error) => console.warn('[od] team members snapshot cache error:', error),
+      })
+    : null;
+  const teamMembersCache = teamMembersSnapshot
     ? createSwrCache(
-        () => collabCloud.listMembers(),
+        () => teamMembersSnapshot(),
         () => activeWorkspace.get() ?? '',
         3000,
       )

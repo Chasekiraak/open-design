@@ -14,6 +14,7 @@ import type {
   ProjectTabsState,
 } from '@open-design/contracts';
 import { eventsEndedWithUnfinishedWork } from '@open-design/contracts';
+import { migrateCollabSyncSnapshots } from './collab/sync-snapshot-store.js';
 import { migrateCritique } from './critique/persistence.js';
 import { migrateMediaTasks } from './media/tasks.js';
 import { migrateLibrary } from './library-store.js';
@@ -434,6 +435,7 @@ function migrate(db: SqliteDb): void {
   migrateMediaTasks(db);
   migrateLibrary(db);
   migratePlugins(db);
+  migrateCollabSyncSnapshots(db);
 }
 
 function migrateWorkspaceProjectsCompositePrimaryKey(db: SqliteDb): void {
