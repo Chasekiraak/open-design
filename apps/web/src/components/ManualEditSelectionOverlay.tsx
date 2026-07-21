@@ -620,6 +620,33 @@ export function ManualEditSelectionOverlay({
           data-testid="manual-edit-resize-right"
           onPointerDown={startGesture('resize-right')}
         />
+        {isImage ? (
+          // Corner anchors: aspect-locked scale from any of the four corners,
+          // anchored at the opposite corner. Image-only — text boxes reflow
+          // their own height, so corners would fight the measured height.
+          <>
+            <div
+              className={`${styles.cornerHandle} ${styles.cornerHandleNw}`}
+              data-testid="manual-edit-resize-nw"
+              onPointerDown={startGesture('resize-nw')}
+            />
+            <div
+              className={`${styles.cornerHandle} ${styles.cornerHandleNe}`}
+              data-testid="manual-edit-resize-ne"
+              onPointerDown={startGesture('resize-ne')}
+            />
+            <div
+              className={`${styles.cornerHandle} ${styles.cornerHandleSw}`}
+              data-testid="manual-edit-resize-sw"
+              onPointerDown={startGesture('resize-sw')}
+            />
+            <div
+              className={`${styles.cornerHandle} ${styles.cornerHandleSe}`}
+              data-testid="manual-edit-resize-se"
+              onPointerDown={startGesture('resize-se')}
+            />
+          </>
+        ) : null}
       </div>
       {!dragKind && !actionBarHidden ? (
         <div

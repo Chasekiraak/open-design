@@ -1562,7 +1562,7 @@ describe('manual edit keyboard forwarding', () => {
     dom.window.close();
   });
 
-  it('forwards Cmd/Ctrl+V as an element paste for a selected non-editable target', () => {
+  it('defers Cmd/Ctrl+V to the native paste event, falling back to element paste', async () => {
     const dom = loadDom();
     const postMessage = vi.spyOn(dom.window.parent, 'postMessage');
 
@@ -1572,15 +1572,54 @@ describe('manual edit keyboard forwarding', () => {
     }));
     expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'od-edit-paste-request' }), '*');
 
-    // A selected non-editable target (image/container never gets a caret, so
-    // the native paste event never fires) must still paste via the shortcut.
     dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
       data: { type: 'od-edit-selected-target', id: 'title' },
     }));
+
+    // The shortcut must NOT cancel the keydown — preventDefault suppresses the
+    // native paste event, the only reader of clipboard IMAGE bytes (that was
+    // the "image paste stopped working" regression) — and must not post
+    // synchronously. The element-paste request fires from the one-shot
+    // fallback only when no paste event follows.
+    const shortcut = new dom.window.KeyboardEvent('keydown', {
+      key: 'v', metaKey: true, bubbles: true, cancelable: true,
+    });
+    dom.window.document.body.dispatchEvent(shortcut);
+    expect(shortcut.defaultPrevented).toBe(false);
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'od-edit-paste-request' }), '*');
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith({ type: 'od-edit-paste-request', id: 'title' }, '*');
+    });
+
+    dom.window.close();
+  });
+
+  it('lets a clipboard image win over the Cmd/Ctrl+V element-paste fallback', async () => {
+    const dom = loadDom();
+    const postMessage = vi.spyOn(dom.window.parent, 'postMessage');
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
+      data: { type: 'od-edit-selected-target', id: 'title' },
+    }));
+
     dom.window.document.body.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
       key: 'v', metaKey: true, bubbles: true, cancelable: true,
     }));
-    expect(postMessage).toHaveBeenCalledWith({ type: 'od-edit-paste-request', id: 'title' }, '*');
+    // The browser delivers the native paste event right after the keydown. An
+    // image on the clipboard must insert as an image, and the armed fallback
+    // must be disarmed — no trailing element-paste request.
+    const image = new dom.window.File(['png-bytes'], 'shot.png', { type: 'image/png' });
+    const imagePaste = new dom.window.Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(imagePaste, 'clipboardData', { value: { files: [image] } });
+    dom.window.document.body.dispatchEvent(imagePaste);
+
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'od-edit-paste-image', id: 'title', name: 'shot.png', mime: 'image/png',
+      }), '*');
+    });
+    // Outlive the 150ms fallback window before asserting it stayed silent.
+    await new Promise((resolve) => setTimeout(resolve, 220));
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'od-edit-paste-request' }), '*');
 
     dom.window.close();
   });

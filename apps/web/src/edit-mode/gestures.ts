@@ -11,7 +11,35 @@ import type { ManualEditRect, ManualEditSpaceScale, ManualEditStyles } from './t
  * screen pixels with the preview scale before calling in.
  */
 
-export type ManualEditGestureKind = 'move' | 'resize-left' | 'resize-right';
+export type ManualEditGestureKind =
+  | 'move'
+  | 'resize-left'
+  | 'resize-right'
+  | 'resize-nw'
+  | 'resize-ne'
+  | 'resize-sw'
+  | 'resize-se';
+
+export type ManualEditCornerGestureKind = Extract<
+  ManualEditGestureKind,
+  'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se'
+>;
+
+/**
+ * Which way each corner handle pulls: +1 when dragging outward increases the
+ * pointer coordinate (right/bottom corners), -1 when it decreases it. The
+ * OPPOSITE corner stays anchored.
+ */
+const CORNER_GESTURE_DIRS: Record<ManualEditCornerGestureKind, { x: -1 | 1; y: -1 | 1 }> = {
+  'resize-nw': { x: -1, y: -1 },
+  'resize-ne': { x: 1, y: -1 },
+  'resize-sw': { x: -1, y: 1 },
+  'resize-se': { x: 1, y: 1 },
+};
+
+export function isManualEditCornerGesture(kind: ManualEditGestureKind): kind is ManualEditCornerGestureKind {
+  return kind === 'resize-nw' || kind === 'resize-ne' || kind === 'resize-sw' || kind === 'resize-se';
+}
 
 export interface ManualEditAlignmentGuide {
   orientation: 'vertical' | 'horizontal';
@@ -108,6 +136,10 @@ export function snapManualEditGestureRect(
     return { rect: next, guides };
   }
 
+  // Corner gestures are aspect-locked; snapping one edge would break the
+  // ratio (or teleport the derived axis), so they don't participate.
+  if (isManualEditCornerGesture(kind)) return { rect: next, guides };
+
   const movingEdge = kind === 'resize-left' ? rect.x : rect.x + rect.width;
   const snap = bestAxisSnap([movingEdge], usable, 'x', threshold);
   if (snap) {
@@ -187,6 +219,28 @@ export function manualEditGestureRect(
 ): ManualEditRect {
   if (kind === 'move') {
     return { ...start, x: start.x + dx, y: start.y + dy };
+  }
+  if (isManualEditCornerGesture(kind)) {
+    // Aspect-locked corner scale anchored at the opposite corner. The pointer
+    // axis with the larger relative change drives the scale, so dragging
+    // mostly-horizontally or mostly-vertically both feel direct; the floor
+    // binds the LARGER dimension so a thin banner can still shrink without
+    // ever collapsing to nothing.
+    if (start.width <= 0 || start.height <= 0) return { ...start };
+    const dir = CORNER_GESTURE_DIRS[kind];
+    const scaleX = (start.width + dir.x * dx) / start.width;
+    const scaleY = (start.height + dir.y * dy) / start.height;
+    const dominant = Math.abs(scaleX - 1) >= Math.abs(scaleY - 1) ? scaleX : scaleY;
+    const minScale = MANUAL_EDIT_MIN_GESTURE_SIZE / Math.max(start.width, start.height);
+    const scale = Math.max(dominant, minScale);
+    const width = start.width * scale;
+    const height = start.height * scale;
+    return {
+      x: dir.x < 0 ? start.x + start.width - width : start.x,
+      y: dir.y < 0 ? start.y + start.height - height : start.y,
+      width,
+      height,
+    };
   }
   if (kind === 'resize-right') {
     return { ...start, width: Math.max(MANUAL_EDIT_MIN_GESTURE_SIZE, start.width + dx) };
@@ -300,34 +354,53 @@ export function manualEditMoveStyles(
 }
 
 /**
- * Resolve the inline styles that persist an edge resize. The right handle
- * only changes `width`; the left handle keeps the right edge fixed, so it
- * pairs the width change with a horizontal offset using the same
- * positioning rules as `manualEditMoveStyles`.
+ * Resolve the inline styles that persist a resize gesture.
  *
- * `display: inline` elements (spans, links) ignore `width` entirely, so a
- * resize gesture on one must also upgrade it to `inline-block` — otherwise
- * the committed width persists to source but never changes what the user
- * sees.
+ * - The right edge handle only changes `width`; the left edge handle keeps
+ *   the right edge fixed, so it pairs the width change with a horizontal
+ *   offset using the same positioning rules as `manualEditMoveStyles`.
+ * - Corner handles persist the aspect-locked `width` AND `height` the gesture
+ *   rect computed; corners on the moved edges (west → horizontal, north →
+ *   vertical) additionally shift the element so the anchored corner stays put.
+ * - `display: inline` elements (spans, links) ignore `width` entirely, so a
+ *   resize gesture on one must also upgrade it to `inline-block` — otherwise
+ *   the committed width persists to source but never changes what the user
+ *   sees.
+ * - `white-space: nowrap` (or `pre`) keeps text on one line no matter how
+ *   narrow the box gets, so a resized element would overflow its own new
+ *   width instead of wrapping. Resizing declares "content should flow inside
+ *   THIS box", so the resize unlocks wrapping alongside the width.
  */
 export function manualEditResizeStyles(
-  kind: Extract<ManualEditGestureKind, 'resize-left' | 'resize-right'>,
-  styles: Pick<ManualEditStyles, 'position' | 'left' | 'top' | 'display'>,
+  kind: Exclude<ManualEditGestureKind, 'move'>,
+  styles: Pick<ManualEditStyles, 'position' | 'left' | 'top' | 'display' | 'whiteSpace'>,
   startRect: ManualEditRect,
   nextRect: ManualEditRect,
   scale: ManualEditSpaceScale = MANUAL_EDIT_UNIT_SCALE,
 ): Partial<ManualEditStyles> {
-  const width: Partial<ManualEditStyles> = {
-    width: roundPx(toLocal(Math.max(MANUAL_EDIT_MIN_GESTURE_SIZE, nextRect.width), scale.x)),
+  const corner = isManualEditCornerGesture(kind);
+  const resized: Partial<ManualEditStyles> = {
+    // Corner rects are already floored by the gesture math with the ratio
+    // intact — re-flooring width alone here would distort a tall image.
+    width: roundPx(toLocal(Math.max(corner ? 1 : MANUAL_EDIT_MIN_GESTURE_SIZE, nextRect.width), scale.x)),
   };
-  if (styles.display === 'inline') width.display = 'inline-block';
-  if (kind === 'resize-right') return width;
+  if (corner) resized.height = roundPx(toLocal(Math.max(1, nextRect.height), scale.y));
+  if (styles.display === 'inline') resized.display = 'inline-block';
+  if (styles.whiteSpace === 'nowrap') resized.whiteSpace = 'normal';
+  else if (styles.whiteSpace === 'pre') resized.whiteSpace = 'pre-wrap';
   const dx = nextRect.x - startRect.x;
-  if (dx === 0) return width;
-  const move = manualEditMoveStyles(styles, dx, 0, undefined, scale);
-  // A left-edge resize only shifts horizontally — never emit a vertical
-  // offset, which would visibly jump flow elements that had no inline top.
-  delete move.top;
-  delete move.bottom;
-  return { ...move, ...width };
+  const dy = corner ? nextRect.y - startRect.y : 0;
+  if (dx === 0 && dy === 0) return resized;
+  const move = manualEditMoveStyles(styles, dx, dy, undefined, scale);
+  // Only emit offsets for axes the gesture actually moved — a stray vertical
+  // offset would visibly jump flow elements that had no inline top.
+  if (dy === 0) {
+    delete move.top;
+    delete move.bottom;
+  }
+  if (dx === 0) {
+    delete move.left;
+    delete move.right;
+  }
+  return { ...move, ...resized };
 }

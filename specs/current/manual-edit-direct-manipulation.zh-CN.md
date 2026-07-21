@@ -178,3 +178,13 @@
 3. **非文本元素键盘粘贴**。根因:原生 `paste` 事件只在有可编辑元素持有 caret 时触发,而图片/容器选中后从不 contenteditable,故 Cmd/Ctrl+V 无反应(文本因入编辑有 caret 才生效)。修复:桥 keydown 增 Cmd/Ctrl+V 分支,对选中的非可编辑元素转发 `od-edit-paste-request`(元素缓冲区粘贴);该分支只在非编辑态到达(编辑态由前置 guard 提前 return,原生 paste 仍处理文本/图片文件),preventDefault 兼防重复粘贴。配套 Cmd/Ctrl+C 早已在 keydown 转发 `od-edit-copy-request`,故图片「选中→Cmd+C→Cmd+V」闭环打通。
 
 新增/更新测试:gestures「动作条上方/贴顶翻下方/过高夹内/未知画布高度」;bridge「首击只选中不入编辑」「二击已选中元素入编辑」「Cmd/Ctrl+V 对非可编辑选中转发 paste」,并把 14 个行内编辑用例的入编辑手势改为双击(`detail:2`);ManualEditSelectionOverlay「动作条 above/贴顶 below」。
+
+### v2.7 修订(图片四角等比缩放 + 收窄自动换行 + 图片粘贴回归修复,2026-07-21)
+
+用户实测三点:图片选中框**只有左右侧柄**,四个角不能像常规画布工具那样拖拽等比放大缩小;nowrap 文本(如 deck 标签「BRAND-LAUNCH NARRATIVE」)**拖侧柄收窄后内容不换行**、单行溢出选中框;v2.6 的键盘粘贴分支上线后**剪贴板图片粘贴失效**。
+
+1. **图片四角等比缩放锚点**。`ManualEditGestureKind` 增 `resize-nw|ne|sw|se`;`manualEditGestureRect` 角部分支做**锚定对角的等比缩放**——相对变化更大的指针轴驱动 scale(横拖/竖拖/斜拖都直接跟手),下限锚在**较大边 ≥ MANUAL_EDIT_MIN_GESTURE_SIZE**(细长图能继续缩、永不塌缩),比例全程锁定不变形。角部手势**不参与 snap**(吸附单边会破坏比例)。`manualEditResizeStyles` 对角部手势同时落 `width`+`height`(各自按 spaceScale 反缩放),西/北角补横/竖偏移使锚角固定。overlay 仅对 image 目标渲染 4 个圆形角锚(`cornerHandle`,白底蓝边,nwse/nesw 光标),复用既有 preview→measure→commit 管线,预览含 width/height 自动触发实测框回报,选中框跟随不错位。
+2. **收窄自动换行**。根因:`white-space: nowrap`(或 `pre`)让文本无视新宽度永远单行。`manualEditResizeStyles` 现在读取 computed `whiteSpace`,resize 一律解锁:`nowrap→normal`、`pre→pre-wrap`(其余值不动)——拖边框即声明「内容应在这个盒子里流动」。`ManualEditStyles`/桥 styleProps 增 `whiteSpace`。
+3. **图片粘贴回归修复**。根因:v2.6 的 keydown Cmd/Ctrl+V 分支 `preventDefault()` 会**抑制原生 paste 事件**,而剪贴板**图片字节只能在 paste 事件里读取**(keydown 看不见 clipboardData),于是「元素粘贴」修好的同时把「图片粘贴」打断了。修复:keydown 分支不再 preventDefault、不再同步发请求,改为**武装 150ms 一次性回退定时器**;原生 paste 事件到达(Chromium 无 caret 也会在焦点 document 上派发)即**解除回退**并按既有逻辑分流(图片→`od-edit-paste-image`,否则→`od-edit-paste-request`);只有 paste 事件真不来(无可编辑焦点的兜底环境)回退才发元素粘贴。两通道互斥,不会双粘贴。
+
+新增/更新测试:gestures「四角等比(se/nw 锚定、主导轴、较大边下限、角部不 snap)」「角部样式落 width+height/西北角偏移/空间反缩放」「nowrap→normal、pre→pre-wrap、其余不动」;overlay「图片渲染 4 角锚点/非图片无角锚」「角拖提交等比 width+height」;bridge「Cmd/Ctrl+V 不取消 keydown、回退仅在无 paste 事件时发」「剪贴板图片胜过元素粘贴回退且回退静默」。

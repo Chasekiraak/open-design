@@ -307,3 +307,97 @@ describe('manual edit action bar vertical placement', () => {
     });
   });
 });
+
+// Corner anchors scale an image from any corner while the OPPOSITE corner
+// stays anchored, so "drag a corner to make it bigger/smaller" behaves like
+// every canvas tool the user already knows. The ratio is locked — an image
+// never distorts mid-gesture.
+describe('manual edit corner gestures (aspect-locked scaling)', () => {
+  it('scales from the se corner anchored at the top-left, keeping the ratio', () => {
+    expect(manualEditGestureRect('resize-se', rect(10, 20, 200, 100), 100, 0))
+      .toEqual(rect(10, 20, 300, 150));
+  });
+
+  it('scales from the nw corner anchored at the bottom-right', () => {
+    const resized = manualEditGestureRect('resize-nw', rect(10, 20, 200, 100), -100, 0);
+    expect(resized.width).toBe(300);
+    expect(resized.height).toBe(150);
+    expect(resized.x + resized.width).toBe(210);
+    expect(resized.y + resized.height).toBe(120);
+  });
+
+  it('lets the dominant axis drive the scale so vertical drags work too', () => {
+    const resized = manualEditGestureRect('resize-se', rect(0, 0, 200, 100), 0, 50);
+    expect(resized.width).toBe(300);
+    expect(resized.height).toBe(150);
+  });
+
+  it('floors the LARGER dimension at the minimum size with the ratio intact', () => {
+    const resized = manualEditGestureRect('resize-se', rect(0, 0, 200, 100), -1000, 0);
+    expect(resized.width).toBe(MANUAL_EDIT_MIN_GESTURE_SIZE);
+    expect(resized.height).toBe(MANUAL_EDIT_MIN_GESTURE_SIZE / 2);
+  });
+
+  it('never snaps a corner gesture — snapping one edge would break the ratio', () => {
+    const snap = snapManualEditGestureRect('resize-se', rect(0, 0, 199, 100), [rect(200, 0, 50, 40)]);
+    expect(snap.rect).toEqual(rect(0, 0, 199, 100));
+    expect(snap.guides).toHaveLength(0);
+  });
+
+  it('persists width AND height for a corner resize', () => {
+    expect(
+      manualEditResizeStyles('resize-se', positionStyles('static'), rect(10, 10, 200, 100), rect(10, 10, 300, 150)),
+    ).toEqual({ width: '300px', height: '150px' });
+  });
+
+  it('shifts the element when a north/west corner moves the origin', () => {
+    const resolved = manualEditResizeStyles(
+      'resize-nw',
+      positionStyles('absolute', '100px', '50px'),
+      rect(100, 50, 200, 100),
+      rect(50, 25, 250, 125),
+    );
+    expect(resolved.width).toBe('250px');
+    expect(resolved.height).toBe('125px');
+    expect(resolved.left).toBe('50px');
+    expect(resolved.top).toBe('25px');
+  });
+
+  it('unscales corner dimensions into the element own pixel space', () => {
+    expect(manualEditResizeStyles(
+      'resize-se',
+      positionStyles('static'),
+      rect(0, 0, 200, 100),
+      rect(0, 0, 300, 150),
+      { x: 0.5, y: 0.5 },
+    )).toEqual({ width: '600px', height: '300px' });
+  });
+});
+
+// white-space: nowrap keeps text on one line no matter how narrow the box
+// gets — a narrowed heading just overflowed its own new width (the "拖拽边框
+// 内容没有换行" report). Resizing declares "content should flow inside THIS
+// box", so the gesture unlocks wrapping alongside the width.
+describe('manual edit resize wrap unlocking', () => {
+  it('turns nowrap into normal so narrowed text wraps instead of overflowing', () => {
+    const nowrap = { ...positionStyles('static'), whiteSpace: 'nowrap' };
+    expect(
+      manualEditResizeStyles('resize-right', nowrap, rect(10, 10, 200, 40), rect(10, 10, 120, 40)).whiteSpace,
+    ).toBe('normal');
+    const left = manualEditResizeStyles('resize-left', nowrap, rect(10, 10, 200, 40), rect(90, 10, 120, 40));
+    expect(left.whiteSpace).toBe('normal');
+  });
+
+  it('softens pre to pre-wrap and leaves wrapping values untouched', () => {
+    const pre = { ...positionStyles('static'), whiteSpace: 'pre' };
+    expect(
+      manualEditResizeStyles('resize-right', pre, rect(0, 0, 200, 40), rect(0, 0, 120, 40)).whiteSpace,
+    ).toBe('pre-wrap');
+    for (const value of ['normal', 'pre-wrap', 'pre-line', '']) {
+      const styles = { ...positionStyles('static'), whiteSpace: value };
+      expect(
+        manualEditResizeStyles('resize-right', styles, rect(0, 0, 200, 40), rect(0, 0, 120, 40)).whiteSpace,
+      ).toBeUndefined();
+    }
+  });
+});

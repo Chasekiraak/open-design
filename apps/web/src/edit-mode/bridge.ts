@@ -195,7 +195,7 @@ export function buildManualEditBridge(enabled: boolean): string {
   var discoverySelector = ${JSON.stringify(MANUAL_EDIT_DISCOVERY_SELECTOR)};
   var hostNodeSelector = ${JSON.stringify(MANUAL_EDIT_HOST_NODE_SELECTOR)};
   var sourcePathAttr = ${JSON.stringify(MANUAL_EDIT_SOURCE_PATH_ATTR)};
-  var styleProps = ['fontFamily','fontSize','fontWeight','fontStyle','textDecorationLine','color','textAlign','lineHeight','letterSpacing','display','position','left','top','right','bottom','zIndex','width','height','minHeight','gap','flexDirection','justifyContent','alignItems','backgroundColor','opacity','transform','padding','paddingTop','paddingRight','paddingBottom','paddingLeft','margin','marginTop','marginRight','marginBottom','marginLeft','border','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle','borderColor','borderRadius'];
+  var styleProps = ['fontFamily','fontSize','fontWeight','fontStyle','textDecorationLine','color','textAlign','lineHeight','letterSpacing','whiteSpace','display','position','left','top','right','bottom','zIndex','width','height','minHeight','gap','flexDirection','justifyContent','alignItems','backgroundColor','opacity','transform','padding','paddingTop','paddingRight','paddingBottom','paddingLeft','margin','marginTop','marginRight','marginBottom','marginLeft','border','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle','borderColor','borderRadius'];
   var inlineTextTags = ${JSON.stringify(MANUAL_EDIT_INLINE_TEXT_TAGS)};
   function isHostNode(el){
     return !!(el && el.matches && el.matches(hostNodeSelector));
@@ -1011,6 +1011,9 @@ export function buildManualEditBridge(enabled: boolean): string {
       return;
     }
   });
+  // One-shot timer armed by the Cmd/Ctrl+V shortcut; any real paste event
+  // disarms it (see the paste listener) so the two channels never double-fire.
+  var pendingShortcutPaste = 0;
   document.addEventListener('keydown', function(ev){
     if (!enabled || activeTextEdit) return;
     var target = ev.target;
@@ -1044,16 +1047,21 @@ export function buildManualEditBridge(enabled: boolean): string {
       return;
     }
     if (meta && key === 'v' && !ev.shiftKey && !ev.altKey) {
-      // The native paste event only fires while an editable element owns the
-      // caret — which never happens for a selected image or container (only
-      // text/link become contentEditable). Without this, Cmd/Ctrl+V does
-      // nothing for those. This branch is only reached for non-editable
-      // selections (the guard above returns early inside a text session), so
-      // it never double-pastes with the native paste handler; preventDefault
-      // also suppresses the browser's own paste for the suppressed case.
-      ev.preventDefault();
-      ev.stopPropagation();
-      window.parent.postMessage({ type: 'od-edit-paste-request', id: stableId(selected) }, '*');
+      // MUST NOT preventDefault here: cancelling the keydown suppresses the
+      // native 'paste' event, and that event is the ONLY place clipboard
+      // IMAGE bytes are readable — swallowing it broke image paste entirely.
+      // Instead, arm a one-shot fallback for environments where no paste
+      // event fires without an editable focus: if the native paste event
+      // arrives (Chromium fires it on the focused document even with no
+      // caret) it handles both the image and element cases and disarms the
+      // fallback; only when it never fires does the fallback forward the
+      // element-paste request, so a selected image/container still pastes.
+      if (pendingShortcutPaste) clearTimeout(pendingShortcutPaste);
+      var shortcutPasteId = stableId(selected);
+      pendingShortcutPaste = window.setTimeout(function(){
+        pendingShortcutPaste = 0;
+        window.parent.postMessage({ type: 'od-edit-paste-request', id: shortcutPasteId }, '*');
+      }, 150);
       return;
     }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
@@ -1196,6 +1204,12 @@ export function buildManualEditBridge(enabled: boolean): string {
   // session cannot consume it anyway.
   document.addEventListener('paste', function(ev){
     if (!enabled) return;
+    // The native paste event supersedes the Cmd/Ctrl+V shortcut fallback —
+    // it can see the clipboard (image vs element) where keydown cannot.
+    if (pendingShortcutPaste) {
+      clearTimeout(pendingShortcutPaste);
+      pendingShortcutPaste = 0;
+    }
     var pastedImage = firstImageFile(ev.clipboardData);
     if (!pastedImage) {
       if (activeTextEdit) return;

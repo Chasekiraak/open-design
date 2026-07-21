@@ -240,6 +240,37 @@ describe('ManualEditSelectionOverlay whole-image move', () => {
     renderOverlay();
     expect(screen.queryByTestId('manual-edit-move-body')).toBeNull();
   });
+
+  it('shows all four corner anchors on an image', () => {
+    renderImageOverlay();
+    for (const corner of ['nw', 'ne', 'sw', 'se']) {
+      expect(screen.getByTestId(`manual-edit-resize-${corner}`)).not.toBeNull();
+    }
+  });
+
+  it('commits an aspect-locked width+height from a corner drag', () => {
+    const { onGestureCommit } = renderImageOverlay();
+    const handle = screen.getByTestId('manual-edit-resize-se');
+
+    // Image rect 200x80 at (100,100): +100px on the x axis scales 1.5x.
+    fireEvent.pointerDown(handle, { clientX: 300, clientY: 180, pointerId: 12 });
+    fireEvent.pointerMove(document, { clientX: 400, clientY: 180, pointerId: 12 });
+    fireEvent.pointerUp(document, { clientX: 400, clientY: 180, pointerId: 12 });
+
+    expect(onGestureCommit).toHaveBeenCalledTimes(1);
+    expect(onGestureCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ width: '300px', height: '120px' }),
+      expect.objectContaining({ x: 100, y: 100, width: 300, height: 120 }),
+      'resize',
+    );
+  });
+
+  it('keeps corner anchors off non-image targets', () => {
+    renderOverlay();
+    for (const corner of ['nw', 'ne', 'sw', 'se']) {
+      expect(screen.queryByTestId(`manual-edit-resize-${corner}`)).toBeNull();
+    }
+  });
 });
 
 describe('ManualEditSelectionOverlay resize frame sync', () => {
