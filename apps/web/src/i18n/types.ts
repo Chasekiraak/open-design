@@ -1049,11 +1049,6 @@ export interface Dict {
   'messageCenter.close': string;
   'messageCenter.desktopSettings': string;
   'messageCenter.desktopSettingsHint': string;
-  'messageCenter.type.product': string;
-  'messageCenter.type.announcement': string;
-  'messageCenter.type.benefit': string;
-  'messageCenter.type.maintenance': string;
-  'messageCenter.type.template': string;
   'workspaceTabs.project': string;
   'workspaceTabs.pluginDetails': string;
   'workspaceTabs.marketplace': string;
