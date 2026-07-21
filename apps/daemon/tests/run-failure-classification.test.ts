@@ -1328,7 +1328,7 @@ describe('classifyRunFailure — batch A reclassification out of execution_faile
       'json-rpc id 4: opencode event stream: {"properties":{"error":{"data":{"message":"[code=request_too_large] request body exceeds configured limit"}}}}',
     );
     expect(result?.failure_category).toBe('prompt_too_large');
-    expect(result?.failure_detail).toBe('prompt_too_large');
+    expect(result?.failure_detail).toBe('request_too_large');
     expect(result?.user_action).toBe('reduce_context');
   });
 
@@ -1517,6 +1517,45 @@ describe('classifyRunFailure — BYOK OpenCode reclassification out of stream_er
     });
   });
 
+  it('does not let a coarse SDK retry hint override a provider client error', () => {
+    const message = 'API Error: 400 Bad Request: Invalid Responses API request';
+    const result = classifyForAgent(
+      'byok-opencode',
+      'AGENT_EXECUTION_FAILED',
+      message,
+      [
+        errorEvent('AGENT_EXECUTION_FAILED', message, true),
+        runtimeCloseEvent('stream_error'),
+      ],
+    );
+
+    expect(result).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_detail: 'upstream_client_error',
+      retryable: false,
+      user_action: 'none',
+    });
+    expect(isResumableFailure(result)).toBe(false);
+  });
+
+  it('prefers provider client-error evidence over mixed stream-disconnect text', () => {
+    const message = 'stream disconnected before completion: statusCode:404';
+    const result = classifyForAgent(
+      'byok-opencode',
+      'AGENT_EXECUTION_FAILED',
+      message,
+      [errorEvent('AGENT_EXECUTION_FAILED', message, true)],
+    );
+
+    expect(result).toMatchObject({
+      failure_category: 'upstream_unavailable',
+      failure_detail: 'upstream_client_error',
+      retryable: false,
+      user_action: 'none',
+    });
+    expect(isResumableFailure(result)).toBe(false);
+  });
+
   it('classifies BYOK OpenCode config directory permission errors as fixable agent config', () => {
     const result = classifyForAgent(
       'byok-opencode',
@@ -1579,5 +1618,132 @@ describe('classifyRunFailure — AMR sampled failures', () => {
       retryable: true,
       user_action: 'retry',
     });
+  });
+});
+
+describe('classifyRunFailure — sampled 0.15.1 provider request failures', () => {
+  it.each([
+    {
+      name: 'HTTP 413 request body rejection',
+      agentId: 'claude',
+      message: 'Payload Too Large: request entity too large',
+      expected: {
+        failure_category: 'prompt_too_large',
+        failure_detail: 'request_too_large',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'reduce_context',
+      },
+      resumable: false,
+    },
+    {
+      name: 'unsupported PDF attachment media type',
+      agentId: 'claude',
+      message: "request.messages.2.content.0.content.1.source.media_type: Invalid enum value. Expected 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp', received 'application/pdf'",
+      expected: {
+        failure_category: 'upstream_unavailable',
+        failure_detail: 'attachment_media_type_unsupported',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'none',
+      },
+      resumable: false,
+    },
+    {
+      name: 'invalid Gemini function declaration name',
+      agentId: 'byok-opencode',
+      message: 'GenerateContentRequest.tools[0].function_declarations[0].name: Invalid function name. Must start with a letter or underscore.',
+      expected: {
+        failure_category: 'upstream_unavailable',
+        failure_detail: 'tool_schema_invalid',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'none',
+      },
+      resumable: false,
+    },
+    {
+      name: 'prompt tokenization rejection',
+      agentId: 'byok-opencode',
+      message: '400: {"code":400,"message":"Failed to tokenize prompt","type":"invalid_request_error"}',
+      expected: {
+        failure_category: 'upstream_unavailable',
+        failure_detail: 'prompt_tokenization_failed',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'none',
+      },
+      resumable: false,
+    },
+    {
+      name: 'context size exceeded',
+      agentId: 'byok-opencode',
+      message: 'Context size has been exceeded.',
+      expected: {
+        failure_category: 'prompt_too_large',
+        failure_detail: 'prompt_too_large',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'reduce_context',
+      },
+      resumable: false,
+    },
+    {
+      name: 'unsupported model',
+      agentId: 'byok-opencode',
+      message: 'Not supported model mimo-v2.5-pro-ultraspeed',
+      expected: {
+        failure_category: 'model_unavailable',
+        failure_detail: 'model_not_supported',
+        failure_stage: 'model_select',
+        retryable: false,
+        user_action: 'switch_model',
+      },
+      resumable: false,
+    },
+    {
+      name: 'provider account function not found',
+      agentId: 'byok-opencode',
+      message: 'Not Found: {"status":404,"detail":"Function \'chat-completions\' Not found for account acct_123"}',
+      expected: {
+        failure_category: 'upstream_unavailable',
+        failure_detail: 'provider_resource_not_found',
+        failure_stage: 'prompt_send',
+        retryable: false,
+        user_action: 'none',
+      },
+      resumable: false,
+    },
+    {
+      name: 'genuine upstream idle timeout',
+      agentId: 'byok-opencode',
+      message: 'Upstream idle timeout exceeded',
+      expected: {
+        failure_category: 'upstream_unavailable',
+        failure_detail: 'stream_disconnected',
+        failure_stage: 'first_token_wait',
+        retryable: true,
+        user_action: 'retry',
+      },
+      resumable: true,
+    },
+  ])('classifies $name before the generic stream close fallback', ({
+    agentId,
+    message,
+    expected,
+    resumable,
+  }) => {
+    const result = classifyForAgent(
+      agentId,
+      'AGENT_EXECUTION_FAILED',
+      message,
+      [
+        errorEvent('AGENT_EXECUTION_FAILED', message, true),
+        runtimeCloseEvent('stream_error'),
+      ],
+    );
+
+    expect(result).toMatchObject(expected);
+    expect(isResumableFailure(result)).toBe(resumable);
   });
 });

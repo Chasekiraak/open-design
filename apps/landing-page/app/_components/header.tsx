@@ -24,7 +24,7 @@ const REPO_DISCUSSIONS = `${REPO}/discussions`;
 const DISCORD = 'https://discord.gg/mHAjSMV6gz';
 const X_PROFILE = 'https://x.com/OpenDesignHQ';
 
-// Open Design Cloud endpoints for the header sign-in module.
+// Open Design Cloud endpoints for the header account module.
 // Production defaults; overridable at build time via PUBLIC_* env so a
 // preview/staging build can point at a non-prod cloud. These are surfaced to
 // the runtime via `data-*` on `.nav-account` because the auth logic lives in
@@ -33,8 +33,6 @@ const X_PROFILE = 'https://x.com/OpenDesignHQ';
 const env = import.meta.env as Record<string, string | undefined>;
 const CLOUD_API_BASE =
   env.PUBLIC_CLOUD_API_BASE ?? env.PUBLIC_AMR_API_BASE ?? 'https://amr-api.open-design.ai';
-const CLOUD_LOGIN_URL =
-  env.PUBLIC_CLOUD_LOGIN_URL ?? env.PUBLIC_AMR_LOGIN_URL ?? 'https://open-design.ai/cloud/login';
 const CLOUD_CONSOLE_URL =
   env.PUBLIC_CLOUD_CONSOLE_URL ??
   env.PUBLIC_AMR_CONSOLE_URL ??
@@ -584,11 +582,9 @@ export function Header({
             {headerCopy.download}
           </a>
           {/*
-            Open Design Cloud account entry. Renders BOTH states up front
-            and lets `header-enhancer.astro` toggle them at runtime: the
-            signed-out "Sign in" link is visible by default (so no-JS / pre-hydration
-            shows a working login link), and the signed-in avatar menu stays
-            `hidden` until the enhancer confirms a live cloud session via
+            Open Design Cloud account entry. Signed-out visitors only see the
+            download CTA above; the avatar menu stays `hidden` until the
+            enhancer confirms a live cloud session via
             `GET {api}/api/auth/get-session`. Config flows through `data-*`
             because the enhancer script cannot read `import.meta.env`.
           */}
@@ -596,13 +592,8 @@ export function Header({
             className='nav-account'
             data-amr-account
             data-amr-api={CLOUD_API_BASE}
-            data-amr-login={CLOUD_LOGIN_URL}
             data-amr-console={CLOUD_CONSOLE_URL}
-            data-amr-home={href('/')}
           >
-            <a className='nav-signin' href={CLOUD_LOGIN_URL} data-amr-signin>
-              {headerCopy.signIn}
-            </a>
             <details className='nav-account-menu' data-amr-menu hidden>
               <summary
                 className='nav-account-trigger'

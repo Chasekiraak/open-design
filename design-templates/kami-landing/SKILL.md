@@ -204,7 +204,7 @@ host app's comment mode can target it.
 ## Files in this skill
 
 ```text
-skills/kami-landing/
+design-templates/kami-landing/
 ├── SKILL.md                 # this contract
 ├── README.md                # human quick-start
 └── example.html             # canonical Open Design rendering
@@ -229,7 +229,7 @@ skills/kami-landing/
 ## See also
 
 - [`design-systems/kami/DESIGN.md`](../../design-systems/kami/DESIGN.md) — the full token spec.
-- [`skills/kami-deck/`](../kami-deck/) — sister skill that produces a
+- [`design-templates/kami-deck/`](../kami-deck/) — sister skill that produces a
   slide deck in the same kami language.
 - Upstream: [`tw93/kami`](https://github.com/tw93/kami) — original
   Claude skill (MIT) that the design system adapts.

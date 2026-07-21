@@ -257,16 +257,50 @@ function isSessionResumeExpiredText(text: string): boolean {
     /\bsession [\w-]+ not found\b/i.test(text);
 }
 
-function isPromptTooLargeText(text: string): boolean {
+function promptTooLargeDetail(text: string): TrackingRunFailureDetail | null {
+  if (
+    /\b(?:Payload Too Large|Request Entity Too Large|request entity too large|request body exceeds configured limit)\b/i.test(text) ||
+    /\[code=request_too_large\]/i.test(text)
+  ) {
+    return 'request_too_large';
+  }
   // `prefill context too large` is the local-runtime (MLX) shape of the same
   // "the prompt does not fit" failure that currently leaks into execution_failed.
-  return /\b(context window|prompt too large|maximum context|too many tokens|input.*too large|request (?:body )?exceeds configured limit|output token maximum|maximum output tokens|CLAUDE_CODE_MAX_OUTPUT_TOKENS|exceeds the safe size|composed prompt exceeds|prompt token count .* exceeds|maximum context length|context too large|prefill context too large|reduce the length of (?:the )?(?:messages|input prompt)|request \(\d+ tokens\) exceeds the available context size|n_keep:\s*\d+\s*>=\s*n_ctx)\b/i
-    .test(text);
+  if (
+    /\b(context window|context size (?:has been )?exceeded|prompt too large|maximum context|too many tokens|input.*too large|request (?:body )?exceeds configured limit|output token maximum|maximum output tokens|CLAUDE_CODE_MAX_OUTPUT_TOKENS|exceeds the safe size|composed prompt exceeds|prompt token count .* exceeds|maximum context length|context too large|prefill context too large|reduce the length of (?:the )?(?:messages|input prompt)|request \(\d+ tokens\) exceeds the available context size|n_keep:\s*\d+\s*>=\s*n_ctx)\b/i.test(text)
+  ) {
+    return 'prompt_too_large';
+  }
+  return null;
+}
+
+function clientRequestFailureDetail(text: string): TrackingRunFailureDetail | null {
+  if (
+    /\bsource\.media_type\b[\s\S]*\bInvalid enum value\b[\s\S]*\bapplication\/pdf\b/i.test(text) ||
+    /\bapplication\/pdf\b[\s\S]*\bexpected\b[\s\S]*\bimage\/(?:jpeg|png|gif|webp)\b/i.test(text)
+  ) {
+    return 'attachment_media_type_unsupported';
+  }
+  if (
+    /\bfunction_declarations\[\d+\]\.name\b[\s\S]*\bInvalid function name\b/i.test(text)
+  ) {
+    return 'tool_schema_invalid';
+  }
+  if (/\bFailed to tokenize (?:the )?prompt\b/i.test(text)) {
+    return 'prompt_tokenization_failed';
+  }
+  if (
+    /["']?status["']?\s*:\s*404\b[\s\S]*\bFunction\s+["'][^"']+["']\s+Not found for account\b/i.test(text) ||
+    /\bFunction\s+["'][^"']+["']\s+Not found for account\b[\s\S]*["']?status["']?\s*:\s*404\b/i.test(text)
+  ) {
+    return 'provider_resource_not_found';
+  }
+  return null;
 }
 
 function isUpstreamDetailText(text: string): boolean {
   return isUpstreamClientErrorText(text) ||
-    /\b(stream disconnected before completion|response\.completed|Transport error: network error|Upstream request failed|websocket closed|socket connection was closed unexpectedly|tls handshake eof|Connection reset by (?:peer|server)|TLS close_notify|Broken pipe|remote host|远程主机强迫关闭|No route to host|Connection refused|ConnectionRefused|error sending request|Provider returned error|high demand|model is at capacity|selected model is at capacity|temporarily unavailable|upstream_error|http2: response body closed|peer closed connection|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Unexpected server error|Streaming response failed|Failed to process error response|AMR model catalog is (?:temporarily )?unavailable)\b/i
+    /\b(stream disconnected before completion|(?:stream|upstream) idle timeout|response\.completed|Transport error: network error|Upstream request failed|websocket closed|socket connection was closed unexpectedly|tls handshake eof|Connection reset by (?:peer|server)|TLS close_notify|Broken pipe|remote host|远程主机强迫关闭|No route to host|Connection refused|ConnectionRefused|error sending request|Provider returned error|high demand|model is at capacity|selected model is at capacity|temporarily unavailable|upstream_error|http2: response body closed|peer closed connection|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Unexpected server error|Streaming response failed|Failed to process error response|AMR model catalog is (?:temporarily )?unavailable)\b/i
       .test(text);
 }
 
@@ -310,7 +344,7 @@ function modelUnavailableDetail(text: string): TrackingRunFailureDetail | null {
   if (/\b(no endpoints found that support tool use|provider routing)\b/i.test(text)) {
     return 'provider_routing_error';
   }
-  if (/\b(model .*not supported|requested model is not supported|supported api model names|not supported when using codex)\b/i.test(text)) {
+  if (/\b(model .*not supported|not supported model\b|requested model is not supported|supported api model names|not supported when using codex)\b/i.test(text)) {
     return 'model_not_supported';
   }
   if (/\b(model (?:is )?(?:unavailable|not available|unsupported|not found)|selected model is not available|not have access|no access|model .*not found|no healthy deployments|model .*not in (?:the )?allowed list)\b/i.test(text)) {
@@ -346,7 +380,7 @@ function upstreamDetail(text: string): TrackingRunFailureDetail {
     return 'provider_routing_error';
   }
   if (/\bhigh demand|temporary errors|model is at capacity|selected model is at capacity\b/i.test(text)) return 'provider_high_demand';
-  if (/\b(stream disconnected before completion|stream idle timeout|response\.completed|websocket closed|socket connection was closed unexpectedly|connection reset|ConnectionRefused|tls handshake eof|tls close_notify|broken pipe|peer closed connection|remote host|远程主机强迫关闭|http2: response body closed|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Streaming response failed)\b/i
+  if (/\b(stream disconnected before completion|(?:stream|upstream) idle timeout|response\.completed|websocket closed|socket connection was closed unexpectedly|connection reset|ConnectionRefused|tls handshake eof|tls close_notify|broken pipe|peer closed connection|remote host|远程主机强迫关闭|http2: response body closed|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Streaming response failed)\b/i
     .test(text)) {
     return 'stream_disconnected';
   }
@@ -516,10 +550,16 @@ function executionFailedDetail(
 export function isResumableFailure(
   failure: RunFailureClassification | undefined,
 ): boolean {
-  if (!failure) return false;
+  if (!failure?.retryable) return false;
   if (
     failure.failure_category === 'upstream_unavailable' &&
-    failure.failure_detail !== 'upstream_client_error'
+    (
+      failure.failure_detail === 'stream_disconnected' ||
+      failure.failure_detail === 'upstream_5xx' ||
+      failure.failure_detail === 'network_error' ||
+      failure.failure_detail === 'provider_high_demand' ||
+      failure.failure_detail === 'provider_routing_error'
+    )
   ) {
     return true;
   }
@@ -612,10 +652,11 @@ export function classifyRunFailure(
     );
   }
 
-  if (errorCode === 'AGENT_PROMPT_TOO_LARGE' || isPromptTooLargeText(text)) {
+  const promptSizeDetail = promptTooLargeDetail(text);
+  if (errorCode === 'AGENT_PROMPT_TOO_LARGE' || promptSizeDetail) {
     return classification(
       'prompt_too_large',
-      'prompt_too_large',
+      promptSizeDetail ?? 'prompt_too_large',
       'prompt_send',
       false,
       'reduce_context',
@@ -632,6 +673,17 @@ export function classifyRunFailure(
       'model_select',
       false,
       'switch_model',
+    );
+  }
+
+  const clientRequestDetail = clientRequestFailureDetail(text);
+  if (clientRequestDetail) {
+    return classification(
+      'upstream_unavailable',
+      clientRequestDetail,
+      'prompt_send',
+      false,
+      'none',
     );
   }
 
@@ -746,12 +798,15 @@ export function classifyRunFailure(
     isUpstreamDetailText(text) ||
     byokOpenCodeProviderNotFound
   ) {
-    const retryable = byokOpenCodeProviderNotFound
-      ? false
-      : retryableHint ?? !isUpstreamClientErrorText(text);
+    const upstreamClientError =
+      byokOpenCodeProviderNotFound || isUpstreamClientErrorText(text);
+    // A provider/SDK 4xx or request-shape rejection will deterministically fail
+    // again with the same payload. Do not let a coarse SDK isRetryable=true hint
+    // override the text-level client-error evidence.
+    const retryable = upstreamClientError ? false : retryableHint ?? true;
     return classification(
       'upstream_unavailable',
-      byokOpenCodeProviderNotFound ? 'upstream_client_error' : upstreamDetail(text),
+      upstreamClientError ? 'upstream_client_error' : upstreamDetail(text),
       inferFailureStageFromEvents(input.events, 'first_token_wait'),
       retryable,
       retryable ? 'retry' : 'none',
