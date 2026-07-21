@@ -7,6 +7,7 @@ import type {
 import {
   runVelaCommand,
   velaWorkspaceCommandOptions,
+  withWorkspaceIdFlag,
 } from '../integrations/vela-command.js';
 
 export type RunVelaCollab = (
@@ -218,8 +219,8 @@ function isRole(value: unknown): value is CollabMemberRole {
 
 const defaultRunVelaCollab: RunVelaCollab = (args, workspaceId) =>
   runVelaCommand(
-    ['collab', ...args],
-    velaWorkspaceCommandOptions(workspaceId),
+    withWorkspaceIdFlag(['collab', ...args], workspaceId),
+    velaWorkspaceCommandOptions(),
   );
 
 export function shouldUseVelaCliCollabTransport(
