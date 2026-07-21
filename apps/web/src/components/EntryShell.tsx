@@ -127,6 +127,11 @@ import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import { useWorkspaceContext, useWorkspaceBilling, useTeamProjects } from '../collab/useWorkspaceContext';
 import { buildAllProjectsList } from '../collab/all-projects-list';
 import {
+  notifyTeamProjectsChanged,
+  notifyWorkspaceBillingRefresh,
+  notifyWorkspaceContextRefresh,
+} from '../collab/useWorkspaceContext';
+import {
   getModelCapabilityTag,
   getModelCostTier,
   MODEL_CAPABILITY_TAG_LABEL_KEYS,
@@ -946,6 +951,15 @@ export function EntryShell({
       setOnboardingRec(buildRecommendation(survey));
     }
     onCompleteOnboarding();
+    // Onboarding is where a signed-out user signs IN, so the workspace context
+    // the shell resolved before it is stale by definition. Without this the
+    // rail came back in its signed-out shape — no workspace switcher, no 草稿 /
+    // 全部项目 / Workspace 设置 — until a focus or the 30s poll happened to
+    // re-read it. `CloudSignInTip` already fires the same three after its own
+    // sign-in; this is the same moment reached by the other door.
+    notifyWorkspaceContextRefresh();
+    notifyWorkspaceBillingRefresh();
+    notifyTeamProjectsChanged();
     changeView('home');
   }
 

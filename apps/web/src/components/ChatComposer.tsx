@@ -37,7 +37,6 @@ import type {
 import { sessionModeToTracking } from '@open-design/contracts/analytics';
 import { deriveUploadCohort } from '../analytics/upload-tracking';
 import { projectRawUrl, uploadProjectFiles, openFolderDialog, fetchRecentLinkedDirs, pushRecentLinkedDir, dirExists, applyLibraryAsset, fetchLibraryAssetElementHtml } from "../providers/registry";
-import { WorkingDirPicker } from './WorkingDirPicker';
 import { duplicatePluginAsProject, patchProject } from "../state/projects";
 import { navigate } from '../router';
 import { fetchMcpServers } from "../state/mcp";
@@ -3145,36 +3144,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
             ) : null}
           </div>
         </div>
-        {/* Deliberate divergence from #5517 (its demo has no working-dir
-            concept): the workdir row is the ONLY entry for re-binding a
-            project's working directory / managing linked dirs mid-project,
-            so it stays. */}
-        {projectId && !inputDisabled ? (
-          <div className="composer-workdir-row">
-            <WorkingDirPicker
-              placement="up"
-              workingDir={workingDir}
-              invalid={workingDirMissing}
-              recentDirs={recentDirs}
-              onOpen={() => void checkWorkingDir()}
-              onPickDirectory={() => {
-                // Fire on the click itself (intent), matching the home
-                // composer's working_dir* elements so one dashboard counts the
-                // action across both surfaces.
-                trackComposerBar({ element: 'working_dir' });
-                void handlePickWorkingDir();
-              }}
-              onSelectRecent={(dir) => {
-                trackComposerBar({ element: 'working_dir_recent' });
-                void setWorkingDirFolder(dir);
-              }}
-              onClear={() => {
-                trackComposerBar({ element: 'working_dir_clear' });
-                void clearWorkingDir();
-              }}
-            />
-          </div>
-        ) : null}
+        {/* #5517 renders no working-dir row inside a project — its ChatComposer
+            imports WorkingDirPicker but never mounts it. Product chose full
+            alignment (2026-07-21) over keeping this as the only mid-project
+            re-bind entry. Home still picks a working directory for NEW projects. */}
         {uploadError ? <span className="composer-hint">{uploadError}</span> : null}
         {detailsRecord ? (
           <PluginDetailsModal

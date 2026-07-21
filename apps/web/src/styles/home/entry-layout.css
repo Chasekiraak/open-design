@@ -2473,7 +2473,14 @@
 .inline-switcher__more {
   appearance: none;
   border: 0;
-  background: transparent;
+  /* Pinned to the bottom of the popover's scroll port: the model list can be
+     long (29 models on AMR), and this entry used to scroll away with it — the
+     one link out to where agent switching now lives. Opaque so rows scrolling
+     underneath do not show through. */
+  position: sticky;
+  bottom: -12px;
+  z-index: 1;
+  background: var(--bg-elevated);
   border-top: 1px solid var(--border-soft);
   margin-top: 2px;
   padding: 8px 4px;

@@ -57,6 +57,7 @@ export function AvatarMenu({
   agents,
   onAgentChange,
   onAgentModelChange,
+  onOpenSettings,
   onBack,
   placement = 'down',
   onOpen,
@@ -173,7 +174,12 @@ export function AvatarMenu({
     [agents],
   );
   const amrAvailable = amrAgent !== null;
-  const showAmrAccountRow = config.mode === 'daemon' && amrAvailable;
+  // Only when Open Design IS the active agent. It used to show whenever AMR was
+  // merely installed, which was fine while the popover listed every agent — the
+  // row was one entry among many. Once #5517's shape dropped that list it became
+  // a lone header card, so selecting Codex still showed AMR's plan and balance.
+  const showAmrAccountRow =
+    config.mode === 'daemon' && amrAvailable && config.agentId === 'amr';
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE;
 
   // Fetch the live account (plan tier + wallet balance) when the popover opens,
@@ -480,6 +486,27 @@ export function AvatarMenu({
               </div>
             </div>
           ) : null}
+
+          {/* The one link out to 设置 → 执行. #5517's popover has no such entry,
+              but #5517 also never moved CLI switching out of this popover — we
+              did (2026-07-21), so without this the place that switching moved TO
+              is unreachable from here. Pinned to the bottom of the scroll port
+              like the home switcher's, so a long model list cannot scroll it
+              away. */}
+          <button
+            type="button"
+            className="avatar-item avatar-item--pinned"
+            data-testid="avatar-open-execution-settings"
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings('execution');
+            }}
+          >
+            <span className="avatar-item-icon" aria-hidden>
+              <RemixIcon name="settings-3-line" size={15} />
+            </span>
+            <span>{t('inlineSwitcher.openFullSettings')}</span>
+          </button>
 
           {onBack ? (
             <>

@@ -901,8 +901,12 @@ html.od-radial-open .workspace-shell {
   right: 0;
 }
 .chrome-present-wrap .present-menu {
-  left: 0;
-  right: auto;
+  /* Right-anchored like the share menu beside it. It used to grow rightward
+     from `left: 0`, and its trigger sits near the window's right edge, so the
+     menu ran off screen — the 演讲者备注 row was cut mid-sentence. The share
+     menu never had this because it kept the shared `right: 0`. */
+  right: 0;
+  left: auto;
 }
 .comment-left-host .comment-side-header {
   min-height: 40px;
@@ -1615,6 +1619,18 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
   -webkit-user-drag: none;
   pointer-events: none;
 }
+/* Pinned to the bottom of the popover's scroll port so a long model list
+   cannot scroll the one link out to 设置 → 执行 away. Opaque, because the
+   popover itself is translucent glass and rows would otherwise read through. */
+.avatar-item--pinned {
+  position: sticky;
+  bottom: -6px;
+  z-index: 1;
+  margin-top: 2px;
+  border-top: 1px solid var(--material-separator);
+  background: var(--bg-elevated);
+}
+
 .avatar-popover {
   position: absolute;
   top: calc(100% + 8px);
