@@ -2,7 +2,7 @@
 // current design project folder in a local editor, while the dropdown also
 // exposes copy-to-CLI prompts for handing the same local folder to code agents.
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentInfo,
   HostEditor,
@@ -15,8 +15,6 @@ import {
 } from '@open-design/contracts/analytics';
 import { fetchHostEditors, openProjectInEditor } from '../providers/registry';
 import { useAnalytics } from '../analytics/provider';
-import { getResolvedDeviceId } from '../analytics/client';
-import { amrHandoffDeviceId, attributedAmrUrl, recordAmrEntry } from '../analytics/amr-attribution';
 import { trackHandoffClick } from '../analytics/events';
 import { useT } from '../i18n';
 import { copyToClipboard } from '../lib/copy-to-clipboard';
@@ -26,7 +24,6 @@ import { AgentIcon } from './AgentIcon';
 
 const PREFERRED_EDITOR_KEY = 'open-design:preferred-editor';
 const PREFERRED_FRAMEWORK_KEY = 'open-design:handoff-framework';
-const AMR_WEBSITE_URL = 'https://open-design.ai/amr';
 const PROJECT_PATH_COPY_ID = 'project-path';
 
 type HandoffTab = 'editor' | 'cli';
@@ -116,6 +113,9 @@ interface Props {
   // Undefined when no artifact tab is active.
   artifactId?: string;
   artifactKind?: TrackingArtifactKind;
+  // Retained on the props contract for the callers that still pass them
+  // (FileViewer / ProjectView). No longer read here since the Open Design
+  // Cloud website link was removed from the CLI tab (acceptance #101).
   metricsConsent?: boolean;
   installationId?: string | null;
   embedded?: boolean;
@@ -294,8 +294,6 @@ export function HandoffButton({
   agents,
   artifactId,
   artifactKind,
-  metricsConsent = false,
-  installationId,
   embedded = false,
   onRequestRevealInFinder,
 }: Props) {
@@ -331,23 +329,6 @@ export function HandoffButton({
   const [error, setError] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
-
-  const handleAmrWebsiteClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    fireHandoff({ element: 'amr_website', handoff_tab: 'cli' });
-    const attribution = recordAmrEntry(analytics.track, 'handoff_amr_website', new Date(), {
-      metricsConsent,
-    });
-    const deviceId = amrHandoffDeviceId({
-      metricsConsent,
-      resolvedDeviceId: getResolvedDeviceId(),
-      installationId,
-    });
-    event.currentTarget.href = attributedAmrUrl(
-      AMR_WEBSITE_URL,
-      attribution,
-      deviceId,
-    );
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -588,7 +569,11 @@ export function HandoffButton({
               .finally(() => setBusy(null));
           }}
         >
-          <EditorIcon editorId={fallbackId} size={20} />
+          {busy === fallbackId ? (
+            <Icon name="spinner" size={20} />
+          ) : (
+            <EditorIcon editorId={fallbackId} size={20} />
+          )}
           <span className="handoff-trigger-label">{fallbackLabel}</span>
         </button>
         {error ? (
@@ -643,7 +628,11 @@ export function HandoffButton({
         >
           {primary ? (
             <>
-              <EditorIcon editorId={primary.id} size={20} />
+              {busy === primary.id ? (
+                <Icon name="spinner" size={20} />
+              ) : (
+                <EditorIcon editorId={primary.id} size={20} />
+              )}
               <span className="handoff-trigger-label sr-only">
                 {primaryTitle}
               </span>
@@ -712,7 +701,16 @@ export function HandoffButton({
             >
               <span className="handoff-path-button-main">
                 <span className="handoff-path-button-icon" aria-hidden>
-                  <Icon name={copiedCliId === PROJECT_PATH_COPY_ID ? 'check' : 'copy'} size={14} />
+                  <Icon
+                    name={
+                      copyBusy === PROJECT_PATH_COPY_ID
+                        ? 'spinner'
+                        : copiedCliId === PROJECT_PATH_COPY_ID
+                          ? 'check'
+                          : 'copy'
+                    }
+                    size={14}
+                  />
                 </span>
                 <span className="handoff-path-button-label">
                   {copiedCliId === PROJECT_PATH_COPY_ID ? t('handoff.copied') : t('designFiles.copyPath')}
@@ -735,7 +733,11 @@ export function HandoffButton({
                       disabled={busy === editor.id}
                       title={t('handoff.openInTarget', { target: editor.label })}
                     >
-                      <EditorIcon editorId={editor.id} size={24} />
+                      {busy === editor.id ? (
+                        <Icon name="spinner" size={24} />
+                      ) : (
+                        <EditorIcon editorId={editor.id} size={24} />
+                      )}
                       <span className="handoff-target-label">{editor.label}</span>
                       <Icon className="handoff-target-arrow" name="chevron-right" size={14} />
                     </button>
@@ -756,7 +758,11 @@ export function HandoffButton({
                         disabled={busy === editor.id}
                         title={t('handoff.notDetectedTitle', { target: editor.label })}
                       >
-                        <EditorIcon editorId={editor.id} size={24} />
+                        {busy === editor.id ? (
+                          <Icon name="spinner" size={24} />
+                        ) : (
+                          <EditorIcon editorId={editor.id} size={24} />
+                        )}
                         <span className="handoff-target-label">{editor.label}</span>
                       </button>
                     ))}
@@ -766,17 +772,6 @@ export function HandoffButton({
             </section>
           ) : (
             <section className="handoff-menu-block" role="tabpanel">
-              <a
-                className="handoff-amr-link"
-                href={AMR_WEBSITE_URL}
-                target="_blank"
-                rel="noreferrer"
-                onClick={handleAmrWebsiteClick}
-              >
-                <AgentIcon id="amr" size={18} />
-                <span>{t('handoff.amrWebsite')}</span>
-                <Icon name="external-link" size={14} />
-              </a>
               <div className="handoff-framework-row" role="group" aria-label={t('handoff.framework')}>
                 <span className="handoff-framework-label">{t('handoff.framework')}</span>
                 {FRAMEWORKS.map((framework) => (
@@ -812,7 +807,11 @@ export function HandoffButton({
                           disabled={copyBusy === cli.id}
                           title={t('handoff.copyPromptForTarget', { target: cliDisplayName(cli) })}
                         >
-                          <AgentIcon id={cli.id} size={24} />
+                          {copyBusy === cli.id ? (
+                            <Icon name="spinner" size={24} />
+                          ) : (
+                            <AgentIcon id={cli.id} size={24} />
+                          )}
                           <span className="handoff-target-copy">
                             <span className="handoff-target-label">{cliDisplayName(cli)}</span>
                             <span className="handoff-target-meta">
@@ -846,7 +845,11 @@ export function HandoffButton({
                         disabled={copyBusy === cli.id}
                         title={t('handoff.copyPromptForTarget', { target: cliDisplayName(cli) })}
                       >
-                        <AgentIcon id={cli.id} size={24} />
+                        {copyBusy === cli.id ? (
+                          <Icon name="spinner" size={24} />
+                        ) : (
+                          <AgentIcon id={cli.id} size={24} />
+                        )}
                         <span className="handoff-target-label">{cliDisplayName(cli)}</span>
                       </button>
                     );
