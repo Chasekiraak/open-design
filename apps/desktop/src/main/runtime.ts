@@ -711,7 +711,13 @@ const MAC_WINDOW_CHROME =
   process.platform === "darwin"
     ? ({
         titleBarStyle: "hiddenInset" as const,
-        trafficLightPosition: { x: 12, y: 10 },
+        // y centers the 12px traffic-light circles on the tab strip's midline:
+        // the tab chrome is 44px tall (`.workspace-tabs-chrome.app-chrome-header`
+        // in apps/web shell.css) and centers its contents, so the midline is 22
+        // and the circles' top edge is 22 - 6 = 16. #5517 hardcodes 20, but its
+        // own comment derives that from a 52px header it no longer has — copying
+        // the number instead of the derivation reintroduces the misalignment.
+        trafficLightPosition: { x: 12, y: 16 },
         // Frosted-glass window: the desktop wallpaper blurs through the whole
         // window (NSVisualEffectView). The web shell keeps html/body
         // transparent in desktop mode (see apps/web app-wash.css) so the
