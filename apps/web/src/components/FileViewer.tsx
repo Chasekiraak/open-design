@@ -851,40 +851,6 @@ function PreviewViewportControls({
   );
 }
 
-function FileVersionViewportControls({
-  viewport,
-  onViewport,
-  t,
-}: {
-  viewport: PreviewViewportId;
-  onViewport: (viewport: PreviewViewportId) => void;
-  t: TranslateFn;
-}) {
-  return (
-    <div className="file-version-viewport-toggle" role="group" aria-label={t('fileViewer.viewportAria')}>
-      {PREVIEW_VIEWPORT_PRESETS.map((preset) => {
-        const selected = viewport === preset.id;
-        const label = t(preset.titleKey);
-        return (
-          <button
-            key={preset.id}
-            type="button"
-            className={`file-version-viewport-button od-tooltip${selected ? ' active' : ''}`}
-            aria-label={label}
-            aria-pressed={selected}
-            title={label}
-            data-tooltip={label}
-            data-tooltip-placement="bottom"
-            onClick={() => onViewport(preset.id)}
-          >
-            <RemixIcon name={previewViewportIcon(preset.id)} size={14} />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function previewViewportStyle(
   viewport: PreviewViewportId,
   previewScale = 1,
@@ -2783,15 +2749,9 @@ function FileVersionManagerModal({
   const [loading, setLoading] = useState(true);
   const [loadingContent, setLoadingContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [previewViewport, setPreviewViewport] = useState<PreviewViewportId>('desktop');
   const [search, setSearch] = useState('');
-  const [promptOpen, setPromptOpen] = useState(false);
-  const promptWrapRef = useRef<HTMLDivElement | null>(null);
-  const promptPopoverId = useId();
   const [confirmRestore, setConfirmRestore] = useState(false);
-  const restoreWrapRef = useRef<HTMLDivElement | null>(null);
   const restorePopoverId = useId();
   const [downloadMenuVersionId, setDownloadMenuVersionId] = useState<string | null>(null);
   const [versionExportToast, setVersionExportToast] = useState<ExportToastState | null>(null);
@@ -2799,7 +2759,6 @@ function FileVersionManagerModal({
   const [versionImageExportFormat, setVersionImageExportFormat] = useState<ImageExportFormat>('png');
   const [versionImageExportInFlight, setVersionImageExportInFlight] = useState(false);
   const versionImageExportTitleId = useId();
-  const [previewFrameRef, previewFrameSize] = usePreviewCanvasSize<HTMLDivElement>();
   const versionPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
   // Track which srcDoc the iframe has finished rendering. Deriving readiness by
   // comparing to the current srcDoc during render (rather than toggling a bool
@@ -2819,9 +2778,6 @@ function FileVersionManagerModal({
   const fireModalClick = (
     element:
       | 'version_item'
-      | 'viewport_toggle'
-      | 'prompt_toggle'
-      | 'copy_prompt'
       | 'open_in_new_tab'
       | 'restore'
       | 'restore_confirm'
@@ -2892,21 +2848,8 @@ function FileVersionManagerModal({
       return haystack.includes(normalizedSearch);
     });
   }, [showSearch, normalizedSearch, versions, versionById, t, locale]);
-  // Decks are 16:9; the desktop preview centers them in an aspect box (see the
-  // `.preview-viewport-deck` CSS) instead of letting the slide bottom-anchor in
-  // a taller pane. Cheap source sniff, memoized on the selected content.
-  const isDeckPreview = useMemo(
-    () =>
-      Boolean(
-        selectedContent && fileVersionPreviewOptions(projectId, file.name, selectedContent).deck,
-      ),
-    [selectedContent, projectId, file.name],
-  );
-  const selectedPrompt = selectedVersion?.prompt?.trim() ?? '';
+  const panelFileName = file.name.split('/').pop() || file.name;
   const selectedDate = selectedVersion ? formatVersionDateTime(selectedVersion.createdAt, locale) : file.name;
-  const selectedRestoredFrom = selectedVersion?.restoreFromVersionId
-    ? versionById.get(selectedVersion.restoreFromVersionId)
-    : null;
   const versionImageExportVersion = versionImageExportVersionId
     ? versionById.get(versionImageExportVersionId) ?? null
     : null;
@@ -2973,9 +2916,7 @@ function FileVersionManagerModal({
   }, [loadVersions]);
 
   useEffect(() => {
-    setCopied(false);
     setConfirmRestore(false);
-    setPromptOpen(false);
     setDownloadMenuVersionId(null);
   }, [selectedId]);
 
@@ -2984,7 +2925,7 @@ function FileVersionManagerModal({
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target.closest('.file-version-download-wrap')) return;
+      if (target.closest('.file-version-download-menu, .artifact-version-panel__download')) return;
       setDownloadMenuVersionId(null);
     };
     document.addEventListener('pointerdown', onPointerDown);
@@ -3052,17 +2993,12 @@ function FileVersionManagerModal({
         setConfirmRestore(false);
         return;
       }
-      if (promptOpen) {
-        setPromptOpen(false);
-        return;
-      }
       onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [
     onClose,
-    promptOpen,
     confirmRestore,
     downloadMenuVersionId,
     versionImageExportVersionId,
@@ -3070,35 +3006,16 @@ function FileVersionManagerModal({
   ]);
 
   useEffect(() => {
-    if (!promptOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!promptWrapRef.current) return;
-      if (!promptWrapRef.current.contains(event.target as Node)) setPromptOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [promptOpen]);
-
-  useEffect(() => {
     if (!confirmRestore) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!restoreWrapRef.current) return;
-      if (!restoreWrapRef.current.contains(event.target as Node)) setConfirmRestore(false);
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.file-version-restore-confirm, .artifact-version-panel__restore')) return;
+      setConfirmRestore(false);
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [confirmRestore]);
-
-  async function copyPrompt() {
-    if (!selectedPrompt) return;
-    fireModalClick('copy_prompt', {
-      ...(selectedVersion ? { version_source: fileVersionSourceToTracking(selectedVersion) } : {}),
-    });
-    const ok = await copyToClipboard(selectedPrompt);
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  }
 
   async function ensureVersionContent(version: ProjectFileVersion): Promise<string | null> {
     const cached = contentCacheRef.current.get(version.id);
@@ -3311,419 +3228,309 @@ function FileVersionManagerModal({
 
   return createPortal(
     <>
-      <div
-        className="modal-backdrop viewer-modal-backdrop file-version-backdrop"
-        role="presentation"
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }}
+      <aside
+        className="artifact-version-panel"
+        role="dialog"
+        aria-label={t('fileViewer.versions.title')}
       >
-        <div
-          className="file-version-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('fileViewer.versions.title')}
-        >
-        <div className="file-version-sidebar">
-          <div className="file-version-sidebar-head">
-            <span className="file-version-count">{versionCountLabel}</span>
+        <header className="artifact-version-panel__head">
+          <div>
+            <p>{`${t('fileViewer.versions.entryFull')} · ${versionCountLabel}`}</p>
+            <strong title={panelFileName}>{panelFileName}</strong>
           </div>
-          {showSearch ? (
-            <div className="file-version-search">
-              <RemixIcon name="search-line" size={14} />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('common.searchEllipsis')}
-                aria-label={t('common.searchEllipsis')}
-              />
-              {search ? (
-                <button
-                  type="button"
-                  className="file-version-search-clear"
-                  aria-label={t('common.clear')}
-                  onClick={() => setSearch('')}
-                >
-                  <RemixIcon name="close-line" size={14} />
-                </button>
-              ) : null}
+          <div className="artifact-version-panel__head-actions">
+            <button
+              type="button"
+              className="artifact-version-panel__close"
+              aria-label={t('fileViewer.versions.open')}
+              title={t('fileViewer.versions.open')}
+              disabled={!selectedContentMatchesVersion || loadingContent}
+              onClick={openVersionInNewTab}
+            >
+              <RemixIcon name="external-link-line" size={15} />
+            </button>
+            <button
+              type="button"
+              className="artifact-version-panel__close"
+              aria-label={t('common.close')}
+              title={t('common.close')}
+              onClick={onClose}
+            >
+              <RemixIcon name="close-line" size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="artifact-version-panel__preview">
+          {srcDoc ? (
+            <iframe
+              ref={versionPreviewIframeRef}
+              title={selectedVersion ? `${file.name} v${selectedVersion.version}` : file.name}
+              sandbox="allow-scripts allow-downloads"
+              srcDoc={srcDoc}
+              onLoad={() => setLoadedSrcDoc(srcDoc)}
+            />
+          ) : null}
+          {selectedVersion ? (
+            <div className="artifact-version-panel__preview-caption">
+              <span>{`v${selectedVersion.version}`}</span>
+              <strong>{selectedDate}</strong>
             </div>
           ) : null}
-          <div className="file-version-list" role="listbox" aria-label={t('fileViewer.versions.listAria')}>
-            {loading ? (
-              <div
-                className="file-version-skeleton-list"
-                role="status"
-                aria-label={t('fileViewer.versions.loading')}
-              >
-                {[0, 1, 2, 3].map((row) => (
-                  <div key={row} className="file-version-skeleton-item" aria-hidden="true">
-                    <div className="file-version-skeleton-row">
-                      <span className="file-version-skeleton-line badge" />
-                      <span className="file-version-skeleton-line time" />
-                    </div>
-                    <span className="file-version-skeleton-line title" />
-                    <span className="file-version-skeleton-line meta" />
-                  </div>
-                ))}
-              </div>
-            ) : versions.length === 0 ? (
-              <div className="file-version-empty">{t('fileViewer.versions.empty')}</div>
-            ) : visibleVersions.length === 0 ? (
-              <div className="file-version-empty">{t('homeHero.noResults', { query: search.trim() })}</div>
-            ) : (
-              visibleVersions.map((version) => {
-                const selected = version.id === selectedVersion?.id;
-                const itemRestoredFrom = version.restoreFromVersionId
-                  ? versionById.get(version.restoreFromVersionId)
-                  : null;
-                const prefetch = () => {
-                  void primeVersionContent(version.id);
-                };
-                const selectVersion = () => {
-                  if (!selected) {
-                    fireModalClick('version_item', {
-                      version_source: fileVersionSourceToTracking(version),
-                      version_is_current: Boolean(version.current),
-                    });
-                  }
-                  setSelectedId(version.id);
-                };
-                // The daemon fills an absent label with a hardcoded English
-                // `Version N` (project-file-versions.ts). Rendering that as the
-                // card title put an untranslated "Version 2" directly above the
-                // localized "版本 2" meta line — the same fact, twice, in two
-                // languages. A card only earns a title when it has something the
-                // meta row does not already say.
-                const autoVersionLabel = /^v(?:ersion)?\s*\.?\s*\d+$/i.test(version.label?.trim() ?? '');
-                const versionTitle =
-                  version.prompt?.trim()
-                  || (autoVersionLabel ? '' : version.label?.trim() ?? '');
-                return (
-                  <div
-                    key={version.id}
-                    className={`file-version-item${selected ? ' active' : ''}`}
-                    onMouseEnter={prefetch}
-                  >
-                    <button
-                      type="button"
-                      className="file-version-item-select"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={selectVersion}
-                      onFocus={prefetch}
-                    >
-                      <span className="file-version-item-top">
-                        {version.current ? (
-                          <span className="file-version-current-badge">{t('fileViewer.versions.current')}</span>
-                        ) : null}
-                        <span className={`file-version-source-badge ${fileVersionSourceClassName(version)}`}>
-                          {fileVersionSourceLabel(version, t)}
-                        </span>
-                        <span className="file-version-time">
-                          {formatVersionDateTime(version.createdAt, locale)}
-                        </span>
-                      </span>
-                      {versionTitle ? (
-                        <span className="file-version-item-title" title={versionTitle}>
-                          {versionTitle}
-                        </span>
-                      ) : null}
-                      <span className="file-version-item-meta">
-                        {t('fileViewer.versions.versionLabel', { version: version.version })}
-                        {itemRestoredFrom ? (
-                          <span className="file-version-item-restored">
-                            {t('fileViewer.versions.restoredFrom', { version: itemRestoredFrom.version })}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          {loading || loadingContent || (srcDoc && !frameReady) ? (
+            <div
+              className="file-version-preview-overlay"
+              role="status"
+              aria-label={t('fileViewer.versions.previewLoading')}
+            >
+              <span className="file-version-preview-spinner" aria-hidden="true" />
+            </div>
+          ) : null}
         </div>
-        <div className="file-version-main">
-          <header className="file-version-head">
-            <div className="file-version-meta">
-              <div className="file-version-meta-row">
-                {selectedVersion?.current ? (
-                  <span className="file-version-current-badge">{t('fileViewer.versions.current')}</span>
-                ) : null}
-                {selectedVersion ? (
-                  <span className={`file-version-source-badge ${fileVersionSourceClassName(selectedVersion)}`}>
-                    {fileVersionSourceLabel(selectedVersion, t)}
-                  </span>
-                ) : null}
-                <span className="file-version-selected-date">{selectedDate}</span>
-                {selectedRestoredFrom ? (
-                  <span className="file-version-restored-from">
-                    {t('fileViewer.versions.restoredFrom', { version: selectedRestoredFrom.version })}
-                  </span>
-                ) : null}
-                <div
-                  className="file-version-prompt-popover-wrap"
-                  ref={promptWrapRef}
+        {error ? (
+          <p className="artifact-version-panel__note" role="alert">{error}</p>
+        ) : null}
+        {showSearch ? (
+          <div className="file-version-search">
+            <RemixIcon name="search-line" size={14} />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t('common.searchEllipsis')}
+              aria-label={t('common.searchEllipsis')}
+            />
+            {search ? (
+              <button
+                type="button"
+                className="file-version-search-clear"
+                aria-label={t('common.clear')}
+                onClick={() => setSearch('')}
+              >
+                <RemixIcon name="close-line" size={14} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="artifact-version-list" role="listbox" aria-label={t('fileViewer.versions.listAria')}>
+          {loading ? (
+            <div
+              className="file-version-skeleton-list"
+              role="status"
+              aria-label={t('fileViewer.versions.loading')}
+            >
+              {[0, 1, 2, 3].map((row) => (
+                <div key={row} className="file-version-skeleton-item" aria-hidden="true">
+                  <div className="file-version-skeleton-row">
+                    <span className="file-version-skeleton-line badge" />
+                    <span className="file-version-skeleton-line time" />
+                  </div>
+                  <span className="file-version-skeleton-line title" />
+                  <span className="file-version-skeleton-line meta" />
+                </div>
+              ))}
+            </div>
+          ) : versions.length === 0 ? (
+            <div className="file-version-empty">{t('fileViewer.versions.empty')}</div>
+          ) : visibleVersions.length === 0 ? (
+            <div className="file-version-empty">{t('homeHero.noResults', { query: search.trim() })}</div>
+          ) : (
+            visibleVersions.map((version) => {
+              const selected = version.id === selectedVersion?.id;
+              const itemRestoredFrom = version.restoreFromVersionId
+                ? versionById.get(version.restoreFromVersionId)
+                : null;
+              const prefetch = () => {
+                void primeVersionContent(version.id);
+              };
+              const selectVersion = () => {
+                if (!selected) {
+                  fireModalClick('version_item', {
+                    version_source: fileVersionSourceToTracking(version),
+                    version_is_current: Boolean(version.current),
+                  });
+                }
+                setSelectedId(version.id);
+              };
+              // The daemon fills an absent label with a hardcoded English
+              // `Version N` (project-file-versions.ts). Rendering that as the
+              // card title put an untranslated "Version 2" directly above the
+              // localized "版本 2" meta line — the same fact, twice, in two
+              // languages. A card only earns a bespoke title when it has
+              // something the `v{n}` mark does not already say.
+              const autoVersionLabel = /^v(?:ersion)?\s*\.?\s*\d+$/i.test(version.label?.trim() ?? '');
+              const versionTitle =
+                version.prompt?.trim()
+                || (autoVersionLabel ? '' : version.label?.trim() ?? '');
+              return (
+                <button
+                  key={version.id}
+                  type="button"
+                  className={`artifact-version-card${selected ? ' is-selected' : ''}`}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={selectVersion}
+                  onMouseEnter={prefetch}
+                  onFocus={prefetch}
                 >
-                  <button
-                    type="button"
-                    className={`file-version-prompt-toggle${promptOpen ? ' active' : ''}`}
-                    aria-expanded={promptOpen}
-                    aria-controls={promptOpen ? promptPopoverId : undefined}
-                    disabled={!selectedVersion}
-                    onClick={() => {
-                      if (!promptOpen) {
-                        fireModalClick('prompt_toggle', {
-                          ...(selectedVersion
-                            ? { version_source: fileVersionSourceToTracking(selectedVersion) }
-                            : {}),
-                        });
-                      }
-                      setPromptOpen((value) => !value);
-                    }}
-                  >
-                    <RemixIcon name="chat-3-line" size={15} />
-                    <span>{t('fileViewer.versions.promptTitle')}</span>
-                    <RemixIcon name="arrow-down-s-line" size={14} />
-                  </button>
-                  {promptOpen ? (
-                    <section
-                      className="file-version-prompt-popover"
-                      id={promptPopoverId}
-                      role="region"
-                      aria-label={t('fileViewer.versions.promptTitle')}
-                    >
-                      <div className="file-version-prompt-head">
-                        <h3>{t('fileViewer.versions.promptTitle')}</h3>
-                        <button
-                          type="button"
-                          className="viewer-action file-version-copy-prompt"
-                          disabled={!selectedPrompt}
-                          onClick={copyPrompt}
-                        >
-                          <RemixIcon name="file-copy-line" size={14} />
-                          <span>{copied ? t('fileViewer.copied') : t('fileViewer.versions.copyPrompt')}</span>
-                        </button>
-                      </div>
-                      <p>{selectedPrompt || t('fileViewer.versions.noPromptBody')}</p>
-                    </section>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-            <div className="file-version-actions">
-              {selectedVersion && !selectedVersion.current ? (
-                <div className="file-version-restore-wrap" ref={restoreWrapRef}>
-                  <button
-                    type="button"
-                    className={`viewer-action primary file-version-restore-action${confirmRestore ? ' active' : ''}`}
-                    disabled={restoreDisabled}
-                    title={viewerOnly ? t('fileViewer.readonlySharedNoExport') : undefined}
-                    aria-haspopup="dialog"
-                    aria-expanded={confirmRestore}
-                    aria-controls={confirmRestore ? restorePopoverId : undefined}
-                    onClick={() => {
-                      if (!confirmRestore) {
-                        fireModalClick('restore', {
-                          version_source: fileVersionSourceToTracking(selectedVersion),
-                        });
-                      }
-                      setConfirmRestore((value) => !value);
-                    }}
-                  >
-                    <RemixIcon name={restoring ? 'loader-4-line' : 'git-branch-line'} size={14} />
-                    <span>
-                      {restoring
-                        ? t('fileViewer.versions.restoring')
-                        : t('fileViewer.versions.restore')}
+                  <span className="artifact-version-card__mark">{`v${version.version}`}</span>
+                  <span className="artifact-version-card__body">
+                    {versionTitle || version.current ? (
+                      <span className="artifact-version-card__title">
+                        {versionTitle ? (
+                          <span className="artifact-version-card__title-text">{versionTitle}</span>
+                        ) : null}
+                        {version.current ? <em>{t('fileViewer.versions.current')}</em> : null}
+                      </span>
+                    ) : null}
+                    <span className="artifact-version-card__meta">
+                      <span className={`file-version-source-badge ${fileVersionSourceClassName(version)}`}>
+                        {fileVersionSourceLabel(version, t)}
+                      </span>
+                      <span>{formatVersionDateTime(version.createdAt, locale)}</span>
                     </span>
-                  </button>
-                  {confirmRestore ? (
-                    <div
-                      className="file-version-restore-confirm"
-                      id={restorePopoverId}
-                      role="dialog"
-                      aria-label={t('fileViewer.versions.restoreConfirmTitle')}
-                    >
-                      <h3>{t('fileViewer.versions.restoreConfirmTitle')}</h3>
-                      <p>{t('fileViewer.versions.restoreHelp')}</p>
-                      <div className="file-version-restore-confirm-actions">
-                        <button
-                          type="button"
-                          className="viewer-action"
-                          onClick={() => {
-                            fireModalClick('restore_cancel', {
-                              version_source: fileVersionSourceToTracking(selectedVersion),
-                            });
-                            setConfirmRestore(false);
-                          }}
-                        >
-                          {t('common.cancel')}
-                        </button>
-                        <button
-                          type="button"
-                          className="viewer-action primary"
-                          disabled={restoreDisabled}
-                          onClick={() => {
-                            fireModalClick('restore_confirm', {
-                              version_source: fileVersionSourceToTracking(selectedVersion),
-                            });
-                            setConfirmRestore(false);
-                            void restoreVersion();
-                          }}
-                        >
-                          {t('fileViewer.versions.restoreConfirmCta')}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {selectedVersion ? (
-                <div className="file-version-download-wrap file-version-head-download-wrap">
-                  <button
-                    type="button"
-                    className="viewer-action viewer-action-icon od-tooltip"
-                    aria-haspopup="menu"
-                    aria-expanded={downloadMenuVersionId === selectedVersion.id}
-                    aria-label={`${t('fileViewer.download')} ${t('fileViewer.versions.versionLabel', { version: selectedVersion.version })}`}
-                    title={`${t('fileViewer.download')} ${t('fileViewer.versions.versionLabel', { version: selectedVersion.version })}`}
-                    data-tooltip={`${t('fileViewer.download')} ${t('fileViewer.versions.versionLabel', { version: selectedVersion.version })}`}
-                    data-tooltip-placement="bottom"
-                    onClick={() => {
-                      void primeVersionContent(selectedVersion.id);
-                      setDownloadMenuVersionId((current) => current === selectedVersion.id ? null : selectedVersion.id);
-                    }}
-                  >
-                    <RemixIcon name="download-line" size={15} />
-                  </button>
-                  {downloadMenuVersionId === selectedVersion.id ? (
-                    <div className="share-menu-popover file-version-download-menu" role="menu">
-                      <button
-                        type="button"
-                        className="share-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          void exportVersionPdf(selectedVersion);
-                        }}
-                      >
-                        <span className="share-menu-icon"><RemixIcon name="file-line" size={15} /></span>
-                        <span>{t('fileViewer.exportPdf')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="share-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          openVersionImageExport(selectedVersion);
-                        }}
-                      >
-                        <span className="share-menu-icon"><RemixIcon name="image-line" size={15} /></span>
-                        <span>{t('fileViewer.exportImage')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="share-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          exportVersionZip(selectedVersion);
-                        }}
-                      >
-                        <span className="share-menu-icon"><RemixIcon name="file-zip-line" size={15} /></span>
-                        <span>{t('fileViewer.exportZip')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="share-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          exportVersionHtml(selectedVersion);
-                        }}
-                      >
-                        <span className="share-menu-icon"><RemixIcon name="file-code-line" size={15} /></span>
-                        <span>{t('fileViewer.exportHtml')}</span>
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              <FileVersionViewportControls
-                viewport={previewViewport}
-                onViewport={(viewport) => {
-                  if (viewport !== previewViewport) {
-                    fireModalClick('viewport_toggle', { viewport });
-                  }
-                  setPreviewViewport(viewport);
-                }}
-                t={t}
-              />
+                    {itemRestoredFrom ? (
+                      <span className="artifact-version-card__summary">
+                        {t('fileViewer.versions.restoredFrom', { version: itemRestoredFrom.version })}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+        <footer className="artifact-version-panel__foot">
+          <button
+            type="button"
+            className={`artifact-version-panel__restore${confirmRestore ? ' active' : ''}`}
+            disabled={restoreDisabled}
+            title={viewerOnly ? t('fileViewer.readonlySharedNoExport') : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={confirmRestore}
+            aria-controls={confirmRestore ? restorePopoverId : undefined}
+            onClick={() => {
+              if (!selectedVersion) return;
+              if (!confirmRestore) {
+                fireModalClick('restore', {
+                  version_source: fileVersionSourceToTracking(selectedVersion),
+                });
+              }
+              setConfirmRestore((value) => !value);
+            }}
+          >
+            <RemixIcon name={restoring ? 'loader-4-line' : 'arrow-go-back-line'} size={15} />
+            {restoring ? t('fileViewer.versions.restoring') : t('fileViewer.versions.restore')}
+          </button>
+          <button
+            type="button"
+            className="artifact-version-panel__download"
+            aria-haspopup="menu"
+            aria-expanded={Boolean(selectedVersion) && downloadMenuVersionId === selectedVersion?.id}
+            aria-label={selectedVersion
+              ? `${t('fileViewer.download')} ${t('fileViewer.versions.versionLabel', { version: selectedVersion.version })}`
+              : t('fileViewer.download')}
+            disabled={!selectedVersion}
+            onClick={() => {
+              if (!selectedVersion) return;
+              void primeVersionContent(selectedVersion.id);
+              setDownloadMenuVersionId((current) => current === selectedVersion.id ? null : selectedVersion.id);
+            }}
+          >
+            <RemixIcon name="download-line" size={15} />
+            {t('fileViewer.download')}
+          </button>
+        </footer>
+        {selectedVersion && confirmRestore ? (
+          <div
+            className="artifact-version-panel__popover file-version-restore-confirm"
+            id={restorePopoverId}
+            role="dialog"
+            aria-label={t('fileViewer.versions.restoreConfirmTitle')}
+          >
+            <h3>{t('fileViewer.versions.restoreConfirmTitle')}</h3>
+            <p>{t('fileViewer.versions.restoreHelp')}</p>
+            <div className="file-version-restore-confirm-actions">
               <button
                 type="button"
-                className="viewer-action viewer-action-icon od-tooltip"
-                aria-label={t('fileViewer.versions.open')}
-                title={t('fileViewer.versions.open')}
-                data-tooltip={t('fileViewer.versions.open')}
-                data-tooltip-placement="bottom"
-                disabled={!selectedContentMatchesVersion || loadingContent}
-                onClick={openVersionInNewTab}
+                className="viewer-action"
+                onClick={() => {
+                  fireModalClick('restore_cancel', {
+                    version_source: fileVersionSourceToTracking(selectedVersion),
+                  });
+                  setConfirmRestore(false);
+                }}
               >
-                <RemixIcon name="external-link-line" size={15} />
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
-                className="viewer-action viewer-action-icon od-tooltip"
-                aria-label={t('common.close')}
-                title={t('common.close')}
-                data-tooltip={t('common.close')}
-                data-tooltip-placement="bottom"
-                onClick={onClose}
+                className="viewer-action primary"
+                disabled={restoreDisabled}
+                onClick={() => {
+                  fireModalClick('restore_confirm', {
+                    version_source: fileVersionSourceToTracking(selectedVersion),
+                  });
+                  setConfirmRestore(false);
+                  void restoreVersion();
+                }}
               >
-                <RemixIcon name="close-line" size={16} />
+                {t('fileViewer.versions.restoreConfirmCta')}
               </button>
             </div>
-          </header>
-          <div className="file-version-preview" ref={previewFrameRef}>
-            {error ? (
-              <div className="viewer-empty" role="alert">{error}</div>
-            ) : (
-              <>
-                {srcDoc ? (
-                  <div
-                    className={`preview-viewport preview-viewport-${previewViewport}${isDeckPreview ? ' preview-viewport-deck' : ''}`}
-                    style={previewViewportStyle(previewViewport, 1, previewFrameSize, { canvasPadding: 24 })}
-                  >
-                    <div className="preview-frame-clip">
-                      <div style={previewScaleShellStyle(previewViewport, 1)}>
-                        <iframe
-                          ref={versionPreviewIframeRef}
-                          title={selectedVersion ? `${file.name} v${selectedVersion.version}` : file.name}
-                          sandbox="allow-scripts allow-downloads"
-                          srcDoc={srcDoc}
-                          onLoad={() => setLoadedSrcDoc(srcDoc)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ) : !loading && !loadingContent ? (
-                  <div className="viewer-empty">{t('fileViewer.versions.previewLoading')}</div>
-                ) : null}
-                {loading || loadingContent || (srcDoc && !frameReady) ? (
-                  <div
-                    className="file-version-preview-overlay"
-                    role="status"
-                    aria-label={t('fileViewer.versions.previewLoading')}
-                  >
-                    <span className="file-version-preview-spinner" aria-hidden="true" />
-                  </div>
-                ) : null}
-              </>
-            )}
           </div>
-        </div>
-        </div>
-      </div>
+        ) : null}
+        {selectedVersion && downloadMenuVersionId === selectedVersion.id ? (
+          <div
+            className="artifact-version-panel__popover share-menu-popover file-version-download-menu"
+            role="menu"
+          >
+            <button
+              type="button"
+              className="share-menu-item"
+              role="menuitem"
+              onClick={() => {
+                void exportVersionPdf(selectedVersion);
+              }}
+            >
+              <span className="share-menu-icon"><RemixIcon name="file-line" size={15} /></span>
+              <span>{t('fileViewer.exportPdf')}</span>
+            </button>
+            <button
+              type="button"
+              className="share-menu-item"
+              role="menuitem"
+              onClick={() => {
+                openVersionImageExport(selectedVersion);
+              }}
+            >
+              <span className="share-menu-icon"><RemixIcon name="image-line" size={15} /></span>
+              <span>{t('fileViewer.exportImage')}</span>
+            </button>
+            <button
+              type="button"
+              className="share-menu-item"
+              role="menuitem"
+              onClick={() => {
+                exportVersionZip(selectedVersion);
+              }}
+            >
+              <span className="share-menu-icon"><RemixIcon name="file-zip-line" size={15} /></span>
+              <span>{t('fileViewer.exportZip')}</span>
+            </button>
+            <button
+              type="button"
+              className="share-menu-item"
+              role="menuitem"
+              onClick={() => {
+                exportVersionHtml(selectedVersion);
+              }}
+            >
+              <span className="share-menu-icon"><RemixIcon name="file-code-line" size={15} /></span>
+              <span>{t('fileViewer.exportHtml')}</span>
+            </button>
+          </div>
+        ) : null}
+      </aside>
       {versionImageExportVersion ? (
         <div className="modal-backdrop viewer-modal-backdrop image-export-backdrop file-version-export-backdrop" role="presentation">
           <div
@@ -12367,13 +12174,20 @@ function HtmlViewer({
           {versioningAvailable && (rawCanShare || rawCanDownload) ? (
             <button
               type="button"
-              className="chrome-action chrome-action-secondary chrome-action-icon od-tooltip"
+              className={`chrome-action chrome-action-secondary chrome-action-icon od-tooltip${versionModalOpen ? ' is-active' : ''}`}
               disabled={source === null || viewerOnly}
               aria-label={t('fileViewer.versions.entry')}
+              aria-expanded={Boolean(versionModalOpen)}
               data-tooltip={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               data-tooltip-placement="bottom"
               title={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               onClick={() => {
+                // The version history is a floating panel now, not a modal, so
+                // the toolbar icon is a toggle: a second click dismisses it.
+                if (versionModalOpen) {
+                  setVersionModalOpen(false);
+                  return;
+                }
                 fireArtifactToolbarClick('versions', 'toolbar');
                 setVersionModalOpen('toolbar');
               }}

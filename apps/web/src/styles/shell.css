@@ -1327,6 +1327,71 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
   background: var(--text) !important;
   border-color: var(--text) !important;
 }
+/* Real-data affordances that the reference panel skeleton has no slot for.
+   Everything above this comment is the shared panel shape; everything below
+   attaches our live version-history capabilities (open-in-tab, filter box,
+   source badges, restore-confirm / download popovers) to that shape without
+   editing the shared rules. */
+.artifact-version-panel__head-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.artifact-version-panel__close:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+/* The filter box only appears once the history is long enough to need it; the
+   sidebar margins it carries from the old modal do not apply inside the panel. */
+.artifact-version-panel .file-version-search {
+  margin: 0;
+}
+/* Real prompts are far longer than the reference's hand-written titles, so the
+   title row wraps instead of squeezing the `当前` pill down to one glyph. */
+.artifact-version-panel .artifact-version-card__title {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.artifact-version-panel .artifact-version-card__title-text {
+  min-width: 0;
+}
+.artifact-version-panel .artifact-version-card__title em {
+  flex: 0 0 auto;
+}
+/* The meta row carries the source badge chip next to the timestamp, so it lays
+   out as a wrapping flex line instead of the reference's plain text run. */
+.artifact-version-panel .artifact-version-card__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.artifact-version-panel__download {
+  min-width: 0;
+}
+.artifact-version-panel__download span,
+.artifact-version-panel__restore span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The panel clips its own overflow (rounded corners + inner scroll), so foot
+   popovers open INSIDE it, stacked over the list, rather than escaping the
+   rounded box the way the old full-screen modal's popovers could. */
+.artifact-version-panel .artifact-version-panel__popover.file-version-restore-confirm,
+.artifact-version-panel .artifact-version-panel__popover.file-version-download-menu.share-menu-popover {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  right: 14px;
+  bottom: 62px;
+  top: auto;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  transform-origin: bottom center;
+}
 .zoom-menu { position: relative; display: inline-block; }
 .zoom-menu .zoom-trigger {
   display: inline-flex;
