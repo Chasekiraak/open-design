@@ -937,6 +937,36 @@ describe('buildTracePayload', () => {
     expect((batch[0] as any).body.metadata.success).toBe(false);
   });
 
+  it('redacts secrets from every failed-run error field sent to Langfuse', () => {
+    const providerToken = ['nvapi', 'A'.repeat(48)].join('-');
+    const rawError = `Header has invalid value: Bearer ${providerToken}`;
+    const batch = buildTracePayload(
+      makeCtx({
+        run: {
+          runId: 'run-secret-error',
+          status: 'failed',
+          startedAt: 1,
+          endedAt: 2,
+          error: rawError,
+        },
+      }),
+    );
+    const redactedError =
+      'Header has invalid value: Bearer [REDACTED:nvidia_api_key]';
+
+    expect(bodyOf(batch, 'span-create', 'agent-run').statusMessage).toBe(
+      redactedError,
+    );
+    expect(bodyOf(batch, 'generation-create', 'llm').statusMessage).toBe(
+      redactedError,
+    );
+    expect(bodyOf(batch, 'event-create', 'run-error').statusMessage).toBe(
+      redactedError,
+    );
+    expect((batch[0] as any).body.metadata.error).toBe(redactedError);
+    expect(JSON.stringify(batch)).not.toContain(providerToken);
+  });
+
   it('uses an agent-runtime span instead of an llm generation for session-init failures with no model usage', () => {
     const batch = buildTracePayload(
       makeCtx({

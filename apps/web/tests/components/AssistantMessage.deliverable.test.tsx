@@ -7,7 +7,7 @@
  * footer instead of the old three-button action row.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessage } from '../../src/components/AssistantMessage';
@@ -96,7 +96,7 @@ describe('AssistantMessage — task deliverable card', () => {
     expect(screen.queryByText('Share')).toBeNull();
     expect(screen.queryByText('Download')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /report\.md/i }));
+    fireEvent.click(within(card).getByRole('button', { name: /report\.md/i }));
     expect(onRequestOpenFile).toHaveBeenCalledWith('report.md');
 
     // The preview itself opens the primary artifact.

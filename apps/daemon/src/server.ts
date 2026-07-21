@@ -95,6 +95,7 @@ import {
   validateCodexGeneratedImagesDir,
 } from './runtimes/chat-prompt-inputs.js';
 import {
+  writePromptAndEndStdin,
   applyClaudeStreamJsonRunBookkeeping,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
@@ -6362,6 +6363,9 @@ export async function startServer({
         artifactRegistered,
       });
     const noteAgentActivity = () => {
+      // E-lite: stamp the last-activity clock BEFORE the disabled-watchdog bail
+      // so `last_progress_age_ms` is recorded even when the watchdog is off.
+      run.lastAgentActivityAt = Date.now();
       const delay = activeInactivityTimeoutMs();
       if (delay <= 0) return;
       clearInactivityWatchdog();
@@ -6909,6 +6913,12 @@ export async function startServer({
     // plain streams (most other CLIs) we forward raw chunks unchanged so
     // the browser can append them to the assistant's text buffer.
     let agentStreamError = null;
+    // Preserve whether a latched error predates a later cancel request. The
+    // close handler runs after cancel() has already flipped cancelRequested,
+    // so consulting only the current flag loses the ordering of those events.
+    let agentStreamErrorObservedBeforeCancellation = false;
+    let acpFatalErrorObservedBeforeCancellation = false;
+    run.runtimeFailureObservedBeforeCancellation = false;
     // Holds buffered plain-text stdout chunks for agents (currently
     // antigravity) where we need to inspect the full output at close
     // time before deciding whether to forward it. The auth-prompt guard
@@ -7158,6 +7168,10 @@ export async function startServer({
 
     const sendAgentEvent = (ev) => {
       if (ev?.type === 'error') {
+        // Cancellation is the terminal user intent. Some CLIs flush a final
+        // error record while reacting to SIGTERM; treating that late frame as
+        // a run failure races the cancel route and can make it return failed.
+        if (run.cancelRequested) return;
         if (agentStreamError) return;
         flushVisibleAgentStderr();
         const failureText = [
@@ -7171,6 +7185,8 @@ export async function startServer({
           String(ev.message || 'Agent stream error'),
           failureText,
         );
+        agentStreamErrorObservedBeforeCancellation = true;
+        run.runtimeFailureObservedBeforeCancellation = true;
         clearInactivityWatchdog();
         const authFailure = classifyAgentAuthFailure(agentId, failureText);
         if (authFailure?.status === 'missing') {
@@ -7261,6 +7277,10 @@ export async function startServer({
         // init/system line arrives well before the model's first token.
         noteCliReadyAt();
         if (ev?.type === 'error') {
+          // Claude commonly reports its SIGTERM shutdown as an assistant or
+          // result error frame. Once cancellation has been requested, that
+          // frame is shutdown noise rather than a new user-visible failure.
+          if (run.cancelRequested) return;
           if (agentStreamError) return;
           // Hold back a resume-failure error so the close handler's transparent
           // reseed stays invisible. An is_error result frame on a dead --resume
@@ -7311,6 +7331,8 @@ export async function startServer({
           const serviceCode = classifyAgentServiceFailure(failureText);
           agentStreamError = diagnostic?.message
             ?? rewriteKnownAgentStreamError(agentId, message, failureText);
+          agentStreamErrorObservedBeforeCancellation = true;
+          run.runtimeFailureObservedBeforeCancellation = true;
           send('error', createSseErrorPayload(
             diagnostic?.code ?? serviceCode ?? 'AGENT_EXECUTION_FAILED',
             agentStreamError,
@@ -7406,9 +7428,13 @@ export async function startServer({
           if (channel === 'agent') {
             sendAgentEvent(payload);
           } else if (channel === 'error') {
+            if (run.cancelRequested) return;
             if (agentStreamError) return;
             flushVisibleAgentStderr();
             agentStreamError = String(payload?.message || 'Pi session error');
+            agentStreamErrorObservedBeforeCancellation = true;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
             const piErrorCode = typeof payload?.code === 'string' ? payload.code : null;
             if (piErrorCode) {
               run.errorCode = piErrorCode;
@@ -7450,6 +7476,11 @@ export async function startServer({
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
         send: (event, data) => {
+          if (event === 'error') {
+            if (run.cancelRequested) return;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
+          }
           if (event === 'agent') {
             lastAgentEventPhase = summarizeAgentEventForInactivity(data);
           }
@@ -7575,12 +7606,25 @@ export async function startServer({
       emitVisibleAgentStderr(chunk);
     });
 
+    const finishCanceledIfRequested = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): boolean => {
+      if (!run.cancelRequested) return false;
+      if (!design.runs.isTerminal(run.status)) {
+        markRpcCloseReason('cancel_requested');
+        finishWithRetryDecision('canceled', code, signal);
+      }
+      return true;
+    };
+
     child.on('error', (err) => {
       clearInactivityWatchdog();
       cleanupPromptFile();
       flushVisibleAgentStderr();
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
+      if (finishCanceledIfRequested(1, null)) return;
       send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', err.message));
       finishWithRetryDecision('failed', 1, null);
     });
@@ -7659,13 +7703,13 @@ export async function startServer({
         ));
         return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
       }
-      if (acpSession?.hasFatalError()) {
+      if (acpFatalErrorObservedBeforeCancellation && acpSession?.hasFatalError()) {
         markRpcCloseReason('fatal_rpc_error');
         return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       parseBufferedAntigravityGeminiJsonEventStream();
       flushAgentTitleMarkerBuffer();
-      if (agentStreamError) {
+      if (agentStreamErrorObservedBeforeCancellation && agentStreamError) {
         markRpcCloseReason('stream_error');
         return finishWithRetryDecision('failed', code === 0 ? 1 : (code ?? 1), signal ?? null);
       }
@@ -8175,7 +8219,11 @@ export async function startServer({
           },
         });
         try {
-          child.stdin.write(`${userMessage}\n`, 'utf8', markStdinWriteEnd);
+          // E-lite: `write` returns false when the chunk was buffered because the
+          // OS pipe is full (the child isn't draining stdin) — the corroborating
+          // signal for a `stdin_write`-phase inactivity stall.
+          const accepted = child.stdin.write(`${userMessage}\n`, 'utf8', markStdinWriteEnd);
+          run.stdinBackpressure = accepted === false;
         } catch (err) {
           // Swallow EPIPE here for the same reason as the listener above —
           // a fast-exiting child has already routed its failure through
@@ -8184,7 +8232,9 @@ export async function startServer({
         }
         run.stdinOpen = true;
       } else {
-        child.stdin.end(composed, 'utf8', markStdinWriteEnd);
+        // Split write + close so the boolean backpressure signal survives —
+        // see writePromptAndEndStdin for why `end(chunk)` cannot report it.
+        run.stdinBackpressure = writePromptAndEndStdin(child.stdin, composed, markStdinWriteEnd);
       }
     }
   };

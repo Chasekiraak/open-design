@@ -223,7 +223,8 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
   // serve the template's own seed HTML — the canonical `assets/template.html`
   // every deck/prototype template ships, with conventional fallbacks. Clients
   // embed this in a sandboxed iframe (no allow-same-origin), so the document
-  // renders isolated; path resolution stays inside the template directory.
+  // renders isolated. Rewrite local assets through the existing skill asset
+  // route, which spans both skill and design-template registries.
   app.get('/api/design-templates/:id/preview', async (req, res) => {
     try {
       const templates = await listAllDesignTemplates();
@@ -254,7 +255,9 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
           if (stat.size > 5 * 1024 * 1024) continue;
           const html = await fsp.readFile(full, 'utf8');
           res.setHeader('Cache-Control', 'private, max-age=300');
-          return res.type('text/html').send(html);
+          return res
+            .type('text/html')
+            .send(rewriteSkillAssetUrls(html, template.id));
         } catch {
           continue;
         }
