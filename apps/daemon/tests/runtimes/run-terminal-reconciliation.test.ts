@@ -26,6 +26,7 @@ describe('durable run terminal reconciliation', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     db.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -188,6 +189,10 @@ describe('durable run terminal reconciliation', () => {
       },
       langfuseCompletedAt: 2_000,
     }));
+    db.prepare(
+      `INSERT INTO messages (id, run_id, run_status, events_json)
+       VALUES (?, ?, 'running', '[]')`,
+    ).run('m1', runId);
     const capture = vi.fn(async () => undefined);
 
     const result = await reconcileDurableRunTerminals({
@@ -198,7 +203,19 @@ describe('durable run terminal reconciliation', () => {
       runsLogDir: tmpDir,
     });
 
-    expect(result).toMatchObject({ interrupted: 0, analyticsReplayed: 1 });
+    expect(result).toMatchObject({
+      interrupted: 0,
+      messagesReconciled: 1,
+      analyticsReplayed: 1,
+    });
+    const message = db.prepare(
+      `SELECT run_status AS status, events_json AS eventsJson FROM messages WHERE id = 'm1'`,
+    ).get() as { status: string; eventsJson: string };
+    expect(message).toMatchObject({
+      status: 'failed',
+      eventsJson: expect.stringContaining('Authentication required before starting the session.'),
+    });
+    expect(message.eventsJson).not.toContain('daemon restarted');
     expect(capture).toHaveBeenCalledWith(expect.objectContaining({
       eventName: 'run_finished',
       properties: expect.objectContaining({
@@ -213,6 +230,50 @@ describe('durable run terminal reconciliation', () => {
         terminal_recovery_reason: 'analytics_incomplete',
       }),
     }));
+  });
+
+  it('does not read events after analytics and Langfuse are checkpointed', async () => {
+    const runId = 'run-fully-checkpointed';
+    const runDir = path.join(tmpDir, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'state.json'), JSON.stringify({
+      schemaVersion: 1,
+      id: runId,
+      projectId: 'p1',
+      conversationId: 'c1',
+      assistantMessageId: 'm1',
+      agentId: 'claude',
+      status: 'succeeded',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      analyticsRecovery: {
+        context: {},
+        properties: {},
+        insertId: 'run-created-fully-checkpointed',
+        completedAt: 2_000,
+      },
+      langfuseCompletedAt: 2_000,
+    }));
+    const readFile = vi.spyOn(fs, 'readFileSync');
+    const capture = vi.fn();
+    const reportLangfuse = vi.fn();
+
+    const result = await reconcileDurableRunTerminals({
+      analytics: { capture },
+      appVersion: '0.15.1',
+      db,
+      reportLangfuse,
+      runsLogDir: tmpDir,
+    });
+
+    expect(result).toMatchObject({
+      scanned: 1,
+      analyticsReplayed: 0,
+      langfuseReplayed: 0,
+    });
+    expect(readFile).not.toHaveBeenCalledWith(path.join(runDir, 'events.jsonl'), 'utf8');
+    expect(capture).not.toHaveBeenCalled();
+    expect(reportLangfuse).not.toHaveBeenCalled();
   });
 
   it('leaves failed Langfuse delivery uncheckpointed for the next boot', async () => {

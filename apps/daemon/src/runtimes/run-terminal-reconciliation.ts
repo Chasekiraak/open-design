@@ -12,6 +12,7 @@ import { runAskedUserQuestion } from './run-artifacts.js';
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 const RESTART_ERROR_CODE = 'DAEMON_RESTARTED';
 const RESTART_ERROR_MESSAGE = 'Run interrupted because the daemon restarted.';
+const RECONCILED_STATUS_MESSAGE = 'Run terminal state reconciled after daemon restart.';
 
 interface AnalyticsRecovery {
   context: Record<string, unknown>;
@@ -177,9 +178,16 @@ function reconcileMessages(
           SET run_status = ?, ended_at = COALESCE(ended_at, ?)
         WHERE id = ? AND run_status IN ('queued', 'running')`,
     ).run(status, state?.updatedAt ?? now, row.id);
+    const isDaemonRestart = state?.terminalRecoveryReason === 'daemon_restart'
+      || state?.errorCode === RESTART_ERROR_CODE;
     appendMessageStatusEvent(db, row.id, status === 'failed'
-      ? { label: 'error', detail: 'Run interrupted because the daemon restarted.' }
-      : { label: status, detail: 'Run terminal state reconciled after daemon restart.' });
+      ? {
+          label: 'error',
+          detail: isDaemonRestart
+            ? RESTART_ERROR_MESSAGE
+            : state?.error ?? RECONCILED_STATUS_MESSAGE,
+        }
+      : { label: status, detail: RECONCILED_STATUS_MESSAGE });
   }
   return rows.length;
 }
@@ -229,9 +237,15 @@ export async function reconcileDurableRunTerminals(
 
   for (const entry of states) {
     const { state } = entry;
+    const needsAnalytics = Boolean(
+      state.analyticsRecovery && !state.analyticsRecovery.completedAt,
+    );
+    const needsLangfuse = !state.langfuseCompletedAt;
+    if (!needsAnalytics && !needsLangfuse) continue;
+
     const recoveryReason = state.terminalRecoveryReason ?? 'analytics_incomplete';
     const events = readEvents(options.runsLogDir, state.id);
-    if (state.analyticsRecovery && !state.analyticsRecovery.completedAt) {
+    if (needsAnalytics && state.analyticsRecovery) {
       const failed = state.status === 'failed';
       const runResult = runResultFromStatus(state.status);
       const errorCode = failed
@@ -282,7 +296,7 @@ export async function reconcileDurableRunTerminals(
       result.analyticsReplayed += 1;
     }
 
-    if (!state.langfuseCompletedAt) {
+    if (needsLangfuse) {
       const delivery = await Promise.resolve(options.reportLangfuse({
         db: options.db,
         dataDir: path.dirname(options.runsLogDir),
