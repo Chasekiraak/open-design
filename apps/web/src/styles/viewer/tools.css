@@ -600,7 +600,28 @@
   align-items: center;
   gap: 6px;
 }
-.template-share-trigger[aria-expanded='true'] {
+/* The Share trigger sits next to the solid "Use" pill in the preview-modal
+   header. `button.ghost` zeroes the border out (`border-color: transparent`),
+   so it used to render as bare text + icons and did not read as a button at
+   all. Give it the same outlined-box treatment the reference uses for a
+   standalone share/more control (`.plugin-share-trigger--solo`): panel fill,
+   1px border, accent-tinted open/hover state. Doubling up on `.ghost` here is
+   deliberate — it out-specifies `button.ghost` without an `!important`; the
+   `:not(:disabled)` is equally deliberate, so the global `button:disabled`
+   treatment still wins when the menu has nothing to offer. The header capsule
+   rule (`.ds-modal-actions .share-menu > button`) still owns the pill radius so
+   the box lines up with the Use pill. */
+.template-share-trigger.ghost:not(:disabled) {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+/* Both selectors carry `.ghost` so they out-specify the idle rule above
+   (0,3,0). Without it the open state would be (0,2,0) — lower than idle — and
+   specificity beats source order, so an open menu would silently render as if
+   it were closed the moment the pointer left it. */
+.template-share-trigger.ghost:hover:not(:disabled),
+.template-share-trigger.ghost[aria-expanded='true'] {
   background: var(--accent-tint);
   border-color: var(--accent);
   color: var(--accent);

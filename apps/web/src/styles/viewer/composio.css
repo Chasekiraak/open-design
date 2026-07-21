@@ -2046,6 +2046,14 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 }
 .ds-modal-primary-action-option {
   align-items: flex-start;
+  /* Reset the global `button` rule in styles/primitives.css
+     (`height: 36px; white-space: nowrap`). Each option stacks a bold label over
+     a muted description, so the fixed 36px clamped both lines into one box and
+     the description bled into the next option's label; `nowrap` also stopped a
+     long description from wrapping. Same reset as `.artifact-version-card` in
+     styles/shell.css, which is the other multi-line button in the app. */
+  height: auto;
+  white-space: normal;
 }
 .ds-modal-primary-action-option__body {
   display: flex;
@@ -2060,6 +2068,10 @@ button.qf-chip-other:disabled { cursor: default; opacity: 0.6; }
 .ds-modal-primary-action-option__desc {
   font-size: 12px;
   color: var(--text-muted);
+  /* Now that the option can wrap (see the height/white-space reset above), the
+     inherited `line-height: 1` from the global `button` rule would let wrapped
+     description lines touch. 1.4 matches `.artifact-version-card__summary`. */
+  line-height: 1.4;
 }
 /* Dedicated icon-button shape for the modal close affordance. Matches the
    visual language used by plugin-media-detail__close and
