@@ -3,7 +3,7 @@ import type {
   WorkspaceBillingSummary,
   WorkspaceTeamBillingPlanId,
 } from '@open-design/contracts';
-import { runVelaCommand } from './vela-command.js';
+import { runVelaCommand, velaWorkspaceCommandOptions } from './vela-command.js';
 
 // A-lane billing 收口. Instead of the daemon holding billing credentials, it
 // shells out to `vela billing summary --format json`, which authenticates with
@@ -24,22 +24,37 @@ export interface FetchVelaBillingOptions {
 }
 
 /**
- * Fetch the caller's Vela billing summary via the CLI 收口. Returns null when
- * the CLI is missing, the user has no billing session, or the payload can't be
- * parsed — every failure is a clean "no summary", never a throw, so the route
- * can always answer and the client falls back to its context tier hint.
+ * Fetch the billing summary for `workspaceId` via the CLI 收口. Returns null
+ * when the CLI is missing, the user has no billing session, or the payload
+ * can't be parsed — every failure is a clean "no summary", never a throw, so
+ * the route can always answer and the client falls back to its context tier
+ * hint.
+ *
+ * The workspace travels to vela the same way it does for collab, resources,
+ * and team projects: as `VELA_WORKSPACE_ID` on the child environment, which
+ * vela's `workspaceScopedClient` turns into the `x-vela-workspace-id` header.
+ * Passing it here is what makes the read a WORKSPACE question rather than an
+ * account one — the summary used to go out with no scope whatsoever, so an
+ * account saw identical credits and an identical tier in every workspace.
+ *
+ * An empty `workspaceId` is allowed and means "no workspace context": the
+ * account-level read still answers (B's wallet does not require a workspace),
+ * it is simply left unstamped rather than being attributed to a workspace the
+ * daemon could not name.
  */
 export async function fetchVelaBillingSummary(
+  workspaceId: string,
   options: FetchVelaBillingOptions = {},
 ): Promise<WorkspaceBillingSummary | null> {
-  const run = options.run ?? defaultRunVelaBilling;
+  const trimmedWorkspaceId = workspaceId.trim();
+  const run = options.run ?? runVelaBillingForWorkspace(trimmedWorkspaceId);
   let stdout: string;
   try {
     stdout = await run(['summary', '--format', 'json']);
   } catch {
     return null;
   }
-  return parseBillingSummary(stdout);
+  return parseBillingSummary(stdout, trimmedWorkspaceId);
 }
 
 export interface BillingCheckoutOptions {
@@ -122,8 +137,19 @@ export async function fetchVelaBillingCatalog(
   return parseBillingCatalog(stdout);
 }
 
-/** Map the `vela billing summary` JSON into the client-facing summary. */
-export function parseBillingSummary(stdout: string): WorkspaceBillingSummary | null {
+/**
+ * Map the `vela billing summary` JSON into the client-facing summary, stamped
+ * with the workspace the read was scoped to.
+ *
+ * B reports the wallet as three numbers under `balances`: the subscription
+ * grant bucket, the top-up bucket, and their total. Keeping only the total is
+ * what left the account menu's 附加积分 row with nothing to read — carry all
+ * three so the UI shows B's real split instead of a constant.
+ */
+export function parseBillingSummary(
+  stdout: string,
+  workspaceId: string,
+): WorkspaceBillingSummary | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   let raw: Record<string, unknown>;
@@ -133,16 +159,24 @@ export function parseBillingSummary(stdout: string): WorkspaceBillingSummary | n
     return null;
   }
   const balances = (raw.balances ?? {}) as Record<string, unknown>;
-  const total = Number(balances.totalAvailableCredits ?? 0);
   return {
+    workspaceId: workspaceId.trim() || null,
     membershipTier: str(raw.membershipTier),
-    totalAvailableCredits: Number.isFinite(total) ? total : 0,
+    totalAvailableCredits: credits(balances.totalAvailableCredits),
+    subscriptionCredits: credits(balances.subscriptionCredits),
+    rechargeCredits: credits(balances.rechargeCredits),
     balanceUsd: str(raw.balanceUsd) || '0',
     subscriptionStatus: str(raw.subscriptionStatus),
     availableActions: Array.isArray(raw.availableActions)
       ? raw.availableActions.filter((a): a is string => typeof a === 'string')
       : [],
   };
+}
+
+/** B sends credit buckets as decimal strings; a missing/garbage bucket is 0. */
+function credits(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function parseBillingCatalog(stdout: string): WorkspaceBillingCatalog | null {
@@ -202,5 +236,22 @@ function parseTeamPlanId(value: unknown): WorkspaceTeamBillingPlanId | null {
     : null;
 }
 
-const defaultRunVelaBilling: RunVelaBilling = (args) =>
-  runVelaCommand(['billing', ...args], { maxBuffer: 4 * 1024 * 1024 });
+const defaultRunVelaBilling: RunVelaBilling = (args) => runVelaBillingForWorkspace('')(args);
+
+/**
+ * A `vela billing` runner scoped to one workspace, using the same env carrier
+ * as the collab / resource / team-project adapters.
+ *
+ * `velaWorkspaceCommandOptions` omits `VELA_WORKSPACE_ID` entirely for an empty
+ * id, so an unscoped call still reaches vela unscoped. It does also add the
+ * `VELA_INVOCATION_SOURCE=open-design` tag those adapters already send, which
+ * billing previously did not — a source label, not a behavioral input.
+ */
+function runVelaBillingForWorkspace(workspaceId: string): RunVelaBilling {
+  const workspaceOptions = velaWorkspaceCommandOptions(workspaceId);
+  return (args) =>
+    runVelaCommand(['billing', ...args], {
+      ...workspaceOptions,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+}

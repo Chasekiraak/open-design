@@ -346,10 +346,41 @@ export function buildWorkspaceSeatSummary(input: {
  * plan-tier hint it already has from the workspace context.
  */
 export interface WorkspaceBillingSummary {
+  /**
+   * The workspace this summary was requested FOR, or null when the daemon had
+   * no workspace context to scope the read with.
+   *
+   * Provenance, not identity: it records which workspace the client asked
+   * about so a summary left over from the workspace the user just switched
+   * away from is detectable instead of being displayed as the new one's. The
+   * route used to take no request at all, which is how one account showed the
+   * same credits and the same tier in every workspace it opened.
+   *
+   * NOTE: B's wallet itself is still ACCOUNT-scoped — `/api/v1/billing/summary`
+   * reads `credit_recharges` by `app_user_id` with no workspace dimension, and
+   * `vela billing summary` has no `--workspace-id` (only `team-catalog` and
+   * `checkout` do). The stamp and the workspace-scoped request are the client
+   * side of the contract; a genuinely per-workspace balance needs B to grow a
+   * workspace-scoped summary first.
+   */
+  workspaceId: string | null;
   /** Membership tier, e.g. `team` / `free`. */
   membershipTier: string;
   /** Total available credits (subscription + recharge), as a number. */
   totalAvailableCredits: number;
+  /**
+   * The subscription-grant bucket of the wallet (`bucket_type =
+   * 'subscription_grant'` in B) — the credits the plan itself hands out.
+   */
+  subscriptionCredits: number;
+  /**
+   * The top-up bucket of the wallet (every non-subscription-grant bucket in B:
+   * purchased recharges, workspace-sponsored grants, promotional credit).
+   * Vela Web labels this 充值余额; the account menu surfaces it as 附加积分.
+   *
+   * `subscriptionCredits + rechargeCredits === totalAvailableCredits`.
+   */
+  rechargeCredits: number;
   /** Available balance in USD, as reported by vela (kept as a string to avoid
    *  float drift on money values). */
   balanceUsd: string;

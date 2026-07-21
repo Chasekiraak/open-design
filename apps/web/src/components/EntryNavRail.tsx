@@ -46,6 +46,7 @@ import {
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
+import { resolvePlanLabelTier } from '../collab/team-plan';
 import type { EntryHomeView } from '../router';
 
 const REPO_URL = 'https://github.com/nexu-io/open-design';
@@ -251,12 +252,23 @@ export function EntryNavRail({
   // context hint is a raw id too (`team_plus`), and it used to reach the card
   // unformatted whenever billing reported an empty tier (which it does today).
   const rawTier = billing?.membershipTier?.trim() || context?.planId?.trim() || '';
-  const tierLabel = rawTier
-    ? formatBillingTier(rawTier, t)
+  // The LABEL is a subscription question, never a workspace-kind one: B makes
+  // every user-created workspace team-typed, so `isTeam` labelled brand-new
+  // unpaid workspaces 团队版 (#146). `resolvePlanLabelTier` answers 'free' when
+  // B positively reports an unsubscribed entitlement, and null when it simply
+  // has not said — only the null case still falls back to the legacy hint, so
+  // a paying member (whom B tells us nothing about) keeps their team label.
+  const labelTier = resolvePlanLabelTier({ billing, context });
+  const tierLabel = labelTier
+    ? formatBillingTier(labelTier, t)
     : isTeam
       ? t('entry.billingTierTeam')
       : t('entry.billingTierFree');
   const creditsBalance = billing ? billing.totalAvailableCredits : null;
+  // #112: B splits the wallet into the plan's own grant and everything topped
+  // up on top of it (purchases, workspace-sponsored grants, promos). The row
+  // used to print a literal 0 because the summary carried no such field.
+  const bonusCreditsBalance = billing ? billing.rechargeCredits : null;
   // #5517: wordmark badge on the account row (replaces the chevron) and a
   // small twin inside the menu's billing card. Derive from the raw tier id
   // first so "team_plus" maps to the plus badge regardless of display label.
@@ -523,9 +535,11 @@ export function EntryNavRail({
                           </button>
                         ) : null}
                       </div>
-                      {/* #5517 rows: 积分 (opens the credits panel) + a static
-                          附加积分 0 — vela reports one combined balance, so the
-                          bonus row mirrors the demo's constant. */}
+                      {/* #5517 rows: 积分 (opens the credits panel) + 附加积分.
+                          Both are real B numbers — the wallet arrives split
+                          into a subscription-grant bucket and a top-up bucket,
+                          and 积分 is their total, so 附加积分 is the part of
+                          that total which did not come from the plan. */}
                       <button
                         type="button"
                         className="entry-nav-rail__menu-credits-row"
@@ -546,7 +560,11 @@ export function EntryNavRail({
                         <span className="entry-nav-rail__menu-credits-label">
                           <RemixIcon name="battery-charge-line" size={14} /> {t('entry.creditsBonus')}
                         </span>
-                        <span className="entry-nav-rail__menu-credits-value">0</span>
+                        <span className="entry-nav-rail__menu-credits-value">
+                          {bonusCreditsBalance != null
+                            ? bonusCreditsBalance.toLocaleString('en-US')
+                            : '—'}
+                        </span>
                       </div>
                     </div>
                   ) : null}

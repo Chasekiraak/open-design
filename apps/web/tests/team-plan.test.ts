@@ -5,11 +5,20 @@ import {
   hasTeamPlan,
   isFreePlanTier,
   isTeamPlanTier,
+  resolvePlanLabelTier,
   resolvePlanTier,
 } from '../src/collab/team-plan';
 
 function context(planId: string | null, workspaceType: 'team' | 'personal' = 'personal') {
   return { workspaceId: 'ws', workspaceType, planId } as unknown as WorkspaceCollabContext;
+}
+
+function contextWithBillingState(
+  planId: string | null,
+  billingState: string,
+  workspaceType: 'team' | 'personal' = 'team',
+) {
+  return { workspaceId: 'ws', workspaceType, planId, billingState } as unknown as WorkspaceCollabContext;
 }
 
 function billing(membershipTier: string) {
@@ -100,6 +109,41 @@ describe('resolvePlanTier', () => {
     expect(resolvePlanTier({ billing: billing(''), context: context(''), accountPlan: '' }))
       .toBeNull();
     expect(resolvePlanTier({ context: null, billing: null, accountPlan: null })).toBeNull();
+  });
+});
+
+describe('resolvePlanLabelTier', () => {
+  // Acceptance #146. B makes EVERY user-created workspace `type: 'team'`, so
+  // the workspace kind cannot be the label's source; the entitlement is.
+  it('reads B’s free entitlement as a positive free, not an unknown', () => {
+    expect(
+      resolvePlanLabelTier({
+        billing: billing(''),
+        context: contextWithBillingState(null, 'free'),
+      }),
+    ).toBe('free');
+  });
+
+  it('still prefers a real tier over the entitlement fallback', () => {
+    expect(
+      resolvePlanLabelTier({
+        billing: billing('team_plus'),
+        context: contextWithBillingState(null, 'free'),
+      }),
+    ).toBe('team_plus');
+  });
+
+  // B omits billingState/planId for non-owners, so nothing here can speak for
+  // a paying member — the caller must keep whatever hint it already had rather
+  // than being handed a wrong answer.
+  it('returns null when B has reported no entitlement at all', () => {
+    expect(
+      resolvePlanLabelTier({
+        billing: billing(''),
+        context: contextWithBillingState(null, 'active'),
+      }),
+    ).toBeNull();
+    expect(resolvePlanLabelTier({})).toBeNull();
   });
 });
 

@@ -46,7 +46,7 @@ export interface RegisterCollabContextRoutesDeps {
   /** Injectable for tests; defaults to creating invites on B with the vela session. */
   createInvite?: (input: CreateWorkspaceInviteInput) => Promise<CreateInviteOutcome>;
   /** Injectable for tests; defaults to the vela billing CLI 收口. */
-  fetchBilling?: () => Promise<WorkspaceBillingSummary | null>;
+  fetchBilling?: (workspaceId: string) => Promise<WorkspaceBillingSummary | null>;
   /** Injectable for tests; defaults to the vela billing catalog CLI 收口. */
   fetchBillingCatalog?: (workspaceId: string) => Promise<WorkspaceBillingCatalog | null>;
   /** Injectable for tests; defaults to the vela billing checkout CLI 收口. */
@@ -135,7 +135,8 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const consumeInvite = deps.consumeInvite ?? ((nonce: string) => consumeInviteContinuation(nonce));
   const createInvite =
     deps.createInvite ?? ((input: CreateWorkspaceInviteInput) => createWorkspaceInvite(input));
-  const fetchBilling = deps.fetchBilling ?? (() => fetchVelaBillingSummary());
+  const fetchBilling =
+    deps.fetchBilling ?? ((workspaceId: string) => fetchVelaBillingSummary(workspaceId));
   const fetchBillingCatalog =
     deps.fetchBillingCatalog ?? ((workspaceId: string) => fetchVelaBillingCatalog(workspaceId));
   const startCheckout =
@@ -331,8 +332,19 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   // summary` (same vela session as resources); a null summary means the CLI /
   // session is unavailable and the client keeps its context-derived tier hint.
   // This route is also the sync-back path after a user upgrades in Vela Web.
-  app.get('/api/workspace/billing', async (_req, res) => {
-    const summary = await fetchBilling();
+  //
+  // Scoped to the ACTIVE workspace, exactly like the catalog route below it.
+  // The handler used to take no request at all, which made the summary an
+  // account question: switching workspaces re-read the same wallet and the
+  // same tier, so one account displayed identical credits everywhere (#134).
+  // Unlike the catalog, an absent workspace is NOT an empty answer here —
+  // B's wallet is readable without one — so the read still happens and the
+  // summary simply carries a null workspace stamp.
+  app.get('/api/workspace/billing', async (req, res) => {
+    const authorization = req.header('authorization') ?? undefined;
+    const context = await workspaceContext.current({ authorization });
+    const workspaceId = context?.workspaceId?.trim() ?? '';
+    const summary = await fetchBilling(workspaceId);
     const body: WorkspaceBillingResponse = { summary };
     res.json(body);
   });

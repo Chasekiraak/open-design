@@ -33,10 +33,17 @@ const CATALOG_SAMPLE = JSON.stringify({
 });
 
 describe('vela billing 收口', () => {
-  it('maps the vela billing summary JSON into the client summary', () => {
-    expect(parseBillingSummary(SAMPLE)).toEqual({
+  // Acceptance #112: B splits the wallet into a subscription grant bucket and
+  // a top-up bucket (`balances.subscriptionCredits` / `balances.rechargeCredits`,
+  // summing to `totalAvailableCredits`). The mapper kept only the total, so the
+  // menu's 附加积分 row had no field to read and could only ever print 0.
+  it('maps the vela billing summary JSON, including BOTH credit buckets', () => {
+    expect(parseBillingSummary(SAMPLE, 'ws_team')).toEqual({
+      workspaceId: 'ws_team',
       membershipTier: 'team',
       totalAvailableCredits: 12500,
+      subscriptionCredits: 5000,
+      rechargeCredits: 7500,
       balanceUsd: '1.2500',
       subscriptionStatus: 'active',
       availableActions: ['subscription_checkout', 'billing_portal'],
@@ -44,12 +51,12 @@ describe('vela billing 收口', () => {
   });
 
   it('returns null on empty or malformed output (clean "no summary")', () => {
-    expect(parseBillingSummary('')).toBeNull();
-    expect(parseBillingSummary('not json')).toBeNull();
+    expect(parseBillingSummary('', 'ws_team')).toBeNull();
+    expect(parseBillingSummary('not json', 'ws_team')).toBeNull();
   });
 
   it('degrades to null when the CLI throws — no billing session', async () => {
-    const out = await fetchVelaBillingSummary({
+    const out = await fetchVelaBillingSummary('ws_team', {
       run: async () => {
         throw new Error('no vela session');
       },
@@ -58,10 +65,26 @@ describe('vela billing 收口', () => {
   });
 
   it('drives the injected runner and maps its output', async () => {
-    const out = await fetchVelaBillingSummary({ run: async () => SAMPLE });
+    const out = await fetchVelaBillingSummary('ws_team', { run: async () => SAMPLE });
     expect(out?.membershipTier).toBe('team');
     expect(out?.totalAvailableCredits).toBe(12500);
+    expect(out?.rechargeCredits).toBe(7500);
     expect(out?.availableActions).toContain('billing_portal');
+  });
+
+  // #134 root cause: the summary went out with no workspace scope whatsoever,
+  // so B answered for the ACCOUNT and every workspace showed the same numbers.
+  // The workspace travels the same way it does for collab / resources /
+  // team-projects — as VELA_WORKSPACE_ID on the child env — and the summary is
+  // stamped with it so the client can tell whose billing it is holding.
+  it('stamps the summary with the workspace it was requested for', async () => {
+    const out = await fetchVelaBillingSummary('ws_team', { run: async () => SAMPLE });
+    expect(out?.workspaceId).toBe('ws_team');
+  });
+
+  it('leaves the stamp null when no workspace is known', async () => {
+    const out = await fetchVelaBillingSummary('', { run: async () => SAMPLE });
+    expect(out?.workspaceId).toBeNull();
   });
 
   it('maps the vela team billing catalog JSON into client catalog data', () => {

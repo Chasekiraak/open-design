@@ -73,6 +73,29 @@ export function resolvePlanTier(sources: PlanTierSources): string | null {
 }
 
 /**
+ * The plan tier the credits card should LABEL, or null when no source knows.
+ *
+ * The label names a SUBSCRIPTION, so it must never be derived from the
+ * workspace kind. Every workspace a user creates in B is `type: 'team'` — only
+ * the auto-provisioned personal one is not — so `workspaceType === 'team'`
+ * carries no information about whether anyone has paid. Reading it as one is
+ * what labelled a brand-new, zero-credit workspace 团队版 (#146).
+ *
+ * B reports an unsubscribed workspace as `billingState: 'free'` with a null
+ * `planId` and an empty `membershipTier`. That combination is a POSITIVE
+ * "free", not an unknown, and it is what overrides the workspace-kind guess.
+ *
+ * Everything else stays null, meaning UNKNOWN — notably a non-owner member,
+ * for whom B omits `billingState`/`planId` entirely, so the caller must keep
+ * whatever hint it already had rather than downgrade a paying member's label.
+ */
+export function resolvePlanLabelTier(sources: PlanTierSources): string | null {
+  const tier = resolvePlanTier(sources);
+  if (tier) return tier;
+  return sources.context?.billingState === 'free' ? 'free' : null;
+}
+
+/**
  * Whether free-tier surfaces (upgrade banners, plan gates, the free nameplate)
  * may be shown for a resolved plan id.
  *
