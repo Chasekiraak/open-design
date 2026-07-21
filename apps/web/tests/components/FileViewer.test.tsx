@@ -6428,6 +6428,119 @@ describe('FileViewer tweaks toolbar', () => {
     expect(showComments.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('renders the signed-in user own avatar and name on their comment when the member roster is empty', async () => {
+    // A personal workspace (and the cold window before a team roster lands)
+    // answers `/api/workspace/members` 200 with an empty list, so NOTHING
+    // resolves through the directory — including the viewer themselves. The
+    // viewer's own identity must still render: it comes from the workspace
+    // context the caller already holds, not from this roster.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/workspace/members')) {
+          return new Response(JSON.stringify({ members: [] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({}), { status: 200 });
+      }),
+    );
+
+    const comment: PreviewComment = {
+      id: 'comment-mine',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'hero-copy',
+      selector: '[data-od-id="hero-copy"]',
+      label: 'Hero copy',
+      text: 'Hero copy',
+      htmlHint: '<p data-od-id="hero-copy">',
+      position: { x: 16, y: 24, width: 320, height: 48 },
+      note: 'Tighten this headline.',
+      status: 'open',
+      authorMemberId: 'wm-self',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    render(
+      <CommentSidePanel
+        comments={[comment]}
+        currentUser={{ memberId: 'wm-self', displayName: '琼羽', role: 'owner' }}
+        selectedIds={new Set()}
+        activeCommentId={null}
+        collapsed={false}
+        onCollapsedChange={() => {}}
+        onToggleSelect={() => {}}
+        onSelectAll={() => {}}
+        onClearSelection={() => {}}
+        onReply={() => {}}
+        onSendSelected={() => {}}
+        sending={false}
+        t={t}
+      />,
+    );
+
+    const item = await screen.findByTestId('comment-side-item');
+    await waitFor(() => {
+      expect(item.querySelector('.comment-side-avatar')?.textContent).toBe('琼');
+    });
+    expect(within(item).getByText(/琼羽/)).toBeTruthy();
+  });
+
+  it('leaves a comment by an unresolved other member on its id-only rendering', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/workspace/members')) {
+          return new Response(JSON.stringify({ members: [] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({}), { status: 200 });
+      }),
+    );
+
+    const comment: PreviewComment = {
+      id: 'comment-theirs',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'hero-copy',
+      selector: '[data-od-id="hero-copy"]',
+      label: 'Hero copy',
+      text: 'Hero copy',
+      htmlHint: '<p data-od-id="hero-copy">',
+      position: { x: 16, y: 24, width: 320, height: 48 },
+      note: 'Tighten this headline.',
+      status: 'open',
+      authorMemberId: 'wm-someone-else',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    render(
+      <CommentSidePanel
+        comments={[comment]}
+        currentUser={{ memberId: 'wm-self', displayName: '琼羽', role: 'owner' }}
+        selectedIds={new Set()}
+        activeCommentId={null}
+        collapsed={false}
+        onCollapsedChange={() => {}}
+        onToggleSelect={() => {}}
+        onSelectAll={() => {}}
+        onClearSelection={() => {}}
+        onReply={() => {}}
+        onSendSelected={() => {}}
+        sending={false}
+        t={t}
+      />,
+    );
+
+    const item = await screen.findByTestId('comment-side-item');
+    expect(item.querySelector('.comment-side-avatar')).toBeNull();
+    expect(within(item).queryByText(/琼羽/)).toBeNull();
+  });
+
   it('lets the inspect panel shrink inside narrow preview layouts', () => {
     const css = readFileSync(join(process.cwd(), 'src/styles/viewer/core.css'), 'utf8');
     const rule = css.match(/\.inspect-panel\s*\{[^}]+\}/)?.[0] ?? '';

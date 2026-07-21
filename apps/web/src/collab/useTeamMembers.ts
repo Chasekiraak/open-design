@@ -3,6 +3,7 @@ import { coalescedGet } from '../lib/coalesced-get';
 import type {
   CollabCloudMemberDirectoryEntry,
   CollabCloudMembersResponse,
+  WorkspaceCollabContext,
 } from '@open-design/contracts';
 import { useWorkspaceInvalidation } from './workspace-events';
 
@@ -20,11 +21,47 @@ export interface TeamMembersState {
   byId: Map<string, CollabCloudMemberDirectoryEntry>;
   /**
    * Turn an opaque `authorMemberId` / `ownerMemberId` into a `{displayName,
-   * role}` entry, or null when the id is missing / not in the directory (off
-   * team, or a member the daemon has not seen register yet). Callers fall back
-   * to their existing id-only rendering on null.
+   * role}` entry. Resolution order: the roster entry → the CURRENT USER when the
+   * id is theirs → null.
+   *
+   * The current-user arm is an INVARIANT, not an optimization: the signed-in
+   * user must always resolve to themselves whether or not a roster exists.
+   * `GET /api/workspace/members` answers `{"members":[]}` on a personal
+   * workspace, and starts empty on a team workspace during the cold window
+   * before the first roster load returns — in both cases the viewer's own
+   * comment rendered with no avatar and no name. That fallback lives here so
+   * every caller inherits it instead of re-patching each card.
+   *
+   * Null now means only: no id, or a genuinely unknown OTHER member (off team,
+   * or one the daemon has not seen register yet). Callers keep their existing
+   * id-only rendering for that case.
    */
   resolve: (memberId: string | null | undefined) => CollabCloudMemberDirectoryEntry | null;
+}
+
+/**
+ * The signed-in user's own directory entry, synthesized from the workspace
+ * context the caller ALREADY holds. Pass it to `useTeamMembers` so the viewer
+ * resolves to themselves even when the roster is empty.
+ *
+ * This deliberately takes an existing `WorkspaceCollabContext` rather than
+ * fetching one: `/api/workspace/context` is already read by the nav shell and by
+ * every viewer that needs it, and duplicating GETs is what saturated HTTP/1.1's
+ * six-connection budget on this branch.
+ */
+export function currentUserDirectoryEntry(
+  context: WorkspaceCollabContext | null | undefined,
+): CollabCloudMemberDirectoryEntry | null {
+  const memberId = context?.workspaceMemberId?.trim();
+  if (!context || !memberId) return null;
+  return {
+    memberId,
+    // Same fallback the daemon uses when it registers an identity into the
+    // directory (`collab-cloud-service.ts`): an unnamed identity reads as its
+    // id rather than as a blank card.
+    displayName: context.displayName?.trim() || memberId,
+    role: context.role,
+  };
 }
 
 /**
@@ -33,8 +70,15 @@ export interface TeamMembersState {
  * owner name on the shared-project banner. Off-team / 404 degrades to an empty
  * map (never throws), so this is safe to mount unconditionally. Lightly polled so
  * a member who joins mid-session resolves without a refresh.
+ *
+ * `currentUser` is the viewer's own entry (see {@link currentUserDirectoryEntry}),
+ * which `resolve` falls back to so the signed-in user is resolvable with or
+ * without a roster. Callers that cannot cheaply supply it may omit it; they then
+ * get roster-only resolution, exactly as before.
  */
-export function useTeamMembers(): TeamMembersState {
+export function useTeamMembers(
+  currentUser?: CollabCloudMemberDirectoryEntry | null,
+): TeamMembersState {
   const [members, setMembers] = useState<CollabCloudMemberDirectoryEntry[]>([]);
   const mountedRef = useRef(true);
 
@@ -88,10 +132,35 @@ export function useTeamMembers(): TeamMembersState {
     return map;
   }, [members]);
 
+  // Field-wise memo so a caller passing a fresh object literal every render does
+  // not churn `resolve`'s identity (and every consumer that depends on it).
+  const currentUserMemberId = currentUser?.memberId ?? null;
+  const currentUserDisplayName = currentUser?.displayName ?? null;
+  const currentUserRole = currentUser?.role ?? null;
+  const self = useMemo<CollabCloudMemberDirectoryEntry | null>(
+    () =>
+      currentUserMemberId && currentUserDisplayName && currentUserRole
+        ? {
+            memberId: currentUserMemberId,
+            displayName: currentUserDisplayName,
+            role: currentUserRole,
+          }
+        : null,
+    [currentUserMemberId, currentUserDisplayName, currentUserRole],
+  );
+
   const resolve = useCallback(
-    (memberId: string | null | undefined): CollabCloudMemberDirectoryEntry | null =>
-      memberId ? byId.get(memberId) ?? null : null,
-    [byId],
+    (memberId: string | null | undefined): CollabCloudMemberDirectoryEntry | null => {
+      if (!memberId) return null;
+      // The roster wins when it has the member: it is the authoritative name and
+      // role, and it stays right when the viewer's own role changes mid-session.
+      const entry = byId.get(memberId);
+      if (entry) return entry;
+      // Me, with no roster (personal workspace) or before it lands.
+      if (self && self.memberId === memberId) return self;
+      return null;
+    },
+    [byId, self],
   );
 
   return { members, byId, resolve };
