@@ -94,6 +94,7 @@ import {
   validateCodexGeneratedImagesDir,
 } from './runtimes/chat-prompt-inputs.js';
 import {
+  writePromptAndEndStdin,
   applyClaudeStreamJsonRunBookkeeping,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
@@ -7980,10 +7981,9 @@ export async function startServer({
         }
         run.stdinOpen = true;
       } else {
-        // `end()` returns the stream (not a boolean), so read backpressure from
-        // `writableNeedDrain` right after queueing the final chunk (see above).
-        child.stdin.end(composed, 'utf8', markStdinWriteEnd);
-        run.stdinBackpressure = child.stdin.writableNeedDrain === true;
+        // Split write + close so the boolean backpressure signal survives —
+        // see writePromptAndEndStdin for why `end(chunk)` cannot report it.
+        run.stdinBackpressure = writePromptAndEndStdin(child.stdin, composed, markStdinWriteEnd);
       }
     }
   };
