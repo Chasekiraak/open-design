@@ -119,6 +119,7 @@ async function main(): Promise<void> {
     return;
   }
   const existingDesktop = await inspectExistingDesktopForLauncher(namespace, {
+    incomingVersion: namespaceConfig.appVersion,
     logger: console,
     paths: initialPaths,
   });
