@@ -1,7 +1,21 @@
 import { Icon } from './Icon';
-import { useState, type CSSProperties } from 'react';
-import { useT } from '../i18n';
-import type { Dict } from '../i18n/types';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import type { InstalledPluginRecord } from '@open-design/contracts';
+import { useI18n, useT } from '../i18n';
+import type { Dict, Locale } from '../i18n/types';
+import { listPlugins } from '../state/projects';
+import {
+  buildCategoryCatalog,
+  buildSubcategoryCatalog,
+  extractCategories,
+  extractSubcategories,
+} from './plugins-home/facets';
+import { localizePluginTitle } from './plugins-home/localization';
+import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
+import { inferPluginPreview } from './plugins-home/preview';
+import { pluginSubfacetLabel } from './plugins-home/subfacetLabel';
+
+type TemplateType = 'Prototype' | 'Live Artifact' | 'Slides' | 'Image' | 'Video' | 'HyperFrames' | 'Audio';
 
 type TemplateDemo = {
   id: string;
@@ -9,79 +23,44 @@ type TemplateDemo = {
   tags: string[];
   accent: string;
   meta: string;
-  type: 'Prototype' | 'Live Artifact' | 'Slides' | 'Image' | 'Video' | 'HyperFrames' | 'Audio';
+  type: TemplateType;
   subtype: string;
+  /** Card thumbnail. Null when the plugin ships no poster at all, in which case
+   *  the stylized paper thumb renders instead. */
+  posterSrc: string | null;
+  /** Daemon-served live preview for the detail modal (html-preview plugins). */
+  previewSrc: string | null;
+  /** Playable clip for the detail modal when the plugin is a media template. */
+  previewVideo: string | null;
+  /** Composer seed carried by the card's Remix / Copy prompt action. */
+  prompt: string;
 };
 
-const COMMUNITY_TEMPLATES: TemplateDemo[] = [
-  {
-    id: 'electric-studio',
-    title: 'Open Design Landing',
-    tags: ['Landing', 'Brand'],
-    accent: '#4164f4',
-    meta: 'Live Artifact · Landing',
-    type: 'Live Artifact',
-    subtype: 'Landing',
-  },
-  {
-    id: 'launch-landing',
-    title: 'Kanban Board',
-    tags: ['Prototype', 'Board'],
-    accent: '#d46342',
-    meta: 'Prototype · Product',
-    type: 'Prototype',
-    subtype: 'Product',
-  },
-  {
-    id: 'founder-memo',
-    title: 'Social Carousel',
-    tags: ['Image', 'Social'],
-    accent: '#111827',
-    meta: 'Image · Carousel',
-    type: 'Image',
-    subtype: 'Social',
-  },
-  {
-    id: 'growth-dashboard',
-    title: 'Blog Post',
-    tags: ['Live Artifact', 'Editorial'],
-    accent: '#0f9f6e',
-    meta: 'Live Artifact · Article',
-    type: 'Live Artifact',
-    subtype: 'Editorial',
-  },
-  { id: 'ai-product-site', title: 'Wireframe Sketch', tags: ['Prototype', 'Wireframe'], accent: '#353535', meta: 'Prototype · Wireframe', type: 'Prototype', subtype: 'Wireframe' },
-  { id: 'commerce-home', title: 'Wireframe Greybox', tags: ['Prototype', 'Wireframe'], accent: '#ea580c', meta: 'Prototype · Greybox', type: 'Prototype', subtype: 'Wireframe' },
-  { id: 'mobile-app-launch', title: 'Mobile Flow', tags: ['Prototype', 'Mobile'], accent: '#0284c7', meta: 'Prototype · Mobile', type: 'Prototype', subtype: 'Mobile' },
-  { id: 'portfolio-case-study', title: 'Pitch Deck', tags: ['Slides', 'Pitch'], accent: '#111827', meta: 'Slides · Pitch deck', type: 'Slides', subtype: 'Pitch deck' },
-  { id: 'design-system-docs', title: 'Design System Slides', tags: ['Slides', 'Design system'], accent: '#4f46e5', meta: 'Slides · System', type: 'Slides', subtype: 'Design system' },
-  { id: 'event-microsite', title: 'Product Demo Video', tags: ['Video', 'Demo'], accent: '#db2777', meta: 'Video · Demo', type: 'Video', subtype: 'Demo' },
-  { id: 'agency-services', title: 'Launch Motion', tags: ['Video', 'Launch'], accent: '#d46a3c', meta: 'Video · Launch', type: 'Video', subtype: 'Launch' },
-  { id: 'fintech-dashboard', title: 'Analytics Console', tags: ['Live Artifact', 'Dashboard'], accent: '#16a34a', meta: 'Live Artifact · Dashboard', type: 'Live Artifact', subtype: 'Dashboard' },
-  { id: 'healthcare-intake', title: 'Intake Prototype', tags: ['Prototype', 'Healthcare'], accent: '#0f9f6e', meta: 'Prototype · Healthcare', type: 'Prototype', subtype: 'Healthcare' },
-  { id: 'developer-docs', title: 'API Docs', tags: ['Live Artifact', 'Docs'], accent: '#475569', meta: 'Live Artifact · Docs', type: 'Live Artifact', subtype: 'Docs' },
-  { id: 'pricing-test', title: 'Pricing Experiment', tags: ['Live Artifact', 'Growth'], accent: '#f59e0b', meta: 'Live Artifact · Pricing', type: 'Live Artifact', subtype: 'Growth' },
-  { id: 'admin-console', title: 'Admin Console', tags: ['Prototype', 'Admin'], accent: '#0f172a', meta: 'Prototype · Admin', type: 'Prototype', subtype: 'Admin' },
-  { id: 'education-course', title: 'Course Landing', tags: ['Live Artifact', 'Education'], accent: '#1A74FF', meta: 'Live Artifact · Course', type: 'Live Artifact', subtype: 'Education' },
-  { id: 'restaurant-booking', title: 'Booking Flow', tags: ['Prototype', 'Booking'], accent: '#be123c', meta: 'Prototype · Booking', type: 'Prototype', subtype: 'Booking' },
-  { id: 'real-estate-listing', title: 'Listing Page', tags: ['Live Artifact', 'Real estate'], accent: '#0d9488', meta: 'Live Artifact · Listing', type: 'Live Artifact', subtype: 'Real estate' },
-  { id: 'support-center', title: 'Support Center', tags: ['Live Artifact', 'Support'], accent: '#0891b2', meta: 'Live Artifact · Support', type: 'Live Artifact', subtype: 'Support' },
-  { id: 'social-campaign', title: 'Campaign Pack', tags: ['Image', 'Campaign'], accent: '#ec4899', meta: 'Image · Campaign', type: 'Image', subtype: 'Campaign' },
-  { id: 'newsletter-brief', title: 'Voice Brief', tags: ['Audio', 'Brief'], accent: '#64748b', meta: 'Audio · Brief', type: 'Audio', subtype: 'Brief' },
-  { id: 'roadmap-board', title: 'Scene Timeline', tags: ['HyperFrames', 'Timeline'], accent: '#8b5cf6', meta: 'HyperFrames · Timeline', type: 'HyperFrames', subtype: 'Timeline' },
-  { id: 'app-settings', title: 'Interactive Story', tags: ['HyperFrames', 'Story'], accent: '#334155', meta: 'HyperFrames · Story', type: 'HyperFrames', subtype: 'Story' },
-];
+const TEMPLATE_TYPE_ORDER: TemplateType[] = ['Slides', 'Prototype', 'Live Artifact', 'Image', 'Video', 'HyperFrames', 'Audio'];
 
-const TEMPLATE_TYPE_ORDER: TemplateDemo['type'][] = ['Slides', 'Prototype', 'Live Artifact', 'Image', 'Video', 'HyperFrames', 'Audio'];
+/** The Community grid is the plugin catalogue seen through the artifact a user
+ *  wants to make. Membership comes from the shared facet derivation in
+ *  `plugins-home/facets.ts` — the same taxonomy the Home starter rail uses — so
+ *  a plugin lands in exactly one tab here and in the same tab there. Do not
+ *  re-derive categories locally. */
+const FACET_CATEGORY_TYPE: Record<string, TemplateType> = {
+  'deck': 'Slides',
+  'prototype': 'Prototype',
+  'live-artifact': 'Live Artifact',
+  'image': 'Image',
+  'video': 'Video',
+  'hyperframes': 'HyperFrames',
+  'audio': 'Audio',
+};
 
 /** Count the catalogue by type so a facet tab can never advertise a number the
  *  grid will not render. The badge and the cards must resolve from the same
  *  array: any tab showing `n` renders exactly `n` cards once its subtype filter
  *  is "All". Do not replace this with a hand-maintained lookup table. */
-// The type tabs are rendered from the demo catalogue's `type` field, which is
+// The type tabs are rendered from the catalogue's `type` field, which is
 // a data value rather than copy. Map it onto a translated label so the tab row
 // is not the one English strip on an otherwise localized page.
-const TEMPLATE_TYPE_LABEL_KEY: Record<TemplateDemo['type'], keyof Dict> = {
+const TEMPLATE_TYPE_LABEL_KEY: Record<TemplateType, keyof Dict> = {
   'Prototype': 'community.typePrototype',
   'Live Artifact': 'community.typeLiveArtifact',
   'Slides': 'community.typeSlides',
@@ -91,42 +70,106 @@ const TEMPLATE_TYPE_LABEL_KEY: Record<TemplateDemo['type'], keyof Dict> = {
   'Audio': 'community.typeAudio',
 };
 
-function countTemplatesByType(templates: TemplateDemo[]): Record<TemplateDemo['type'], number> {
+function countTemplatesByType(templates: TemplateDemo[]): Record<TemplateType, number> {
   const counts = Object.fromEntries(
     TEMPLATE_TYPE_ORDER.map((type) => [type, 0]),
-  ) as Record<TemplateDemo['type'], number>;
+  ) as Record<TemplateType, number>;
   for (const template of templates) counts[template.type] += 1;
   return counts;
 }
 
-const TEMPLATE_TYPE_COUNTS: Record<TemplateDemo['type'], number> = countTemplatesByType(COMMUNITY_TEMPLATES);
+// Card accents tint the thumbnail plate and the fallback preview page. The
+// palette is the designer's; picking from it by a stable hash of the plugin id
+// keeps a card's colour fixed across reloads without hand-maintaining a table.
+const TEMPLATE_ACCENTS = [
+  '#4164f4', '#d46342', '#111827', '#0f9f6e', '#353535', '#ea580c', '#0284c7',
+  '#4f46e5', '#db2777', '#16a34a', '#475569', '#f59e0b', '#0f172a', '#1A74FF',
+  '#be123c', '#0d9488', '#0891b2', '#ec4899', '#64748b', '#8b5cf6', '#334155',
+];
 
-const TEMPLATE_PREVIEW_SRC: Record<string, string> = {
-  'electric-studio': '/community-templates/open-design-landing.webp',
-  'launch-landing': '/community-templates/kanban-board.webp',
-  'founder-memo': '/community-templates/social-carousel.jpg',
-  'growth-dashboard': '/community-templates/blog-post.webp',
-  'ai-product-site': '/community-templates/wireframe-sketch.webp',
-  'commerce-home': '/community-templates/wireframe-greybox.webp',
-  'mobile-app-launch': '/community-templates/mobile-flow.webp',
-  'portfolio-case-study': '/community-templates/pitch-deck.webp',
-  'design-system-docs': '/community-templates/workspace-cover.webp',
-  'event-microsite': '/community-templates/hyperframes.webp',
-  'agency-services': '/community-templates/live-artifact.webp',
-  'fintech-dashboard': '/community-templates/dashboard.webp',
-  'healthcare-intake': '/community-templates/wireframe-sketch.webp',
-  'developer-docs': '/community-templates/blog-post.webp',
-  'pricing-test': '/community-templates/open-design-landing.webp',
-  'admin-console': '/community-templates/kanban-board.webp',
-  'education-course': '/community-templates/workspace-cover.webp',
-  'restaurant-booking': '/community-templates/wireframe-greybox.webp',
-  'real-estate-listing': '/community-templates/live-artifact.webp',
-  'support-center': '/community-templates/blog-post.webp',
-  'social-campaign': '/community-templates/social-carousel.jpg',
-  'newsletter-brief': '/community-templates/pitch-deck.webp',
-  'roadmap-board': '/community-templates/hyperframes.webp',
-  'app-settings': '/community-templates/dashboard.webp',
-};
+function hashString(value: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+function templateAccent(id: string): string {
+  return TEMPLATE_ACCENTS[hashString(id) % TEMPLATE_ACCENTS.length]!;
+}
+
+/** Project the installed plugin catalogue onto the Community grid's card shape.
+ *  Every field the grid reads — badge counts, subtype pills, thumbnails, the
+ *  modal preview, and the composer seed — is derived here from the record, so
+ *  the page has exactly one data source: `GET /api/plugins`. */
+function buildCommunityTemplates(
+  plugins: InstalledPluginRecord[],
+  locale: Locale,
+  t: ReturnType<typeof useT>,
+): TemplateDemo[] {
+  const categoryOrder = buildCategoryCatalog(plugins).map((option) => option.slug);
+  const subcategoryCatalog = buildSubcategoryCatalog(plugins);
+  const subcategoryRank = new Map<string, number>();
+  const subcategoryLabel = new Map<string, string>();
+  for (const [parent, options] of Object.entries(subcategoryCatalog)) {
+    options.forEach((option, index) => {
+      subcategoryRank.set(`${parent}:${option.slug}`, index);
+      subcategoryLabel.set(`${parent}:${option.slug}`, option.label);
+    });
+  }
+
+  const entries = plugins.flatMap((record, index) => {
+    const categorySlug = extractCategories(record)[0];
+    if (!categorySlug) return [];
+    const type = FACET_CATEGORY_TYPE[categorySlug];
+    if (!type) return [];
+    const subSlug = extractSubcategories(record, categorySlug)[0] ?? null;
+    return [{ record, index, categorySlug, subSlug, type }];
+  });
+
+  // Group the grid the way the pills read: category order, then the sub-facet
+  // display order, then catalogue order. The subtype pill row is derived from
+  // this array, so sorting here is what puts the pills in taxonomy order.
+  entries.sort((a, b) => {
+    const byCategory = categoryOrder.indexOf(a.categorySlug) - categoryOrder.indexOf(b.categorySlug);
+    if (byCategory !== 0) return byCategory;
+    const rank = (categorySlug: string, subSlug: string | null) => (
+      subSlug === null
+        ? Number.MAX_SAFE_INTEGER
+        : subcategoryRank.get(`${categorySlug}:${subSlug}`) ?? Number.MAX_SAFE_INTEGER - 1
+    );
+    const bySub = rank(a.categorySlug, a.subSlug) - rank(b.categorySlug, b.subSlug);
+    if (bySub !== 0) return bySub;
+    return a.index - b.index;
+  });
+
+  return entries.map(({ record, categorySlug, subSlug, type }) => {
+    const title = localizePluginTitle(locale, record);
+    const typeLabel = t(TEMPLATE_TYPE_LABEL_KEY[type]);
+    const subtype = subSlug
+      ? pluginSubfacetLabel(subSlug, subcategoryLabel.get(`${categorySlug}:${subSlug}`) ?? subSlug, t)
+      : '';
+    // Gallery tiles prefer the pre-baked poster; the modal keeps the real
+    // `od.preview` so opening a card shows the live page, not the baked frame.
+    const card = inferPluginPreview(record, { preferBaked: true });
+    const detail = inferPluginPreview(record);
+    return {
+      id: record.id,
+      title,
+      tags: record.manifest?.tags ?? [],
+      accent: templateAccent(record.id),
+      meta: subtype ? `${typeLabel} · ${subtype}` : typeLabel,
+      type,
+      subtype,
+      posterSrc: card.kind === 'media' ? card.poster : detail.kind === 'media' ? detail.poster : null,
+      previewSrc: detail.kind === 'html' ? detail.src : null,
+      previewVideo: detail.kind === 'media' ? detail.videoUrl : null,
+      prompt: examplePresetSeedPrompt(record, locale, () => title).text,
+    };
+  });
+}
 
 interface CommunityViewProps {
   /** Hand the user into Home with a starting prompt derived from the chosen
@@ -135,36 +178,46 @@ interface CommunityViewProps {
   onRemixTemplate?: (remix: { templateId: string; prompt: string }) => void;
 }
 
-/** Build the Home-composer starting prompt for a remixed template. */
-function buildRemixPrompt(template: TemplateDemo): string {
-  return `Remix the "${template.title}" community template into a new Open Design project (${template.meta}).`;
-}
-
 export function CommunityView({ onRemixTemplate }: CommunityViewProps) {
-  const t = useT();
+  const { locale, t } = useI18n();
+  const [plugins, setPlugins] = useState<InstalledPluginRecord[]>([]);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDemo | null>(null);
-  const [activeType, setActiveType] = useState<TemplateDemo['type']>('Slides');
+  const [activeType, setActiveType] = useState<TemplateType>('Slides');
   const [activeSubtype, setActiveSubtype] = useState('All');
+  useEffect(() => {
+    let cancelled = false;
+    // `listPlugins` resolves to [] on a failed/aborted fetch, so a daemon that
+    // is not up yet simply leaves the grid empty instead of throwing.
+    void listPlugins().then((rows) => {
+      if (!cancelled) setPlugins(rows);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const templates = useMemo(
+    () => buildCommunityTemplates(plugins, locale, t),
+    [plugins, locale, t],
+  );
+  const templateTypeCounts = useMemo(() => countTemplatesByType(templates), [templates]);
   const typeOptions = TEMPLATE_TYPE_ORDER.filter((type) =>
-    COMMUNITY_TEMPLATES.some((template) => template.type === type),
+    templates.some((template) => template.type === type),
   );
   const subtypeOptions = Array.from(new Set(
-    COMMUNITY_TEMPLATES
-      .filter((template) => template.type === activeType)
+    templates
+      .filter((template) => template.type === activeType && template.subtype)
       .map((template) => template.subtype),
   ));
-  const filteredTemplates = COMMUNITY_TEMPLATES.filter((template) => {
+  const filteredTemplates = templates.filter((template) => {
     const typeMatches = template.type === activeType;
     const subtypeMatches = activeSubtype === 'All' || template.subtype === activeSubtype;
     return typeMatches && subtypeMatches;
   });
-  const typeCount = (type: TemplateDemo['type']) => TEMPLATE_TYPE_COUNTS[type];
+  const typeCount = (type: TemplateType) => templateTypeCounts[type];
   const handleTemplateAction = (template: TemplateDemo) => {
     if (isPromptArtifact(template)) {
       void copyTemplatePrompt(template);
       return;
     }
-    onRemixTemplate?.({ templateId: template.id, prompt: buildRemixPrompt(template) });
+    onRemixTemplate?.({ templateId: template.id, prompt: template.prompt });
   };
 
   return (
@@ -290,7 +343,12 @@ function TemplatePreviewModal({
         <iframe
           title={`${template.title} preview`}
           className="community-template-preview__frame"
-          srcDoc={templatePreviewHtml(template)}
+          // Html-preview plugins load their real daemon-served page; media
+          // templates have no page to load, so the same frame carries their
+          // poster/clip instead.
+          {...(template.previewSrc
+            ? { src: template.previewSrc }
+            : { srcDoc: templatePreviewHtml(template) })}
         />
         <footer className="community-template-preview__foot">
           <span>{template.meta}</span>
@@ -311,13 +369,11 @@ function templateActionLabel(template: TemplateDemo): string {
 
 async function copyTemplatePrompt(template: TemplateDemo): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
-  await navigator.clipboard.writeText(
-    `Create a ${template.meta.toLowerCase()} artifact titled "${template.title}" for Open Design. Use a polished composition, clear hierarchy, and production-ready visual direction.`,
-  );
+  await navigator.clipboard.writeText(template.prompt);
 }
 
 function TemplateThumb({ template }: { template: TemplateDemo }) {
-  const previewSrc = TEMPLATE_PREVIEW_SRC[template.id];
+  const previewSrc = template.posterSrc;
 
   if (previewSrc) {
     return (
@@ -348,7 +404,33 @@ function TemplateThumb({ template }: { template: TemplateDemo }) {
   );
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Document rendered inside the detail frame when the plugin has no daemon
+ *  html preview: media templates show their real poster/clip, and the handful
+ *  of plugins that ship neither fall back to the stylized template page. */
 function templatePreviewHtml(template: TemplateDemo): string {
+  if (template.previewVideo || template.posterSrc) {
+    const poster = template.posterSrc ? escapeHtmlAttribute(template.posterSrc) : '';
+    const body = template.previewVideo
+      ? `<video src="${escapeHtmlAttribute(template.previewVideo)}"${poster ? ` poster="${poster}"` : ''} controls autoplay muted loop playsinline></video>`
+      : `<img src="${poster}" alt="" />`;
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body { display: grid; place-items: center; background: #0b1020; }
+    img, video { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>${body}</body>
+</html>`;
+  }
   return `<!doctype html>
 <html>
 <head>
