@@ -153,6 +153,8 @@ import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
 import { SettingsWorkspaceSection } from './SettingsWorkspaceSection';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { resolvePlanTier } from '../collab/team-plan';
+import { planBadgeTierForLabel } from './PlanWordmark';
 import { canShowWorkspaceSettings } from '../collab/settings-access';
 import { ConnectorsBrowser } from './ConnectorsBrowser';
 import { MemoryModelInline } from './MemoryModelInline';
@@ -4471,10 +4473,23 @@ export function SettingsDialog({
                             isAmrAgent && active && amrCardStatus?.loggedIn
                               ? amrStatusBalance ?? amrWalletBalance
                               : null;
-                          const amrCardPlanLabel =
+                          // vela's `account.plan` is ACCOUNT-scoped, so a member
+                          // whose plan is held by the team workspace reads
+                          // `free` there — the workspace context wins. The badge
+                          // is a tier nameplate (free/plus/pro/max), so the
+                          // resolved id maps onto its tier word (`team_plus` →
+                          // Plus) through the same helper the nav-rail account
+                          // row uses; an id outside that set renders verbatim.
+                          const amrCardResolvedPlan =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? amrCardStatus.account?.plan?.trim() || null
+                              ? resolvePlanTier({
+                                  context: workspaceContext,
+                                  accountPlan: amrCardStatus.account?.plan,
+                                })
                               : null;
+                          const amrCardPlanLabel = amrCardResolvedPlan
+                            ? planBadgeTierForLabel(amrCardResolvedPlan) ?? amrCardResolvedPlan
+                            : null;
                           const amrCardCanUpgrade =
                             isAmrAgent && active && amrCardStatus?.loggedIn
                               ? canUpgradeVelaPlan(amrCardStatus.account?.plan)

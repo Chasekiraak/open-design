@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceBillingSummary, WorkspaceCollabContext } from '@open-design/contracts';
 
-import { hasTeamPlan, isTeamPlanTier } from '../src/collab/team-plan';
+import {
+  hasTeamPlan,
+  isFreePlanTier,
+  isTeamPlanTier,
+  resolvePlanTier,
+} from '../src/collab/team-plan';
 
 function context(planId: string | null, workspaceType: 'team' | 'personal' = 'personal') {
   return { workspaceId: 'ws', workspaceType, planId } as unknown as WorkspaceCollabContext;
@@ -50,5 +55,77 @@ describe('hasTeamPlan', () => {
 
   it('prefers billing once it reports a team tier', () => {
     expect(hasTeamPlan(context(null), billing('team_pro'))).toBe(true);
+  });
+});
+
+describe('resolvePlanTier', () => {
+  it('prefers the workspace billing summary over every other source', () => {
+    expect(
+      resolvePlanTier({
+        billing: billing('team_pro'),
+        context: context('free'),
+        accountPlan: 'free',
+      }),
+    ).toBe('team_pro');
+  });
+
+  // Acceptance #33/#40: vela's login projection is ACCOUNT-scoped, so a member
+  // whose plan is held by the team workspace reads `free` there. Reading it as
+  // authoritative is what showed the free chip and the free-user home upsell to
+  // Team Plus / Team Pro accounts.
+  it('lets the workspace plan id override the account-scoped vela projection', () => {
+    expect(resolvePlanTier({ context: context('team_plus'), accountPlan: 'free' }))
+      .toBe('team_plus');
+  });
+
+  it('falls through an EMPTY billing tier rather than treating it as an answer', () => {
+    // B reports '' for a workspace with no active subscription — `||`, not `??`.
+    expect(
+      resolvePlanTier({
+        billing: billing(''),
+        context: context('team_max'),
+        accountPlan: 'free',
+      }),
+    ).toBe('team_max');
+    expect(resolvePlanTier({ billing: billing(''), accountPlan: 'pro' })).toBe('pro');
+  });
+
+  it('uses the account plan only when no workspace source knows', () => {
+    expect(resolvePlanTier({ context: context(null), accountPlan: 'plus' })).toBe('plus');
+    expect(resolvePlanTier({ accountPlan: ' max ' })).toBe('max');
+  });
+
+  it('returns null when nothing knows the tier', () => {
+    expect(resolvePlanTier({})).toBeNull();
+    expect(resolvePlanTier({ billing: billing(''), context: context(''), accountPlan: '' }))
+      .toBeNull();
+    expect(resolvePlanTier({ context: null, billing: null, accountPlan: null })).toBeNull();
+  });
+});
+
+describe('isFreePlanTier', () => {
+  it('is true only for a known, genuinely free tier', () => {
+    expect(isFreePlanTier('free')).toBe(true);
+    expect(isFreePlanTier(' FREE ')).toBe(true);
+  });
+
+  // The gate must fail CLOSED while billing is unresolved: an unknown tier is
+  // not free, so a slow read never flashes an upsell at a paying user.
+  it('treats an unknown or empty tier as not free', () => {
+    for (const tier of ['', '   ', null, undefined]) {
+      expect(isFreePlanTier(tier)).toBe(false);
+    }
+  });
+
+  it('never reads a team-namespaced id as free', () => {
+    for (const tier of ['team', 'team_basic', 'team_plus', 'team_pro', 'team_max', 'TEAM_PRO']) {
+      expect(isFreePlanTier(tier)).toBe(false);
+    }
+  });
+
+  it('rejects the personal paid tiers', () => {
+    for (const tier of ['pro', 'plus', 'max']) {
+      expect(isFreePlanTier(tier)).toBe(false);
+    }
   });
 });

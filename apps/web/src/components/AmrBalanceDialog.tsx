@@ -10,6 +10,8 @@ import {
   recordAmrEntry,
 } from '../analytics/amr-attribution';
 import { amrConsoleUrlForProfile } from '../runtime/amr-guidance';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { teamConsoleUrl } from './EntryNavRail';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
   amrWalletBalanceUsd,
@@ -50,10 +52,11 @@ interface Props {
 // user just wrote a task and pressed send — so it must read as "one step from
 // starting", never as an error. Two variants with distinct copy AND CTAs:
 //
-//   insufficient — signed in, wallet definitively empty. CTA opens the
-//     console WALLET page (not the plans modal directly: free users landing
-//     on the wallet already get the subscription modal auto-opened, while
-//     paying users see top-up options in place). Balance badge shown.
+//   insufficient — signed in, wallet definitively empty. The CTA reads
+//     「升级套餐」, so it must LAND on the plan picker rather than drop the user
+//     on a page to hunt for it: it opens the team dashboard with B's
+//     `billing=checkout` deep link, which auto-opens the checkout dialog on
+//     arrival. Balance badge shown.
 //
 //   signed_out — Open Design Cloud selected but no account session. The CTA
 //     is the in-app sign-in (AmrLoginPill: spawns vela login, surfaces the
@@ -93,6 +96,17 @@ export function AmrBalanceDialog({
   // resume the parked task via onResolved. Bounded so an abandoned recharge
   // doesn't poll forever; guarded against double-fires.
   const [watchingWallet, setWatchingWallet] = useState(false);
+  // Where 「升级套餐」 goes. `teamConsoleUrl(_, 'upgrade')` is the one place that
+  // knows B's deep link: it targets the team DASHBOARD (not the settings page)
+  // and appends `billing=checkout`, which B's `team-dashboard` route reads to
+  // auto-open its checkout dialog. Falls back to the profile's wallet page when
+  // the console URL is unavailable (personal workspace, or the context read has
+  // not landed) so the CTA is never a dead end.
+  const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
+  const upgradeUrl = workspaceSettingsUrl
+    ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade')
+    : amrConsoleUrlForProfile(profile);
   const resolvedRef = useRef(false);
   const resolveOnce = () => {
     if (resolvedRef.current) return;
@@ -124,7 +138,7 @@ export function AmrBalanceDialog({
     // resolveOnce is stable via ref; onResolved changes don't re-arm the watch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchingWallet]);
-  const openWallet = () => {
+  const openUpgrade = () => {
     setWatchingWallet(true);
     // Same attribution handshake as the other Open Design Cloud handoffs
     // (ChatPane recharge, AvatarMenu upgrade): record the amr_entry, forward
@@ -138,7 +152,7 @@ export function AmrBalanceDialog({
       installationId,
     });
     window.open(
-      attributedAmrUrl(amrConsoleUrlForProfile(profile), attribution, deviceId),
+      attributedAmrUrl(upgradeUrl, attribution, deviceId),
       '_blank',
       'noopener,noreferrer',
     );
@@ -215,7 +229,7 @@ export function AmrBalanceDialog({
           <Button
             variant="primary"
             className={styles.cta}
-            onClick={openWallet}
+            onClick={openUpgrade}
             data-testid="amr-balance-dialog-plans"
           >
             {t('chat.amrBalanceGate.plansCta')}

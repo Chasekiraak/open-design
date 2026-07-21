@@ -81,6 +81,7 @@ import {
 import { AMR_LOGIN_STATUS_EVENT } from './components/amrLoginPolling';
 import { CollabDemoView } from './collab/CollabDemoView';
 import { useWorkspaceContext } from './collab/useWorkspaceContext';
+import { resolvePlanTier } from './collab/team-plan';
 import { CommunityView } from './components/CommunityView';
 import { seedHomeComposerPrompt } from './components/HomeView';
 import { goBack, navigate, useRoute, type Route } from './router';
@@ -761,10 +762,18 @@ function AppInner() {
   // globals effect below reads it; the sync effects live next to the
   // other AMR plumbing further down.
   const [amrLoginStatus, setAmrLoginStatus] = useState<VelaLoginStatus | null>(null);
-  const resolvedAmrPlan =
-    amrLoginStatus?.account?.plan?.trim()
-    || amrLoginStatus?.user?.plan?.trim()
-    || null;
+  // The plan that gates free-tier surfaces (today: the post-generation artifact
+  // upsell). vela's login status is ACCOUNT-scoped, so a member whose plan is
+  // held by the team workspace reads `free` there and used to be shown the
+  // free-user banner; the workspace context's plan id is authoritative and
+  // wins. See resolvePlanTier for the full precedence rule.
+  const resolvedAmrPlan = resolvePlanTier({
+    context: workspaceContext,
+    accountPlan:
+      amrLoginStatus?.account?.plan?.trim()
+      || amrLoginStatus?.user?.plan?.trim()
+      || null,
+  });
   // Child surfaces report status snapshots, not login events. Deduplicate the
   // signed-in transition here: restarting the model poll for every Settings
   // snapshot updates `agents`, which makes Settings fetch status again and

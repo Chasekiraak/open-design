@@ -32,3 +32,58 @@ export function hasTeamPlan(
   if (!context) return false;
   return isTeamPlanTier(billing?.membershipTier) || isTeamPlanTier(context.planId);
 }
+
+/** The tier sources a surface may have in scope; pass whichever it holds. */
+export interface PlanTierSources {
+  /** `GET /api/workspace/billing` — the workspace's live subscription. */
+  billing?: WorkspaceBillingSummary | null;
+  /** `GET /api/workspace/context` — carries the same raw plan id as billing. */
+  context?: WorkspaceCollabContext | null;
+  /** vela's `account.plan` / `user.plan` login projection. ACCOUNT-scoped. */
+  accountPlan?: string | null;
+}
+
+/**
+ * The raw plan id that actually governs this client's entitlements.
+ *
+ * Three sources report a tier and they disagree by design. vela's login-status
+ * projection is ACCOUNT-scoped, so a user whose entitlements are held by a TEAM
+ * workspace reads `free` — or nothing at all — there. The workspace billing
+ * summary and the collab context both report the WORKSPACE plan id
+ * (`team_plus`, …), so they win over it, in that order. Reading the account
+ * projection as authoritative is what showed free-user surfaces to paid team
+ * accounts.
+ *
+ * Every step falls through on an EMPTY STRING, not only on null: B reports an
+ * empty `membershipTier` for a workspace with no active subscription, and an
+ * empty tier means "this source does not know", never "free". That is why the
+ * chain is `||` and not `??`.
+ *
+ * Returns null when no source knows. Callers must treat null as UNKNOWN and
+ * fail closed — never assume free — so a slow or failed billing read cannot
+ * flash a free-tier surface at a paying user.
+ */
+export function resolvePlanTier(sources: PlanTierSources): string | null {
+  return (
+    sources.billing?.membershipTier?.trim()
+    || sources.context?.planId?.trim()
+    || sources.accountPlan?.trim()
+    || null
+  );
+}
+
+/**
+ * Whether free-tier surfaces (upgrade banners, plan gates, the free nameplate)
+ * may be shown for a resolved plan id.
+ *
+ * True only for a tier that is KNOWN and genuinely free. Two cases must never
+ * read as free: an unknown/empty tier, because billing may simply not have
+ * answered yet; and every team-namespaced id, which is paid by construction —
+ * that is exactly the case the account-scoped vela projection gets wrong.
+ */
+export function isFreePlanTier(tier: string | null | undefined): boolean {
+  const normalized = tier?.trim().toLowerCase() ?? '';
+  if (!normalized) return false;
+  if (isTeamPlanTier(normalized)) return false;
+  return normalized === 'free';
+}
