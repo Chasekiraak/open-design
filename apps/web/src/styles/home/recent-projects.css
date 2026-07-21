@@ -962,37 +962,6 @@
 }
 
 /* "邀请同事" entry on the team "全部项目" header (UC-2 entry point 2). */
-/* Create action in the list-page header. Neutral pill, not the accent fill —
-   the accent belongs to 邀请同事 beside it, and this is the routine action. */
-.recent-projects__new {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  /* Match the 多选 / filter pills beside it (28px). */
-  height: 28px;
-  padding: 0 14px;
-  margin-right: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-panel);
-  color: var(--text-strong);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
-    border-color 140ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-.recent-projects__new:hover:not(:disabled) {
-  background: var(--bg-subtle);
-  border-color: var(--border-strong, var(--border));
-}
-.recent-projects__new .od-icon {
-  flex: 0 0 auto;
-  opacity: 0.75;
-}
-
 .recent-projects__invite {
   display: inline-flex;
   align-items: center;

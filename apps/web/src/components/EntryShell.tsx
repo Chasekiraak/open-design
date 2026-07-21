@@ -1335,7 +1335,6 @@ export function EntryShell({
                     limit={1000}
                     heading={t('entry.navDrafts')}
                     space="drafts"
-                    onNewProject={() => openNewProject()}
                     sharedProjectIds={teamSharedProjectIds}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     onOpen={(id) => onOpenProject(id)}
@@ -1372,7 +1371,6 @@ export function EntryShell({
                     limit={1000}
                     heading={t('entry.navAllProjects')}
                     space="team"
-                    onNewProject={() => openNewProject()}
                     sharedProjectIds={teamSharedProjectIds}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     openingProjectId={pullingProjectId}

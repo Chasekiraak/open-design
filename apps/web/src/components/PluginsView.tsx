@@ -71,7 +71,8 @@ import { copyToClipboard } from '../lib/copy-to-clipboard';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { AnimatePresence } from 'motion/react';
 import { navigate } from '../router';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { hasTeamPlan } from '../collab/team-plan';
 
 type PluginsTab = 'installed' | 'available' | 'sources' | 'team';
 
@@ -850,11 +851,16 @@ export function ExtensionsMarketplace({
   const analytics = useAnalytics();
   // My own member id, to keep the Personal tab to resources I actually own.
   const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
   const myMemberId = workspaceContext?.workspaceMemberId ?? null;
   // The 团队 scope is a team-workspace surface: B's resource plane is
   // team-only, so signed-out and personal-workspace users get no team pill
   // (#5517 hides every team surface in the signed-out form).
-  const hasTeamWorkspace = Boolean(workspaceContext?.teamId);
+  // Gate on the PLAN, not the workspace kind: a personal workspace is still a
+  // workspace and can still have members, so `teamId` hid the tab from people
+  // who genuinely have a team to share into. It hides only when signed out or
+  // on a personal/free plan that was never upgraded to a team one.
+  const hasTeamWorkspace = hasTeamPlan(workspaceContext, workspaceBilling);
   const pageViewFiredRef = useRef(false);
   useEffect(() => {
     if (pageViewFiredRef.current) return;

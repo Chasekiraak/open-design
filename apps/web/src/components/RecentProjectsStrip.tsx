@@ -42,9 +42,6 @@ interface Props {
   description?: string;
   onOpen: (id: string) => void;
   onViewAll?: () => void;
-  /** Renders a create action in the full-page header. Home passes none —
-   *  there the composer IS the create surface. */
-  onNewProject?: () => void;
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicate?: (id: string) => Promise<void> | void;
   onRename?: (id: string, name: string) => void;
@@ -118,7 +115,6 @@ export function RecentProjectsStrip({
   description,
   onOpen,
   onViewAll,
-  onNewProject,
   onDelete,
   onDuplicate,
   onRename,
@@ -526,20 +522,6 @@ export function RecentProjectsStrip({
             ) : null}
           </div>
           <div className="recent-projects__controls">
-            {/* The list pages are the only durable home for "new project": the
-                blank-state CTA disappears the moment you own one project, and
-                #5517's alignment took the rail "+" and the home template row
-                with it. Without this the New Project modal is unreachable. */}
-            {onNewProject ? (
-              <button
-                type="button"
-                className="recent-projects__new"
-                onClick={onNewProject}
-                data-testid="recent-projects-new"
-              >
-                <Icon name="plus" size={15} /> {t('entry.blankCreate')}
-              </button>
-            ) : null}
             {collaborationAvailable && space === 'team' && canInvite ? (
               <button
                 type="button"

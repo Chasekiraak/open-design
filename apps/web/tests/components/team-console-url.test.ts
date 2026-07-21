@@ -23,7 +23,7 @@ describe('teamConsoleUrl', () => {
   // (vela routes/workspace-settings.tsx and routes/team-dashboard.tsx).
   it('deep-links upgrade straight into the plan-change dialog', () => {
     expect(teamConsoleUrl(base, 'upgrade')).toBe(
-      'https://web.example/settings?workspaceId=ws-1&billing=checkout',
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
     );
   });
 

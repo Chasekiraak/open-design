@@ -15,7 +15,8 @@ import type {
   TrackingDesignSystemStatusValue,
 } from '@open-design/contracts/analytics';
 import { useI18n } from '../i18n';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { hasTeamPlan } from '../collab/team-plan';
 import type { Locale } from '../i18n/types';
 import {
   localizeDesignSystemCategory,
@@ -175,7 +176,12 @@ export function DesignSystemsTab({
   // team-only): signed-out / personal-workspace users get no team tab, and a
   // sign-out while on it falls back to 你的体系 (#5517 signed-out form).
   const { context: workspaceContext } = useWorkspaceContext();
-  const hasTeamWorkspace = Boolean(workspaceContext?.teamId);
+  const workspaceBilling = useWorkspaceBilling();
+  // Gate on the PLAN, not the workspace kind: a personal workspace is still a
+  // workspace and can still have members, so `teamId` hid the tab from people
+  // who genuinely have a team to share into. It hides only when signed out or
+  // on a personal/free plan that was never upgraded to a team one.
+  const hasTeamWorkspace = hasTeamPlan(workspaceContext, workspaceBilling);
   useEffect(() => {
     if (designSystemCollection === 'team' && !hasTeamWorkspace) setDesignSystemCollection('mine');
   }, [designSystemCollection, hasTeamWorkspace]);

@@ -141,7 +141,7 @@ export function teamConsoleUrl(
   // opens on the SAME workspace this client is pinned to (B asks the user to
   // confirm if their account-level selection differs).
   //
-  // `upgrade` lands on workspace settings AND opens the plan-change dialog,
+  // `upgrade` lands on the team dashboard AND opens the plan-change dialog,
   // because sending someone to a billing page to hunt for the upgrade control
   // is a worse answer to "I want to upgrade". B already honors the deep link:
   // both `routes/workspace-settings.tsx` and `routes/team-dashboard.tsx` open
@@ -149,7 +149,7 @@ export function teamConsoleUrl(
   const path =
     section === 'members' ? 'team'
     : section === 'billing' ? 'wallet'
-    : section === 'upgrade' ? 'settings'
+    : section === 'upgrade' ? 'dashboard'
     : section === 'create-team' ? 'dashboard'
     : section;
   try {
