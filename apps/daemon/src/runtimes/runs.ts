@@ -103,7 +103,20 @@ export function createChatRunService({
       errorCode: null,
       cancelRequested: false,
       retryRestartTimer: null,
+      // First failure that triggered a same-run retry. The next attempt creates
+      // a fresh startChatRun closure and clears run.error/errorCode, so keep the
+      // compact analytics snapshot on the shared run until terminal telemetry.
+      retryOriginFailure: null,
+      retryOriginErrorCode: null,
       stdinOpen: false,
+      // E-lite root-cause telemetry. `stdinBackpressure` records whether the
+      // prompt write to the child's stdin was queued (pipe buffer full — a
+      // corroborating signal for a `stdin_write`-phase stall). `lastAgentActivityAt`
+      // is the clock the inactivity watchdog keys off, read at finish to derive
+      // `last_progress_age_ms`. (`approval_requested` and `tool_result_sent` are
+      // derived from run.events by summarizeRunDiagnosticsForAnalytics.)
+      stdinBackpressure: false,
+      lastAgentActivityAt: now,
       // Work-completeness signals (#1247 / #1060), folded from agent events by
       // captureRunWorkCompletenessSignals (server.ts). `lastTodoSnapshot` is the
       // most recent TodoWrite `todos` array; `truncatedMidTurn` records a

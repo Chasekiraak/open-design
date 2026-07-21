@@ -94,6 +94,7 @@ import {
   validateCodexGeneratedImagesDir,
 } from './runtimes/chat-prompt-inputs.js';
 import {
+  writePromptAndEndStdin,
   applyClaudeStreamJsonRunBookkeeping,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
@@ -200,9 +201,13 @@ import {
 import { loadMmdRouteLaunchEnv } from './runtimes/mmd-routes.js';
 import { preparePromptFileForAgent } from './runtimes/prompt-file.js';
 import { TerminalControlSequenceStripper } from './runtimes/terminal-control.js';
-import { buildOpenCodeByokProviderConfig } from './runtimes/byok-opencode.js';
 import {
-  persistPlainStreamArtifacts,
+  buildOpenCodeByokProviderConfig,
+  BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+} from './runtimes/byok-opencode.js';
+import {
+  extractPlainStreamArtifacts,
+  persistPlainStreamArtifactList,
   plainStdoutFromRunEvents,
 } from './runtimes/plain-stream.js';
 import {
@@ -315,6 +320,7 @@ import {
   restoreProjectSnapshotLink,
   resolvePluginSnapshot,
   runPipelineForRun,
+  isSafePluginId,
   runStageWithRegistry,
   startSnapshotGc,
   uninstallPlugin,
@@ -736,7 +742,32 @@ const PLUGIN_PREVIEWS_DIR = resolveDaemonPluginPreviewsDir({
   projectRoot: PROJECT_ROOT,
 });
 const OD_BIN = resolveDaemonCliPath();
-const OD_NODE_BIN = process.execPath;
+export function resolveOpenDesignNodeBin({
+  env = process.env,
+  execPath = process.execPath,
+  platform = process.platform,
+  resourceRoot = DAEMON_RESOURCE_ROOT,
+  exists = fs.existsSync,
+}: {
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  execPath?: string;
+  platform?: NodeJS.Platform;
+  resourceRoot?: string | null;
+  exists?: (path: string) => boolean;
+} = {}): string {
+  const configured = env.OD_NODE_BIN?.trim();
+  if (configured) return configured;
+
+  const bundledName = platform === 'win32' ? 'node.exe' : 'node';
+  const bundled = resourceRoot
+    ? (platform === 'win32' ? path.win32 : path).join(resourceRoot, 'bin', bundledName)
+    : null;
+  if (bundled && exists(bundled)) return bundled;
+
+  return execPath;
+}
+
+const OD_NODE_BIN = resolveOpenDesignNodeBin();
 const SKILLS_DIR = resolveDaemonResourceDir(
   DAEMON_RESOURCE_ROOT,
   'skills',
@@ -1088,7 +1119,7 @@ export function createAgentRuntimeEnv(
   baseEnv: NodeJS.ProcessEnv | Record<string, string | undefined>,
   daemonUrl: string,
   toolTokenGrant: { token?: string } | null = null,
-  nodeBin: string = process.execPath,
+  nodeBin: string = OD_NODE_BIN,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = applySandboxRuntimeEnv(
     {
@@ -1306,6 +1337,7 @@ function filesystemEmptyAnswerFallbackText(fileNames) {
 export function __forTestFilesystemEmptyAnswerFallbackText(fileNames) {
   return filesystemEmptyAnswerFallbackText(fileNames);
 }
+
 
 export function shouldReportRunCompletedFromMessage(saved, body = {}) {
   return Boolean(
@@ -3414,6 +3446,7 @@ export async function startServer({
       listInstalledPlugins,
       getInstalledPlugin,
       installPlugin,
+      isSafePluginId,
       uninstallPlugin,
       installFromLocalFolder,
       applyPlugin,
@@ -3466,6 +3499,7 @@ export async function startServer({
       listInstalledPlugins,
       getInstalledPlugin,
       installPlugin,
+      isSafePluginId,
       uninstallPlugin,
       installFromLocalFolder,
       applyPlugin,
@@ -4270,7 +4304,7 @@ export async function startServer({
       return design.runs.fail(
         run,
         'BYOK_PROVIDER_REQUIRED',
-        'BYOK OpenCode requires a provider, API key, and model for this run.',
+        BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
     // Validate the checked-in `inactivityTimeoutMs` hint immediately
@@ -5109,6 +5143,10 @@ export async function startServer({
     // extractor only needs the head of the reply.
     const MEMORY_REPLY_CAP = 32 * 1024;
     let memoryReplyText = '';
+    // Upper bound for the truncation-proof plain-stream stdout accumulator used
+    // by the artifact finalizer (see the emit handler below). 8 MiB comfortably
+    // covers realistic artifact-bearing runs while bounding per-run memory.
+    const PLAIN_ARTIFACT_STDOUT_CAP = 8 * 1024 * 1024;
     const send = (event, data) => {
       const lifecycleMarkers = runLifecycleMarkersForStreamEvent(event, data);
       if (lifecycleMarkers.firstModelEventType) {
@@ -5154,6 +5192,24 @@ export async function startServer({
               : '';
         if (replyPiece) {
           memoryReplyText = (memoryReplyText + replyPiece).slice(0, MEMORY_REPLY_CAP);
+        }
+      }
+      // Keep enough of the plain-stream stdout on the run itself that the
+      // finalizer's artifact extraction does not depend on the <artifact> tag
+      // surviving the 2000-event run.events ring buffer. A long run that streams
+      // a complete <artifact> early and then floods >2000 later stdout events
+      // would evict the opening tag, making a scan of run.events miss it and
+      // silently drop the delivered file (#5351 fixed the same truncation class
+      // for the verdict consumers). We keep the HEAD (first CAP bytes, bounded)
+      // and separately track the TOTAL byte count; the finalizer stitches the
+      // head to the tail-biased run.events at their exact stream offset, so no
+      // artifact is lost and none is double-counted regardless of where in the
+      // stream it appears.
+      if (event === 'stdout' && data && typeof data.chunk === 'string') {
+        run.plainStdoutTotalBytes = (run.plainStdoutTotalBytes ?? 0) + data.chunk.length;
+        if ((run.plainArtifactStdout?.length ?? 0) < PLAIN_ARTIFACT_STDOUT_CAP) {
+          run.plainArtifactStdout =
+            ((run.plainArtifactStdout ?? '') + data.chunk).slice(0, PLAIN_ARTIFACT_STDOUT_CAP);
         }
       }
       persistRunEventToAssistantMessage(db, run, event, data);
@@ -5323,10 +5379,20 @@ export async function startServer({
         attemptCount > 0
           ? { ...decision, retryAttemptIndex: attemptCount }
           : decision;
+      // A successful retry has no current failure classification or error code.
+      // Fall back to the failure that caused attempt 0 to be retried so success
+      // recovery can still be attributed by root cause. Failed/suppressed retry
+      // events retain their existing current-attempt semantics.
+      const eventFailure = retryResult === 'success'
+        ? run.retryOriginFailure ?? failure
+        : failure;
+      const eventErrorCode = retryResult === 'success'
+        ? run.retryOriginErrorCode ?? errorCode
+        : errorCode;
       run.retryFinalResult = retryResult;
       run.retrySuppressedReason = retrySuppressedReason;
       design.runs.emit(run, 'run_retry_finished', {
-        ...retryAnalyticsBase(eventDecision, failure, errorCode),
+        ...retryAnalyticsBase(eventDecision, eventFailure, eventErrorCode),
         retry_result: retryResult,
         ...(retrySuppressedReason
           ? { retry_suppressed_reason: retrySuppressedReason }
@@ -5392,6 +5458,10 @@ export async function startServer({
         sideEffects,
       });
       if (decision.shouldRetry && !design.runs.isTerminal(run.status)) {
+        if ((run.retryAttemptCount ?? 0) === 0) {
+          run.retryOriginFailure = failure ? { ...failure } : null;
+          run.retryOriginErrorCode = errorCode ?? null;
+        }
         run.retryAttemptCount = decision.retryAttemptIndex;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;
@@ -5958,6 +6028,12 @@ export async function startServer({
       persistDeliveredAgentSessionState = () => {
         if (persisted) return;
         persisted = true;
+        if (!getConversation(db, run.conversationId)) {
+          console.warn(
+            '[sessions] skipped delivered session persistence because the conversation is not persisted',
+          );
+          return;
+        }
         // The id to persist for a create turn: capture-style adapters store the
         // session id the CLI minted and reported on the stream; specify-style
         // adapters store the daemon-minted id they passed to the CLI. A
@@ -6192,6 +6268,9 @@ export async function startServer({
         artifactRegistered,
       });
     const noteAgentActivity = () => {
+      // E-lite: stamp the last-activity clock BEFORE the disabled-watchdog bail
+      // so `last_progress_age_ms` is recorded even when the watchdog is off.
+      run.lastAgentActivityAt = Date.now();
       const delay = activeInactivityTimeoutMs();
       if (delay <= 0) return;
       clearInactivityWatchdog();
@@ -7806,14 +7885,51 @@ export async function startServer({
         (def.streamFormat ?? 'plain') === 'plain' &&
         run.projectId
       ) {
-        const plainStdout = plainStdoutFromRunEvents(run.events);
-        if (plainStdout.includes('<artifact')) {
+        // Reconstruct the agent's stdout for artifact extraction from two
+        // truncation-complementary windows over the SAME underlying stream:
+        //   - head: `run.plainArtifactStdout`, the FIRST CAP bytes (bounded), and
+        //   - tail: run.events, the LAST 2000 events.
+        // Using stream offsets (total byte count) we stitch them into a single
+        // continuous string at their exact seam, then extract ONCE. This is
+        // correct by construction:
+        //   - not truncated  -> head == whole stream (or tail == whole stream);
+        //   - overlapping    -> seam removes the double-covered span, so the
+        //                        same artifact is never counted twice AND two
+        //                        distinct artifacts that share a body are both
+        //                        kept (no value-level dedup);
+        //   - a true gap (a run with both >CAP early bytes AND >2000 later
+        //     events whose tail does not reach back to CAP) -> extract each
+        //     window separately and concatenate the artifact lists. The windows
+        //     do not overlap there, so there are no duplicate occurrences; only
+        //     an artifact buried entirely in the un-covered middle is lost, which
+        //     was already unrecoverable before this change (the old code only
+        //     ever had the tail).
+        const head = run.plainArtifactStdout ?? '';
+        const tail = plainStdoutFromRunEvents(run.events);
+        const totalBytes = run.plainStdoutTotalBytes ?? head.length;
+        const tailStart = Math.max(0, totalBytes - tail.length);
+        let plainArtifacts: ReturnType<typeof extractPlainStreamArtifacts>;
+        if (head.length === 0) {
+          plainArtifacts = extractPlainStreamArtifacts(tail);
+        } else if (tailStart <= head.length) {
+          // Overlap or contiguous: splice tail on at the seam and extract once.
+          const stitched = head + tail.slice(head.length - tailStart);
+          plainArtifacts = extractPlainStreamArtifacts(stitched);
+        } else {
+          // Gap: no overlap, so extracting each window and concatenating cannot
+          // produce a duplicate occurrence or a false cross-gap artifact.
+          plainArtifacts = [
+            ...extractPlainStreamArtifacts(head),
+            ...extractPlainStreamArtifacts(tail),
+          ];
+        }
+        if (plainArtifacts.length > 0) {
           try {
             const project = getProject(db, run.projectId);
-            const persistedPlainArtifacts = await persistPlainStreamArtifacts({
+            const persistedPlainArtifacts = await persistPlainStreamArtifactList({
               projectsRoot: PROJECTS_DIR,
               projectId: run.projectId,
-              stdout: plainStdout,
+              artifacts: plainArtifacts,
               metadata: project?.metadata,
               writeProjectFile,
             });
@@ -7926,7 +8042,11 @@ export async function startServer({
           design.runs.finish(run, 'failed', 1, signal);
           return;
         }
-        persistDeliveredAgentSessionState();
+        try {
+          persistDeliveredAgentSessionState();
+        } catch (err) {
+          console.warn('[sessions] delivered session persistence failed', err);
+        }
       }
       finishWithRetryDecision(status, code, signal);
       } finally {
@@ -7964,7 +8084,11 @@ export async function startServer({
           },
         });
         try {
-          child.stdin.write(`${userMessage}\n`, 'utf8', markStdinWriteEnd);
+          // E-lite: `write` returns false when the chunk was buffered because the
+          // OS pipe is full (the child isn't draining stdin) — the corroborating
+          // signal for a `stdin_write`-phase inactivity stall.
+          const accepted = child.stdin.write(`${userMessage}\n`, 'utf8', markStdinWriteEnd);
+          run.stdinBackpressure = accepted === false;
         } catch (err) {
           // Swallow EPIPE here for the same reason as the listener above —
           // a fast-exiting child has already routed its failure through
@@ -7973,7 +8097,9 @@ export async function startServer({
         }
         run.stdinOpen = true;
       } else {
-        child.stdin.end(composed, 'utf8', markStdinWriteEnd);
+        // Split write + close so the boolean backpressure signal survives —
+        // see writePromptAndEndStdin for why `end(chunk)` cannot report it.
+        run.stdinBackpressure = writePromptAndEndStdin(child.stdin, composed, markStdinWriteEnd);
       }
     }
   };
