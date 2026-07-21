@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AvatarMenu } from '../../src/components/AvatarMenu';
@@ -116,32 +115,28 @@ describe('AvatarMenu', () => {
     vi.clearAllMocks();
   });
 
-  it('opens execution settings when Local CLI is selected while the daemon is offline', () => {
-    const onOpenSettings = vi.fn();
-    renderMenu({
-      daemonLive: false,
-      onOpenSettings,
-    });
-
-    openMenu();
-    fireEvent.click(screen.getByRole('button', { name: /avatar.useLocal/i }));
-
-    expect(onOpenSettings).toHaveBeenCalledWith('execution');
-  });
-
-  it('opens execution settings from the popover action', () => {
+  // The composer popover is a one-decision surface: pick the model for the
+  // active agent. Execution mode, which CLI agent runs, PATH rescan, reasoning
+  // effort and the BYOK model are configuration, and live in
+  // Settings → Execution. Keeping them out is what makes the popover compact.
+  it('keeps execution configuration out of the composer popover', () => {
     const onOpenSettings = vi.fn<OpenSettingsHandler>();
-    renderMenu({ onOpenSettings });
+    const onRefreshAgents = vi.fn<VoidHandler>();
+    renderMenu({ daemonLive: false, onOpenSettings, onRefreshAgents });
 
     openMenu();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'inlineSwitcher.openFullSettings' }),
-    );
 
-    expect(onOpenSettings).toHaveBeenCalledWith('execution');
+    expect(screen.queryByRole('button', { name: /avatar.useLocal/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /avatar.useApi/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'avatar.rescan' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'inlineSwitcher.openFullSettings' }),
+    ).toBeNull();
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(onRefreshAgents).not.toHaveBeenCalled();
   });
 
-  it('pins Open Design to the top of the CLI picker', async () => {
+  it('lists only the Open Design account row, not every installed CLI', async () => {
     const amrAgent: AgentInfo = {
       id: 'amr',
       name: 'Open Design AMR',
@@ -175,58 +170,63 @@ describe('AvatarMenu', () => {
     expect(
       Array.from(menu.querySelectorAll('[data-testid^="avatar-agent-option-"]'))
         .map((row) => row.getAttribute('data-testid')),
-    ).toEqual([
-      'avatar-agent-option-amr',
-      'avatar-agent-option-codex',
-      'avatar-agent-option-claude',
+    ).toEqual(['avatar-agent-option-amr']);
+  });
+
+  it('switches to Open Design from the account row', async () => {
+    const amrAgent: AgentInfo = {
+      id: 'amr',
+      name: 'Open Design AMR',
+      bin: 'vela',
+      available: true,
+      models: [{ id: 'default', label: 'Default (CLI config)' }],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
+
+    const { onAgentChange } = renderMenu({ agents: [codexAgent, amrAgent] });
+    openMenu();
+
+    const row = await screen.findByTestId('avatar-agent-option-amr');
+    fireEvent.click(row.querySelector('.avatar-amr-row__select') as HTMLElement);
+
+    expect(onAgentChange).toHaveBeenCalledWith('amr');
+  });
+
+  it('renders the active reasoning effort as a read-only readout', () => {
+    renderMenu();
+
+    const menu = openMenu();
+    const rows = Array.from(menu.querySelectorAll('.avatar-select-row'));
+    const reasoningRow = rows.find((row) =>
+      row.querySelector('.avatar-select-label')?.textContent ===
+      'avatar.reasoningLabel',
+    );
+    expect(reasoningRow).toBeTruthy();
+    expect(
+      reasoningRow!.querySelector('.avatar-static-value')?.textContent,
+    ).toBe('Default');
+    // Read-only: no control to change it from the composer.
+    expect(reasoningRow!.querySelector('select')).toBeNull();
+  });
+
+  it('selects a model from the inline list and dismisses the popover', () => {
+    const { onAgentModelChange } = renderMenu({
+      config: { ...baseConfig, agentId: 'claude' },
+      agents: [codexAgent, claudeAgent],
+    });
+
+    openMenu();
+    const list = screen.getByTestId('avatar-model-list');
+    const options = within(list).getAllByRole('radio');
+    expect(options.map((o) => o.textContent)).toEqual([
+      'Default (CLI config)',
+      'Sonnet (alias)',
     ]);
-  });
 
-  it('rescans agents and re-renders newly available CLI entries', async () => {
-    function Harness() {
-      const [agents, setAgents] = useState<AgentInfo[]>([
-        codexAgent,
-        { ...claudeAgent, available: false },
-      ]);
-      return (
-        <AvatarMenu
-          config={baseConfig}
-          agents={agents}
-          daemonLive={true}
-          onModeChange={vi.fn()}
-          onAgentChange={vi.fn()}
-          onAgentModelChange={vi.fn()}
-          onOpenSettings={vi.fn()}
-          onRefreshAgents={() => {
-            setAgents([codexAgent, claudeAgent]);
-          }}
-        />
-      );
-    }
+    fireEvent.click(options[1]!);
 
-    render(<Harness />);
-
-    openMenu();
-    expect(screen.queryByRole('button', { name: /Claude Code/i })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'avatar.rescan' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Claude Code/i })).toBeTruthy();
-    });
-  });
-
-  it('routes reasoning selection changes through onAgentModelChange', () => {
-    const onAgentModelChange = vi.fn();
-    renderMenu({ onAgentModelChange });
-
-    openMenu();
-    const selects = screen.getAllByRole('combobox');
-    fireEvent.change(selects[1]!, { target: { value: 'high' } });
-
-    expect(onAgentModelChange).toHaveBeenCalledWith('codex', {
-      reasoning: 'high',
-    });
+    expect(onAgentModelChange).toHaveBeenCalledWith('claude', { model: 'sonnet' });
+    expect(screen.queryByRole('dialog', { name: 'avatar.title' })).toBeNull();
   });
 
   it('keeps a custom saved model visible when it is not in the declared agent model list', () => {
@@ -238,18 +238,45 @@ describe('AvatarMenu', () => {
     });
 
     openMenu();
-    // The model picker is a SearchableModelSelect: a combobox button whose
-    // label shows the active selection, backed by a popover listbox. A custom
-    // saved model that isn't in the agent's declared list is injected as an
-    // additional option so it stays selectable instead of silently dropping.
-    const modelCombobox = screen.getAllByRole('combobox')[0] as HTMLButtonElement;
-    expect(modelCombobox.textContent).toContain('custom-codex-model');
+    // The model picker is an always-expanded radio list. A custom saved model
+    // that isn't in the agent's declared list is appended as an extra option so
+    // it stays visible and checked instead of silently dropping.
+    const list = screen.getByTestId('avatar-model-list');
+    const custom = within(list).getByRole('radio', { name: /custom-codex-model/i });
+    expect(custom.getAttribute('aria-checked')).toBe('true');
+  });
 
-    fireEvent.click(modelCombobox);
-    const popover = screen.getByTestId('avatar-model-popover');
-    expect(
-      within(popover).getByRole('option', { name: /custom-codex-model/i }),
-    ).toBeTruthy();
+  it('routes plan-gated Open Design models to the plans page instead of selecting them', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
+    const openSpy = vi.fn();
+    vi.stubGlobal('open', openSpy);
+
+    const { onAgentModelChange } = renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      agents: [
+        {
+          id: 'amr',
+          name: 'Open Design AMR',
+          bin: 'vela',
+          available: true,
+          models: [
+            { id: 'free-model', label: 'Free model', enabled: true },
+            { id: 'paid-model', label: 'Paid model', enabled: false },
+          ],
+        },
+      ],
+    });
+
+    openMenu();
+    const list = screen.getByTestId('avatar-model-list');
+    const locked = within(list).getByRole('radio', { name: /Paid model/i });
+    expect(locked.getAttribute('aria-disabled')).toBe('true');
+
+    fireEvent.click(locked);
+
+    expect(onAgentModelChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(openSpy).toHaveBeenCalled());
+    expect(String(openSpy.mock.calls[0]![0])).toContain('view=plans');
   });
 
   it('renders the signed-in plan/balance and stamps the avatar upgrade link', async () => {

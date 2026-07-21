@@ -1672,6 +1672,10 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
   width: auto;
   margin: 2px 0 4px;
   padding: 8px 9px;
+  /* The popover is a compact 208px column, which is too narrow to fit
+     icon + name + plan badge + Upgrade on one line — the account name would
+     ellipsise down to "Ope…". Let Upgrade drop to its own line instead. */
+  flex-wrap: wrap;
   border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-tint) 34%, var(--bg-panel));
   cursor: default;
@@ -1689,7 +1693,7 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
 }
 .avatar-amr-row__select {
-  flex: 1 1 auto;
+  flex: 1 1 100%;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1765,6 +1769,8 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
 .avatar-amr-row__upgrade,
 .avatar-amr-row__upgrade:visited {
   flex: 0 0 auto;
+  /* Trails the account block on its own wrapped line. */
+  margin-left: auto;
   appearance: none;
   display: inline-flex;
   align-items: center;
@@ -1933,6 +1939,13 @@ a.avatar-item:visited {
   color: var(--accent);
   font-weight: 600;
 }
+/* Plan-gated Open Design models. They stay listed (so users can see what a
+   higher plan unlocks) but read as unavailable; clicking one opens the plans
+   page instead of selecting a model the run would reject. */
+.avatar-model-option.is-locked {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
 .avatar-model-option-label {
   min-width: 0;
   overflow: hidden;
@@ -1942,6 +1955,9 @@ a.avatar-item:visited {
 .avatar-model-option-check {
   flex: 0 0 auto;
   color: var(--accent);
+}
+.avatar-model-option.is-locked .avatar-model-option-check {
+  color: var(--text-muted);
 }
 
 /* Environment pill — only used in entry view header now */

@@ -1220,26 +1220,26 @@ test('[P1] Open Design Cloud hard balance gate blocks a project send before a da
   );
 });
 
-test('[P0] @critical project detail composer agent menu lets the user switch Local CLI agents and models', async ({ page }) => {
+test('[P0] @critical project detail composer agent menu lets the user switch the model', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/');
   await createProject(page, 'Composer agent switch');
   await expectWorkspaceReady(page);
 
-  const { menu, claudeButton } = await openComposerAgentMenu(page);
-  await expect(claudeButton).toBeVisible();
-  await claudeButton.click();
+  const { menu } = await openComposerAgentMenu(page);
+  const list = menu.getByTestId('avatar-model-list');
+  await expect(list).toBeVisible();
+  await expect(list.locator('.avatar-model-option.is-active')).toContainText(/default/i);
 
-  await expect(claudeButton).toHaveAttribute('aria-current', 'true');
-  const modelSelect = menu.locator('.avatar-model-section [role=\"combobox\"]').first();
-  await expect(modelSelect).toBeVisible();
-  await expect(modelSelect).toContainText(/default/i);
-  await modelSelect.click();
-  await page.getByRole('option', { name: /^Sonnet \(alias\)$/i }).click();
-  await expect(modelSelect).toContainText(/Sonnet/i);
+  await list.getByRole('radio', { name: /^GPT 5\.5$/i }).click();
+
+  const { menu: reopened } = await openComposerAgentMenu(page);
+  await expect(
+    reopened.getByTestId('avatar-model-list').locator('.avatar-model-option.is-active'),
+  ).toContainText(/GPT 5\.5/i);
 });
 
-test('[P0] project detail composer agent, model, and Plan mode switches carry into the next daemon run request', async ({ page }) => {
+test('[P0] project detail composer model and Plan mode switches carry into the next daemon run request', async ({ page }) => {
   test.setTimeout(60_000);
   const runRequestBodies: Array<Record<string, unknown>> = [];
   await page.route('**/api/runs', async (route) => {
@@ -1263,14 +1263,7 @@ test('[P0] project detail composer agent, model, and Plan mode switches carry in
   await createProject(page, 'Composer agent switch run context');
   await expectWorkspaceReady(page);
 
-  const { menu, claudeButton } = await openComposerAgentMenu(page);
-  await claudeButton.click();
-  const modelSelect = menu.locator('.avatar-model-section [role=\"combobox\"]').first();
-  await modelSelect.click();
-  await page.getByRole('option', { name: /^Sonnet \(alias\)$/i }).click();
-  await expect(modelSelect).toContainText(/Sonnet/i);
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.avatar-popover[role="dialog"]')).toHaveCount(0);
+  await pickComposerModel(page, /^GPT 5\.5$/i);
 
   await selectComposerSessionMode(page, 'Plan mode');
 
@@ -1282,8 +1275,8 @@ test('[P0] project detail composer agent, model, and Plan mode switches carry in
   ]);
 
   expect(runRequestBodies.length).toBeGreaterThan(0);
-  expect(runRequestBodies[0]?.agentId).toBe('claude');
-  expect(runRequestBodies[0]?.model).toBe('sonnet');
+  expect(runRequestBodies[0]?.agentId).toBe('codex');
+  expect(runRequestBodies[0]?.model).toBe('gpt-5.5');
   expect(runRequestBodies[0]?.sessionMode).toBe('plan');
 });
 
@@ -1383,10 +1376,10 @@ test('[P1] project detail composer keeps the selected mode across consecutive tu
   );
 });
 
-test('[P0] @critical project detail composer BYOK model switch persists from the agent menu', async ({ page }) => {
+test('[P0] @critical project detail composer reports the BYOK model read-only', async ({ page }) => {
   test.setTimeout(60_000);
   const config = {
-    mode: 'daemon',
+    mode: 'api',
     apiKey: 'sk-openai-test',
     apiProtocol: 'openai',
     apiVersion: '',
@@ -1432,25 +1425,15 @@ test('[P0] @critical project detail composer BYOK model switch persists from the
   await expectWorkspaceReady(page);
 
   const { menu } = await openComposerAgentMenu(page);
-  await menu.getByRole('button', { name: /API · BYOK|Use API/i }).click();
 
-  const modelSelect = menu.locator('.avatar-model-section [role="combobox"]').first();
-  await expect(modelSelect).toContainText('gpt-4o-2024-05-13');
-  await modelSelect.click();
-  const modelPopover = page.getByTestId('avatar-byok-model-popover');
-  await expect(modelPopover.getByRole('option', { name: /^gpt-4o-mini$/i })).toBeVisible();
-  await expect(modelPopover.getByRole('option', { name: /deepseek/i })).toHaveCount(0);
-  await expect(modelPopover.getByRole('option', { name: /MiniMax/i })).toHaveCount(0);
-  await modelPopover.getByRole('option', { name: /^gpt-4o-mini$/i }).click();
-
-  await expect(modelSelect).toContainText('gpt-4o-mini');
-  await expect.poll(async () => page.evaluate((key) => {
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  }, STORAGE_KEY)).toMatchObject({
-    mode: 'api',
-    model: 'gpt-4o-mini',
-  });
+  // BYOK is provider configuration, not a per-message choice: the composer
+  // popover reports the active model read-only and offers no picker. Changing
+  // it lives in Settings → Execution.
+  const readout = menu.locator('.avatar-model-section .avatar-static-value').first();
+  await expect(readout).toHaveText('gpt-4o-2024-05-13');
+  await expect(menu.locator('.avatar-model-section [role="combobox"]')).toHaveCount(0);
+  await expect(menu.getByTestId('avatar-model-list')).toHaveCount(0);
+  await expect(menu.getByRole('button', { name: /API · BYOK|Use API/i })).toHaveCount(0);
 });
 
 test('[P0] @critical project detail composer keeps Local CLI and BYOK model choices isolated', async ({ page }) => {
@@ -1501,34 +1484,26 @@ test('[P0] @critical project detail composer keeps Local CLI and BYOK model choi
   await createProject(page, 'Composer model mode isolation');
   await expectWorkspaceReady(page);
 
-  const { menu, claudeButton } = await openComposerAgentMenu(page);
-  await claudeButton.click();
-  const localModelSelect = menu.locator('.avatar-model-section [role="combobox"]').first();
-  await localModelSelect.click();
-  await page.getByRole('option', { name: /^Sonnet \(alias\)$/i }).click();
-  await expect(localModelSelect).toContainText(/Sonnet/i);
+  // Picking a Local CLI model must not touch the stored BYOK model: the two
+  // live in separate config slots (`agentModels[agentId].model` vs `model`).
+  await pickComposerModel(page, /^GPT 5\.5$/i);
 
-  await menu.getByRole('button', { name: /API · BYOK|Use API/i }).click();
-  const byokModelSelect = menu.locator('.avatar-model-section [role="combobox"]').first();
-  await expect(byokModelSelect).toContainText('gpt-4o-2024-05-13');
-  await byokModelSelect.click();
-  await page.getByTestId('avatar-byok-model-popover').getByRole('option', { name: /^gpt-4o-mini$/i }).click();
-  await expect(byokModelSelect).toContainText('gpt-4o-mini');
-
-  await menu.getByRole('button', { name: /Local CLI|Use local|本机 CLI|本地 CLI/i }).click();
-  await expect(claudeButton).toHaveAttribute('aria-current', 'true');
-  await expect(localModelSelect).toContainText(/Sonnet/i);
   await expect.poll(async () => page.evaluate((key) => {
     const raw = window.localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
   }, STORAGE_KEY)).toMatchObject({
     mode: 'daemon',
-    agentId: 'claude',
-    model: 'gpt-4o-mini',
+    agentId: 'codex',
+    model: 'gpt-4o-2024-05-13',
     agentModels: {
-      claude: { model: 'sonnet' },
+      codex: { model: 'gpt-5.5' },
     },
   });
+
+  const { menu } = await openComposerAgentMenu(page);
+  await expect(
+    menu.getByTestId('avatar-model-list').locator('.avatar-model-option.is-active'),
+  ).toContainText(/GPT 5\.5/i);
 });
 
 test('[P0] clearing the project design system removes designSystemId from the next run request', async ({ page }) => {
@@ -3145,10 +3120,16 @@ async function openEntrySettingsDialog(page: Page, sectionName?: RegExp | string
   return settingsDialog;
 }
 
-async function openComposerAgentMenu(page: Page): Promise<{
-  menu: Locator;
-  claudeButton: Locator;
-}> {
+/**
+ * Opens the composer's agent/model popover.
+ *
+ * The popover is a one-decision surface: pick the model for the agent that is
+ * already active. Which CLI agent runs, the execution mode, PATH rescan and
+ * reasoning effort are configuration and live in Settings → Execution, so
+ * tests that need a different agent/mode seed it into the stored config rather
+ * than clicking through this popover.
+ */
+async function openComposerAgentMenu(page: Page): Promise<{ menu: Locator }> {
   const composer = page.getByTestId('chat-composer');
   await expect(composer).toBeVisible();
   const trigger = composer.locator('.avatar-menu .avatar-agent-trigger');
@@ -3156,22 +3137,17 @@ async function openComposerAgentMenu(page: Page): Promise<{
   await trigger.click();
   const menu = page.locator('.avatar-popover[role="dialog"]');
   await expect(menu).toBeVisible();
+  return { menu };
+}
 
-  const claudeButton = menu
-    .locator('[data-testid="avatar-agent-option-claude"], .avatar-item', {
-      hasText: /Claude Code/i,
-    })
-    .first();
-  if (!(await claudeButton.isVisible().catch(() => false))) {
-    const localCliOption = menu.getByRole('button', {
-      name: /Local CLI|本机 CLI|本地 CLI|Use local/i,
-    });
-    if (await localCliOption.isVisible().catch(() => false)) {
-      await localCliOption.click();
-    }
-  }
-  await expect(claudeButton).toBeVisible({ timeout: 20_000 });
-  return { menu, claudeButton };
+/** Picks a model from the popover's always-expanded radio list. */
+async function pickComposerModel(page: Page, name: RegExp): Promise<void> {
+  const { menu } = await openComposerAgentMenu(page);
+  const list = menu.getByTestId('avatar-model-list');
+  await expect(list).toBeVisible({ timeout: 20_000 });
+  await list.getByRole('radio', { name }).click();
+  // Selecting a model dismisses the popover.
+  await expect(page.locator('.avatar-popover[role="dialog"]')).toHaveCount(0);
 }
 
 async function selectComposerSessionMode(page: Page, modeTitle: 'Ask mode' | 'Plan mode' | 'Design mode') {

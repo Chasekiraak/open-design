@@ -216,14 +216,12 @@ test('[P1] Avatar menu surfaces the signed-in plan/balance and upgrade entry', a
   await gotoVisualWorkspace(page);
 
   const menu = await prepareVisualAvatarMenu(page);
+  // Only the Open Design account card lives in the popover; picking a different
+  // local CLI is configuration and belongs to Settings → Execution.
   const agentOrder = await menu.locator('[data-testid^="avatar-agent-option-"]').evaluateAll(
     (nodes) => nodes.map((node) => (node as HTMLElement).dataset.testid),
   );
-  expect(agentOrder.slice(0, 3)).toEqual([
-    'avatar-agent-option-amr',
-    'avatar-agent-option-claude',
-    'avatar-agent-option-codex',
-  ]);
+  expect(agentOrder).toEqual(['avatar-agent-option-amr']);
   const row = menu.locator('.avatar-amr-row');
   await expect(row).toContainText('Open Design');
   await expect(row).toContainText('Plus');
@@ -243,7 +241,7 @@ test('[P1] Avatar menu surfaces the signed-in plan/balance and upgrade entry', a
   await captureVisual(page, 'visual-avatar-open-design-account');
 });
 
-test('[P2] captures the avatar local agent list surface', async ({ page }) => {
+test('[P2] captures the avatar reasoning readout surface', async ({ page }) => {
   await configureVisualPage(page, {
     agents: VISUAL_CLI_AGENTS,
     config: {
@@ -255,14 +253,15 @@ test('[P2] captures the avatar local agent list surface', async ({ page }) => {
   await gotoVisualWorkspace(page);
 
   const menu = await prepareVisualAvatarMenu(page);
-  await expect(menu.getByTestId('avatar-agent-option-claude')).toBeVisible();
-  await expect(menu.getByTestId('avatar-agent-option-codex')).toBeVisible();
+  // Reasoning effort is shown as a read-only readout; it is changed in
+  // Settings → Execution, not from the composer.
+  await expect(menu.locator('.avatar-static-value').first()).toBeVisible();
 
   await captureVisual(page, 'visual-avatar-local-agent-list');
   await captureVisualTarget(page, 'visual-avatar-local-agent-list-panel', menu);
 });
 
-test('[P2] captures the avatar local agent model dropdown surface', async ({ page }) => {
+test('[P2] captures the avatar local agent model list surface', async ({ page }) => {
   await configureVisualPage(page, {
     agents: VISUAL_CLI_AGENTS,
     config: {
@@ -274,13 +273,12 @@ test('[P2] captures the avatar local agent model dropdown surface', async ({ pag
   await gotoVisualWorkspace(page);
 
   const menu = await prepareVisualAvatarMenu(page);
-  const modelSelect = menu.locator('.avatar-model-section [role="combobox"]').first();
-  await expect(modelSelect).toBeVisible();
-  await modelSelect.click();
-  const popover = page.getByTestId('avatar-model-popover');
-  await expect(popover).toBeVisible();
-  await expect(page.getByTestId('avatar-model-search')).toBeVisible();
+  // Always-expanded radio list — no click-to-open dropdown, no search box.
+  const modelList = menu.getByTestId('avatar-model-list');
+  await expect(modelList).toBeVisible();
+  await expect(modelList.getByRole('radio', { name: /Sonnet \(alias\)/i })).toBeVisible();
+  await expect(modelList.locator('.avatar-model-option.is-active')).toHaveCount(1);
 
   await captureVisual(page, 'visual-project-avatar-model-dropdown');
-  await captureVisualTarget(page, 'visual-project-avatar-model-dropdown-popover', [modelSelect, popover]);
+  await captureVisualTarget(page, 'visual-project-avatar-model-dropdown-popover', [menu, modelList]);
 });

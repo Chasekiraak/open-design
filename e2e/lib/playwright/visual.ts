@@ -638,7 +638,9 @@ export async function prepareVisualWorkspacePreview(page: Page): Promise<void> {
 export async function prepareVisualAvatarMenu(page: Page): Promise<Locator> {
   await prepareVisualWorkspaceFileList(page);
   const menu = await openAvatarMenu(page);
-  await expect(menu.locator('.avatar-item').first()).toBeVisible();
+  // The composer popover is a model picker: the Open Design account card is
+  // conditional (Open Design has to be installed), so gate on the model list.
+  await expect(menu.locator('.avatar-model-section').first()).toBeVisible();
   await expect(page.getByTestId('design-files-tab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('design-file-row-index.html')).toBeVisible();
   await waitForVisualStable(page);

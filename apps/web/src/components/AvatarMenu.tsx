@@ -8,18 +8,9 @@ import { useT } from '../i18n';
 import { AgentIcon } from './AgentIcon';
 import { PlanBadge } from './PlanBadge';
 import { RemixIcon } from './RemixIcon';
-import { orderAgentsWithOpenDesignFirst } from './agentOrdering';
 import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
-import {
-  orderModelOptionsByAvailability,
-  SearchableModelSelect,
-} from './modelOptions';
+import { orderModelOptionsByAvailability } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode, ProviderModelOption } from '../types';
-import { SUGGESTED_MODELS_BY_PROTOCOL } from '../state/apiProtocols';
-import { KNOWN_PROVIDERS } from '../state/config';
-import { mergeProviderModelOptions, providerModelsCacheKey } from './SettingsDialog';
-import { apiProtocolLabel } from '../utils/apiProtocol';
-import { fetchProviderModels } from '../providers/provider-models';
 import {
   canUpgradeVelaPlan,
   fetchAmrWalletSnapshot,
@@ -27,11 +18,8 @@ import {
   formatVelaBalanceUsd,
   type VelaLoginStatus,
 } from '../providers/daemon';
-import {
-  amrPlansUrlForProfile,
-} from '../runtime/amr-guidance';
+import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import { isMacPlatform } from '../utils/platform';
-import { isVisibleLocalCliAgent } from '../utils/visibleAgents';
 
 interface Props {
   config: AppConfig;
@@ -58,20 +46,17 @@ function displayAgentName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
 }
 
 /**
- * Compact runtime control. Click opens a dropdown with current execution mode
- * and the agent picker (when in daemon mode).
+ * Compact runtime control. Click opens a dropdown with the Open Design account
+ * and the model picker for the active agent. Execution wiring that is not a
+ * per-message choice (execution mode, which CLI agent, PATH rescan, reasoning
+ * effort, BYOK model) lives in Settings → Execution; this popover stays a
+ * one-decision surface.
  */
 export function AvatarMenu({
   config,
   agents,
-  daemonLive,
-  onModeChange,
   onAgentChange,
   onAgentModelChange,
-  onApiModelChange,
-  providerModelsCache,
-  onOpenSettings,
-  onRefreshAgents,
   onBack,
   placement = 'down',
   onOpen,
@@ -87,7 +72,6 @@ export function AvatarMenu({
       return !v;
     });
   }
-  const [discoveredProviderModels, setDiscoveredProviderModels] = useState<Record<string, ProviderModelOption[]>>({});
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -125,13 +109,16 @@ export function AvatarMenu({
 
       const margin = 16;
       const gap = 8;
-      const width = Math.min(320, window.innerWidth - margin * 2);
+      const width = Math.min(208, window.innerWidth - margin * 2);
       const left = Math.min(
-        Math.max(rect.left + rect.width / 2 - width / 2, margin),
+        Math.max(rect.left, margin),
         window.innerWidth - width - margin,
       );
 
       if (placement === 'up') {
+        // The model list is unbounded (an agent can expose 30+ models), so the
+        // popover has to stay inside the viewport or the active row scrolls off
+        // the top of the screen and becomes unreachable.
         const available = Math.max(160, rect.top - margin - gap);
         setPopoverStyle({
           position: 'fixed',
@@ -181,15 +168,18 @@ export function AvatarMenu({
     return orderModelOptionsByAvailability(models);
   }, [currentAgent]);
 
-  const installedAgents = orderAgentsWithOpenDesignFirst(
-    agents.filter((a) => a.available && isVisibleLocalCliAgent(a)),
+  const amrAgent = useMemo(
+    () => agents.find((a) => a.id === 'amr' && a.available) ?? null,
+    [agents],
   );
-  const amrAvailable = installedAgents.some((a) => a.id === 'amr');
+  const amrAvailable = amrAgent !== null;
+  const showAmrAccountRow = config.mode === 'daemon' && amrAvailable;
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE;
 
   // Fetch the live account (plan tier + wallet balance) when the popover opens,
-  // whenever the Open Design runtime is installed — so the Open Design agent row
-  // can show the real plan/balance even when another agent is currently active.
+  // whenever the Open Design runtime is installed — so the Open Design account
+  // row can show the real plan/balance even when another agent is currently
+  // active.
   const [amrAccount, setAmrAccount] = useState<VelaLoginStatus | null>(null);
   const [amrWalletSnapshot, setAmrWalletSnapshot] =
     useState<AmrWalletSnapshot | null>(null);
@@ -249,6 +239,26 @@ export function AvatarMenu({
     event.currentTarget.href = attributedAmrUrl(amrPlansUrl, attribution, deviceId);
     setOpen(false);
   };
+  // Plan-gated models stay visible but are not selectable; clicking one routes
+  // to the plans page instead of silently choosing a model the run would reject.
+  const openAmrUpgrade = () => {
+    const attribution = recordAmrEntry(
+      analytics.track,
+      'avatar_amr_upgrade',
+      new Date(),
+      { metricsConsent: config.telemetry?.metrics === true },
+    );
+    const deviceId = amrHandoffDeviceId({
+      metricsConsent: config.telemetry?.metrics === true,
+      resolvedDeviceId: getResolvedDeviceId(),
+      installationId: config.installationId,
+    });
+    window.open(
+      attributedAmrUrl(amrPlansUrl, attribution, deviceId),
+      '_blank',
+      'noopener,noreferrer',
+    );
+  };
 
   // Resolve the user's model + reasoning pick for the active agent. Falls
   // back to the agent's first declared option (`'default'`) when the user
@@ -263,70 +273,18 @@ export function AvatarMenu({
   const currentModelLabel = currentAgent?.models?.find(
     (m) => m.id === currentModelId,
   )?.label;
+  const currentReasoningLabel =
+    currentAgent?.reasoningOptions?.find((option) => option.id === currentReasoningId)?.label ??
+    currentReasoningId;
+  const apiModelLabel = config.model?.trim() || null;
   // Selected-model readout shown inside the trigger (left of the Send button).
   // Hidden by default in CSS; composer-row contexts opt it in.
   const triggerModelLabel =
     config.mode === 'api'
-      ? config.model?.trim() || null
+      ? apiModelLabel
       : config.mode === 'daemon'
         ? currentModelLabel ?? currentModelId
         : null;
-
-  const apiProtocol = config.apiProtocol ?? 'openai';
-  const byokProvider =
-    KNOWN_PROVIDERS.find(
-      (provider) =>
-        provider.protocol === apiProtocol &&
-        (config.apiProviderBaseUrl
-          ? provider.baseUrl === config.apiProviderBaseUrl
-          : provider.baseUrl === config.baseUrl),
-    ) ?? KNOWN_PROVIDERS.find((provider) => provider.protocol === apiProtocol);
-  const byokProviderModelsKey = providerModelsCacheKey(
-    apiProtocol,
-    config.baseUrl ?? '',
-    config.apiKey ?? '',
-    config.apiVersion ?? '',
-  );
-  const fetchedByokModels = providerModelsCache?.[byokProviderModelsKey] ?? discoveredProviderModels[byokProviderModelsKey] ?? [];
-
-  useEffect(() => {
-    if (!open || config.mode !== 'api') return;
-    if (fetchedByokModels.length > 0) return;
-    if (apiProtocol === 'azure' || apiProtocol === 'ollama') return;
-    const baseUrl = config.baseUrl?.trim() ?? '';
-    const apiKey = config.apiKey?.trim() ?? '';
-    if (!baseUrl || !apiKey) return;
-    let cancelled = false;
-    void fetchProviderModels({
-      protocol: apiProtocol,
-      baseUrl,
-      apiKey,
-    }).then((result) => {
-      if (cancelled || !result.ok || !result.models?.length) return;
-      setDiscoveredProviderModels((current) => ({
-        ...current,
-        [byokProviderModelsKey]: result.models ?? [],
-      }));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    open,
-    config.mode,
-    apiProtocol,
-    config.baseUrl,
-    config.apiKey,
-    byokProviderModelsKey,
-    fetchedByokModels.length,
-  ]);
-
-  const byokModelOptions = mergeProviderModelOptions(
-    fetchedByokModels,
-    byokProvider?.models?.length
-      ? byokProvider.models
-      : SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol] ?? [],
-  );
 
   return (
     <div className={`avatar-menu avatar-menu--${placement}`} ref={wrapRef}>
@@ -359,166 +317,65 @@ export function AvatarMenu({
           aria-label={t('avatar.title')}
           style={popoverStyle}
         >
-          <div className="avatar-popover-head">
-            <span className="who">
-              {config.mode === 'daemon'
-                ? t('avatar.localCli')
-                : apiProtocolLabel(config.apiProtocol)}
-            </span>
-            <span className="where">
-              {config.mode === 'api'
-                ? safeHost(config.baseUrl)
-                : currentAgent
-                  ? `${displayAgentName(currentAgent)}${
-                      currentAgent.id !== 'amr' && currentAgent.version
-                        ? ` · ${currentAgent.version}`
-                        : ''
-                    }${
-                      currentModelLabel && currentModelId !== 'default'
-                        ? ` · ${currentModelLabel}`
-                        : ''
-                    }`
-                  : t('avatar.noAgentSelected')}
-            </span>
-          </div>
-          <button
-            type="button"
-            className={`avatar-item avatar-item--mode${config.mode === 'daemon' ? ' active' : ''}`}
-            aria-current={config.mode === 'daemon' ? 'true' : undefined}
-            onClick={() => {
-              if (config.mode === 'daemon') {
-                setOpen(false);
-                if (!daemonLive) {
-                  onOpenSettings('execution');
-                }
-                return;
-              }
-              onModeChange('daemon');
-              if (!daemonLive) {
-                // No daemon — let user know via settings page rather than
-                // silently failing.
-                setOpen(false);
-                onOpenSettings('execution');
-              }
-            }}
-            disabled={!daemonLive && config.mode !== 'daemon'}
-          >
-            <span className="avatar-item-icon" aria-hidden>
-              <RemixIcon name="file-code-line" size={15} />
-            </span>
-            <span>{t('avatar.useLocal')}</span>
-            {!daemonLive ? (
-              <span className="avatar-item-meta">{t('avatar.metaOffline')}</span>
-            ) : null}
-            {config.mode === 'daemon' ? (
-              <span className="avatar-item__check" aria-hidden>
-                <RemixIcon name="check-line" size={15} />
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            className={`avatar-item avatar-item--mode${config.mode === 'api' ? ' active' : ''}`}
-            aria-current={config.mode === 'api' ? 'true' : undefined}
-            onClick={() => onModeChange('api')}
-          >
-            <span className="avatar-item-icon" aria-hidden>
-              <RemixIcon name="link" size={15} />
-            </span>
-            <span>{t('avatar.useApi')}</span>
-            {config.mode === 'api' ? (
-              <span className="avatar-item__check" aria-hidden>
-                <RemixIcon name="check-line" size={15} />
-              </span>
-            ) : null}
-          </button>
-
-          {config.mode === 'daemon' && installedAgents.length > 0 ? (
-            <>
-              <div className="avatar-section-label">{t('avatar.codeAgent')}</div>
-              {installedAgents.map((a) => {
-                const selected = config.agentId === a.id;
-                // Open Design row carries the account (balance + plan) inline,
-                // plus Upgrade and Console actions, so it is a container rather
-                // than a single select button (which can't nest buttons/links).
-                if (a.id === 'amr') {
-                  return (
-                    <div
-                      key={a.id}
-                      className={`avatar-item avatar-amr-row${selected ? ' active' : ''}`}
-                      data-testid={`avatar-agent-option-${a.id}`}
-                    >
-                      <button
-                        type="button"
-                        className="avatar-amr-row__select"
-                        aria-current={selected ? 'true' : undefined}
-                        onClick={() => {
-                          recordAmrEntry(
-                            analytics.track,
-                            'avatar_amr_agent_card',
-                            new Date(),
-                            { metricsConsent: config.telemetry?.metrics === true },
-                          );
-                          onAgentChange('amr');
-                        }}
-                      >
-                        <AgentIcon id="amr" size={24} />
-                        <span className="avatar-amr-row__text">
-                          <span className="avatar-amr-row__name-row">
-                            <span className="avatar-amr-row__name">
-                              {displayAgentName(a)}
-                            </span>
-                            <PlanBadge plan={amrPlanDisplay} size="md" />
-                          </span>
-                          {amrBalanceLabel ? (
-                            <span className="avatar-amr-row__subtitle">
-                              <span className="avatar-amr-row__stat">
-                                <span className="avatar-amr-row__stat-label">
-                                  {t('settings.amrBalance')}
-                                </span>
-                                <span className="avatar-amr-row__stat-value">
-                                  {amrBalanceLabel}
-                                </span>
-                              </span>
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                      {amrCanUpgrade ? (
-                        <a
-                          className="avatar-amr-row__upgrade"
-                          href={amrPlansUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={handleAmrUpgradeClick}
-                        >
-                          {t('settings.amrUpgrade')}
-                        </a>
-                      ) : null}
-                    </div>
+          {showAmrAccountRow && amrAgent ? (
+            <div
+              className={`avatar-item avatar-amr-row${
+                config.agentId === 'amr' ? ' active' : ''
+              }`}
+              data-testid="avatar-agent-option-amr"
+            >
+              <button
+                type="button"
+                className="avatar-amr-row__select"
+                aria-current={config.agentId === 'amr' ? 'true' : undefined}
+                onClick={() => {
+                  recordAmrEntry(
+                    analytics.track,
+                    'avatar_amr_agent_card',
+                    new Date(),
+                    { metricsConsent: config.telemetry?.metrics === true },
                   );
-                }
-                return (
-                  <button
-                    type="button"
-                    key={a.id}
-                    className={`avatar-item${selected ? ' active' : ''}`}
-                    data-testid={`avatar-agent-option-${a.id}`}
-                    aria-current={selected ? 'true' : undefined}
-                    onClick={() => {
-                      onAgentChange(a.id);
-                      // Keep the popover open so the user can immediately
-                      // pick a model for the agent they just chose.
-                    }}
-                  >
-                    <AgentIcon id={a.id} size={18} />
-                    <span>{displayAgentName(a)}</span>
-                    {a.version ? (
-                      <span className="avatar-item-meta">{a.version}</span>
-                    ) : null}
-                  </button>
-                );
-              })}
+                  onAgentChange('amr');
+                }}
+              >
+                <AgentIcon id="amr" size={24} />
+                <span className="avatar-amr-row__text">
+                  <span className="avatar-amr-row__name-row">
+                    <span className="avatar-amr-row__name">
+                      {displayAgentName(amrAgent)}
+                    </span>
+                    <PlanBadge plan={amrPlanDisplay} size="md" />
+                  </span>
+                  {amrBalanceLabel ? (
+                    <span className="avatar-amr-row__subtitle">
+                      <span className="avatar-amr-row__stat">
+                        <span className="avatar-amr-row__stat-label">
+                          {t('settings.amrBalance')}
+                        </span>
+                        <span className="avatar-amr-row__stat-value">
+                          {amrBalanceLabel}
+                        </span>
+                      </span>
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+              {amrCanUpgrade ? (
+                <a
+                  className="avatar-amr-row__upgrade"
+                  href={amrPlansUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleAmrUpgradeClick}
+                >
+                  {t('settings.amrUpgrade')}
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+
+          {config.mode === 'daemon' ? (
+            <>
               {currentAgent &&
               currentAgent.available &&
               ((currentAgent.models && currentAgent.models.length > 0) ||
@@ -526,162 +383,103 @@ export function AvatarMenu({
                   currentAgent.reasoningOptions.length > 0)) ? (
                 <div className="avatar-model-section">
                   {currentAgent.models && currentAgent.models.length > 0 ? (
-                    <label className="avatar-select-row">
+                    <div className="avatar-select-row">
                       <span className="avatar-select-label">
                         {t('avatar.modelLabel')}
                       </span>
-                      <SearchableModelSelect
-                        className="inline-switcher__select avatar-select"
-                        value={currentModelId ?? ''}
-                        onChange={(value) =>
-                          onAgentModelChange(currentAgent.id, {
-                            model: value,
-                          })
-                        }
-                        models={currentAgentModelOptions}
-                        additionalOptions={
-                          currentModelId &&
-                          !currentAgent.models.some((m) => m.id === currentModelId)
-                            ? [
-                                {
-                                  value: currentModelId,
-                                  label: `${currentModelId} ${t('avatar.customSuffix')}` ,
-                                },
-                              ]
-                            : undefined
-                        }
-                        searchPlaceholder={t('newproj.modelSearch')}
-                        searchInputTestId="avatar-model-search"
-                        popoverTestId="avatar-model-popover"
-                        minSearchableOptions={5}
-                        disabledOptionHint={
-                          currentAgent.id === 'amr'
-                            ? (option) =>
-                                option.enabled === false
+                      <div
+                        className="avatar-model-list"
+                        role="radiogroup"
+                        aria-label={t('avatar.modelLabel')}
+                        data-testid="avatar-model-list"
+                      >
+                        {(currentModelId &&
+                        !currentAgent.models.some((m) => m.id === currentModelId)
+                          ? [
+                              ...currentAgentModelOptions,
+                              {
+                                id: currentModelId,
+                                label: `${currentModelId} ${t('avatar.customSuffix')}`,
+                              },
+                            ]
+                          : currentAgentModelOptions
+                        ).map((model) => {
+                          const active = model.id === currentModelId;
+                          const locked =
+                            currentAgent.id === 'amr' && model.enabled === false;
+                          return (
+                            <button
+                              key={model.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              aria-disabled={locked ? 'true' : undefined}
+                              title={
+                                locked
                                   ? t('settings.amrModelUpgradeHint')
-                                  : null
-                            : undefined
-                        }
-                        onDisabledOptionUpgrade={
-                          currentAgent.id === 'amr'
-                            ? () => {
-                                const attribution = recordAmrEntry(
-                                  analytics.track,
-                                  'avatar_amr_upgrade',
-                                  new Date(),
-                                  {
-                                    metricsConsent:
-                                      config.telemetry?.metrics === true,
-                                  },
-                                );
-                                const deviceId = amrHandoffDeviceId({
-                                  metricsConsent:
-                                    config.telemetry?.metrics === true,
-                                  resolvedDeviceId: getResolvedDeviceId(),
-                                  installationId: config.installationId,
-                                });
-                                window.open(
-                                  attributedAmrUrl(
-                                    amrPlansUrl,
-                                    attribution,
-                                    deviceId,
-                                  ),
-                                  '_blank',
-                                  'noopener,noreferrer',
-                                );
+                                  : undefined
                               }
-                            : undefined
-                        }
-                      />
-                    </label>
+                              className={`avatar-model-option${active ? ' is-active' : ''}${
+                                locked ? ' is-locked' : ''
+                              }`}
+                              data-testid={`avatar-model-option-${model.id}`}
+                              onClick={() => {
+                                if (locked) {
+                                  openAmrUpgrade();
+                                  return;
+                                }
+                                onAgentModelChange(currentAgent.id, { model: model.id });
+                                // Selection made — dismiss the popover right away.
+                                setOpen(false);
+                              }}
+                            >
+                              <span className="avatar-model-option-label">
+                                {model.label}
+                              </span>
+                              {locked ? (
+                                <RemixIcon
+                                  name="lock-line"
+                                  size={14}
+                                  className="avatar-model-option-check"
+                                />
+                              ) : active ? (
+                                <RemixIcon
+                                  name="check-line"
+                                  size={14}
+                                  className="avatar-model-option-check"
+                                />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ) : null}
                   {currentAgent.reasoningOptions &&
-                  currentAgent.reasoningOptions.length > 0 ? (
-                    <label className="avatar-select-row">
+                  currentAgent.reasoningOptions.length > 0 &&
+                  currentReasoningLabel ? (
+                    <div className="avatar-select-row">
                       <span className="avatar-select-label">
                         {t('avatar.reasoningLabel')}
                       </span>
-                      <select
-                        className="avatar-select"
-                        value={currentReasoningId ?? ''}
-                        onChange={(e) =>
-                          onAgentModelChange(currentAgent.id, {
-                            reasoning: e.target.value,
-                          })
-                        }
-                      >
-                        {currentAgent.reasoningOptions.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <div className="avatar-static-value">{currentReasoningLabel}</div>
+                    </div>
                   ) : null}
                 </div>
               ) : null}
-              <button
-                type="button"
-                className="avatar-item"
-                onClick={() => {
-                  onRefreshAgents();
-                }}
-              >
-                <span className="avatar-item-icon" aria-hidden>
-                  <RemixIcon name="refresh-line" size={15} />
-                </span>
-                <span>{t('avatar.rescan')}</span>
-              </button>
             </>
           ) : null}
 
-          {config.mode === 'api' ? (
+          {config.mode === 'api' && apiModelLabel ? (
             <div className="avatar-model-section">
-              <label className="avatar-select-row">
+              <div className="avatar-select-row">
                 <span className="avatar-select-label">
                   {t('avatar.modelLabel')}
                 </span>
-                <SearchableModelSelect
-                  className="inline-switcher__select avatar-select"
-                  value={config.model ?? ''}
-                  onChange={(value) => onApiModelChange?.(value)}
-                  models={byokModelOptions.map((m) => ({ ...m, label: m.label }))}
-                  additionalOptions={
-                    config.model && !byokModelOptions.some((m) => m.id === config.model)
-                      ? [
-                          {
-                            value: config.model,
-                            label: byokProvider?.models?.includes(config.model)
-                              ? config.model
-                              : `${config.model} ${t('avatar.customSuffix')}`,
-                          },
-                        ]
-                      : undefined
-                  }
-                  searchPlaceholder={t('newproj.modelSearch')}
-                  searchInputTestId="avatar-byok-model-search"
-                  popoverTestId="avatar-byok-model-popover"
-                  minSearchableOptions={5}
-                />
-              </label>
+                <div className="avatar-static-value">{apiModelLabel}</div>
+              </div>
             </div>
           ) : null}
-
-          <div style={{ height: 1, background: 'var(--border-soft)', margin: '4px 6px' }} />
-
-          <button
-            type="button"
-            className="avatar-item avatar-item--execution-settings"
-            onClick={() => {
-              setOpen(false);
-              onOpenSettings('execution');
-            }}
-          >
-            <span className="avatar-item-icon" aria-hidden>
-              <RemixIcon name="settings-3-line" size={15} />
-            </span>
-            <span>{t('inlineSwitcher.openFullSettings')}</span>
-          </button>
 
           {onBack ? (
             <>
@@ -705,12 +503,4 @@ export function AvatarMenu({
       ) : null}
     </div>
   );
-}
-
-function safeHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
