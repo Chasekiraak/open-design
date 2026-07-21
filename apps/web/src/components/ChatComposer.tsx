@@ -263,7 +263,12 @@ interface Props {
   onOpenPetSettings?: () => void;
   researchAvailable?: boolean;
   projectMetadata?: ProjectMetadata;
-  onProjectMetadataChange?: (metadata: ProjectMetadata) => void;
+  // Fired after the daemon accepts a metadata PATCH, with the authoritative
+  // post-patch project (fresh `updatedAt` included). Callers must replace
+  // their whole project copy with it: forwarding only the metadata onto a
+  // stale copy lets an older detail snapshot win recency comparisons and
+  // shadow the change (e.g. the working-dir label never updating).
+  onProjectMetadataChange?: (updated: Project) => void;
   activeWorkspaceContext?: WorkspaceContextItem | null;
   initialWorkspaceContexts?: WorkspaceContextItem[];
   workspaceContexts?: WorkspaceContextItem[];
@@ -1345,7 +1350,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           onShowToast?.(t('homeWorkingDir.applyFailed'));
           return false;
         }
-        onProjectMetadataChange?.(result.metadata);
+        onProjectMetadataChange?.(result);
         for (const trimmed of trimmedDirs) void rememberRecentDir(trimmed);
       }
       return trackedByDir;
@@ -1675,7 +1680,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         onShowToast?.(t('homeWorkingDir.applyFailed'));
         return false;
       }
-      onProjectMetadataChange?.(result.metadata);
+      onProjectMetadataChange?.(result);
       setWorkspaceLinkedDirAdds((current) => {
         const { [id]: _removed, ...rest } = current;
         return rest;
@@ -2149,7 +2154,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         onShowToast?.(t('homeWorkingDir.applyFailed'));
         return;
       }
-      onProjectMetadataChange?.(result.metadata);
+      onProjectMetadataChange?.(result);
       const promotedDir = dir.trim();
       setPromotedWorkspaceContextDir(
         selectedWorkspaceContextDirs.includes(promotedDir) ? promotedDir : null,
@@ -2178,7 +2183,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       const result = await patchProject(projectId, { metadata });
       if (result?.metadata) {
         setPromotedWorkspaceContextDir(null);
-        onProjectMetadataChange?.(result.metadata);
+        onProjectMetadataChange?.(result);
       }
     }
 

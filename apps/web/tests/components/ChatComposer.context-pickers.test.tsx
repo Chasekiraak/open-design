@@ -520,7 +520,9 @@ describe('ChatComposer context pickers', () => {
         projectMetadata: metadata,
         onProjectMetadataChange: (next) => {
           onProjectMetadataChange(next);
-          setMetadata(next);
+          // main 把回调从 ProjectMetadata 拓宽成整个 Project(#5379 之后的
+          // 工作目录流程需要 project 层字段),这里的受控 state 仍只关心 metadata。
+          if (next.metadata) setMetadata(next.metadata);
         },
       });
     }
@@ -546,7 +548,9 @@ describe('ChatComposer context pickers', () => {
     });
     expect(projectPatchBodies()[1]?.metadata?.linkedDirs).toEqual(['/Users/me/work-dir']);
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: ['/Users/me/work-dir'] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: ['/Users/me/work-dir'] }),
+      }),
     );
   });
 
@@ -576,7 +580,9 @@ describe('ChatComposer context pickers', () => {
       expect(screen.queryByText('reference-dir')).toBeNull();
     });
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: [] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: [] }),
+      }),
     );
   });
 
@@ -634,11 +640,13 @@ describe('ChatComposer context pickers', () => {
     });
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        metadata: expect.objectContaining({
         linkedDirs: [
           '/Users/me/work-dir',
           '/tmp/open-design/reference-a',
           '/tmp/open-design/reference-b',
         ],
+      }),
       }),
     );
   });
@@ -692,7 +700,9 @@ describe('ChatComposer context pickers', () => {
         projectMetadata: metadata,
         onProjectMetadataChange: (next) => {
           onProjectMetadataChange(next);
-          setMetadata(next);
+          // main 把回调从 ProjectMetadata 拓宽成整个 Project(#5379 之后的
+          // 工作目录流程需要 project 层字段),这里的受控 state 仍只关心 metadata。
+          if (next.metadata) setMetadata(next.metadata);
         },
         onSend,
       });
@@ -738,7 +748,9 @@ describe('ChatComposer context pickers', () => {
     expect(projectPatchBodies()[1]?.metadata?.linkedDirs).toEqual([]);
     expect(screen.queryByTestId('staged-contexts')?.textContent ?? '').not.toContain('reference-dir');
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: [] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: [] }),
+      }),
     );
   });
 
@@ -816,7 +828,9 @@ describe('ChatComposer context pickers', () => {
         projectMetadata: metadata,
         onProjectMetadataChange: (next) => {
           onProjectMetadataChange(next);
-          setMetadata(next);
+          // main 把回调从 ProjectMetadata 拓宽成整个 Project(#5379 之后的
+          // 工作目录流程需要 project 层字段),这里的受控 state 仍只关心 metadata。
+          if (next.metadata) setMetadata(next.metadata);
         },
       });
     }
@@ -846,7 +860,9 @@ describe('ChatComposer context pickers', () => {
     expect(projectPatchBodies()[1]?.metadata?.linkedDirs).toEqual(['/Users/me/work-dir']);
     expect(screen.queryByTestId('staged-contexts')?.textContent ?? '').not.toContain('reference-dir');
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: ['/Users/me/work-dir'] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: ['/Users/me/work-dir'] }),
+      }),
     );
   });
 
@@ -878,7 +894,9 @@ describe('ChatComposer context pickers', () => {
         projectMetadata: metadata,
         onProjectMetadataChange: (next) => {
           onProjectMetadataChange(next);
-          setMetadata(next);
+          // main 把回调从 ProjectMetadata 拓宽成整个 Project(#5379 之后的
+          // 工作目录流程需要 project 层字段),这里的受控 state 仍只关心 metadata。
+          if (next.metadata) setMetadata(next.metadata);
         },
       });
     }
@@ -898,7 +916,9 @@ describe('ChatComposer context pickers', () => {
     expect(projectPatchBodies()[0]?.metadata?.linkedDirs).toEqual([]);
     expect(screen.queryByTestId('staged-contexts')?.textContent ?? '').not.toContain('reference-dir');
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: [] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: [] }),
+      }),
     );
   });
 
@@ -947,7 +967,9 @@ describe('ChatComposer context pickers', () => {
     });
     expect(projectPatchBodies()).toHaveLength(1);
     expect(onProjectMetadataChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ linkedDirs: ['/Users/me/shared'] }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({ linkedDirs: ['/Users/me/shared'] }),
+      }),
     );
   });
 

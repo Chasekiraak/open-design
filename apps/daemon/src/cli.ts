@@ -64,6 +64,7 @@ const MEDIA_GENERATE_STRING_FLAGS = new Set([
   'surface',
   'model',
   'prompt',
+  'prompt-file',
   'output',
   'aspect',
   'length',
@@ -204,6 +205,14 @@ const AMR_STRING_FLAGS = new Set(['daemon-url']);
 const AMR_BOOLEAN_FLAGS = new Set(['help', 'h', 'json', 'refresh']);
 const COLLAB_STRING_FLAGS = new Set(['daemon-url', 'project', 'member', 'name', 'role', 'design-system']);
 const COLLAB_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
+const MESSAGE_CENTER_STRING_FLAGS = new Set([
+  'daemon-url',
+  'locale',
+  'filter',
+  'limit',
+  'cursor',
+]);
+const MESSAGE_CENTER_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 const PROJECT_STRING_FLAGS = new Set([
   'daemon-url', 'name', 'skill', 'design-system', 'plugin', 'metadata-json',
   'pending-prompt', 'project', 'conversation', 'message', 'prompt',
@@ -227,6 +236,14 @@ const TEMPLATES_STRING_FLAGS = new Set([
   'daemon-url', 'name', 'description',
 ]);
 const TEMPLATES_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
+// `od deploy …` posts to /api/projects/:id/deploy. The CLI form is the
+// embeddability contract: external agents can deploy a project file to
+// Vercel or Cloudflare Pages without going through the web UI.
+const DEPLOY_STRING_FLAGS = new Set([
+  'daemon-url', 'file', 'provider', 'target',
+  'cf-zone-id', 'cf-zone-name', 'cf-domain-prefix',
+]);
+const DEPLOY_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 // `od automation …` mirrors the Automations tab. Same surface, same
 // /api/routines store. The CLI form is the embeddability contract:
 // external agents (hermes-agent, openclaw, etc.) can drive Open Design
@@ -327,6 +344,7 @@ const SUBCOMMAND_MAP = {
   mcp: runMcp,
   amr: runAmr,
   collab: runCollab,
+  'message-center': runMessageCenter,
   research: runResearch,
   plugin: runPlugin,
   ui: runUi,
@@ -344,6 +362,7 @@ const SUBCOMMAND_MAP = {
   templates: runTemplates,
   conversation: runConversation,
   chat: runChat,
+  deploy: runDeploy,
   daemon: runDaemon,
   atoms: runAtoms,
   skills: runSkills,
@@ -657,6 +676,10 @@ function printRootHelp() {
       Automations tab, so an external agent (hermes, openclaw, ...) can
       schedule, trigger, or harvest results from a routine without
       opening the web UI.
+
+  od message-center <list|read|read-all> [args]
+      Read and acknowledge message-center inbox items through the same
+      daemon endpoints the bell UI uses.
 
   od memory tree <list|view|edit|move> [args]
       Inspect and edit the memory tree that is injected into agent prompts.
@@ -1015,6 +1038,168 @@ async function runCollab(args) {
       process.exit(2);
   }
 }
+// Subcommand: od message-center …
+// ---------------------------------------------------------------------------
+
+async function runMessageCenter(args) {
+  const sub = args[0];
+  if (!sub || sub === 'help' || args.includes('--help') || args.includes('-h')) {
+    printMessageCenterHelp();
+    process.exit(sub === 'help' || args.includes('--help') || args.includes('-h') ? 0 : 2);
+  }
+  const rest = args.slice(1);
+  let flags;
+  try {
+    flags = parseFlags(rest, {
+      string: MESSAGE_CENTER_STRING_FLAGS,
+      boolean: MESSAGE_CENTER_BOOLEAN_FLAGS,
+    });
+  } catch (err) {
+    console.error(err.message);
+    printMessageCenterHelp();
+    process.exit(2);
+  }
+  const base = await cliDaemonBaseUrl(flags);
+  switch (sub) {
+    case 'list':
+      return runMessageCenterList(rest, flags, base);
+    case 'read':
+      return runMessageCenterRead(rest, flags, base);
+    case 'read-all':
+      return runMessageCenterReadAll(flags, base);
+    default:
+      console.error(`unknown subcommand: od message-center ${sub}`);
+      printMessageCenterHelp();
+      process.exit(2);
+  }
+}
+
+async function runMessageCenterList(rawArgs, flags, base) {
+  const limit = flags.limit == null ? 100 : Number(flags.limit);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    console.error('--limit must be a positive integer');
+    process.exit(2);
+  }
+  const filter = flags.filter == null ? 'all' : String(flags.filter);
+  if (filter !== 'all' && filter !== 'unread' && filter !== 'read') {
+    console.error('--filter must be one of: all | unread | read');
+    process.exit(2);
+  }
+  const query = new URLSearchParams({
+    locale: messageCenterApiLocale(flags.locale == null ? 'en' : String(flags.locale)),
+    filter,
+    limit: String(limit),
+  });
+  if (typeof flags.cursor === 'string' && flags.cursor.length > 0) query.set('cursor', flags.cursor);
+  let resp;
+  try {
+    resp = await fetch(`${base}/api/integrations/vela/message-center/messages?${query}`);
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
+  if (!resp.ok) return structuredHttpFailure(resp);
+  const payload = await resp.json();
+  if (flags.json) {
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  if (messages.length === 0) {
+    console.log('No message-center messages.');
+    return;
+  }
+  for (const message of messages) {
+    const status = message?.readAt ? 'read' : 'unread';
+    const id = typeof message?.id === 'string' ? message.id : '(missing-id)';
+    const typeName = typeof message?.typeName === 'string' ? message.typeName : '-';
+    const publishedAt = typeof message?.publishedAt === 'string' ? message.publishedAt : '-';
+    const title = typeof message?.title === 'string' ? message.title : '';
+    console.log(`${id}\t${status}\t${typeName}\t${publishedAt}\t${title}`);
+  }
+  if (payload?.nextCursor) console.log(`nextCursor\t${payload.nextCursor}`);
+  if (typeof payload?.unreadCount === 'number') console.log(`unreadCount\t${payload.unreadCount}`);
+}
+
+async function runMessageCenterRead(rawArgs, flags, base) {
+  const id = positionalArgs(rawArgs, MESSAGE_CENTER_STRING_FLAGS)[0];
+  if (!id) {
+    console.error('Usage: od message-center read <id> [--json] [--daemon-url <url>]');
+    process.exit(2);
+  }
+  let resp;
+  try {
+    resp = await fetch(`${base}/api/integrations/vela/message-center/messages/${encodeURIComponent(id)}/read`, {
+      method: 'POST',
+    });
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
+  if (!resp.ok) return structuredHttpFailure(resp);
+  const bodyText = await resp.text();
+  const payload = bodyText ? safeJsonParse(bodyText) : null;
+  if (flags.json) {
+    process.stdout.write(
+      JSON.stringify(payload ?? { ok: true, id }, null, 2) + '\n',
+    );
+    return;
+  }
+  console.log(`Marked message as read\t${id}`);
+}
+
+async function runMessageCenterReadAll(flags, base) {
+  let resp;
+  try {
+    resp = await fetch(`${base}/api/integrations/vela/message-center/read-all`, {
+      method: 'POST',
+    });
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
+  if (!resp.ok) return structuredHttpFailure(resp);
+  const bodyText = await resp.text();
+  const payload = bodyText ? safeJsonParse(bodyText) : null;
+  if (flags.json) {
+    process.stdout.write(
+      JSON.stringify(payload ?? { ok: true }, null, 2) + '\n',
+    );
+    return;
+  }
+  console.log('Marked all message-center messages as read');
+}
+
+function printMessageCenterHelp() {
+  console.log(`Usage:
+  od message-center list [--locale <locale>] [--filter <all|unread|read>] [--limit <n>] [--cursor <token>] [--json] [--daemon-url <url>]
+  od message-center read <id> [--json] [--daemon-url <url>]
+  od message-center read-all [--json] [--daemon-url <url>]
+
+Mirrors the message-center inbox surface exposed in the web UI through the
+same /api/integrations/vela/message-center daemon routes.
+
+Options:
+  --locale <locale>     Defaults to en. Mapped to the daemon API locale shape.
+  --filter <value>      all | unread | read (default: all).
+  --limit <n>           Positive integer page size (default: 100).
+  --cursor <token>      Forward a server pagination cursor for list.
+  --json                Emit raw JSON for scripts and external agents.
+  --daemon-url <url>    Open Design daemon HTTP base.`);
+}
+
+function messageCenterApiLocale(locale) {
+  const mapping = { en: 'en-US', 'es-ES': 'es', 'pt-BR': 'pt' };
+  return mapping[locale] ?? locale;
+}
+
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Subcommand: od research …
@@ -1151,10 +1336,16 @@ async function runMediaGenerate(rawArgs) {
     process.exit(2);
   }
 
+  // Long-form media prompts (detailed image/video descriptions, program-
+  // generated prompts) arrive via --prompt-file <path|-> (stdin) per the CLI
+  // contract; readPromptFromFlags prefers an inline --prompt and otherwise reads
+  // the file/stdin, matching od run / od brand / od automation.
+  const prompt = await readPromptFromFlags(flags);
+
   const body = {
     surface,
     model: flags.model,
-    prompt: flags.prompt,
+    prompt,
     output: flags.output,
     aspect: flags.aspect,
     voice: flags.voice,
@@ -1465,6 +1656,7 @@ Required:
 
 Common options:
   --prompt "<text>"         Generation prompt. ElevenLabs SFX prompts must stay under 450 characters.
+  --prompt-file <path|->     Read the prompt from a file, or - for stdin (for long-form prompts).
   --output <filename>       File to write under the project. Auto-named if omitted.
   --aspect 1:1|16:9|9:16|4:3|3:4
   --length <seconds>        Video length.
@@ -10614,4 +10806,91 @@ async function runAutomation(args) {
       printAutomationHelp();
       process.exit(2);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Subcommand: od deploy
+// ---------------------------------------------------------------------------
+
+async function runDeploy(args) {
+  let flags;
+  try {
+    flags = parseFlags(args, { string: DEPLOY_STRING_FLAGS, boolean: DEPLOY_BOOLEAN_FLAGS });
+  } catch (err) {
+    console.error(err.message);
+    process.exit(2);
+  }
+  if (flags.help || flags.h) {
+    console.log(`Usage: od deploy <projectId> --file <fileName> [options]
+
+Required:
+  <projectId>              Project id to deploy.
+  --file <fileName>        File name within the project to deploy.
+
+Options:
+  --provider vercel-self|cloudflare-pages   Deploy provider (default: vercel-self).
+  --target preview|production               Deployment target (default: server decides).
+  --cf-zone-id <id>                         Cloudflare Pages: zone id.
+  --cf-zone-name <name>                     Cloudflare Pages: zone name.
+  --cf-domain-prefix <prefix>               Cloudflare Pages: domain prefix.
+  --json                                    Emit raw JSON response.
+  --daemon-url <url>                        Open Design daemon HTTP base.`);
+    return;
+  }
+
+  // Extract positional projectId (first non-flag argument)
+  const positionals = positionalArgs(args, DEPLOY_STRING_FLAGS);
+  const projectId = positionals[0] ?? '';
+  if (!projectId) {
+    console.error('projectId is required: od deploy <projectId> --file <fileName>');
+    process.exit(2);
+  }
+
+  const fileName = typeof flags.file === 'string' ? flags.file.trim() : '';
+  if (!fileName) {
+    console.error('--file <fileName> is required');
+    process.exit(2);
+  }
+
+  // Validate --target locally before making any HTTP request
+  const targetRaw = flags.target;
+  if (targetRaw !== undefined && targetRaw !== 'preview' && targetRaw !== 'production') {
+    console.error(`invalid --target value: "${targetRaw}" (must be "preview" or "production")`);
+    process.exit(2);
+  }
+
+  const providerId = typeof flags.provider === 'string' ? flags.provider : 'vercel-self';
+
+  const body: Record<string, unknown> = { fileName, providerId };
+
+  // Only include target when explicitly supplied
+  if (targetRaw !== undefined) {
+    body.target = targetRaw;
+  }
+
+  // Include cloudflarePages object only when at least one CF flag is present
+  const zoneId = typeof flags['cf-zone-id'] === 'string' ? flags['cf-zone-id'] : undefined;
+  const zoneName = typeof flags['cf-zone-name'] === 'string' ? flags['cf-zone-name'] : undefined;
+  const domainPrefix = typeof flags['cf-domain-prefix'] === 'string' ? flags['cf-domain-prefix'] : undefined;
+  if (zoneId !== undefined || zoneName !== undefined || domainPrefix !== undefined) {
+    body.cloudflarePages = { zoneId, zoneName, domainPrefix };
+  }
+
+  const base = await cliDaemonBaseUrl(flags);
+  let resp;
+  try {
+    resp = await fetch(`${base}/api/projects/${encodeURIComponent(projectId)}/deploy`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
+  if (!resp.ok) return structuredHttpFailure(resp);
+  const data = await resp.json();
+  if (flags.json) return process.stdout.write(JSON.stringify(data) + '\n');
+  const url = data?.url ?? data?.deploymentUrl ?? '';
+  console.log(`[deploy] ${data?.id ?? 'done'}${url ? ` → ${url}` : ''}`);
 }

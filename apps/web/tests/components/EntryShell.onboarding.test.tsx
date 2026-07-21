@@ -335,6 +335,56 @@ describe('EntryShell design systems view', () => {
   });
 });
 
+describe('EntryShell route scroll isolation', () => {
+  afterEach(() => {
+    window.localStorage.removeItem('od.entry.railOpen');
+  });
+
+  function entryScrollContainer(): HTMLElement {
+    const scrollContainer = document.querySelector('.entry-main--scroll');
+    expect(scrollContainer).toBeInstanceOf(HTMLElement);
+    if (!(scrollContainer instanceof HTMLElement)) {
+      throw new Error('entry scroll container not found');
+    }
+    return scrollContainer;
+  }
+
+  // #5517 reshaped the rail: the flat `entry-nav-projects` button is gone, and
+  // its Drafts / All-projects replacements only mount under a workspace
+  // context this render has none of. Design systems is the nearest rail
+  // destination that survives in every state, and the reset it exercises is the
+  // same shared `.entry-main--scroll` element, so the spec's subject is intact.
+  it('resets the shared scroll offset when navigating away from Home', async () => {
+    window.localStorage.setItem('od.entry.railOpen', 'true');
+    renderHome();
+
+    const scrollContainer = entryScrollContainer();
+    scrollContainer.scrollTop = 280;
+    fireEvent.click(screen.getByTestId('entry-nav-design-systems'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('entry-view-design-systems').getAttribute('data-active'),
+      ).toBe('true');
+    });
+    expect(scrollContainer.scrollTop).toBe(0);
+  });
+
+  it('resets the shared scroll offset when navigating from Projects to Home', async () => {
+    window.localStorage.setItem('od.entry.railOpen', 'true');
+    renderHome({}, '/projects');
+
+    const scrollContainer = entryScrollContainer();
+    scrollContainer.scrollTop = 360;
+    fireEvent.click(screen.getByTestId('entry-nav-home'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('entry-view-home').getAttribute('data-active')).toBe('true');
+    });
+    expect(scrollContainer.scrollTop).toBe(0);
+  });
+});
+
 describe('EntryShell new project rail', () => {
   // The rail's "+ New project" button (`entry-nav-new-project`) is gone in
   // #5517's rail: `EntryShell` still passes `onNewProject` — with its
@@ -1388,6 +1438,44 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
       .map(([, payload]) => payload as Record<string, unknown>)
       .filter((payload) => payload.element === 'about_you_submit');
     expect(aboutYouSubmits).toHaveLength(1);
+  });
+
+  it('uses provider preferences instead of the first upstream model during BYOK onboarding', async () => {
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({ loggedIn: false, profile: 'prod', user: null, configPath: '/x' });
+      }
+      if (url.endsWith('/api/provider/models') && init?.method === 'POST') {
+        return jsonResponse({
+          ok: true,
+          kind: 'success',
+          latencyMs: 10,
+          models: [
+            { id: 'upstream-first', label: 'Upstream First' },
+            { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch;
+    const props = renderOnboarding({
+      config: baseConfig({
+        apiProtocol: 'anthropic',
+        apiKey: 'test-api-key',
+        baseUrl: 'https://api.anthropic.com',
+        model: '',
+        apiProviderBaseUrl: 'https://api.anthropic.com',
+      }),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Bring your own key/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Fetch models/i }));
+
+    await waitFor(() => {
+      expect(props.onApiModelChange).toHaveBeenCalledWith('claude-sonnet-4-5');
+    });
+    expect(props.onApiModelChange).not.toHaveBeenCalledWith('upstream-first');
   });
 
   it('persists the BYOK config before finishing onboarding', async () => {

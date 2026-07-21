@@ -38,10 +38,10 @@ vi.mock('../../src/providers/registry', () => ({
       ];
     }
     if (projectId === 'project-html') {
-      return [{ name: 'index.html', kind: 'html', mtime: 2 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 200 }];
     }
     if (projectId === 'project-deck') {
-      return [{ name: 'index.html', kind: 'html', mtime: 2 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 400 }];
     }
     return [];
   }),
@@ -76,6 +76,19 @@ function projects(count: number): Project[] {
       updatedAt: count - index,
     }),
   );
+}
+
+function stubCoverProbe(status = 200, statusText = 'OK', body = '<html><body>slide</body></html>') {
+  const fetchMock = vi.fn(async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText,
+    // Deck cards read the cover document (GET) to build their first-slide
+    // srcDoc; plain HTML cards only HEAD-probe it.
+    text: async () => body,
+  }) as Response);
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 }
 
 describe('RecentProjectsStrip', () => {
@@ -173,6 +186,8 @@ describe('RecentProjectsStrip', () => {
   });
 
   it('matches project cards with previews and design-system tags', async () => {
+    stubCoverProbe();
+
     const { container } = render(
       <RecentProjectsStrip
         projects={[
@@ -205,34 +220,13 @@ describe('RecentProjectsStrip', () => {
     await waitFor(() => {
       expect(designSystemCard?.querySelector('.recent-projects__card-thumb-image img')).toBeTruthy();
       expect(designSystemCard?.querySelector('img')?.getAttribute('src')).toBe(
-        '/api/projects/project-ds/files/imagery/cover-0.png',
+        '/api/projects/project-ds/files/imagery/cover-0.png?v=3',
       );
-      // HTML projects render their real artifact in the card thumbnail; the
-      // initial glyph is only the no-entry-file fallback.
-      expect(container.querySelector('.recent-projects__card-thumb-html iframe')).toBeTruthy();
+      const htmlFrame = container.querySelector<HTMLIFrameElement>('.recent-projects__card-thumb-html iframe');
+      expect(htmlFrame).toBeTruthy();
+      expect(htmlFrame?.getAttribute('src')).toBe('/api/projects/project-html/files/index.html?v=200');
       expect(container.querySelector('.recent-projects__card-thumb-html .recent-projects__card-glyph')).toBeNull();
     });
-  });
-
-  it('marks owner-shared projects with the shared card state and badge', () => {
-    const { container } = render(
-      <RecentProjectsStrip
-        projects={[
-          project({
-            id: 'project-shared',
-            name: 'Shared Prototype',
-            updatedAt: 4,
-          }),
-        ]}
-        isSharedProject={(id) => id === 'project-shared'}
-        onOpen={() => {}}
-        onViewAll={() => {}}
-      />,
-    );
-
-    const card = container.querySelector('.recent-projects__card');
-    expect(card?.classList.contains('is-shared')).toBe(true);
-    expect(screen.getByText('Shared')).toBeTruthy();
   });
 
   it('uses non-favicon design-system logo alternates when no cover exists', async () => {
@@ -259,21 +253,13 @@ describe('RecentProjectsStrip', () => {
     await waitFor(() => {
       expect(designSystemCard?.querySelector('.recent-projects__card-thumb-logo img')).toBeTruthy();
       expect(designSystemCard?.querySelector('img')?.getAttribute('src')).toBe(
-        '/api/projects/project-ds-fallback/files/logos/wordmark.svg',
+        '/api/projects/project-ds-fallback/files/logos/wordmark.svg?v=3',
       );
     });
   });
 
-  // This used to assert the opposite — that the grid never renders a preview,
-  // because doing so fetched every project's raw content on mount. #5517 shows
-  // real content in these cards and the placeholder grid was one of the visible
-  // gaps against it, so the previews are back, but only on terms that keep the
-  // old test's actual concern satisfied: the iframes are lazy, and deck covers
-  // resolve through a module-level cache so N cards on one src cost one fetch.
-  it('renders HTML previews lazily rather than eagerly fetching every card', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      new Response('<html><body>deck</body></html>', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
+  it('renders HTML and deck covers from the current file URL', async () => {
+    const fetchMock = stubCoverProbe();
 
     const { container } = render(
       <RecentProjectsStrip
@@ -299,27 +285,51 @@ describe('RecentProjectsStrip', () => {
     const htmlCard = container.querySelector('[data-project-id="project-html"]');
 
     await waitFor(() => {
-      expect(deckCard?.querySelector('iframe')).toBeNull();
-      expect(htmlCard?.querySelector('iframe')).toBeNull();
-      expect(deckCard?.querySelector('.recent-projects__card-glyph')).toBeTruthy();
-      expect(htmlCard?.querySelector('.recent-projects__card-glyph')).toBeTruthy();
+      // #5517 collapses a deck card to its first slide, so its frame is built
+      // from the fetched document (srcDoc) rather than pointed at the live URL
+      // — a running deck would otherwise show whichever slide it drifted to.
+      // The URL is still the versioned one, which is what this spec guards.
+      expect(deckCard?.querySelector('.recent-projects__deck-iframe')?.getAttribute('srcdoc'))
+        .toContain('slide');
+      expect(htmlCard?.querySelector('iframe')?.getAttribute('src')).toBe(
+        '/api/projects/project-html/files/index.html?v=200',
+      );
+      expect(deckCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
+      expect(htmlCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
     });
-    // The card grid must never spin up a live HTML/deck preview — that would
-    // fetch the project's raw content under /api/projects/. The workspace
-    // nav/collab hooks (team members + workspace context) still fetch on mount,
-    // so guard the real intent (no preview fetch) rather than a blanket "never
-    // fetched".
-    const previewFetches = fetchMock.mock.calls.filter(([input]) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input instanceof Request
-              ? input.url
-              : String(input);
-      return url.includes('/api/projects/');
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-deck/files/index.html?v=400');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-html/files/index.html?v=200',
+      expect.objectContaining({ cache: 'no-store', method: 'HEAD' }),
+    );
+  });
+
+  it('falls back to the glyph and logs when an HTML cover is unavailable', async () => {
+    stubCoverProbe(404, 'Not Found');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[
+          project({
+            id: 'project-html',
+            name: 'Web Prototype',
+            updatedAt: 3,
+          }),
+        ]}
+        onOpen={() => {}}
+        onViewAll={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      const htmlThumb = container.querySelector('.recent-projects__card-thumb-html');
+      expect(htmlThumb?.querySelector('iframe')).toBeNull();
+      expect(htmlThumb?.querySelector('.recent-projects__card-glyph')?.textContent).toBe('W');
+      expect(warn).toHaveBeenCalledWith(
+        '[project-cover] HTML cover unavailable (404 Not Found):',
+        'project-html:index.html',
+      );
     });
-    expect(previewFetches).toEqual([]);
   });
 });

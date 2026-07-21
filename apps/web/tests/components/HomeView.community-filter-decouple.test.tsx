@@ -85,23 +85,26 @@ describe('HomeView community filter decoupling', () => {
       </I18nProvider>,
     );
 
-    // The Community gallery owns its own facet state: it leads with the first
-    // real category (deck/Slides) via resolveDefaultSelection and drops the
-    // generic All bucket (gallery layout), independent of Home's hero chip rail
-    // default selection.
+    // The Community gallery owns its own facet state, so it is mounted on its
+    // own here — there is no hero rail for it to couple to. It boots on its own
+    // All selection (the gallery layout keeps the All bucket, per #5762's
+    // sibling change to PluginsHomeSection) no matter which type chip Home
+    // would have started on. Wait for the selected state, not just the pill
+    // mount, so the assertion stays stable under full-suite CI load.
     await waitFor(() => {
-      expect(ariaSelected('plugins-home-pill-category-deck')).toBe('true');
+      expect(ariaSelected('plugins-home-pill-category-all')).toBe('true');
     });
-    expect(screen.queryByTestId('plugins-home-pill-category-all')).toBeNull();
-    expect(ariaSelected('plugins-home-pill-category-deck')).toBe('true');
+    expect(ariaSelected('plugins-home-pill-category-deck')).toBe('false');
     expect(ariaSelected('plugins-home-pill-category-prototype')).toBe('false');
 
     // The gallery's own pills still work locally, independent of any hero chip.
     fireEvent.click(screen.getByTestId('plugins-home-pill-category-deck'));
+    expect(ariaSelected('plugins-home-pill-category-all')).toBe('false');
     expect(ariaSelected('plugins-home-pill-category-deck')).toBe('true');
 
     // And switching to a different gallery pill selects it locally.
     fireEvent.click(screen.getByTestId('plugins-home-pill-category-prototype'));
+    expect(ariaSelected('plugins-home-pill-category-deck')).toBe('false');
     expect(ariaSelected('plugins-home-pill-category-prototype')).toBe('true');
   });
 

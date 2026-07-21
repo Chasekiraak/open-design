@@ -57,6 +57,9 @@ export type {
   OpenDesignHostUpdaterStatusSnapshot,
   OpenDesignHostUpdaterResult,
   OpenDesignHostUpdaterStatusListener,
+  OpenDesignHostUpdaterMenuLabels,
+  OpenDesignHostUpdaterOpenDialogRequest,
+  OpenDesignHostUpdaterOpenDialogListener,
   OpenDesignHostBridge,
   OpenDesignHostGlobalScope,
 } from "./protocol.js";
@@ -93,4 +96,6 @@ export {
   installHostUpdater,
   quitHostAfterUpdaterInstallerOpen,
   subscribeHostUpdater,
+  subscribeHostUpdaterOpenDialog,
+  setHostUpdaterMenuLabels,
 } from "./actions.js";

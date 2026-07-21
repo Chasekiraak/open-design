@@ -2,9 +2,8 @@
 
 /**
  * Gate coverage for the "next step" affordance under the last assistant
- * message. Artifact-backed turns expose Share/Download/toolbox actions, while
- * terminal no-artifact or interrupted turns still surface recovery prompts so
- * users are never left at a dead end.
+ * message. The surface is reserved for successful, artifact-backed delivery;
+ * pure answers, interruptions, and incomplete work stay compact.
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -66,8 +65,6 @@ const handlers = () => ({
   onNextStepPromptAction: vi.fn(),
 });
 
-const AUTO_MATCH_TITLE = en['chat.designToolbox.action.auto-match.title'];
-
 describe('AssistantMessage next-step affordance', () => {
   it('routes Share through the More → Share cascade with the file name', () => {
     const h = handlers();
@@ -80,7 +77,8 @@ describe('AssistantMessage next-step affordance', () => {
         {...h}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
+    expect(screen.getByRole('group', { name: en['nextStep.title'] })).toBeTruthy();
+    expect(screen.queryByText(en['nextStep.title'])).toBeNull();
     fireEvent.mouseEnter(screen.getByTestId('next-step-toolbox-more'));
     fireEvent.mouseEnter(screen.getByTestId('next-step-more-share'));
     fireEvent.click(screen.getByTestId('next-step-share-share'));
@@ -119,7 +117,7 @@ describe('AssistantMessage next-step affordance', () => {
     expect(onShareToOpenDesign).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the card after a simple answer with no previewable artifact', () => {
+  it('does not render after a simple answer with no deliverable', () => {
     render(
       <AssistantMessage
         message={baseMessage({ producedFiles: [] })}
@@ -129,11 +127,10 @@ describe('AssistantMessage next-step affordance', () => {
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
-    expect(screen.getByText(en['nextStep.projectGenerateArtifactTitle'])).toBeTruthy();
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
-  it('renders the card for a simple answer even without a project id', () => {
+  it('does not render for a simple answer without a project id', () => {
     render(
       <AssistantMessage
         message={baseMessage({ producedFiles: [] })}
@@ -142,7 +139,7 @@ describe('AssistantMessage next-step affordance', () => {
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
   it('renders project recovery actions when the turn produced no previewable artifact', () => {
@@ -166,7 +163,7 @@ describe('AssistantMessage next-step affordance', () => {
     expect(h.onNextStepPromptAction).toHaveBeenCalledWith(PROJECT_GENERATE_ARTIFACT_PROMPT);
   });
 
-  it('renders once the project has a previewable HTML artifact from an earlier turn', () => {
+  it('does not reuse an earlier artifact for a pure-answer turn', () => {
     render(
       <AssistantMessage
         message={baseMessage({ producedFiles: [] })}
@@ -177,11 +174,10 @@ describe('AssistantMessage next-step affordance', () => {
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
-    expect(screen.getByText(AUTO_MATCH_TITLE)).toBeTruthy();
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
-  it('renders incomplete brand extraction next steps after cancellation without an artifact', () => {
+  it('does not render incomplete brand extraction next steps after cancellation', () => {
     const h = handlers();
     const onContinueExtraction = vi.fn();
     const onContinueAiExtraction = vi.fn();
@@ -202,22 +198,18 @@ describe('AssistantMessage next-step affordance', () => {
       />,
     );
 
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
-    expect(screen.getByText(en['nextStep.brandContinueExtractionTitle'])).toBeTruthy();
-    expect(screen.getByText(en['nextStep.brandContinueAiExtractionTitle'])).toBeTruthy();
-    fireEvent.click(screen.getByTestId('next-step-brand-action-brand-continue-extraction'));
-    expect(onContinueExtraction).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByTestId('next-step-brand-action-brand-continue-ai-extraction'));
-    expect(onContinueAiExtraction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
+    expect(onContinueExtraction).not.toHaveBeenCalled();
+    expect(onContinueAiExtraction).not.toHaveBeenCalled();
   });
 
-  it('refreshes the incomplete brand continuation busy state on memoized rows', () => {
+  it('refreshes the brand continuation busy state on memoized rows', () => {
     const h = handlers();
     const onContinueExtraction = vi.fn();
     const message = baseMessage({
-      runStatus: 'canceled',
-      content: 'Stopped.',
-      producedFiles: [],
+      runStatus: 'succeeded',
+      content: 'Done.',
+      producedFiles: [producedFile('brand.html')],
     });
     const view = render(
       <AssistantMessage
@@ -225,7 +217,7 @@ describe('AssistantMessage next-step affordance', () => {
         streaming={false}
         projectId="proj-brand"
         isLast
-        nextStepVariant="brand-extraction"
+        nextStepVariant="brand-programmatic-incomplete"
         onNextStepContinueExtraction={onContinueExtraction}
         nextStepContinueExtractionBusy={false}
         {...h}
@@ -242,7 +234,7 @@ describe('AssistantMessage next-step affordance', () => {
         streaming={false}
         projectId="proj-brand"
         isLast
-        nextStepVariant="brand-extraction"
+        nextStepVariant="brand-programmatic-incomplete"
         onNextStepContinueExtraction={onContinueExtraction}
         nextStepContinueExtractionBusy
         {...h}
@@ -267,7 +259,7 @@ describe('AssistantMessage next-step affordance', () => {
     expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
-  it('renders after a failed turn when a follow-up action is available', () => {
+  it('does not render after a failed turn', () => {
     render(
       <AssistantMessage
         message={baseMessage({ producedFiles: [], runStatus: 'failed' })}
@@ -277,10 +269,10 @@ describe('AssistantMessage next-step affordance', () => {
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
-  it('renders after a canceled turn when a follow-up action is available', () => {
+  it('does not render after a canceled turn', () => {
     render(
       <AssistantMessage
         message={baseMessage({ producedFiles: [], runStatus: 'canceled' })}
@@ -290,12 +282,12 @@ describe('AssistantMessage next-step affordance', () => {
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('next-step-actions')).toBeTruthy();
+    expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 });
 
-// A clarification turn ends the run while its <question-form> is still waiting
-// for the user in the Questions tab; the next-step card must hold back until
+// A clarification turn ends the run while its inline <question-form> is still
+// waiting for the user; the next-step card must hold back until
 // the answers (or a skip-all, which submits through the same path) arrive as
 // the following user message.
 describe('AssistantMessage next-step affordance during the question phase', () => {
@@ -311,6 +303,7 @@ describe('AssistantMessage next-step affordance during the question phase', () =
     return baseMessage({
       content,
       events: [{ kind: 'text', text: content } as NonNullable<ChatMessage['events']>[number]],
+      producedFiles: [producedFile('brief.html')],
     });
   }
 
@@ -324,7 +317,8 @@ describe('AssistantMessage next-step affordance during the question phase', () =
         {...handlers()}
       />,
     );
-    expect(screen.getByTestId('questions-banner')).toBeTruthy();
+    expect(screen.getByText('Brief')).toBeTruthy();
+    expect(screen.getByText('Studio name')).toBeTruthy();
     expect(screen.queryByTestId('next-step-actions')).toBeNull();
   });
 
