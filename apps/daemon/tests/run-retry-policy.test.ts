@@ -129,6 +129,30 @@ describe('decideSafeRunRetry', () => {
     });
   });
 
+  it.each([
+    'request_too_large',
+    'attachment_media_type_unsupported',
+    'tool_schema_invalid',
+    'prompt_tokenization_failed',
+    'provider_resource_not_found',
+  ] as const)('keeps %s out of the transient retry allowlist', (failure_detail) => {
+    expect(
+      decide({
+        failure: {
+          failure_category: failure_detail === 'request_too_large'
+            ? 'prompt_too_large'
+            : 'upstream_unavailable',
+          failure_detail,
+          failure_stage: 'prompt_send',
+          retryable: true,
+        },
+      }),
+    ).toMatchObject({
+      shouldRetry: false,
+      retrySuppressedReason: 'non_retryable_category',
+    });
+  });
+
   it('uses unsafe_failure_stage for transient categories after unsafe output phases', () => {
     expect(
       decide({

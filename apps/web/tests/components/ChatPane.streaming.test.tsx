@@ -398,9 +398,10 @@ describe('ChatPane streaming state', () => {
         onSelectConversation={vi.fn()}
         onDeleteConversation={vi.fn()}
         projectMetadata={projectMetadata}
-      />,
+    />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'brand.viewDetails' }));
     fireEvent.click(screen.getByRole('button', { name: 'Copy error diagnostics' }));
 
     await waitFor(() => expect(clipboardMocks.copyToClipboard).toHaveBeenCalledTimes(1));

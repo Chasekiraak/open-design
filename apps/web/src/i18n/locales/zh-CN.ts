@@ -355,6 +355,8 @@ export const zhCN: Dict = {
   "settings.modeApiMeta": "BYOK",
   "settings.byokNoFileToolsNotice":
     "BYOK 无法读写或修改项目文件；需要改代码时请使用本机 CLI。",
+  "settings.byokDraftNotice":
+    "必填项补全前，此配置只会保存为草稿；当前执行配置将继续保持生效。",
   "settings.codeAgent": "代码代理",
   "settings.codeAgentHint": "选择用来运行提示词的 CLI。",
   "settings.rescan": "↻ 重新扫描",
@@ -602,8 +604,8 @@ export const zhCN: Dict = {
   "settings.runtimePackaged": "已打包应用",
   "settings.runtimeDevelopment": "开发环境",
   "settings.versionUnavailable": "守护进程离线时无法获取版本详情。",
-  "settings.allowSilentUpdates": "允许静默更新",
-  "settings.allowSilentUpdatesDesc": "启动时自动应用已下载的 payload 更新。安装器更新仍会先询问。",
+  "settings.allowSilentUpdates": "允许以后自动安装应用内更新",
+  "settings.allowSilentUpdatesDesc": "有可应用的应用内更新时，下次启动将自动安装。不会立刻升级当前版本。安装器更新仍会先询问。",
   "settings.installLatest": "安装最新版本",
   "settings.alreadyLatest": "当前为最新版本",
   "settings.mcpTitle": "MCP 服务器",
@@ -625,6 +627,8 @@ export const zhCN: Dict = {
     '点击"在 Cursor 中安装"以通过确认对话框安装，或将此 JSON 合并到 {path}。',
   "settings.mcpDeeplinkInstallCursor": "在 Cursor 中安装",
   "settings.mcpMethodJson": "JSON 配置",
+  "settings.mcpInstructionKiro":
+    "打开 {path} 并合并此 JSON。对于 workspace 级配置，请使用 .kiro/settings/mcp.json。",
   "settings.mcpInstructionCopilot":
     '打开命令面板（{shortcut}），运行 "MCP: Open User Configuration"，然后合并此 JSON。Copilot Chat 必须处于 Agent 模式，工具才会显示。',
   "settings.mcpInstructionAntigravity":
@@ -695,7 +699,7 @@ export const zhCN: Dict = {
   "workspaceTabs.project": "项目",
   "workspaceTabs.pluginDetails": "插件详情",
   "workspaceTabs.marketplace": "插件市场",
-  "homeHero.title": "你今天要设计什么？",
+  "homeHero.title": "今天想和你的 Agent 一起设计什么？",
   "homeHero.startWithTemplate": "从模板开始…",
   "homeHero.startBlankProject": "…或创建一个空白项目",
   "homeHero.templatePicker.label": "模板",
@@ -2640,6 +2644,12 @@ export const zhCN: Dict = {
     "从项目文件夹中删除选中的 {n} 个文件？",
   "workspace.deleteSelectedFilesPartial": "有 {n} 个文件删除失败。",
   "workspace.openFromDesignFiles": "请从",
+  "previewRunStatus.analyzing": "正在梳理信息架构",
+  "previewRunStatus.generating": "正在构建设计方案",
+  "previewRunStatus.verifying": "正在校验交付结果",
+  "previewRunStatus.succeeded": "设计已就绪",
+  "previewRunStatus.failed": "交付需要处理 · 请在对话中重试",
+  "previewRunStatus.elapsed": "已用时 {time}",
   "workspace.designFilesLink": "设计文件",
   "workspace.loadingSketch": "正在加载草图…",
   "workspace.newTab": "新建标签页",
@@ -3001,6 +3011,8 @@ export const zhCN: Dict = {
   "fileViewer.speakerNotesSaved": "已保存",
   "fileViewer.speakerNotesSaveFailed": "无法保存演讲者备注。",
   "fileViewer.speakerNotesPlaceholder": "为这一页添加演讲者备注...",
+  "fileViewer.previewAssetBlockedTitle": "预览资源已被阻止",
+  "fileViewer.previewAssetBlockedDetail": "无法加载 {filePath}。请将外部符号链接替换为此项目内的文件。",
   "fileViewer.presenterReset": "重置",
   "fileViewer.present": "演示",
   "fileViewer.presentInTab": "在当前标签页",
@@ -3154,6 +3166,9 @@ export const zhCN: Dict = {
   "fileViewer.deployProviderLabel": "部署平台",
   "fileViewer.vercelProvider": "Vercel",
   "fileViewer.cloudflarePagesProvider": "Cloudflare Pages",
+  "fileViewer.deployTargetLabel": "目标",
+  "fileViewer.deployTargetPreview": "预览",
+  "fileViewer.deployTargetProduction": "生产环境",
   "fileViewer.deployToProvider": "部署到 {provider}",
   "fileViewer.redeployToProvider": "重新部署到 {provider}",
   "fileViewer.deployingToProvider": "正在部署到 {provider}…",
@@ -3868,6 +3883,8 @@ export const zhCN: Dict = {
   "settings.memoryExtractionPhaseSkipped": "已跳过",
   "settings.memoryExtractionPhaseFailed": "失败",
   "settings.memoryExtractionSkipNoProvider": "未配置 API key，LLM 抽取未运行。",
+  "settings.memoryExtractionSkipUnsupportedProvider":
+    "已保存的媒体 Provider 不能用于 LLM 记忆抽取。",
   "settings.memoryExtractionSkipDisabled": "记忆功能已关闭。",
   "settings.memoryExtractionSkipEmpty": "用户消息为空，没有可抽取的内容。",
   "settings.memoryExtractionSkipNoMatch": "本轮没有命中任何正则规则。",
@@ -3887,6 +3904,8 @@ export const zhCN: Dict = {
   "settings.memoryNoProviderBannerTitle": "LLM 抽取未启用",
   "settings.memoryNoProviderBannerBody":
     "未找到可用的 API key，LLM 抽取已跳过。可以在媒体提供商里填入 OpenAI key，或设置环境变量 ANTHROPIC_API_KEY / OPENAI_API_KEY 来启用。启发式抽取仍在运行。",
+  "settings.memoryUnsupportedProviderBannerBody":
+    "已保存媒体 Provider key，但 Memory 只能复用支持文本抽取的 Provider：OpenAI、MiniMax、AIHubMix 和 SenseAudio。请在媒体提供商中配置其中一个，设置 ANTHROPIC_API_KEY / OPENAI_API_KEY，或在高级设置中选择 Memory model。",
   "settings.libraryInstall": "安装",
   "settings.libraryInstallGithub": "GitHub",
   "settings.libraryInstallLocal": "本地路径",
@@ -3901,6 +3920,9 @@ export const zhCN: Dict = {
   "notify.successBody": "一轮回答已经写完。",
   "notify.failureBody": "本轮任务出错，请查看错误信息。",
   "updater.available": "有可用更新",
+  "updater.activeRunsTitle": "Open Design 仍在执行任务",
+  "updater.activeRunsBody": "仍有 {count} 个任务正在运行。现在重启会中断这些任务。",
+  "updater.activeRunsUnknownBody": "Open Design 无法确认是否仍有任务运行。现在重启可能会中断正在进行的工作。",
   "updater.availableBody":
     "Open Design {version} 可用。下载安装完成后即可打开安装器。",
   "updater.checking": "正在检查更新",
@@ -3913,12 +3935,21 @@ export const zhCN: Dict = {
     "安装器已打开。Open Design 正在退出，以便你完成更新。",
   "updater.installerOpened": "安装器已打开",
   "updater.later": "稍后",
-  "updater.allowSilentUpdates": "允许静默更新",
+  "updater.allowSilentUpdates": "允许以后自动安装应用内更新",
   "updater.openFailedFallback": "无法打开安装器。",
   "updater.installRestart": "安装并重启",
   "updater.installingRestart": "正在安装并重启…",
   "updater.openInstaller": "安装更新",
   "updater.opening": "正在打开安装器…",
+  "updater.dialogAvailableGeneric": "发现新版本。\n下载后即可安装。",
+  "updater.dialogAvailableVersion": "v{version} 可供更新。\n下载后即可安装。",
+  "updater.dialogCheckFailed": "检查更新失败。\n请稍后重试。",
+  "updater.dialogReadyGeneric":
+    "新版本已准备就绪。\n更好的体验，更智能的设计，欢迎体验新版本。",
+  "updater.dialogReadyVersion":
+    "v{version} 已准备就绪。\n更好的体验，更智能的设计，欢迎体验新版本。",
+  "updater.dialogUnsupported":
+    "当前环境不支持应用内更新。\n可前往发布页手动下载。",
   "updater.payloadReadyGeneric":
     "Open Design 更新已就绪。Open Design 会关闭并自动重启。",
   "updater.payloadReadyVersion":
@@ -3933,6 +3964,9 @@ export const zhCN: Dict = {
   "updater.readyVersion":
     "Open Design {version} 已就绪。Open Design 会关闭并打开安装器。",
   "updater.upToDate": "您已经是最新版本啦",
+  "updater.viewVersionFeatures": "查看新版本特性",
+  "updater.manualDownload": "手动下载",
+  "updater.restartAnyway": "仍然重启",
 
   "whatsNew.cta": "看看有什么新功能",
   "whatsNew.dismissAria": "关闭更新亮点",

@@ -369,6 +369,7 @@ export type PackagedDaemonSpawnEnvOptions = {
   appVersion: string | null;
   amrProfile?: string | null;
   daemonCliEntry: string | null;
+  nodeCommand?: string | null;
   /**
    * PR #974 round-5 (lefarcen P2): only pin the daemon's import-folder
    * gate ON when the desktop runtime is actually being started in the
@@ -411,6 +412,9 @@ export function buildPackagedDaemonSpawnEnv(
     // fallback, but packaged runtime must not rely on path inference from
     // Electron userData, bundle names, or ports.
     ...createPackagedDaemonManagedPathEnv(paths),
+    ...(options.nodeCommand == null || options.nodeCommand.length === 0
+      ? {}
+      : { OD_NODE_BIN: options.nodeCommand }),
     ...(options.amrProfile == null || options.amrProfile.length === 0
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
@@ -582,6 +586,7 @@ export async function startPackagedSidecars(
         amrProfile: options.amrProfile,
         daemonCliEntry: options.daemonCliEntry,
         legacyDataDir: process.env.OD_LEGACY_DATA_DIR ?? null,
+        nodeCommand: options.nodeCommand,
         requireDesktopAuth: options.requireDesktopAuth,
         telemetryRelayUrl: options.telemetryRelayUrl,
         posthogKey: options.posthogKey,

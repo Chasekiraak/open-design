@@ -153,7 +153,10 @@ import {
   API_PROTOCOL_TABS,
   SUGGESTED_MODELS_BY_PROTOCOL,
 } from '../state/apiProtocols';
-import { KNOWN_PROVIDERS } from '../state/config';
+import {
+  defaultKnownProviderModel,
+  KNOWN_PROVIDERS,
+} from '../state/config';
 import type { KnownProvider } from '../state/config';
 import { saveOnboardingProfile } from '../state/onboarding-profile';
 import { testAgent, testApiProvider } from '../providers/connection-test';
@@ -177,6 +180,7 @@ import {
   providerModelsCacheKey,
   type ProviderModelsCache,
 } from './providerModelsCache';
+import { resolveByokModelPreference } from './byok/validation';
 
 // Persist the entry nav-rail open/collapsed state so it survives both a
 // home -> project -> home navigation (EntryShell unmounts on the project
@@ -388,6 +392,10 @@ interface Props {
   onApiProtocolChange: (protocol: ApiProtocol) => void;
   onApiModelChange: (model: string) => void;
   onConfigPersist: (cfg: AppConfig) => Promise<void> | void;
+  /** True only when GET /api/app-config returned a real config object. */
+  daemonAppConfigReady?: boolean;
+  /** Non-optimistic daemon write for the silent-update preference. */
+  onSilentUpdatePreferenceChange?: (allowSilentUpdates: boolean) => Promise<void>;
   onSkillsRefresh?: () => Promise<void> | void;
   onSkillsChanged?: (affectedSkillId?: string) => void;
   onRefreshAgents: () => Promise<AgentInfo[]> | AgentInfo[];
@@ -504,6 +512,8 @@ export function EntryShell({
   onApiProtocolChange,
   onApiModelChange,
   onConfigPersist,
+  daemonAppConfigReady = false,
+  onSilentUpdatePreferenceChange,
   onSkillsRefresh,
   onSkillsChanged,
   onRefreshAgents,
@@ -597,6 +607,12 @@ export function EntryShell({
   // §7.1). Cleared as soon as the user takes any concrete entry (spec §7.4).
   const [onboardingRec, setOnboardingRec] = useState<Recommendation | null>(null);
   const entryMainScrollRef = useRef<HTMLElement | null>(null);
+  // Entry views share this element, so route changes must not inherit the previous view's offset.
+  useLayoutEffect(() => {
+    const scrollContainer = entryMainScrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTop = 0;
+  }, [view]);
   const analytics = useAnalytics();
   const discordOnlineLabel = discordPresence
     ? t('entry.discordOnlineLabel', {
@@ -1064,8 +1080,10 @@ export function EntryShell({
             </div>
             <UpdaterPopup
               allowSilentUpdates={config.allowSilentUpdates}
-              onAllowSilentUpdatesChange={(allowSilentUpdates) =>
-                onConfigPersist({ ...config, allowSilentUpdates })
+              silentUpdatePreferenceReady={daemonAppConfigReady}
+              onAllowSilentUpdatesChange={
+                onSilentUpdatePreferenceChange
+                  ?? ((allowSilentUpdates) => onConfigPersist({ ...config, allowSilentUpdates }))
               }
             />
             <WhatsNewPopup active={view === 'home'} />
@@ -1863,7 +1881,9 @@ function OnboardingView({
     activeProviderModelsCache[providerModelsInputKey] ?? [];
   const byokModelOptions = mergeOnboardingProviderModelOptions(
     fetchedProviderModels,
-    SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol],
+    selectedProvider?.preferredModels.length
+      ? selectedProvider.preferredModels
+      : SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol],
     config.model,
   ).map((model) => ({
     value: model.id,
@@ -1900,14 +1920,12 @@ function OnboardingView({
     void onConfigPersist(nextConfig);
   }
 
-  function selectFirstProviderModelWhenEmpty(
+  function selectPreferredProviderModelWhenEmpty(
     models: readonly ProviderModelOption[],
     expectedInputKey: string,
   ) {
-    const firstModel = models[0];
     const current = providerModelAutoSelectRef.current;
     if (
-      !firstModel ||
       current.runtime !== 'byok' ||
       current.step !== 0 ||
       current.providerModelsInputKey !== expectedInputKey ||
@@ -1915,8 +1933,14 @@ function OnboardingView({
     ) {
       return;
     }
-    onApiModelChange(firstModel.id);
-    updateApiConfig({ model: firstModel.id });
+    const preference = resolveByokModelPreference({
+      currentModel: '',
+      accountModels: models,
+      providerPreferredModels: selectedProvider?.preferredModels ?? [],
+    });
+    if (!preference.model) return;
+    onApiModelChange(preference.model);
+    updateApiConfig({ model: preference.model });
   }
 
   function clearAgentRevealTimers() {
@@ -2444,7 +2468,7 @@ function OnboardingView({
     providerModelsAutoFetchKeyRef.current = inputKey;
     const cachedModels = activeProviderModelsCache[inputKey];
     if (cachedModels) {
-      selectFirstProviderModelWhenEmpty(cachedModels, inputKey);
+      selectPreferredProviderModelWhenEmpty(cachedModels, inputKey);
       setProviderModelsState({
         status: 'done',
         inputKey,
@@ -2465,7 +2489,7 @@ function OnboardingView({
         apiKey: config.apiKey,
       });
       if (result.ok && result.models?.length) {
-        selectFirstProviderModelWhenEmpty(result.models, inputKey);
+        selectPreferredProviderModelWhenEmpty(result.models, inputKey);
         activeSetProviderModelsCache((current) => ({
           ...current,
           [inputKey]: result.models ?? [],
@@ -2743,7 +2767,7 @@ function OnboardingView({
                       );
                       updateApiConfig({
                         baseUrl: provider?.baseUrl ?? '',
-                        model: provider?.model ?? '',
+                        model: defaultKnownProviderModel(provider),
                         apiProviderBaseUrl: provider?.baseUrl ?? null,
                       });
                     }}
@@ -3418,7 +3442,7 @@ function OnboardingByokSetupPanel({
         {modelOptions.length > 0 ? (
           <OnboardingDropdown
             label={t('settings.model')}
-            placeholder={selectedProvider?.model ?? 'claude-sonnet-4-5'}
+            placeholder={defaultKnownProviderModel(selectedProvider) || 'claude-sonnet-4-5'}
             value={model}
             options={modelOptions}
             onChange={onModelChange}
@@ -3432,7 +3456,7 @@ function OnboardingByokSetupPanel({
             <input
               type="text"
               value={model}
-              placeholder={selectedProvider?.model ?? 'claude-sonnet-4-5'}
+              placeholder={defaultKnownProviderModel(selectedProvider) || 'claude-sonnet-4-5'}
               onChange={(event) => onModelChange(event.target.value.trim())}
             />
           </label>

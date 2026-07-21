@@ -1276,13 +1276,12 @@ async function checkCiTopology(): Promise<boolean> {
       "ci_mode: ${{ steps.detect.outputs.ci_mode }}",
       "ui_p0_validation_required: ${{ steps.detect.outputs.ui_p0_validation_required }}",
       "run_ui_p0: ${{ steps.detect.outputs.run_ui_p0 }}",
-      "run_nix_validation: ${{ steps.detect.outputs.run_nix_validation }}",
       "ui_p0_matrix: ${{ steps.detect.outputs.ui_p0_matrix }}",
       "visual_matrix: ${{ steps.detect.outputs.visual_matrix }}",
       "include: ${{ fromJSON(needs.scopes.outputs.ui_p0_matrix) }}",
       "include: ${{ fromJSON(needs.scopes.outputs.visual_matrix) }}",
       "needs.scopes.outputs.run_ui_p0 == 'true'",
-      "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group smoke",
+      "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group critical-extras",
       "pnpm -C e2e exec tsx scripts/playwright.ts run-ui-group ${{ matrix.shard }}",
     ]
       .filter((needle) => !ciWorkflow.includes(needle))

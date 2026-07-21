@@ -403,6 +403,20 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect(env.OD_DAEMON_CLI_PATH).toBe('/path/to/cli/dist/index.js');
   });
 
+  it('forwards the packaged node command as OD_NODE_BIN for agent wrapper calls', () => {
+    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+      appVersion: null,
+      daemonCliEntry: null,
+      legacyDataDir: null,
+      nodeCommand: 'C:\\Users\\Ada\\AppData\\Local\\Programs\\Open Design\\resources\\open-design\\bin\\node.exe',
+      requireDesktopAuth: true,
+    });
+
+    expect(env.OD_NODE_BIN).toBe(
+      'C:\\Users\\Ada\\AppData\\Local\\Programs\\Open Design\\resources\\open-design\\bin\\node.exe',
+    );
+  });
+
   it('forwards the packaged telemetry relay URL to the daemon when configured', () => {
     const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
       appVersion: null,
