@@ -32,6 +32,8 @@ interface Props {
   onOpenNotificationSettings?: () => void;
 }
 
+type SyncState = 'loading' | 'ready' | 'error';
+
 export function MessageCenter({ onOpenNotificationSettings }: Props) {
   const { locale, t } = useI18n();
   const titleId = useId();
@@ -42,7 +44,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
   const [messages, setMessages] = useState<MessageCenterMessage[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loggedIn, setLoggedIn] = useState(false);
-  const [syncError, setSyncError] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('loading');
   const loggedInRef = useRef(false);
   const messagesRef = useRef<MessageCenterMessage[]>([]);
   const readIdsRef = useRef<Set<string>>(new Set());
@@ -63,6 +65,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
   const sync = useCallback(async () => {
     const requestId = syncRequestIdRef.current + 1;
     syncRequestIdRef.current = requestId;
+    if (messagesRef.current.length === 0) setSyncState('loading');
     const account = await isAmrLoggedIn();
     const wasAccount = loggedInRef.current;
     loggedInRef.current = account;
@@ -90,7 +93,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     }));
     if (account) clearAnonymousState(window.localStorage);
     commitState(merged, overlayReadIds, { persistAnonymous: !account });
-    setSyncError(false);
+    setSyncState('ready');
   }, [commitState, locale]);
 
   const resolveLoggedInForWrite = useCallback(async () => {
@@ -101,7 +104,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
   }, []);
 
   const retrySync = useCallback(() => {
-    void sync().catch(() => setSyncError(true));
+    void sync().catch(() => setSyncState('error'));
   }, [sync]);
 
   const invalidateSyncResponses = useCallback(() => {
@@ -200,9 +203,9 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     </button>
     {open ? createPortal(<div className={styles.backdrop} data-testid="message-center-backdrop"><aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-testid="message-center-dialog">
       <header className={styles.header}><div className={styles.headerCopy}><h2 id={titleId}>{t('messageCenter.title')}</h2><p>{t('messageCenter.subtitle')}</p></div><button type="button" className={styles.close} onClick={closePanel} aria-label={t('messageCenter.close')}><Icon name="close" size={15}/></button></header>
-      <div className={styles.controls}><div className={styles.filters} role="group" aria-label={t('messageCenter.title')}>{FILTERS.map((item) => <button key={item.id} type="button" className={`${styles.filter}${filter === item.id ? ` ${styles.filterActive}` : ''}`} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}{item.id === 'unread' && unreadCount > 0 ? <span className={styles.filterBadge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}</button>)}</div><button type="button" className={styles.markAll} onClick={() => void markAllRead().catch(() => setSyncError(true))} disabled={unreadCount === 0}>{t('messageCenter.markAllRead')}</button></div>
+      <div className={styles.controls}><div className={styles.filters} role="group" aria-label={t('messageCenter.title')}>{FILTERS.map((item) => <button key={item.id} type="button" className={`${styles.filter}${filter === item.id ? ` ${styles.filterActive}` : ''}`} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}{item.id === 'unread' && unreadCount > 0 ? <span className={styles.filterBadge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}</button>)}</div><button type="button" className={styles.markAll} onClick={() => void markAllRead().catch(() => setSyncState('error'))} disabled={unreadCount === 0}>{t('messageCenter.markAllRead')}</button></div>
       <div className={styles.list} aria-live="polite">
-        {syncError && messages.length > 0 ? (
+        {syncState === 'error' && messages.length > 0 ? (
           <div className={styles.syncStatus} role="status">
             <span>{t('settings.updateStatusFailed')}</span>
             <button type="button" onClick={retrySync}>
@@ -210,7 +213,22 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
             </button>
           </div>
         ) : null}
-        {syncError && messages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{t('messageCenter.emptyAllTitle')}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{emptyTitle}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.map((message) => <MessageItem key={message.id} message={message} onRead={markRead} onError={() => setSyncError(true)}/>)}
+        {syncState === 'loading' && messages.length === 0 ? (
+          <div className={styles.empty} role="status">
+            <Icon name="spinner" size={20} className="icon-spin" />
+            <strong>{t('settings.updateStatusChecking')}</strong>
+          </div>
+        ) : syncState === 'error' && messages.length === 0 ? (
+          <div className={styles.empty}>
+            <Icon name="bell" size={20}/>
+            <div className={styles.emptyError} role="status">
+              <span>{t('settings.updateStatusFailed')}</span>
+              <button type="button" onClick={retrySync}>
+                {t('settings.updateRetry')}
+              </button>
+            </div>
+          </div>
+        ) : visibleMessages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{emptyTitle}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.map((message) => <MessageItem key={message.id} message={message} onRead={markRead} onError={() => setSyncState('error')}/>)}
       </div>
       <footer className={styles.footer}><p>{t('messageCenter.desktopSettingsHint')}</p>{onOpenNotificationSettings ? <Button variant="ghost" onClick={() => { closePanel(); onOpenNotificationSettings(); }}>{t('messageCenter.desktopSettings')}</Button> : null}</footer>
     </aside></div>, document.body) : null}

@@ -248,6 +248,58 @@ describe('MessageCenter', () => {
     expect(within(screen.getByRole('status')).getByRole('button')).toBeTruthy();
   });
 
+  it('shows a loading state instead of the empty copy during the first empty sync', async () => {
+    let messageRequests = 0;
+    let releaseFirstRequest: (() => void) | undefined;
+    mockFetch({
+      messages: [],
+      onMessages: () =>
+        new Promise<Response>((resolve) => {
+          messageRequests += 1;
+          if (messageRequests === 1) {
+            releaseFirstRequest = () => resolve(Response.json({ messages: [], nextCursor: null, unreadCount: 0 }));
+            return;
+          }
+          resolve(Response.json({ messages: [], nextCursor: null, unreadCount: 0 }));
+        }),
+    });
+
+    renderMessageCenter();
+    fireEvent.click(screen.getByTestId('message-center-trigger'));
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking for updates...');
+    expect(screen.queryByText('No messages yet')).toBeNull();
+
+    releaseFirstRequest?.();
+    await waitFor(() => expect(screen.getByText('No messages yet')).toBeTruthy());
+  });
+
+  it('shows retry controls instead of the empty copy when the first empty sync fails', async () => {
+    let messageRequests = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/status')) return Response.json({ loggedIn: false });
+      if (url.includes('/messages?')) {
+        messageRequests += 1;
+        if (messageRequests <= 2) return new Response(null, { status: 500 });
+        return Response.json({ messages: [], nextCursor: null, unreadCount: 0 });
+      }
+      if (url.includes('/read')) return Response.json({ read: true, markedCount: 1 });
+      return new Response(null, { status: 404 });
+    }));
+
+    renderMessageCenter();
+    fireEvent.click(screen.getByTestId('message-center-trigger'));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Check failed. Please retry.'));
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.queryByText('No messages yet')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.getByText('No messages yet')).toBeTruthy());
+    expect(messageRequests).toBeGreaterThanOrEqual(2);
+  });
+
   it('hydrates cached anonymous state through the ref-backed source of truth', async () => {
     const cachedMessages = [
       { ...defaultMessages[0]!, id: 'release', title: 'Release update', readAt: null, ctaLabel: null, ctaUrl: null },

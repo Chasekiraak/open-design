@@ -224,6 +224,26 @@
   font-weight: 600;
 }
 
+.emptyError {
+  width: 100%;
+}
+
+.emptyError,
+.emptyError button {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.emptyError button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
 .item {
   flex: 0 0 auto;
   position: relative;
