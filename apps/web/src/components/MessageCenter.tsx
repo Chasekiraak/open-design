@@ -16,7 +16,7 @@ import {
   writeAnonymousState,
 } from '../message-center-client';
 import { Icon } from './Icon';
-import styles from './MessageCenterDemo.module.css';
+import styles from './MessageCenter.module.css';
 
 const FILTERS: Array<{ id: MessageCenterFilter; label: 'messageCenter.filterAll' | 'messageCenter.filterUnread' | 'messageCenter.filterRead' }> = [
   { id: 'all', label: 'messageCenter.filterAll' },
@@ -32,7 +32,7 @@ interface Props {
   onOpenNotificationSettings?: () => void;
 }
 
-export function MessageCenterDemo({ onOpenNotificationSettings }: Props) {
+export function MessageCenter({ onOpenNotificationSettings }: Props) {
   const { locale, t } = useI18n();
   const titleId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);

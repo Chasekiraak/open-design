@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MessageCenterDemo } from '../../src/components/MessageCenterDemo';
+import { MessageCenter } from '../../src/components/MessageCenter';
 import { I18nProvider, useI18n } from '../../src/i18n';
 import type { MessageCenterMessage } from '../../src/message-center-client';
 
@@ -33,7 +33,7 @@ function mockFetch(
 
 function renderMessageCenter() {
   const onOpenNotificationSettings = vi.fn();
-  const result = render(<I18nProvider initial="en"><MessageCenterDemo onOpenNotificationSettings={onOpenNotificationSettings}/></I18nProvider>);
+  const result = render(<I18nProvider initial="en"><MessageCenter onOpenNotificationSettings={onOpenNotificationSettings}/></I18nProvider>);
   return { ...result, onOpenNotificationSettings };
 }
 
@@ -63,7 +63,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('MessageCenterDemo', () => {
+describe('MessageCenter', () => {
   it('renders API messages for anonymous clients without a local window', async () => {
     renderMessageCenter();
     const dialog = await openCenter();
@@ -233,7 +233,7 @@ describe('MessageCenterDemo', () => {
     render(
       <I18nProvider initial="en">
         <LocaleSwitcher />
-        <MessageCenterDemo />
+        <MessageCenter />
       </I18nProvider>,
     );
 
