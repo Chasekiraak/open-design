@@ -230,12 +230,26 @@ export interface StudioOnboardingHintClickProps {
 }
 
 export interface UpdateIndicatorClickProps {
-  page_name: 'home';
-  area: 'update_indicator' | 'update_prompt';
-  element: 'ready_indicator' | 'later' | 'install_update';
-  action: 'open_prompt' | 'dismiss' | 'install';
+  page_name: 'home' | 'app';
+  area: 'update_indicator' | 'update_prompt' | 'mac_app_menu' | 'update_dialog';
+  element:
+    | 'ready_indicator'
+    | 'later'
+    | 'install_update'
+    | 'check_for_updates'
+    | 'view_release_notes'
+    | 'restart_anyway';
+  action: 'open_prompt' | 'dismiss' | 'install' | 'check' | 'open_link' | 'force_restart';
   app_version_before?: string;
   app_version_after?: string;
+}
+
+export interface WhatsNewPopupClickProps {
+  page_name: 'home';
+  area: 'whats_new_popup';
+  element: 'see_whats_new' | 'dismiss';
+  action: 'open_link' | 'dismiss';
+  app_version: string;
 }
 
 export interface NewProjectModalTabClickProps {
@@ -860,14 +874,14 @@ export interface NextStepActionClickProps {
   chip_id?: string;
 }
 
-// Studio Questions tab discovery form (the agent-emitted <question-form>
-// rendered in the right-hand panel before generation starts). The form body
-// is model-generated JSON, so chips are question options, not fixed UI:
+// Studio inline discovery form (the agent-emitted <question-form> rendered in
+// its originating assistant message). The form body is model-generated JSON,
+// so chips are question options, not fixed UI:
 //   - `task_type_chip`: a pick on the `taskType` radio (Prototype / Live
 //     artifact / Slide deck / Image / Video / HyperFrames / Audio / Other).
 //   - `brand_bg_chip`: a pick on the `brand` radio (pick_direction /
 //     brand_spec / reference_match).
-//   - `skip`: the Skip button or the auto-continue countdown elapsing
+//   - `skip`: the Skip button or an optional-only auto-continue countdown
 //     (`skip_source` says which). The countdown honours any picks the user
 //     made, so skip also carries the counts.
 //   - `submit`: the Continue CTA (or the form's own submit).
@@ -876,7 +890,18 @@ export interface NextStepActionClickProps {
 export interface QuestionsFormClickProps {
   page_name: 'chat_panel';
   area: 'questions_form';
-  element: 'task_type_chip' | 'brand_bg_chip' | 'skip' | 'submit';
+  element:
+    | 'task_type_chip'
+    | 'brand_bg_chip'
+    | 'skip'
+    | 'submit'
+    | 'visual_style_card'
+    | 'visual_style_refresh'
+    | 'visual_style_gallery_open'
+    | 'visual_style_category_tab'
+    | 'step_back'
+    | 'step_next'
+    | 'step_skip';
   // task_type_chip / brand_bg_chip only: the picked option value, snake_case.
   chip_id?: string;
   // skip only: user pressed the button vs the countdown elapsed.
@@ -886,6 +911,13 @@ export interface QuestionsFormClickProps {
   skipped_count?: number;
   // 'task_type' (single-shot default-router brief) | 'discovery' | other.
   form_id?: string;
+  question_id?: string;
+  style_id?: string;
+  style_context?: 'deck' | 'prototype' | 'document' | 'image' | 'video';
+  interaction_source?: 'inline' | 'gallery';
+  category_id?: 'all' | 'business' | 'editorial' | 'creative' | 'minimal';
+  step_index?: number;
+  step_count?: number;
   project_id: string;
 }
 
@@ -1084,6 +1116,7 @@ export interface DrawToolbarClickProps {
   element:
     | 'rect'
     | 'pen'
+    | 'text'
     | 'undo'
     | 'redo'
     | 'attach_image'
@@ -1208,6 +1241,40 @@ export interface PresentPopoverClickProps {
   element: 'in_this_tab' | 'fullscreen' | 'new_tab';
   artifact_id?: string;
   artifact_kind?: TrackingArtifactKind;
+}
+
+// In-deck navigation and speaker-notes controls once a slide deck is open in
+// the file viewer (area 'deck_viewer'). These sit downstream of the
+// DeckViewerSurfaceView entry and measure how the deck is actually consumed:
+// paging through slides, jumping via thumbnails, toggling the thumbnail rail,
+// and opening a slide's speaker notes for editing. Entering an actual
+// presentation surface (in-tab/fullscreen/new-tab) is NOT tracked here — that
+// stays on PresentPopoverClickProps to avoid double-counting.
+export interface DeckViewerClickProps {
+  page_name: 'artifact';
+  area: 'deck_viewer';
+  element:
+    // Prev/next slide, from any nav surface (toolbar, floating nav, more
+    // menu, keyboard). Reported once per slide move via the shared handler.
+    | 'slide_prev'
+    | 'slide_next'
+    // Reset/jump back to slide 1 (floating "Reset" button / keyboard R).
+    | 'slide_reset'
+    // Click a thumbnail in the left rail to jump to that slide.
+    | 'thumbnail_select'
+    // Expand/collapse the thumbnail rail from the top toolbar toggle.
+    | 'thumbnail_rail_toggle'
+    // Open a slide's speaker notes for in-place editing (preview panel).
+    | 'speaker_notes_edit';
+  artifact_id?: string;
+  artifact_kind?: TrackingArtifactKind;
+  // Only for thumbnail_rail_toggle: which way the toggle went.
+  action?: 'expand' | 'collapse';
+  // Active slide index (0-based) at the moment of the interaction, and the
+  // deck's total slide count — lets us see where in a deck users navigate and
+  // how deck length correlates with engagement.
+  slide_index?: number;
+  slide_count?: number;
 }
 
 export interface ShareOptionPopoverClickProps {
@@ -1487,6 +1554,7 @@ export type UiClickProps =
   | HomeRecommendationClickProps
   | StudioOnboardingHintClickProps
   | UpdateIndicatorClickProps
+  | WhatsNewPopupClickProps
   | NewProjectModalTabClickProps
   | NewProjectModalElementClickProps
   | PluginReplacementModalClickProps
@@ -1542,6 +1610,7 @@ export type UiClickProps =
   | ArtifactHeaderClickProps
   | HandoffClickProps
   | PresentPopoverClickProps
+  | DeckViewerClickProps
   | ShareOptionPopoverClickProps
   | FileVersionModalClickProps
   | AssistantFeedbackButtonClickProps
@@ -1561,4 +1630,3 @@ export type UiClickProps =
   | SettingsDesignReviewClickProps
   | SettingsExternalMcpClickProps
   | OnboardingClickProps;
-

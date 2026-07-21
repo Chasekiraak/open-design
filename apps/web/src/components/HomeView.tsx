@@ -40,6 +40,7 @@ import {
   createProject,
   duplicatePluginAsProject,
   listPlugins,
+  listPluginsFresh,
   patchProject,
   renderPluginBriefTemplate,
   resolvePluginQueryFallback,
@@ -251,6 +252,7 @@ interface Props {
   }) => boolean | void | Promise<boolean | void>;
   onRecommendationDismiss?: () => void;
   executionSwitcher?: ReactNode;
+  artifactUpgradeSlot?: ReactNode;
 }
 
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
@@ -324,6 +326,7 @@ export function HomeView({
   onRecommendationStart,
   onRecommendationDismiss,
   executionSwitcher,
+  artifactUpgradeSlot,
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
@@ -335,6 +338,12 @@ export function HomeView({
     homePageViewFiredRef.current = true;
     trackPageView(analytics.track, { page_name: 'home' });
   }, [analytics.track]);
+  // Start empty + loading (cheap first render — seeding the full list here made
+  // the mount do all plugin-dependent render work on the click's critical path,
+  // a visible freeze). The effect below uses the cache-aware loader, which on a
+  // warm cache resolves on a microtask, so `pluginsLoading` clears within a
+  // frame without the heavy `/api/plugins` re-fetch that greyed the rail for
+  // 1-2s on every Home remount.
   const [plugins, setPlugins] = useState<InstalledPluginRecord[]>([]);
   const [pluginsLoading, setPluginsLoading] = useState(true);
   const [pendingApplyId, setPendingApplyId] = useState<string | null>(null);
@@ -516,18 +525,21 @@ export function HomeView({
   }, []);
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
-      void listPlugins().then((rows) => {
+    // On mount use the cache-aware loader (skips the network when warm); an
+    // explicit plugins-changed event forces a fresh fetch.
+    const load = (force = false) => {
+      void (force ? listPlugins() : listPluginsFresh()).then((rows) => {
         if (cancelled) return;
         setPlugins(rows);
         setPluginsLoading(false);
       });
     };
     load();
-    window.addEventListener('open-design:plugins-changed', load);
+    const onChanged = () => load(true);
+    window.addEventListener('open-design:plugins-changed', onChanged);
     return () => {
       cancelled = true;
-      window.removeEventListener('open-design:plugins-changed', load);
+      window.removeEventListener('open-design:plugins-changed', onChanged);
     };
   }, []);
 
@@ -926,22 +938,34 @@ export function HomeView({
       options?.preserveInputFields ? inputFields : result.inputs ?? inputFields,
       reconciledInputs,
     );
-    setActive((prev) =>
-      prev && prev.record.id === record.id
-        ? {
-            ...prev,
-            result,
-            inputs: reconciledInputs,
-            inputFields: options?.preserveInputFields ? inputFields : result.inputs ?? inputFields,
-            inputsValid: reconciledInputsValid,
-            projectMetadata: homeCreateProjectMetadata(
-              prev.projectKind,
-              reconciledInputs,
-              prev.projectMetadata,
-            ),
-          }
-        : prev,
-    );
+    setActive((prev) => {
+      if (!prev || prev.record.id !== record.id) return prev;
+      // Mirror the prompt-reconcile guard below for the extracted inputs: the
+      // user may have edited the prompt during the apply roundtrip, and
+      // handlePromptChange has already extracted those edits into
+      // prev.inputs. Rebuilding from the bind-time optimistic snapshot would
+      // silently revert them, so merge the apply result's defaults into
+      // prev.inputs instead.
+      const mergedInputs: Record<string, unknown> = { ...prev.inputs };
+      for (const field of result.inputs ?? []) {
+        if (field.default !== undefined && mergedInputs[field.name] === undefined) {
+          mergedInputs[field.name] = field.default;
+        }
+      }
+      const mergedFields = options?.preserveInputFields ? inputFields : result.inputs ?? inputFields;
+      return {
+        ...prev,
+        result,
+        inputs: mergedInputs,
+        inputFields: mergedFields,
+        inputsValid: pluginInputsAreValid(mergedFields, mergedInputs),
+        projectMetadata: homeCreateProjectMetadata(
+          prev.projectKind,
+          mergedInputs,
+          prev.projectMetadata,
+        ),
+      };
+    });
     // The daemon may have filled in `topic`/`audience` defaults the
     // optimistic render didn't know about (the manifest is inspected
     // client-side but field.default lives on the apply result). Re-
@@ -1184,6 +1208,20 @@ export function HomeView({
 
   function useExamplePlugin(record: InstalledPluginRecord, chipId: string, promptText: string) {
     setError(null);
+    // P0 ui_click area=chat_composer element=example_prompt: the user picked a
+    // plugin-preset example card below the rail. `chip_id` is the active task
+    // type, `plugin_id` the preset so example usage breaks down per plugin. (The
+    // Website-clone rail uses plain text prompt cards instead — those fire the
+    // same event from HomeHero's usePromptExample.) Raw seed text is never sent
+    // (free-text / PII rule).
+    trackHomeChatComposerClick(analytics.track, {
+      page_name: 'home',
+      area: 'chat_composer',
+      element: 'example_prompt',
+      chip_id: chipId,
+      plugin_id: record.sourceMarketplaceEntryName ?? record.id,
+      plugin_type: record.marketplaceTrust ?? 'official',
+    });
     // Picking a preset card *binds* the plugin (not just a textarea fill):
     // active switches to this exact preset so submit resolves its snapshot and
     // injects the plugin's SKILL.md + example.html as generation context — the
@@ -1207,6 +1245,21 @@ export function HomeView({
 
   async function duplicateExamplePlugin(record: InstalledPluginRecord) {
     setError(null);
+    // P0 ui_click area=chat_composer element=example_open_project: the one-click
+    // "Remix" on an example card — creates and enters a project seeded from the
+    // example (for site-clone cards it drops the pre-built clone straight in as
+    // index.html) instead of only seeding the composer. Same chip_id/plugin_id
+    // attribution as `example_prompt`; `chip_id` from the active task type since
+    // preset cards only render under an active chip. The created project's own
+    // `project_kind` (web_clone) still rides project_create_result separately.
+    trackHomeChatComposerClick(analytics.track, {
+      page_name: 'home',
+      area: 'chat_composer',
+      element: 'example_open_project',
+      chip_id: active?.chipId ?? undefined,
+      plugin_id: record.sourceMarketplaceEntryName ?? record.id,
+      plugin_type: record.marketplaceTrust ?? 'official',
+    });
     setPendingDuplicatePluginId(record.id);
     try {
       const result = await duplicatePluginAsProject(record.id, {
@@ -1688,10 +1741,19 @@ export function HomeView({
         // for that. Migrate-group chips (From Figma, etc.) still carry
         // a meaningful prompt the user wants dropped in, so they keep
         // the historical behavior.
+        //
+        // Website clone is the one create chip that seeds the composer: the
+        // scenario is meaningless without a target URL, so an empty composer
+        // gets the localized "clone this site: <url>" scaffold instead of
+        // staying blank. A non-empty draft is the user's — leave it alone.
+        const promptSeed =
+          chip.id === 'web-clone' && prompt.trim().length === 0
+            ? t('homeHero.chip.webClonePromptSeed')
+            : null;
         if (chip.group === 'create') {
-          void usePlugin(record, undefined, {
+          void usePlugin(record, promptSeed ?? undefined, {
             ...pluginOptions,
-            suppressPromptUpdate: true,
+            suppressPromptUpdate: promptSeed === null,
             deferApply: true,
           });
         } else {
@@ -2139,7 +2201,7 @@ export function HomeView({
                 onOpenNewProject?.('template');
               }}
             />
-          ) : undefined
+          ) : artifactUpgradeSlot
         }
       />
 
@@ -2188,7 +2250,7 @@ export function HomeView({
           onDuplicate={(record) => void duplicateExamplePlugin(record)}
           onOpenDetails={handleCommunityOpenDetails}
           onBrowseRegistry={onBrowseRegistry}
-          preferDefaultFacet={false}
+          preferDefaultFacet
           cardLayout="gallery"
         />
       </HomeTemplatesReveal>

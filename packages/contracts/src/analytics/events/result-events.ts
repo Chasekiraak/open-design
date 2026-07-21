@@ -6,9 +6,33 @@ import type { TrackingRuntimeType } from '../public-params.js';
 import type { ReleaseChannel } from '@open-design/release';
 import type { TrackingDesignSystemEditSurface, TrackingDesignSystemKind, TrackingDesignSystemLengthBucket, TrackingDesignSystemOrigin, TrackingDesignSystemRunEntryFrom } from './design-systems.js';
 import type { TrackingSettingsPage } from './event-names.js';
-import type { TrackingArtifactKind, TrackingArtifactWriteSource, TrackingArtifactWriteStatus, TrackingByokProviderId, TrackingCliProviderId, TrackingDesignSystemSource, TrackingExportFormat, TrackingExportResult, TrackingFeedbackAction, TrackingFeedbackProviderId, TrackingFeedbackRating, TrackingFeedbackRatingWithNone, TrackingFeedbackReasonCode, TrackingFidelity, TrackingFileSizeBucket, TrackingFileType, TrackingFirstModelEventType, TrackingLangfuseDeliveryStatus, TrackingLangfuseDropReason, TrackingLangfuseReportResult, TrackingLangfuseReportSkipReason, TrackingProjectKind, TrackingProjectSource, TrackingResult, TrackingRunCloseReason, TrackingRunDiagnosticSource, TrackingRunFailureCategory, TrackingRunFailureDetail, TrackingRunFailureStage, TrackingRunFailureUserAction, TrackingRunLifecyclePhase, TrackingRunPhaseTimingStatus, TrackingRunResult, TrackingRunRetryFinalResult, TrackingRunRetryStrategy, TrackingRunRetrySuppressedReason, TrackingStderrLineCountBucket, TrackingTestResult, TrackingTokenCountSource } from './shared-enums.js';
+import type { TrackingArtifactKind, TrackingArtifactWriteSource, TrackingArtifactWriteStatus, TrackingByokPreflightBlockReason, TrackingByokProviderId, TrackingCliProviderId, TrackingDesignSystemSource, TrackingExecutionMode, TrackingExportFormat, TrackingExportResult, TrackingFeedbackAction, TrackingFeedbackProviderId, TrackingFeedbackRating, TrackingFeedbackRatingWithNone, TrackingFeedbackReasonCode, TrackingFidelity, TrackingFileSizeBucket, TrackingFileType, TrackingFirstModelEventType, TrackingLangfuseDeliveryStatus, TrackingLangfuseDropReason, TrackingLangfuseReportResult, TrackingLangfuseReportSkipReason, TrackingProjectKind, TrackingProjectSource, TrackingResult, TrackingRunCloseReason, TrackingRunDiagnosticSource, TrackingRunFailureCategory, TrackingRunFailureDetail, TrackingRunFailureStage, TrackingRunFailureUserAction, TrackingRunLifecyclePhase, TrackingRunPhaseTimingStatus, TrackingRunResult, TrackingRunRetryFinalResult, TrackingRunRetryStrategy, TrackingRunRetrySuppressedReason, TrackingStderrLineCountBucket, TrackingTestResult, TrackingTokenCountSource } from './shared-enums.js';
 import type { TrackingFileVersionSource, TrackingPluginImportSource, TrackingSessionMode, TrackingSettingsArea } from './ui-click.js';
 // ---- Result events -------------------------------------------------------
+
+// Final outcome for the paid provider submission. Keep this envelope free of
+// prompts, response bodies, configured URLs, credentials, and output paths.
+export interface MediaGenerationResultProps {
+  page_name: 'studio';
+  area: 'media_generation';
+  project_id: string;
+  task_id: string;
+  run_id?: string;
+  surface: 'image' | 'video' | 'audio';
+  provider_id: string;
+  model_id: string;
+  result: 'success' | 'failed';
+  initial_response_status?: number;
+  response_status?: number;
+  attempt_count: number;
+  retry_count: number;
+  retry_reason?: 'rate_limit_429' | 'service_unavailable_503';
+  retry_after_ms?: number;
+  retry_delay_ms?: number;
+  retry_final_result: 'not_attempted' | 'success' | 'failed' | 'skipped_retry_after_budget';
+  duration_ms: number;
+  used_stub_fallback: boolean;
+}
 
 export interface ProjectCreateResultProps {
   page_name: 'home';
@@ -44,6 +68,25 @@ export interface PluginReplacementResultProps {
   error_code?: string;
 }
 
+// Outcome of persisting a slide's speaker notes back into the deck HTML.
+// Fires when a save settles (success/failure), so we can measure how many
+// users actually author speaker notes and how reliable the save is. Editing
+// closes on blur/auto-save, so this is the completion event for the
+// deck_viewer speaker_notes_edit click. `edit_surface` distinguishes the
+// in-preview notes panel from the presenter popup; `has_content` is whether
+// the saved note for that slide is non-empty (authoring vs. clearing).
+export interface SpeakerNotesSaveResultProps {
+  page_name: 'artifact';
+  area: 'deck_viewer';
+  edit_surface: 'preview' | 'presenter';
+  artifact_id: string;
+  artifact_kind: TrackingArtifactKind;
+  slide_count?: number;
+  has_content?: boolean;
+  result: TrackingResult;
+  error_code?: string;
+}
+
 // Outcome of an actual import attempt from the plugin import modal. Fires
 // once per executed import (after the install/upload promise settles), not
 // for clicks that no-op. `error_code` carries the backend failure message —
@@ -57,9 +100,18 @@ export interface PluginImportResultProps {
 }
 
 export interface UpdateInstallResultProps {
-  page_name: 'home';
-  area: 'update_prompt';
+  page_name: 'home' | 'app';
+  area: 'update_prompt' | 'update_dialog';
   result: TrackingResult;
+  app_version_before?: string;
+  app_version_after?: string;
+  error_code?: string;
+}
+
+export interface UpdateCheckResultProps {
+  page_name: 'app';
+  area: 'update_dialog';
+  result: 'available' | 'up_to_date' | 'failed';
   app_version_before?: string;
   app_version_after?: string;
   error_code?: string;
@@ -276,6 +328,25 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   bottleneck_phase?: TrackingRunLifecyclePhase;
   last_observed_phase?: TrackingRunLifecyclePhase;
   phase_timing_status?: TrackingRunPhaseTimingStatus;
+  // E-lite root-cause discriminators. `last_observed_phase` tells us WHICH phase
+  // a stalled run died in (e.g. `tool_execution`); these four tell us WHY, which
+  // the phase alone cannot separate:
+  // - `approval_requested`: an approval/permission gate fired. Only the ACP path
+  //   is daemon-observable — stream/CLI runtimes pass a skip-permissions flag so
+  //   no gate fires, and `false` there means "not observed", not "no approval".
+  // - `stdin_backpressure`: writing the prompt to the child's stdin was queued
+  //   because the OS pipe buffer was full (the child was not draining stdin).
+  // - `tool_result_sent`: every committed tool_use received a matching
+  //   tool_result (paired by id, or by count for degraded events that carry a
+  //   null id on both sides). A stall with `tool_call_seen &&
+  //   !tool_result_sent` means a tool result was never delivered (our bug) vs a
+  //   provider that stalled after every tool result was delivered.
+  // - `last_progress_age_ms`: age of the last agent activity at finish. Near the
+  //   inactivity ceiling on a stall; near zero on a clean finish.
+  approval_requested?: boolean;
+  stdin_backpressure?: boolean;
+  tool_result_sent?: boolean;
+  last_progress_age_ms?: number;
   attempt_index?: number;
   attempt_duration_ms?: number;
   attempt_time_to_first_token_ms?: number;
@@ -290,6 +361,12 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   retry_attempt_count?: number;
   retry_final_result?: TrackingRunRetryFinalResult;
   retry_suppressed_reason?: TrackingRunRetrySuppressedReason;
+  agent_cli_version?: string;
+  runtime_companion_name?: string;
+  runtime_companion_version?: string;
+  retry_original_failure_category?: TrackingRunFailureCategory;
+  retry_original_failure_detail?: TrackingRunFailureDetail;
+  retry_original_failure_stage?: TrackingRunFailureStage;
 }
 
 export interface LangfuseReportResultProps {
@@ -364,7 +441,7 @@ export interface UpdateApplyObservedProps {
   namespace: string;
   platform: string;
   arch: string;
-  artifact_type: 'dmg' | 'installer';
+  artifact_type: 'dmg' | 'installer' | 'payload';
   from_version: string;
   to_version: string;
   result: TrackingUpdateApplyResult;
@@ -661,6 +738,13 @@ export interface SettingsByokModelsFetchResultProps {
   duration_ms: number;
 }
 
+export interface ByokPreflightBlockedProps {
+  source: 'settings' | 'run';
+  reason: TrackingByokPreflightBlockReason;
+  provider_id: TrackingByokProviderId | 'unknown';
+  active_execution_mode: TrackingExecutionMode;
+}
+
 export interface SettingsConnectorAuthResultProps {
   page_name: TrackingSettingsPage;
   area: 'connectors';
@@ -676,6 +760,11 @@ export type PackagedStartupFailureKind =
   | 'daemon-start'
   | 'web-start'
   | 'path-access'
+  // A sidecar that never reported ready within the status-wait budget — the
+  // pipe/socket never bound in time (e.g. win32 first-launch AV scanning slowing
+  // the daemon cold start), as opposed to a sidecar that exited (`daemon-start` /
+  // `web-start`). Split out so this bucket stops hiding inside `unknown`.
+  | 'status-timeout'
   | 'unknown';
 
 // Event-specific props for `packaged_runtime_failed`. Emitted by the packaged
@@ -717,4 +806,3 @@ export interface PackagedRuntimeFailedProps {
   source: string;
   platform: string;
 }
-

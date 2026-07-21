@@ -5,7 +5,10 @@ import {
   SIDECAR_SOURCES,
   type SidecarStamp,
 } from "@open-design/sidecar-proto";
-import { parseLauncherAfterQuitArgs } from "@open-design/launcher-proto";
+import {
+  parseLauncherAfterQuitArgs,
+  parseLauncherHandoffResumeArgs,
+} from "@open-design/launcher-proto";
 import {
   bootstrapSidecarRuntime,
   createSidecarLaunchEnv,
@@ -17,6 +20,10 @@ import { join } from "node:path";
 import { app, dialog } from "electron";
 
 import { readPackagedConfig } from "./config.js";
+import {
+  claimPackagedDownloadAttribution,
+  discoverPackagedDownloadAttribution,
+} from "./download-attribution.js";
 import { writePackagedDesktopIdentity } from "./identity.js";
 import { PackagedPathAccessError } from "./errors.js";
 import { inspectExistingDesktopForLauncher, waitForLauncherAfterQuit } from "./launcher-after-quit.js";
@@ -32,6 +39,7 @@ import {
   type PackagedDesktopLogger,
 } from "./logging.js";
 import { resolvePackagedNamespacePaths } from "./paths.js";
+import { launchPackagedPayloadDesktop } from "./payload-desktop-launch.js";
 import { packagedEntryUrl, registerOdProtocol } from "./protocol.js";
 import { startPackagedSidecars } from "./sidecars.js";
 import { reportStartupFailure, resolveStartupDistinctId } from "./startup-telemetry.js";
@@ -101,11 +109,15 @@ async function main(): Promise<void> {
 
   const config = await readPackagedConfig();
   const afterQuit = parseLauncherAfterQuitArgs(process.argv.slice(1));
+  const handoffResume = parseLauncherHandoffResumeArgs(process.argv.slice(1));
   const argvStamp = readProcessStamp(process.argv.slice(1), OPEN_DESIGN_SIDECAR_CONTRACT);
   const namespace = argvStamp?.namespace ?? config.namespace;
   const namespaceConfig = namespace === config.namespace ? config : { ...config, namespace };
   const initialPaths = resolvePackagedNamespacePaths(namespaceConfig, namespace, process.env);
-  await waitForLauncherAfterQuit(afterQuit, initialPaths);
+  if (!await waitForLauncherAfterQuit(afterQuit, initialPaths)) {
+    app.exit(1);
+    return;
+  }
   const existingDesktop = await inspectExistingDesktopForLauncher(namespace, {
     logger: console,
     paths: initialPaths,
@@ -113,10 +125,16 @@ async function main(): Promise<void> {
   if (existingDesktop.action === "exit") {
     return;
   }
-  const launcherRuntime = await resolvePackagedLauncherRuntime(namespaceConfig, initialPaths);
+  const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);
+  const launcherRuntime = await resolvePackagedLauncherRuntime(namespaceConfig, initialPaths, {
+    resume: handoffResume,
+  });
+  if (await launchPackagedPayloadDesktop(launcherRuntime, stamp)) {
+    app.exit(0);
+    return;
+  }
   const activeConfig = launcherRuntime.config;
   const paths = launcherRuntime.paths;
-  const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);
 
   // Arm fatal-exit telemetry now that we know the channel key/version. The
   // startPackagedSidecars call below is THE failure this covers (daemon/web
@@ -145,6 +163,10 @@ async function main(): Promise<void> {
   };
 
   await ensurePackagedNamespacePaths(paths);
+  const downloadAttribution = await discoverPackagedDownloadAttribution(paths, console).catch((error: unknown) => {
+    console.warn("[attribution] failed to discover packaged download attribution", error);
+    return null;
+  });
   packagedLogger = createPackagedDesktopLogger(paths);
   attachPackagedDesktopProcessLogging({ logger: packagedLogger, paths, stamp });
   applyPackagedElectronPathOverrides(paths);
@@ -212,6 +234,14 @@ async function main(): Promise<void> {
       setSplashStage(splash.window, stage);
     },
   });
+  if (sidecars.daemon.url) {
+    void claimPackagedDownloadAttribution({
+      attribution: downloadAttribution,
+      daemonUrl: sidecars.daemon.url,
+      installerObservationRoot: paths.installerObservationRoot,
+      logger: packagedLogger,
+    });
+  }
   // Sidecars are up; the remaining wait is the hidden main window loading and
   // mounting the web bundle (the runtime re-asserts this stage at its reveal
   // gate, which is a no-op when the label is already current).

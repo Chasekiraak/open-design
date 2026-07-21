@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useCallback,
   useEffect,
   useId,
@@ -16,13 +17,6 @@ import { resolveHtmlPointerArtifactTarget } from '../artifacts/pointer';
 import { validateHtmlArtifact } from '../artifacts/validate';
 import { recoverHtmlDocumentFromMarkdownFence, recoverStandaloneHtmlDocument, resolvePersistedArtifactHtml } from '../artifacts/recover';
 import { createArtifactParser } from '../artifacts/parser';
-import {
-  findFirstQuestionForm,
-  hasUnterminatedQuestionForm,
-  parsePartialQuestionForm,
-  type QuestionForm,
-} from '../artifacts/question-form';
-import { parseSubmittedAnswers } from './QuestionForm';
 import { useI18n } from '../i18n';
 import {
   fetchChatRunStatus,
@@ -31,6 +25,7 @@ import {
   fetchVelaLoginStatus,
   listActiveChatRuns,
   listProjectRuns,
+  publishDaemonRunFinishedEvent,
   reattachDaemonRun,
   reportChatRunFeedback,
   streamViaDaemon,
@@ -54,6 +49,7 @@ import {
 import { useProjectFileEvents, type ProjectEvent } from '../providers/project-events';
 import { claimProjectTurnIndex, claimRunTurnIndex } from '../analytics/identity';
 import { useCoalescedCallback } from '../hooks/useCoalescedCallback';
+import { requestAmrArtifactUpgrade } from '../runtime/amr-artifact-upgrade';
 import {
   type AmrWalletSnapshot,
   type ByokMediaDefaults,
@@ -64,6 +60,8 @@ import {
 import {
   anonymizeArtifactId,
   artifactKindToTracking,
+  byokProtocolToTracking,
+  executionModeToTracking,
   projectKindFromMetadataToTracking,
   projectKindToTracking,
 } from '@open-design/contracts/analytics';
@@ -76,6 +74,7 @@ import type {
 import { useAnalytics } from '../analytics/provider';
 import {
   trackArtifactHeaderClick,
+  trackByokPreflightBlocked,
   trackComposerBarClick,
   trackDesignSystemApplyResult,
   trackDesignSystemEnrichClick,
@@ -84,6 +83,7 @@ import {
   trackOnboardingFirstPromptSent,
   trackOnboardingFirstGenerationCompleted,
 } from '../analytics/events';
+import { byokPreflightBlockReason } from './byok/preflight';
 import {
   clearOnboardingSessionId,
   peekOnboardingSessionId,
@@ -104,9 +104,21 @@ import { playSound, showCompletionNotification } from '../utils/notifications';
 import { randomUUID } from '../utils/uuid';
 import { DEFAULT_NOTIFICATIONS } from '../state/config';
 import type { TodoItem } from '../runtime/todos';
-import { appendErrorStatusEvent, removeErrorStatusEvent } from '../runtime/chat-events';
+import {
+  appendErrorStatusEvent,
+  removeErrorStatusEvent,
+  runFailureFieldsFromError,
+} from '../runtime/chat-events';
+import type { RunFailureClassificationFields } from '../runtime/chat-events';
+import {
+  designDeliveryVerificationPending,
+  isRetryableAssistantTerminalFailure,
+  resolveDesignDeliveryOutcome,
+  type DesignDeliveryOutcome,
+} from '../runtime/design-delivery';
 import { RESUME_CONTINUE_PROMPT } from '../runtime/resume';
 import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
+import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
 import {
@@ -213,8 +225,7 @@ import { DesignSystemPicker } from './DesignSystemPicker';
 import { PluginDetailsModal } from './PluginDetailsModal';
 import { DesignSystemPreviewModal } from './DesignSystemPreviewModal';
 import { ChatPane } from './ChatPane';
-import type { QuestionFormOpenRequest } from './AssistantMessage';
-import type { ChatSendMeta } from './ChatComposer';
+import type { ChatSendMeta, ChatSendOutcome } from './ChatComposer';
 import {
   CritiqueTheaterMount,
   useCritiqueTheaterEnabled,
@@ -223,6 +234,7 @@ import { useIframeKeepAlivePool } from './IframeKeepAlivePool';
 import {
   decideAutoOpenAfterWrite,
   selectAutoOpenProducedArtifact,
+  selectAutoOpenTurnArtifact,
 } from './auto-open-file';
 import { buildRepoImportPrompt, designSystemNeedsRepoConnect } from './design-system-github-evidence';
 import { isDesignSystemProject, resolveProjectDesignSystemId } from './design-system-project';
@@ -476,6 +488,8 @@ const MIN_WORKSPACE_PANEL_WIDTH = 400;
 const SPLIT_RESIZE_HANDLE_WIDTH = 8;
 const BYOK_OPENCODE_UNAVAILABLE_MESSAGE =
   'BYOK API runs require OpenCode. Install OpenCode, then rescan local agents in Settings before retrying.';
+const BYOK_PROVIDER_REQUIRED_MESSAGE =
+  'BYOK OpenCode requires a provider, API key, and model. Complete BYOK settings before starting a run.';
 const BEDROCK_BYOK_UNSUPPORTED_MESSAGE =
   'AWS Bedrock BYOK chat requires AWS credential signing and is not supported by the current API-key proxy.';
 const CHAT_PANEL_KEYBOARD_STEP = 16;
@@ -1228,10 +1242,14 @@ function byokMediaDefaultsForRun(input: {
 function byokOpenCodeProviderFromConfig(
   config: AppConfig,
 ): ByokChatProviderConfig | undefined {
+  if (!isOpenCodeByokChatProtocol(config.apiProtocol)) return undefined;
   const selectedProvider = selectedKnownProviderForConfig(config);
+  const model = config.model.trim();
   if (
-    !isOpenCodeByokChatProtocol(config.apiProtocol) ||
-    (byokProviderRequiresApiKey(config.apiProtocol, selectedProvider, config.baseUrl) && !config.apiKey.trim())
+    (byokProviderRequiresApiKey(config.apiProtocol, selectedProvider, config.baseUrl) && !config.apiKey.trim()) ||
+    !model ||
+    model.toLowerCase() === 'default' ||
+    (config.apiProtocol === 'azure' && !config.baseUrl.trim())
   ) {
     return undefined;
   }
@@ -1239,6 +1257,7 @@ function byokOpenCodeProviderFromConfig(
     protocol: config.apiProtocol,
     apiKey: config.apiKey.trim(),
     baseUrl: config.baseUrl,
+    model: config.model,
     ...(selectedProvider?.requiresApiKey === false ? { requiresApiKey: false } : {}),
     apiVersion:
       config.apiProtocol === 'azure'
@@ -1387,6 +1406,12 @@ export function ProjectView({
     detailedProject && detailedProject.updatedAt >= project.updatedAt ? detailedProject : project;
   const projectDesignSystemId = resolveProjectDesignSystemId(currentProject);
   const projectIsDesignSystemProject = isDesignSystemProject(currentProject);
+  // Website-clone turns reproduce a whole multi-page site; auto-open should
+  // land on the site entry (index.html), not the last-written subpage. See
+  // `SelectAutoOpenOptions.preferSiteEntry`.
+  const autoOpenArtifactOptions = {
+    preferSiteEntry: currentProject.metadata?.intent === 'web-clone',
+  };
   const designSystemBrandId = projectIsDesignSystemProject
     ? currentProject.metadata?.brandId?.trim() || null
     : null;
@@ -1576,6 +1601,7 @@ export function ProjectView({
     code?: string | null;
     tone?: 'default' | 'success' | 'error' | 'loading';
     ttlMs?: number;
+    scope?: 'chat-pane';
   } | null>(null);
   // Brand extraction has no SSE; this polls the brand's status and, once the
   // backing extraction finalizes a `user:<id>` design system, surfaces a
@@ -1642,7 +1668,10 @@ export function ProjectView({
   // Soft low-balance warning holding a pending send: the dialog resolves the
   // promise the gate is awaiting ('proceed' continues the very same send).
   const [amrLowBalanceWarn, setAmrLowBalanceWarn] = useState<
-    { snapshot: AmrWalletSnapshot; resolve: (decision: AmrLowBalanceDecision) => void } | null
+    {
+      snapshot: AmrWalletSnapshot;
+      resolve: (decision: AmrLowBalanceDecision) => void;
+    } | null
   >(null);
   // Conversations with a balance-gate check currently in flight. Sends that
   // arrive during the check queue instead of racing a duplicate run through
@@ -1746,6 +1775,11 @@ export function ProjectView({
   const reattachControllersRef = useRef<Map<string, AbortController>>(new Map());
   const reattachCancelControllersRef = useRef<Map<string, AbortController>>(new Map());
   const completedReattachRunsRef = useRef<Set<string>>(new Set());
+  // A locally finished run briefly has terminal status before its async
+  // project-file refresh attaches delivery evidence. Do not let that same
+  // browser session reattach the run during this handoff; reattach remains
+  // the recovery path after a reload, where this in-memory set is empty.
+  const finalizingLocalRunIdsRef = useRef<Set<string>>(new Set());
   // Tracks transient null-status retry attempts per runId; bounded by
   // MAX_TRANSIENT_RETRIES so we never spin indefinitely on a persistently
   // missing run.
@@ -1839,146 +1873,6 @@ export function ProjectView({
   const currentConversationActionDisabled = currentConversationBusy || currentConversationSendDisabled;
   const currentConversationQueueDisabled = currentConversationLoading
     || failedMessagesConversationId === activeConversationId;
-
-  // The discovery question form lives in the right-hand Questions tab. We
-  // derive it from the latest assistant message: if that message embeds a
-  // <question-form> block, the panel renders it. The form is interactive
-  // only while it's the most recent turn and the user hasn't answered yet
-  // (an answer arrives as a following "[form answers …]" user message).
-  const lastAssistantIndex = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === 'assistant') return i;
-    }
-    return -1;
-  }, [messages]);
-  const lastAssistantContent =
-    lastAssistantIndex >= 0 ? messages[lastAssistantIndex]?.content ?? '' : '';
-  const lastAssistantMessageId =
-    lastAssistantIndex >= 0 ? messages[lastAssistantIndex]?.id ?? null : null;
-  const questionForm: QuestionForm | null = useMemo(
-    () => findFirstQuestionForm(lastAssistantContent)?.form ?? null,
-    [lastAssistantContent],
-  );
-  const questionFormSubmittedAnswers = useMemo(() => {
-    if (!questionForm) return undefined;
-    for (let i = lastAssistantIndex + 1; i < messages.length; i++) {
-      const m = messages[i];
-      if (m?.role !== 'user') continue;
-      const parsed = parseSubmittedAnswers(questionForm, m.content ?? '');
-      if (parsed) return parsed;
-    }
-    return undefined;
-  }, [questionForm, lastAssistantIndex, messages]);
-  const questionsGenerating =
-    currentConversationStreaming && hasUnterminatedQuestionForm(lastAssistantContent);
-  // While the form is still streaming, parse it tolerantly so the Questions tab
-  // can show a frame (title) immediately and fill questions in as they arrive.
-  const questionFormPreview = useMemo(
-    () => (questionsGenerating ? parsePartialQuestionForm(lastAssistantContent) : null),
-    [questionsGenerating, lastAssistantContent],
-  );
-  // The active (latest, unanswered) form stays editable the whole time it's on
-  // screen — while it streams in AND while the turn is still busy — so it never
-  // flickers between the locked (grey) and interactive (accent) styles.
-  // Submission is gated separately by the panel via `submitDisabled`/generating.
-  const questionFormActive =
-    (!!questionForm || questionsGenerating) && questionFormSubmittedAnswers === undefined;
-  // Mirror `questionFormActive`'s unanswered gate: once the user answers, the
-  // Questions tab closes, so the auto-focus nonce must not treat an answered
-  // form as a freshly appeared one.
-  const hasQuestions =
-    Boolean(questionForm || questionsGenerating) && questionFormSubmittedAnswers === undefined;
-  // Stable identity for the current form occurrence, used to remember that its
-  // one-by-one reveal already played. Keyed on the conversation + the hosting
-  // assistant message id (not the message index, and NOT the parsed form id —
-  // see buildQuestionFormKey). The assistant message id is allocated once and
-  // kept in place across the streaming→persisted swap (same `assistantId`
-  // throughout), so it survives the brief unmount/re-focus of the Questions tab
-  // without replaying the animation, yet differs for every distinct form
-  // occurrence (each lives in its own assistant message).
-  const questionFormKey = useMemo(
-    () =>
-      buildQuestionFormKey(
-        activeConversationId,
-        lastAssistantMessageId,
-        Boolean(questionForm ?? questionFormPreview),
-      ),
-    [activeConversationId, lastAssistantMessageId, questionForm, questionFormPreview],
-  );
-
-  // Release #3661: let a past question form be manually re-opened in the
-  // Questions panel. Layered on top of main's stable questionFormKey (#3644) —
-  // the `displayed*` values fall back to the live form when nothing is manually
-  // pinned, so both fixes coexist.
-  const [manualQuestionFormRequest, setManualQuestionFormRequest] =
-    useState<QuestionFormOpenRequest | null>(null);
-  useEffect(() => {
-    setManualQuestionFormRequest(null);
-  }, [project.id, activeConversationId]);
-  useEffect(() => {
-    if (hasQuestions && questionFormKey) setManualQuestionFormRequest(null);
-  }, [hasQuestions, questionFormKey]);
-  const displayedQuestionForm = manualQuestionFormRequest?.form ?? questionForm;
-  const displayedQuestionFormPreview = manualQuestionFormRequest ? null : questionFormPreview;
-  const displayedQuestionFormSubmittedAnswers =
-    manualQuestionFormRequest?.submittedAnswers ?? questionFormSubmittedAnswers;
-  const displayedQuestionFormActive = manualQuestionFormRequest ? false : questionFormActive;
-  const displayedQuestionsGenerating = manualQuestionFormRequest ? false : questionsGenerating;
-  const displayedQuestionFormKey = manualQuestionFormRequest
-    ? `${activeConversationId ?? 'conversation'}:${manualQuestionFormRequest.messageId}:${manualQuestionFormRequest.form.id}:manual`
-    : questionFormKey;
-
-  // Auto-switch the workspace to the Questions tab when a new discovery form
-  // first appears, and let the chat banner re-focus it on click. The nonce
-  // bump is what FileWorkspace listens to.
-  const [questionsFocusNonce, setQuestionsFocusNonce] = useState(0);
-  const prevHasQuestionsRef = useRef(false);
-  useEffect(() => {
-    if (hasQuestions && !prevHasQuestionsRef.current) {
-      setQuestionsFocusNonce((n) => n + 1);
-    }
-    prevHasQuestionsRef.current = hasQuestions;
-  }, [hasQuestions]);
-  const focusQuestionsRequest = useMemo(
-    () => (questionsFocusNonce > 0 ? { nonce: questionsFocusNonce } : null),
-    [questionsFocusNonce],
-  );
-  const submittedAnswersForQuestionFormRequest = useCallback((request: QuestionFormOpenRequest) => {
-    const assistantIndex = messages.findIndex((m) => m.id === request.messageId);
-    if (assistantIndex < 0) return null;
-    for (let i = assistantIndex + 1; i < messages.length; i++) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.role === 'assistant') break;
-      if (m.role !== 'user') continue;
-      const parsed = parseSubmittedAnswers(request.form, m.content ?? '');
-      if (parsed) return parsed;
-    }
-    return null;
-  }, [messages]);
-  const openQuestionsTab = useCallback((request?: QuestionFormOpenRequest) => {
-    if (request) {
-      const opensCurrentLiveForm =
-        request.messageId === lastAssistantMessageId
-        && questionForm?.id === request.form.id
-        && questionFormSubmittedAnswers === undefined;
-      if (opensCurrentLiveForm) {
-        setManualQuestionFormRequest(null);
-      } else {
-        setManualQuestionFormRequest({
-          ...request,
-          submittedAnswers:
-            request.submittedAnswers ?? submittedAnswersForQuestionFormRequest(request) ?? undefined,
-        });
-      }
-    }
-    setQuestionsFocusNonce((n) => n + 1);
-  }, [
-    lastAssistantMessageId,
-    questionForm,
-    questionFormSubmittedAnswers,
-    submittedAnswersForQuestionFormRequest,
-  ]);
 
   const currentConversationQueuedItems = activeConversationId
     ? queuedChatSends
@@ -2233,7 +2127,11 @@ export function ProjectView({
     // file mutations or live artifacts.
     setDesignMdRefreshKey((n) => n + 1);
 
-    const status = last.runStatus;
+    const status =
+      last.resultDeliveryState === 'no_result' ||
+      last.resultDeliveryState === 'delivery_failed'
+        ? 'failed'
+        : last.runStatus;
     if (status !== 'succeeded' && status !== 'failed') return;
 
     const cfg = config.notifications ?? DEFAULT_NOTIFICATIONS;
@@ -2282,6 +2180,7 @@ export function ProjectView({
         continue;
       }
       if (message.runStatus !== 'succeeded' && message.runStatus !== 'failed') continue;
+      if (message.runStatus === 'succeeded' && designDeliveryVerificationPending(message)) continue;
       if (!keys.some((key) => activeCompletionNotificationRunsRef.current.has(key))) continue;
       if (keys.some((key) => completedNotificationRunsRef.current.has(key))) continue;
       for (const key of keys) completedNotificationRunsRef.current.add(key);
@@ -2376,9 +2275,20 @@ export function ProjectView({
   }, []);
 
   const handleWorkspaceContextsChange = useCallback((next: WorkspaceContextItem[]) => {
-    setWorkspaceContexts((current) =>
-      workspaceContextItemsEqual(current, next) ? current : next,
-    );
+    // This runs in a post-commit effect inside FileWorkspace: on any tab
+    // mutation the workspace-context set changes and this setState schedules a
+    // SECOND full render of the entire ProjectView -> FileWorkspace ->
+    // FileViewer tree, on top of the tab-state render that triggered it. The
+    // result only feeds the composer's @-mention context picker, which never
+    // needs to update in the same frame the user closes a tab. Marking it as a
+    // transition lets the urgent tab-close render commit first (tab disappears
+    // immediately) and defers this heavy second pass so it no longer stalls the
+    // interaction.
+    startTransition(() => {
+      setWorkspaceContexts((current) =>
+        workspaceContextItemsEqual(current, next) ? current : next,
+      );
+    });
   }, []);
 
   const refreshProjectFiles = useCallback(async (): Promise<ProjectFile[]> => {
@@ -2540,10 +2450,12 @@ export function ProjectView({
           projectFiles: pointerProjectFiles,
         });
         if (pointerTarget) {
-          if (savedArtifactRef.current === pointerTarget) return;
+          if (savedArtifactRef.current === pointerTarget) {
+            return { ok: true as const, fileName: pointerTarget };
+          }
           savedArtifactRef.current = pointerTarget;
           requestOpenFile(pointerTarget);
-          return;
+          return { ok: true as const, fileName: pointerTarget };
         }
       }
       // Pre-write structural gate for HTML artifacts (#50, #1143). Reject
@@ -2554,11 +2466,16 @@ export function ProjectView({
       if (ext === '.html') {
         const validation = validateHtmlArtifact(artifactToPersist.html);
         if (!validation.ok) {
-          setError(`Refused to save artifact "${art.identifier || art.title || 'untitled'}": ${validation.reason}`);
-          return;
+          const message =
+            `Refused to save artifact "${art.identifier || art.title || 'untitled'}": ` +
+            validation.reason;
+          setError(message);
+          return { ok: false as const, error: message };
         }
       }
-      if (savedArtifactRef.current === fileName) return;
+      if (savedArtifactRef.current === fileName) {
+        return { ok: true as const, fileName };
+      }
       const title = art.title || art.identifier || fileName;
       const metadata = {
         identifier: art.identifier,
@@ -2603,6 +2520,7 @@ export function ProjectView({
         // sees it without an extra click. The Write-tool path already does
         // this for tool-emitted files; this handles the artifact-tag path.
         requestOpenFile(file.name);
+        return { ok: true as const, fileName: file.name };
       } else {
         // writeProjectTextFile collapses all failure paths (non-OK HTTP
         // responses, network errors, and stub-guard 422s) to null — the
@@ -2612,10 +2530,11 @@ export function ProjectView({
         // the structured details for any specific error type.
         // Clear the saved-artifact ref so the user can retry.
         savedArtifactRef.current = '';
-        setError(
+        const message =
           `Couldn't save artifact "${fileName}". The write failed — ` +
-            'check the daemon logs for details.',
-        );
+          'check the daemon logs for details.';
+        setError(message);
+        return { ok: false as const, error: message };
       }
     },
     [project.id, projectDesignSystemId, project.skillId, requestOpenFile],
@@ -3088,12 +3007,6 @@ export function ProjectView({
         nonce,
         attentionAction: 'download-page',
       });
-      setProjectActionsToast({
-        message: t('chat.brandBrowserAssistDownloadGuideTitle'),
-        details: t('chat.brandBrowserAssistDownloadGuideDetails'),
-        tone: 'default',
-        ttlMs: 12000,
-      });
       return { ok: true, action: 'opened' };
     },
     [currentProject.metadata?.brandSourceUrl, t],
@@ -3339,11 +3252,16 @@ export function ProjectView({
   // rides along on the error status event so AssistantMessage can render the
   // hosted-AMR nudge for model/auth/quota failures on non-AMR agents.
   const appendAssistantErrorEvent = useCallback(
-    (messageId: string, message: string, code?: string) => {
+    (
+      messageId: string,
+      message: string,
+      code?: string,
+      failure?: RunFailureClassificationFields,
+    ) => {
       if (!message) return;
       updateMessageById(
         messageId,
-        (prev) => appendErrorStatusEvent(prev, message, code),
+        (prev) => appendErrorStatusEvent(prev, message, code, failure),
         true,
       );
     },
@@ -3646,6 +3564,7 @@ export function ProjectView({
           );
           continue;
         }
+        if (finalizingLocalRunIdsRef.current.has(runId)) continue;
         if (reattachControllersRef.current.has(runId)) continue;
         if (completedReattachRunsRef.current.has(runId)) continue;
         const genericDisconnectBackoffUntil =
@@ -3819,6 +3738,8 @@ export function ProjectView({
               ? parsedArtifact
               : artifactFromStandaloneHtml(replayedContent);
             let recoveredExistingArtifact: ProjectFile | null = null;
+            let artifactPersistenceSucceeded = false;
+            let artifactPersistenceError: string | undefined;
             if (artifactToPersist?.html) {
               const producedBeforeFallback = computeProducedFiles(beforeFileNames, nextFiles) ?? [];
               const runStartedAt = status.createdAt || message.startedAt || message.createdAt;
@@ -3835,30 +3756,75 @@ export function ProjectView({
                   { minMtime: runStartedAt },
                 );
               if (recoveredExistingArtifact) {
+                artifactPersistenceSucceeded = true;
                 savedArtifactRef.current = recoveredExistingArtifact.name;
                 requestOpenFile(recoveredExistingArtifact.name);
               } else {
                 savedArtifactRef.current = null;
-                await persistArtifact(
+                const persistence = await persistArtifact(
                   artifactToPersist,
                   nextFiles,
                   replayedContent,
                   { pointerMinMtime: runStartedAt },
                 );
+                if (persistence.ok) artifactPersistenceSucceeded = true;
+                else artifactPersistenceError = persistence.error;
                 nextFiles = await refreshProjectFiles();
               }
             }
             const diff = computeProducedFiles(beforeFileNames, nextFiles) ?? [];
             const produced = mergeRecoveredArtifact(diff, recoveredExistingArtifact);
-            const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced);
+            const touchedFilePaths = extractTouchedFilePathsFromEvents(message.events);
+            const traceObjectFiles = mergeRecoveredTraceObjectFile(
+              computeTraceObjectFiles(
+                beforeFileNames,
+                nextFiles,
+                touchedFilePaths,
+                project.id,
+                projectDetail.resolvedDir,
+              ) ?? [],
+              recoveredExistingArtifact,
+            );
+            const producedArtifactToOpen = selectAutoOpenTurnArtifact(produced, nextFiles, {
+              ...autoOpenArtifactOptions,
+              turnStartedAt: status.createdAt || message.startedAt || message.createdAt || null,
+              turnEndedAt: message.endedAt || legacyReplayEndedAt || null,
+              agentTouchedFileNames: resolveAgentTouchedFileNames(
+                touchedFilePaths,
+                nextFiles,
+                project.id,
+                projectDetail.resolvedDir,
+              ),
+            });
             if (producedArtifactToOpen) requestOpenFile(producedArtifactToOpen);
-            if (produced.length > 0) {
-              updateMessageById(
-                message.id,
-                (prev) => ({ ...prev, producedFiles: produced }),
-                true,
-                { telemetryFinalized: true },
-              );
+            const deliveryOutcome = resolveDesignDeliveryOutcome({
+              sessionMode: message.sessionMode,
+              runStatus: 'succeeded',
+              content: replayedContent,
+              events: message.events,
+              producedFileCount: produced.length,
+              traceObjectFileCount: traceObjectFiles.length,
+              persistenceSucceeded: artifactPersistenceSucceeded,
+              persistenceFailed: artifactPersistenceError !== undefined,
+            });
+            updateMessageById(
+              message.id,
+              (prev) =>
+                applyDesignDeliveryOutcome(
+                  {
+                    ...prev,
+                    content: replayedContent,
+                    producedFiles: produced,
+                    traceObjectFiles,
+                  },
+                  deliveryOutcome,
+                  artifactPersistenceError,
+                ),
+              true,
+              { telemetryFinalized: true },
+            );
+            if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
+              setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
             }
             await auditDesignSystemWorkspaceAfterRun(message.id);
             // Clear stale retry count for successfully recovered run.
@@ -3985,11 +3951,18 @@ export function ProjectView({
           reattachTextBuffersRef.current.delete(textBuffer);
         };
 
+        const shouldPublishRunFinishedEvent =
+          isActiveRunStatus(message.runStatus)
+          || spuriouslyFailedPending
+          || recoverableGenericDisconnectFailed;
         void reattachDaemonRun({
           runId,
+          projectId: project.id,
+          conversationId: reattachConversationId,
           signal: controller.signal,
           cancelSignal: cancelController.signal,
           initialLastEventId: needsFullReplay ? null : message.lastRunEventId ?? null,
+          publishRunFinishedEvent: shouldPublishRunFinishedEvent,
           handlers: {
             onDelta: (delta) => {
               // First payload from the resumed stream is real recovery — the daemon is
@@ -4079,6 +4052,8 @@ export function ProjectView({
               void (async () => {
                 const preTurn = message.preTurnFileNames;
                 let nextFiles = await refreshProjectFiles();
+                let artifactPersistenceSucceeded = false;
+                let artifactPersistenceError: string | undefined;
                 // Use the turn-start snapshot when available so reload
                 // recovers files produced before the artifact write too;
                 // fall back to the current list for legacy messages.
@@ -4103,39 +4078,81 @@ export function ProjectView({
                       { minMtime: runStartedAt },
                     );
                   if (recoveredExistingArtifact) {
+                    artifactPersistenceSucceeded = true;
                     savedArtifactRef.current = recoveredExistingArtifact.name;
                     requestOpenFile(recoveredExistingArtifact.name);
                   } else {
                     savedArtifactRef.current = null;
-                    await persistArtifact(
+                    const persistence = await persistArtifact(
                       artifactToPersist,
                       nextFiles,
                       replayedContent,
                       { pointerMinMtime: runStartedAt },
                     );
+                    if (persistence.ok) artifactPersistenceSucceeded = true;
+                    else artifactPersistenceError = persistence.error;
                     nextFiles = await refreshProjectFiles();
                   }
                 }
                 const diff = computeProducedFiles(beforeFileNames, nextFiles) ?? [];
                 const produced = mergeRecoveredArtifact(diff, recoveredExistingArtifact);
+                const touchedFilePaths = extractTouchedFilePathsFromEvents(
+                  needsFullReplay ? replayedEvents : message.events,
+                );
                 const traceObjectFiles = mergeRecoveredTraceObjectFile(
                   computeTraceObjectFiles(
                     beforeFileNames,
                     nextFiles,
-                    extractTouchedFilePathsFromEvents(
-                      needsFullReplay ? replayedEvents : message.events,
-                    ),
+                    touchedFilePaths,
+                    project.id,
+                    projectDetail.resolvedDir,
                   ) ?? [],
                   recoveredExistingArtifact,
                 );
-                const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced);
+                const producedArtifactToOpen = selectAutoOpenTurnArtifact(produced, nextFiles, {
+                  ...autoOpenArtifactOptions,
+                  turnStartedAt: status.createdAt || message.startedAt || message.createdAt || null,
+                  turnEndedAt: endedAt ?? null,
+                  agentTouchedFileNames: resolveAgentTouchedFileNames(
+                    touchedFilePaths,
+                    nextFiles,
+                    project.id,
+                    projectDetail.resolvedDir,
+                  ),
+                });
                 if (producedArtifactToOpen) requestOpenFile(producedArtifactToOpen);
+                const deliveryContent = needsFullReplay ? replayedContent : message.content;
+                const deliveryEvents = needsFullReplay ? replayedEvents : message.events;
+                const deliveryOutcome = resolveDesignDeliveryOutcome({
+                  sessionMode: message.sessionMode,
+                  runStatus: 'succeeded',
+                  content: deliveryContent,
+                  events: deliveryEvents,
+                  producedFileCount: produced.length,
+                  traceObjectFileCount: traceObjectFiles.length,
+                  persistenceSucceeded: artifactPersistenceSucceeded,
+                  persistenceFailed: artifactPersistenceError !== undefined,
+                });
                 updateMessageById(
                   message.id,
-                  (prev) => ({ ...prev, producedFiles: produced, traceObjectFiles }),
+                  (prev) =>
+                    applyDesignDeliveryOutcome(
+                      {
+                        ...prev,
+                        content: deliveryContent,
+                        events: deliveryEvents,
+                        producedFiles: produced,
+                        traceObjectFiles,
+                      },
+                      deliveryOutcome,
+                      artifactPersistenceError,
+                    ),
                   true,
                   { telemetryFinalized: true },
                 );
+                if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
+                  setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
+                }
                 await auditDesignSystemWorkspaceAfterRun(message.id);
               })();
               onProjectsRefresh();
@@ -4146,6 +4163,7 @@ export function ProjectView({
               let skipFinalPersistNow = false;
               let retryFullReplayAfterCleanup = false;
               const genericDisconnect = isGenericDaemonDisconnect(err);
+              const failure = runFailureFieldsFromError(err);
               // A superseded reattached run must not paint a global failure
               // banner or re-finalize its message over the replacement run.
               const runMayFinalize =
@@ -4155,7 +4173,7 @@ export function ProjectView({
               unregisterTextBuffer();
               if (runMayFinalize) {
                 setError(err.message);
-                appendAssistantErrorEvent(message.id, err.message, errorCode);
+                appendAssistantErrorEvent(message.id, err.message, errorCode, failure);
                 updateMessageById(
                   message.id,
                   (prev) => ({
@@ -4216,9 +4234,22 @@ export function ProjectView({
                     if (produced.length > 0) {
                       recoveredArtifactMessagesRef.current.add(message.id);
                     }
-                    const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced);
+                    const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced, autoOpenArtifactOptions);
                     if (producedArtifactToOpen) requestOpenFile(producedArtifactToOpen);
                     if (latestRunStatus?.status === 'succeeded') setError(null);
+                    if (
+                      shouldPublishRunFinishedEvent
+                      && latestRunStatus?.status === 'succeeded'
+                      && typeof latestRunStatus.artifactCount === 'number'
+                    ) {
+                      publishDaemonRunFinishedEvent({
+                        runId,
+                        projectId: project.id,
+                        conversationId: reattachConversationId,
+                        result: 'success',
+                        artifactCount: latestRunStatus.artifactCount,
+                      });
+                    }
                     // Unlike the recoverArtifacts sibling below, this row's
                     // endedAt was already stamped synchronously above (~4041)
                     // at disconnect time — `prev.endedAt` is never null here,
@@ -4236,6 +4267,8 @@ export function ProjectView({
                         ...prev,
                         content: replayedContent,
                         producedFiles: produced.length > 0 ? produced : prev.producedFiles,
+                        resultDeliveryState:
+                          produced.length > 0 ? 'delivered' : prev.resultDeliveryState,
                         runStatus: latestRunStatus?.status === 'succeeded' ? 'succeeded' : prev.runStatus,
                         endedAt:
                           latestRunStatus?.status === 'succeeded'
@@ -4290,6 +4323,18 @@ export function ProjectView({
                   const latestRunStatus = await fetchChatRunStatus(runId).catch(() => null);
                   if (!latestRunStatus || isActiveRunStatus(latestRunStatus.status)) {
                   } else if (latestRunStatus.status === 'succeeded') {
+                    if (
+                      shouldPublishRunFinishedEvent
+                      && typeof latestRunStatus.artifactCount === 'number'
+                    ) {
+                      publishDaemonRunFinishedEvent({
+                        runId,
+                        projectId: project.id,
+                        conversationId: reattachConversationId,
+                        result: 'success',
+                        artifactCount: latestRunStatus.artifactCount,
+                      });
+                    }
                     clearProjectTimeout(backoffTimer);
                     setError(null);
                     // If the resumed stream already replayed some content/events
@@ -4578,7 +4623,7 @@ export function ProjectView({
             continue;
           }
           recoveredArtifactMessagesRef.current.add(message.id);
-          const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced);
+          const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced, autoOpenArtifactOptions);
           if (producedArtifactToOpen) requestOpenFile(producedArtifactToOpen);
           // This message's persisted runStatus was already terminal (a
           // precondition of hasRecoverableArtifactMessage); when it has no
@@ -4592,6 +4637,7 @@ export function ProjectView({
               ...prev,
               content: sourceText,
               producedFiles: produced,
+              resultDeliveryState: 'delivered',
               runStatus:
                 latestRunStatus?.status === 'succeeded'
                   ? 'succeeded'
@@ -4772,6 +4818,21 @@ export function ProjectView({
           chatAttachmentsFromPreviewCommentImages(attachment.imageAttachments),
         ),
       );
+      const byokOpenCodeProvider = byokOpenCodeProviderFromConfig(config);
+      const requiresByokPreflight =
+        (config.mode === 'api' && config.apiProtocol !== 'bedrock') ||
+        (config.mode === 'daemon' && config.agentId === 'byok-opencode');
+      if (requiresByokPreflight && !byokOpenCodeProvider) {
+        trackByokPreflightBlocked(analytics.track, {
+          source: 'run',
+          reason: byokPreflightBlockReason(config) ?? 'config_invalid',
+          provider_id: byokProtocolToTracking(config.apiProtocol) ?? 'unknown',
+          active_execution_mode: executionModeToTracking(config.mode),
+        });
+        setError(BYOK_PROVIDER_REQUIRED_MESSAGE);
+        onOpenSettings('execution');
+        return false;
+      }
       if (!retryTarget && meta?.queueOnly) {
         queueChatSendForCurrentConversation({
           conversationId: activeConversationId,
@@ -4862,15 +4923,22 @@ export function ProjectView({
             // Low balance: pause THIS send while the reminder dialog waits
             // for a decision. 'proceed' resumes the very same send below —
             // a continuation, not a re-submit.
-            const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
-              setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
-            });
-            setAmrLowBalanceWarn(null);
-            // Same conversation-switch guard for the dialog-open window; the
-            // payload is parked (not sent) so nothing is lost either way.
-            if (decision !== 'proceed' || messagesConversationIdRef.current !== activeConversationId) {
-              parkBlockedSend();
+            const plan = await resolveAmrPlan(gate.snapshot);
+            if (messagesConversationIdRef.current !== activeConversationId) {
+              queueGateSend();
               return false;
+            }
+            if (isPaidAmrPlan(plan)) {
+              const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
+                setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
+              });
+              setAmrLowBalanceWarn(null);
+              // Same conversation-switch guard for the dialog-open window; the
+              // payload is parked (not sent) so nothing is lost either way.
+              if (decision !== 'proceed' || messagesConversationIdRef.current !== activeConversationId) {
+                parkBlockedSend();
+                return false;
+              }
             }
           }
           amrGatePausedQueueConversationsRef.current.delete(gateConversationId);
@@ -4954,7 +5022,6 @@ export function ProjectView({
               effectiveSelectedAgentChoice?.model,
             )
           : apiProtocolModelLabel(config.apiProtocol, config.model);
-      const byokOpenCodeProvider = byokOpenCodeProviderFromConfig(config);
       const preTurnFileNames = projectFiles.map((f) => f.name);
       const assistantId = randomUUID();
       const assistantMsg: ChatMessage = {
@@ -4967,6 +5034,7 @@ export function ProjectView({
         createdAt: startedAt,
         runStatus: config.mode === 'daemon' ? 'running' : undefined,
         startedAt,
+        sessionMode: runSessionMode,
         preTurnFileNames,
       };
       let latestAssistantMsg: ChatMessage = assistantMsg;
@@ -5409,6 +5477,8 @@ export function ProjectView({
               runStatus: finalRunStatus,
             };
           });
+          const finalizingRunId = currentRunId;
+          if (finalizingRunId) finalizingLocalRunIdsRef.current.add(finalizingRunId);
           if (runCommentAttachments.length > 0) {
             void patchAttachedStatuses(runCommentAttachments, 'needs_review');
           }
@@ -5425,6 +5495,8 @@ export function ProjectView({
           void (async () => {
             try {
               let nextFiles = await refreshProjectFiles();
+              let artifactPersistenceSucceeded = false;
+              let artifactPersistenceError: string | undefined;
               const finalText = streamedText || fullText;
               const artifactToPersist = parsedArtifact?.html
                 ? parsedArtifact
@@ -5450,10 +5522,13 @@ export function ProjectView({
                     });
                 const sameTurnWrite = sameTurnArtifactWrite ?? sameTurnHtmlWrite;
                 if (sameTurnWrite) {
+                  artifactPersistenceSucceeded = true;
                   savedArtifactRef.current = sameTurnWrite.name;
                   requestOpenFile(sameTurnWrite.name);
                 } else {
-                  await persistArtifact(artifactToPersist, nextFiles, finalText);
+                  const persistence = await persistArtifact(artifactToPersist, nextFiles, finalText);
+                  if (persistence.ok) artifactPersistenceSucceeded = true;
+                  else artifactPersistenceError = persistence.error;
                   nextFiles = await refreshProjectFiles();
                 }
               }
@@ -5484,22 +5559,64 @@ export function ProjectView({
                 beforeFileNames,
                 nextFiles,
                 traceTouchedFilePaths,
+                project.id,
+                projectDetail.resolvedDir,
               ) ?? [];
-              const producedArtifactToOpen = selectAutoOpenProducedArtifact(produced);
+              const producedArtifactToOpen = selectAutoOpenTurnArtifact(produced, nextFiles, {
+                ...autoOpenArtifactOptions,
+                turnStartedAt: startedAt,
+                turnEndedAt: endedAt ?? null,
+                agentTouchedFileNames: resolveAgentTouchedFileNames(
+                  traceTouchedFilePaths,
+                  nextFiles,
+                  project.id,
+                  projectDetail.resolvedDir,
+                ),
+              });
               if (producedArtifactToOpen) requestOpenFile(producedArtifactToOpen);
+              const deliveryCandidate: ChatMessage = {
+                ...latestAssistantMsg,
+                endedAt,
+                runStatus: finalRunStatus,
+                sessionMode: runSessionMode,
+                producedFiles: produced,
+                traceObjectFiles,
+              };
+              const deliveryOutcome = resolveDesignDeliveryOutcome({
+                sessionMode: deliveryCandidate.sessionMode,
+                runStatus: deliveryCandidate.runStatus,
+                content: deliveryCandidate.content,
+                events: deliveryCandidate.events,
+                producedFileCount: produced.length,
+                traceObjectFileCount: traceObjectFiles.length,
+                persistenceSucceeded: artifactPersistenceSucceeded,
+                persistenceFailed: artifactPersistenceError !== undefined,
+              });
+              const finalized = applyDesignDeliveryOutcome(
+                deliveryCandidate,
+                deliveryOutcome,
+                artifactPersistenceError,
+              );
+              latestAssistantMsg = finalized;
               setMessages((curr) => {
                 const updated = curr.map((m) =>
                   m.id === assistantId
-                    ? { ...m, producedFiles: produced, traceObjectFiles }
+                    ? finalized
                     : m,
                 );
-                const finalized = updated.find((m) => m.id === assistantId);
-                if (finalized) persistMessage(finalized, { telemetryFinalized: true });
+                persistMessage(finalized, { telemetryFinalized: true });
                 return updated;
               });
+              if (deliveryOutcome === 'no_result' || deliveryOutcome === 'delivery_failed') {
+                setError(artifactPersistenceError ?? DESIGN_RESULT_MISSING_DETAIL);
+                if (runCommentAttachments.length > 0) {
+                  void patchAttachedStatuses(runCommentAttachments, 'failed');
+                }
+              }
               await auditDesignSystemWorkspaceAfterRun(assistantId);
             } finally {
               clearTraceTouchedFilePaths();
+              if (finalizingRunId) finalizingLocalRunIdsRef.current.delete(finalizingRunId);
             }
           })();
           onProjectsRefresh();
@@ -5526,6 +5643,7 @@ export function ProjectView({
           // directly, so the unconditional call at the bottom does not need
           // (and must not double-apply) that same update.
           let conversationFinalizedInline = false;
+          const failure = runFailureFieldsFromError(err);
           // A run superseded by a "send now" interrupt can still surface a
           // late disconnect error (e.g. a canceled stream that lost its
           // terminal SSE). It must not paint a global failure banner or
@@ -5538,7 +5656,7 @@ export function ProjectView({
           cancelSendTextBuffer();
           if (runMayFinalize) {
             setError(err.message);
-            appendAssistantErrorEvent(assistantId, err.message, errorCode);
+            appendAssistantErrorEvent(assistantId, err.message, errorCode, failure);
             updateAssistant((prev) => ({
               ...prev,
               endedAt,
@@ -5591,6 +5709,15 @@ export function ProjectView({
                 const latestRunStatus = await fetchChatRunStatus(runIdForGenericDisconnect).catch(() => null);
                 if (!latestRunStatus || isActiveRunStatus(latestRunStatus.status)) {
                 } else if (latestRunStatus.status === 'succeeded') {
+                  if (typeof latestRunStatus.artifactCount === 'number') {
+                    publishDaemonRunFinishedEvent({
+                      runId: runIdForGenericDisconnect,
+                      projectId: project.id,
+                      conversationId: runConversationId,
+                      result: 'success',
+                      artifactCount: latestRunStatus.artifactCount,
+                    });
+                  }
                   clearProjectTimeout(backoffTimer);
                   // Advance the outer endedAt so updateConversationLatestRun()
                   // below adopts this same authoritative terminal timestamp,
@@ -5885,6 +6012,7 @@ export function ProjectView({
               apiKey: byokOpenCodeProvider.apiKey,
               baseUrl: byokOpenCodeProvider.baseUrl,
               apiVersion: byokOpenCodeProvider.apiVersion,
+              model: byokOpenCodeProvider.model,
             }
           : undefined;
         if (userText.length > 0) {
@@ -6039,6 +6167,7 @@ export function ProjectView({
       scheduleProjectTimeout,
       onProjectsRefresh,
       onProjectChange,
+      onOpenSettings,
       byokImageModelOverride,
       byokVideoModelOverride,
       byokSpeechModelOverride,
@@ -6047,6 +6176,26 @@ export function ProjectView({
       byokVideoModelOptionsPV,
       byokSpeechModelOptionsPV,
     ],
+  );
+
+  const handleComposerSend = useCallback(
+    async (
+      prompt: string,
+      attachments: ChatAttachment[],
+      commentAttachments: ChatCommentAttachment[],
+      meta?: ChatSendMeta,
+    ): Promise<ChatSendOutcome> => {
+      if (activeConversationId) {
+        const decision = await requestAmrArtifactUpgrade({
+          projectId: project.id,
+          conversationId: activeConversationId,
+          source: 'chat_send',
+        });
+        if (decision === 'cancel') return 'restore-draft';
+      }
+      void handleSend(prompt, attachments, commentAttachments, meta);
+    },
+    [activeConversationId, handleSend, project.id],
   );
 
   // Cancel every in-flight run for the current conversation (the user's own
@@ -7096,7 +7245,7 @@ export function ProjectView({
 	            sendDisabled: currentConversationSendDisabled,
             queuedItems: currentConversationQueuedItems,
             error: conversationLoadError ?? error,
-            onSend: handleSend,
+            onSend: handleComposerSend,
             onRetry: handleRetry,
             onStop: handleStop,
             onRemoveQueuedSend: removeQueuedChatSend,
@@ -7117,7 +7266,7 @@ export function ProjectView({
       error,
       handleAssistantFeedback,
       handleRetry,
-      handleSend,
+      handleComposerSend,
       handleStop,
       messages,
       removeQueuedChatSend,
@@ -7415,6 +7564,21 @@ export function ProjectView({
     ? COMMENT_INSPECTOR_PANEL_WIDTH
     : chatPanelWidthRef.current;
   const chatPanelAriaMinWidth = Math.min(MIN_CHAT_PANEL_WIDTH, chatPanelMaxWidth);
+  const projectActionsToastInChatPane =
+    projectActionsToast?.scope === 'chat-pane' &&
+    !workspaceFocused &&
+    !commentInspectorActive &&
+    Boolean(activeConversationId || conversationLoadError);
+  const projectActionsToastNode = projectActionsToast ? (
+    <Toast
+      message={projectActionsToast.message}
+      details={projectActionsToast.details}
+      code={projectActionsToast.code}
+      tone={projectActionsToast.tone}
+      ttlMs={projectActionsToast.ttlMs}
+      onDismiss={() => setProjectActionsToast(null)}
+    />
+  ) : null;
 
   const renderPreferredChatPanelWidth = useCallback((
     preferredWidth: number,
@@ -7768,6 +7932,7 @@ export function ProjectView({
             details: null,
             tone: 'error',
             ttlMs: 7000,
+            scope: 'chat-pane',
           });
           return { status: 'handled' };
         }
@@ -7790,6 +7955,7 @@ export function ProjectView({
             details: null,
             tone: 'error',
             ttlMs: 6000,
+            scope: 'chat-pane',
           });
           return { status: 'handled' };
         }
@@ -7819,6 +7985,7 @@ export function ProjectView({
             details: null,
             tone: 'error',
             ttlMs: 5000,
+            scope: 'chat-pane',
           });
           return;
         }
@@ -7864,9 +8031,10 @@ export function ProjectView({
           snapshotMessage(liveSnapshot) ||
           fallbackMessage ||
           t('chat.brandBrowserAssistReadFailed'),
-        details: t('chat.brandBrowserAssistDownloadGuideDetails'),
+        details: null,
         tone: 'error',
         ttlMs: 7000,
+        scope: 'chat-pane',
       });
     })()
       .catch((err) => {
@@ -7876,6 +8044,7 @@ export function ProjectView({
           details: null,
           tone: 'error',
           ttlMs: 5000,
+          scope: 'chat-pane',
         });
       })
       .finally(() => {
@@ -8402,6 +8571,7 @@ export function ProjectView({
               hasActiveDesignSystem={!!projectDesignSystemId}
               activeDesignSystem={chatDesignSystemSummary}
               projectFileNames={projectFileNames}
+              projectResolvedDir={projectDetail.resolvedDir}
               skills={skills}
               onEnsureProject={handleEnsureProject}
               previewComments={previewComments}
@@ -8409,7 +8579,7 @@ export function ProjectView({
               onAttachComment={attachPreviewComment}
               onDetachComment={detachPreviewComment}
               onDeleteComment={(commentId) => void removePreviewComment(commentId)}
-              onSend={handleSend}
+              onSend={handleComposerSend}
               onRetry={handleRetry}
               onResumeRun={handleResumeRun}
               onStop={handleStop}
@@ -8428,7 +8598,14 @@ export function ProjectView({
               forceStreamingMessageIds={forceStreamingPluginMessageIds}
               initialDraft={chatInitialDraft}
               onboardingStarterPath={onboardingEntryRef.current?.productType ?? null}
-              onOpenQuestions={openQuestionsTab}
+              questionFormSubmitDisabled={currentConversationActionDisabled}
+              onSubmitQuestionForm={(text, attachments = [], context) => {
+                if (currentConversationActionDisabled) return false;
+                return handleSend(text, attachments, [], {
+                  entryFrom: 'question_answer',
+                  ...(context ? { context } : {}),
+                });
+              }}
               onContinueRemainingTasks={handleContinueRemainingTasks}
               onAssistantFeedback={handleAssistantFeedback}
               onArtifactShare={handleArtifactShare}
@@ -8481,6 +8658,13 @@ export function ProjectView({
               }
               createDesignSystemFromProjectBusy={projectDesignSystemCreateStarting}
               onBrandBrowserAssistConfirm={handleBrandBrowserAssistConfirm}
+              chatLogTray={
+                projectActionsToastInChatPane ? (
+                  <div className="project-actions-toast-anchor">
+                    {projectActionsToastNode}
+                  </div>
+                ) : null
+              }
               composerDraftSignal={composerDraftSignal}
               petConfig={config.pet}
               onAdoptPet={onAdoptPetInline}
@@ -8497,9 +8681,7 @@ export function ProjectView({
               byokSpeechVoice={byokSpeechVoiceOverride}
               onChangeByokSpeechVoice={setByokSpeechVoiceOverride}
               projectMetadata={currentProject.metadata}
-              onProjectMetadataChange={(metadata) => {
-                onProjectChange({ ...project, metadata });
-              }}
+              onProjectMetadataChange={onProjectChange}
               activeWorkspaceContext={activeWorkspaceContext}
               initialWorkspaceContexts={initialWorkspaceContexts}
               workspaceContexts={workspaceContexts}
@@ -8658,7 +8840,6 @@ export function ProjectView({
           messages={messages}
           artifactHtml={artifact?.html}
           conversationError={error}
-          onRetry={handleRetry}
           onAuthorizeAndRetry={handleSwitchToAmrAndRetry}
           onLaunchTerminalAuth={handleLaunchAntigravityOauth}
           conversationId={activeConversationId}
@@ -8696,20 +8877,6 @@ export function ProjectView({
               />
             </>
           )}
-          questionForm={displayedQuestionForm}
-          questionFormPreview={displayedQuestionFormPreview}
-          questionFormKey={displayedQuestionFormKey}
-          questionFormInteractive={displayedQuestionFormActive}
-          questionFormSubmitDisabled={currentConversationActionDisabled}
-          questionFormSubmittedAnswers={displayedQuestionFormSubmittedAnswers}
-          questionsGenerating={displayedQuestionsGenerating}
-          focusQuestionsRequest={focusQuestionsRequest}
-          onSubmitQuestionForm={(text) => {
-            if (currentConversationActionDisabled) return;
-            // Submitting question-form answers is a clarification turn, not a
-            // fresh create/edit — tag entry_from so the dashboard can separate it.
-            void handleSend(text, [], [], { entryFrom: 'question_answer' });
-          }}
         />
       </div>
       {contextPluginDetails ? (
@@ -8769,16 +8936,7 @@ export function ProjectView({
         />
       ) : null}
       <AnimatePresence>
-        {projectActionsToast ? (
-          <Toast
-            message={projectActionsToast.message}
-            details={projectActionsToast.details}
-            code={projectActionsToast.code}
-            tone={projectActionsToast.tone}
-            ttlMs={projectActionsToast.ttlMs}
-            onDismiss={() => setProjectActionsToast(null)}
-          />
-        ) : null}
+        {projectActionsToast && !projectActionsToastInChatPane ? projectActionsToastNode : null}
         {brandReadyPrompt ? (
           <BrandReadyPrompt
             key="brand-ready-prompt"
@@ -9153,10 +9311,14 @@ function artifactFromRecoverableSourceText(sourceText: string): Artifact | null 
   };
 }
 
-function shouldReplayTerminalRunMessage(message: ChatMessage): boolean {
+export function shouldReplayTerminalRunMessage(message: ChatMessage): boolean {
   if (message.role !== 'assistant') return false;
   if (!message.runId) return false;
   if (message.runStatus !== 'succeeded') return false;
+  // A daemon can persist terminal success before the browser finishes its
+  // project-file refresh. Reattach once even when prose already exists so the
+  // delivery invariant can confirm a file or downgrade the turn after reload.
+  if (designDeliveryVerificationPending(message)) return true;
   if (message.content.trim().length > 0) return false;
   if (
     message.startedAt == null
@@ -9241,7 +9403,7 @@ export function resolveRetryTarget(
     (message) =>
       message.id === failedAssistantId &&
       message.role === 'assistant' &&
-      message.runStatus === 'failed',
+      isRetryableAssistantTerminalFailure(message),
   );
   if (failedIndex <= 0 || failedIndex !== messages.length - 1) return null;
 
@@ -9249,7 +9411,7 @@ export function resolveRetryTarget(
   while (
     userIndex >= 0 &&
     messages[userIndex]?.role === 'assistant' &&
-    messages[userIndex]?.runStatus === 'failed'
+    isRetryableAssistantTerminalFailure(messages[userIndex]!)
   ) {
     userIndex -= 1;
   }
@@ -9414,6 +9576,36 @@ export function resolveSucceededRunStatus(status: ChatMessage['runStatus']): Cha
   return status === 'failed' || status === 'canceled' ? status : 'succeeded';
 }
 
+const DESIGN_RESULT_MISSING_DETAIL =
+  'The design run finished without producing a deliverable project file.';
+const DESIGN_RESULT_DELIVERY_FAILED_DETAIL =
+  'The design result was generated, but Open Design could not save it to the project.';
+
+function applyDesignDeliveryOutcome(
+  message: ChatMessage,
+  outcome: DesignDeliveryOutcome,
+  persistenceError?: string,
+): ChatMessage {
+  if (outcome === 'delivered') {
+    return { ...message, resultDeliveryState: 'delivered' };
+  }
+  if (outcome !== 'no_result' && outcome !== 'delivery_failed') return message;
+  const detail =
+    outcome === 'delivery_failed'
+      ? persistenceError || DESIGN_RESULT_DELIVERY_FAILED_DETAIL
+      : DESIGN_RESULT_MISSING_DETAIL;
+  const failed = {
+    ...message,
+    resultDeliveryState: outcome,
+    resumable: false,
+  };
+  return appendErrorStatusEvent(
+    failed,
+    detail,
+    'ARTIFACT_NOT_FOUND',
+  );
+}
+
 export function computeProducedFiles(
   beforeNames: ReadonlySet<string> | readonly string[] | undefined,
   next: readonly ProjectFile[],
@@ -9427,6 +9619,8 @@ export function computeTraceObjectFiles(
   beforeNames: ReadonlySet<string> | readonly string[] | undefined,
   next: readonly ProjectFile[],
   touchedPaths: Iterable<string> = [],
+  projectId?: string,
+  projectRoot?: string | null,
 ): ProjectFile[] | undefined {
   if (!beforeNames) return undefined;
   const set = beforeNames instanceof Set ? beforeNames : new Set(beforeNames);
@@ -9435,7 +9629,7 @@ export function computeTraceObjectFiles(
     byName.set(file.name, { ...file, traceObjectReason: 'new' });
   }
   for (const rawPath of touchedPaths) {
-    const file = findTouchedProjectFile(rawPath, next);
+    const file = findTouchedProjectFile(rawPath, next, projectId, projectRoot);
     if (!file) continue;
     byName.set(file.name, {
       ...file,
@@ -9445,10 +9639,48 @@ export function computeTraceObjectFiles(
   return [...byName.values()];
 }
 
-function findTouchedProjectFile(rawPath: string, files: readonly ProjectFile[]): ProjectFile | null {
-  const normalized = normalizeComparableFilePath(rawPath);
-  if (!normalized) return null;
-  const hasPathSeparator = normalized.includes('/');
+function findTouchedProjectFile(
+  rawPath: string,
+  files: readonly ProjectFile[],
+  projectId?: string,
+  projectRoot?: string | null,
+): ProjectFile | null {
+  const slashed = rawPath.replace(/\\/g, '/');
+  // Lexically resolve `.`/`..` first: a path whose `..` climbs above its own
+  // anchor can never be proven to stay anywhere, so it is rejected outright —
+  // before any suffix matching could pair it with an in-project file.
+  const segments = lexicallyNormalizePathSegments(slashed);
+  if (!segments || segments.length === 0) return null;
+  let normalized = segments.join('/');
+  // A managed-project alias (`…/projects/<projectId>/…`) identifies the file's
+  // project-relative form regardless of where the alias mount lives, so it is
+  // trusted as-is; containment below only anchors paths without that marker.
+  const managedProjectRelativePath = relativePathFromManagedProjectAlias(normalized, projectId);
+  if (!managedProjectRelativePath && isAbsoluteToolPath(slashed)) {
+    const rootSegments = projectRoot
+      ? lexicallyNormalizePathSegments(projectRoot.replace(/\\/g, '/'))
+      : null;
+    if (rootSegments && rootSegments.length > 0) {
+      // An absolute tool path is only trusted when it provably lives under
+      // the project root: require the root's segments as a prefix and match
+      // on the remaining project-relative form (/workspace/index.html →
+      // index.html). Out-of-root paths (including `..` escapes that resolve
+      // outside the root) are rejected here rather than falling through to
+      // suffix matching, where /tmp/site/index.html could otherwise pick the
+      // project's own index.html.
+      if (segments.length <= rootSegments.length) return null;
+      for (let i = 0; i < rootSegments.length; i += 1) {
+        if (segments[i] !== rootSegments[i]) return null;
+      }
+      normalized = segments.slice(rootSegments.length).join('/');
+    }
+    // Without a usable root there is no anchor to judge containment against;
+    // keep the legacy suffix behavior below.
+  }
+  const comparablePaths = managedProjectRelativePath
+    ? [normalized, managedProjectRelativePath]
+    : [normalized];
+  const hasPathSeparator = comparablePaths.every((candidate) => candidate.includes('/'));
   const basename = normalized.split('/').pop() ?? normalized;
   const normalizedFiles = files.map((file) => ({
     file,
@@ -9466,13 +9698,15 @@ function findTouchedProjectFile(rawPath: string, files: readonly ProjectFile[]):
     return matched;
   };
 
-  const exact = matches((candidate) => candidate === normalized);
+  const exact = matches((candidate) => comparablePaths.includes(candidate));
   if (exact.length === 1) return exact[0]!;
   if (exact.length > 1) return null;
 
   const suffix = matches((candidate) =>
     candidate.includes('/') &&
-    (candidate.endsWith(`/${normalized}`) || normalized.endsWith(`/${candidate}`)),
+    comparablePaths.some((comparablePath) =>
+      candidate.endsWith(`/${comparablePath}`) || comparablePath.endsWith(`/${candidate}`),
+    ),
   );
   if (suffix.length === 1) return suffix[0]!;
   if (suffix.length > 1) return null;
@@ -9485,12 +9719,63 @@ function findTouchedProjectFile(rawPath: string, files: readonly ProjectFile[]):
   return basenameMatches.length === 1 ? basenameMatches[0]!.file : null;
 }
 
+function relativePathFromManagedProjectAlias(
+  normalizedPath: string,
+  projectId: string | undefined,
+): string | null {
+  const normalizedProjectId = normalizeComparableFilePath(projectId ?? '');
+  if (!normalizedProjectId || normalizedProjectId.includes('/')) return null;
+  const marker = `projects/${normalizedProjectId}/`;
+  const markerIndex = normalizedPath.lastIndexOf(marker);
+  if (markerIndex < 0 || (markerIndex > 0 && normalizedPath[markerIndex - 1] !== '/')) return null;
+  return normalizedPath.slice(markerIndex + marker.length) || null;
+}
+
 function normalizeComparableFilePath(value: string): string {
   return value
     .replace(/\\/g, '/')
     .split('/')
     .filter((part) => part && part !== '.')
     .join('/');
+}
+
+// Lexically resolve `.`/`..` segments. Returns null when a `..` climbs above
+// the path's own anchor — such a path cannot be proven to resolve anywhere.
+function lexicallyNormalizePathSegments(path: string): string[] | null {
+  const out: string[] = [];
+  for (const part of path.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out;
+}
+
+function isAbsoluteToolPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+// Resolve the agent's raw Write/Edit tool paths (absolute or partial) to
+// project file NAMES for selectAutoOpenTurnArtifact's touched-file
+// restriction. Paths that do not resolve to a project file (out-of-project
+// writes) are dropped; ambiguous matches resolve to null inside
+// findTouchedProjectFile and are dropped the same way.
+export function resolveAgentTouchedFileNames(
+  touchedPaths: Iterable<string>,
+  files: readonly ProjectFile[],
+  projectId?: string,
+  projectRoot?: string | null,
+): Set<string> {
+  const names = new Set<string>();
+  for (const rawPath of touchedPaths) {
+    const file = findTouchedProjectFile(rawPath, files, projectId, projectRoot);
+    if (file) names.add(file.name);
+  }
+  return names;
 }
 
 // Reattach with a recovered (on-disk) artifact must still include any

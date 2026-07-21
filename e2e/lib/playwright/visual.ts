@@ -575,7 +575,7 @@ export async function mockSignedInVelaAccount(
 }
 
 export async function waitForVisualReady(page: Page): Promise<void> {
-  await page.getByText('Loading Open Design…').waitFor({ state: 'hidden', timeout: T.long });
+  await page.getByText('Loading Open Design…').waitFor({ state: 'hidden', timeout: T.xlong });
   await expect(page.getByTestId('home-hero')).toBeVisible({ timeout: T.medium });
   await expect(page.getByTestId('home-hero-input')).toBeVisible({ timeout: T.medium });
   await page.evaluate(async () => {
@@ -608,8 +608,12 @@ export async function gotoVisualWorkspace(page: Page): Promise<void> {
 }
 
 export async function prepareVisualWorkspaceFileList(page: Page): Promise<void> {
-  await page.getByTestId('design-files-tab').click();
-  await expect(page.getByTestId('design-files-tab')).toHaveAttribute('aria-selected', 'true');
+  const trigger = page.getByTestId('workspace-pages-menu-trigger');
+  const triggerText = await trigger.textContent().catch(() => '');
+  if (!/\bAll project files\b/.test(triggerText ?? '')) {
+    await trigger.click();
+    await page.getByRole('menuitem', { name: 'All project files' }).click();
+  }
   await expect(page.getByTestId('design-file-row-index.html')).toBeVisible();
   await expect(page.getByTestId('design-file-preview')).toHaveCount(0);
   await resetVisualScroll(page);
@@ -636,7 +640,6 @@ export async function prepareVisualAvatarMenu(page: Page): Promise<Locator> {
   await prepareVisualWorkspaceFileList(page);
   const menu = await openAvatarMenu(page);
   await expect(menu.locator('.avatar-item').first()).toBeVisible();
-  await expect(page.getByTestId('design-files-tab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('design-file-row-index.html')).toBeVisible();
   await waitForVisualStable(page);
   return menu;

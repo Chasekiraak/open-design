@@ -16,6 +16,7 @@ import {
   mergeNoProxyWithLoopbackDefaults,
   proxyDispatcherRequestInit,
   redactSecrets,
+  resolveOpenAIConnectionTestRunProviderPackage,
   resolveConnectionTestTimeoutMs,
   testAgentConnection,
   testProviderConnection,
@@ -23,9 +24,18 @@ import {
   validateUserProviderBaseUrl,
   type DnsLookupAddress,
 } from '../src/connectionTest.js';
+import {
+  applyAgentLaunchEnv,
+  getAgentDef,
+  resolveAgentLaunch,
+  spawnEnvForAgent,
+} from '../src/agents.js';
 import { listProviderModels } from '../src/integrations/provider-models.js';
+import { readVelaCredentialRevision } from '../src/integrations/vela.js';
 import { startServer } from '../src/server.js';
 import { rememberLiveModels } from '../src/runtimes/models.js';
+import { amrModelLoadingCache } from '../src/runtimes/amr-model-cache.js';
+import { buildAmrModelCacheKey } from '../src/runtimes/amr-model-probe.js';
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -154,6 +164,10 @@ async function withFakeKimi<T>(script: string, run: () => Promise<T>): Promise<T
   return withFakeAgent('kimi', script, run);
 }
 
+async function withFakeAntigravity<T>(script: string, run: () => Promise<T>): Promise<T> {
+  return withFakeAgent('agy', script, run);
+}
+
 async function waitForFile(file: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -189,6 +203,7 @@ beforeAll(async () => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  amrModelLoadingCache.resetForTests();
 });
 
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -202,8 +217,18 @@ describe('POST /api/provider/models', () => {
       );
       return jsonResponse({
         data: [
-          { id: 'gpt-4o-mini', object: 'model' },
-          { id: 'gpt-4o', object: 'model' },
+          {
+            id: 'gpt-4o-mini',
+            object: 'model',
+            metadata: { cost: 'low', capability: 'standard' },
+            enabled: false,
+          },
+          {
+            id: 'gpt-4o',
+            object: 'model',
+            metadata: { cost: 'medium', capability: 'advanced' },
+            default: true,
+          },
           { id: 'gpt-4o', object: 'model' },
           { id: 'wan2-1-14b-t2v-250225', object: 'model' },
           { id: 'text-embedding-3-large', object: 'model' },
@@ -224,13 +249,65 @@ describe('POST /api/provider/models', () => {
     });
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
+    const body = (await res.json()) as {
+      ok: boolean;
+      kind: string;
+      models?: Array<Record<string, unknown>>;
+    };
+    expect(body).toMatchObject({
       ok: true,
       kind: 'success',
       models: [
-        { id: 'gpt-4o', label: 'gpt-4o' },
-        { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+        {
+          id: 'gpt-4o-mini',
+          label: 'gpt-4o-mini',
+          metadata: { cost: 'low', capability: 'standard' },
+        },
+        {
+          id: 'gpt-4o',
+          label: 'gpt-4o',
+          metadata: { cost: 'medium', capability: 'advanced' },
+        },
       ],
+    });
+    expect(body.models?.[0]?.enabled).toBeUndefined();
+    expect(body.models?.[0]?.default).toBeUndefined();
+    expect(body.models?.[1]?.enabled).toBeUndefined();
+    expect(body.models?.[1]?.default).toBeUndefined();
+  });
+
+  // Regression for #5367: a gateway's /models catalogue can list embedding
+  // models alongside real chat models. `BAAI/bge-large-en-v1.5` (reported via
+  // SiliconFlow) doesn't contain any of the existing exclusion substrings
+  // (`embedding`, `rerank`, ...), so it was surfacing as a "loaded" chat model
+  // in the picker and then 404ing the moment a user actually tested it.
+  it('excludes the BGE embedding family from an OpenAI-compatible /models catalogue', async () => {
+    const fetchMock = passThroughOrUpstream(() =>
+      jsonResponse({
+        data: [
+          { id: 'deepseek-ai/DeepSeek-V3', object: 'model' },
+          { id: 'BAAI/bge-large-en-v1.5', object: 'model' },
+          { id: 'BAAI/bge-reranker-v2-m3', object: 'model' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await realFetch(`${baseUrl}/api/provider/models`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        protocol: 'openai',
+        baseUrl: 'https://api.siliconflow.cn/v1',
+        apiKey: 'sk-siliconflow',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      kind: 'success',
+      models: [{ id: 'deepseek-ai/DeepSeek-V3', label: 'deepseek-ai/DeepSeek-V3' }],
     });
   });
 
@@ -310,8 +387,8 @@ describe('POST /api/provider/models', () => {
     await expect(res.json()).resolves.toMatchObject({
       ok: true,
       models: [
-        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
         { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+        { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
       ],
     });
   });
@@ -357,8 +434,8 @@ describe('POST /api/provider/models', () => {
     await expect(res.json()).resolves.toMatchObject({
       ok: true,
       models: [
-        { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
         { id: 'gemini-custom', label: 'Gemini Custom' },
+        { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
       ],
     });
   });
@@ -1089,15 +1166,8 @@ describe('POST /api/test/connection provider mode', () => {
       'fetch',
       passThroughOrUpstream(() =>
         jsonResponse({
-          choices: [
-            {
-              message: {
-                role: 'assistant',
-                content:
-                  "There's an issue with the selected model (abcde). It may not exist.",
-              },
-            },
-          ],
+          output_text:
+            "There's an issue with the selected model (abcde). It may not exist.",
         }),
       ),
     );
@@ -1554,11 +1624,9 @@ describe('POST /api/test/connection provider mode', () => {
     }
   });
 
-  it('keeps max_tokens for legacy OpenAI connection tests', async () => {
+  it('uses max_output_tokens for native OpenAI connection tests', async () => {
     const fetchMock = passThroughOrUpstream(() =>
-      jsonResponse({
-        choices: [{ message: { role: 'assistant', content: 'ok' } }],
-      }),
+      jsonResponse({ output_text: 'ok' }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -1579,12 +1647,16 @@ describe('POST /api/test/connection provider mode', () => {
       ([input]) => !String(input).startsWith(baseUrl),
     );
     expect(upstream).toBeDefined();
+    expect(String(upstream?.[0])).toBe('https://api.openai.com/v1/responses');
     const [, upstreamInit] = upstream!;
     expect(JSON.parse(String(upstreamInit?.body))).toMatchObject({
       model: 'gpt-4o',
-      max_tokens: 100,
-      stream: false,
+      input: 'Reply with only: ok',
+      max_output_tokens: 100,
     });
+    expect(JSON.parse(String(upstreamInit?.body))).not.toHaveProperty(
+      'max_tokens',
+    );
     expect(JSON.parse(String(upstreamInit?.body))).not.toHaveProperty(
       'max_completion_tokens',
     );
@@ -1629,6 +1701,82 @@ describe('POST /api/test/connection provider mode', () => {
     expect(JSON.parse(String(upstreamInit?.body))).not.toHaveProperty(
       'max_completion_tokens',
     );
+  });
+
+  it('binds non-OpenAI openai-protocol connection tests to the BYOK OpenCode compatible route', async () => {
+    expect(resolveOpenAIConnectionTestRunProviderPackage({
+      protocol: 'openai',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      apiKey: 'moonshot-key',
+      model: 'kimi-k2.7-code',
+    })).toBe('@ai-sdk/openai-compatible');
+
+    const fetchMock = passThroughOrUpstream((url) => {
+      if (url === 'https://api.moonshot.cn/v1/models') {
+        return jsonResponse({
+          data: [{ id: 'kimi-k2.7-code', object: 'model' }],
+        });
+      }
+      return jsonResponse({
+        choices: [{ message: { role: 'assistant', content: 'ok' } }],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await realFetch(`${baseUrl}/api/test/connection`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'provider',
+        protocol: 'openai',
+        baseUrl: 'https://api.moonshot.cn/v1',
+        apiKey: 'moonshot-key',
+        model: 'kimi-k2.7-code',
+      }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    const upstream = fetchMock.mock.calls.find(
+      ([input]) => String(input) === 'https://api.moonshot.cn/v1/chat/completions',
+    );
+    expect(upstream).toBeDefined();
+  });
+
+  it('binds native OpenAI connection tests to the BYOK OpenCode responses route', async () => {
+    expect(resolveOpenAIConnectionTestRunProviderPackage({
+      protocol: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'openai-key',
+      model: 'gpt-5.5',
+    })).toBe('@ai-sdk/openai');
+
+    const fetchMock = passThroughOrUpstream((url) => {
+      if (url === 'https://api.openai.com/v1/models') {
+        return jsonResponse({
+          data: [{ id: 'gpt-5.5', object: 'model' }],
+        });
+      }
+      return jsonResponse({ output_text: 'ok' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await realFetch(`${baseUrl}/api/test/connection`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'provider',
+        protocol: 'openai',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'openai-key',
+        model: 'gpt-5.5',
+      }),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    const upstream = fetchMock.mock.calls.find(
+      ([input]) => String(input) === 'https://api.openai.com/v1/responses',
+    );
+    expect(upstream).toBeDefined();
   });
 
   it('keeps max_tokens for Azure gpt-4o connection tests on the default deployment path', async () => {
@@ -2247,6 +2395,215 @@ describe('POST /api/test/connection agent mode', () => {
         });
       },
     );
+  });
+
+  it('concretizes explicit AMR default before the strict fake Vela connection smoke prompt', async () => {
+    const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-amr-default-'));
+    const logPath = path.join(markerDir, 'invocations.jsonl');
+    const previousLog = process.env.FAKE_VELA_INVOCATION_LOG;
+    const previousLogSetModel = process.env.FAKE_VELA_LOG_SET_MODEL;
+    const previousRequireSetModel = process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+    try {
+      process.env.FAKE_VELA_INVOCATION_LOG = logPath;
+      process.env.FAKE_VELA_LOG_SET_MODEL = '1';
+      delete process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+
+      await withFakeAgent(
+        'vela',
+        `void import(${JSON.stringify(pathToFileURL(FAKE_VELA_FIXTURE).href)});\n`,
+        async () => {
+          const result = await testAgentConnection({
+            agentId: 'amr',
+            model: 'default',
+          });
+
+          expect(result).toMatchObject({
+            ok: true,
+            kind: 'success',
+            agentName: 'AMR',
+            sample: 'Hello from fake vela.',
+          });
+        },
+      );
+
+      const raw = await fsp.readFile(logPath, 'utf8');
+      const methods = raw
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { method: string })
+        .map((entry) => entry.method);
+      expect(methods).toEqual(['new', 'set_model:deepseek-v4-flash']);
+    } finally {
+      if (previousLog === undefined) delete process.env.FAKE_VELA_INVOCATION_LOG;
+      else process.env.FAKE_VELA_INVOCATION_LOG = previousLog;
+      if (previousLogSetModel === undefined) delete process.env.FAKE_VELA_LOG_SET_MODEL;
+      else process.env.FAKE_VELA_LOG_SET_MODEL = previousLogSetModel;
+      if (previousRequireSetModel === undefined) delete process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+      else process.env.FAKE_VELA_REQUIRE_SET_MODEL = previousRequireSetModel;
+      await fsp.rm(markerDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refreshes AMR connection-test default resolution when file credentials change', async () => {
+    const tempHome = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-amr-home-'));
+    const logPath = path.join(tempHome, 'invocations.jsonl');
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousLog = process.env.FAKE_VELA_INVOCATION_LOG;
+    const previousLogSetModel = process.env.FAKE_VELA_LOG_SET_MODEL;
+    const previousRequireSetModel = process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+    const previousPreset = process.env.FAKE_VELA_MODEL_PRESET_JSON;
+    const previousList = process.env.FAKE_VELA_MODEL_LIST_JSON;
+    const writeAmrConfig = async (runtimeKey: string, userId: string) => {
+      const configPath = path.join(tempHome, '.amr', 'config.json');
+      await fsp.mkdir(path.dirname(configPath), { recursive: true });
+      await fsp.writeFile(
+        configPath,
+        JSON.stringify({
+          profiles: {
+            local: {
+              runtimeKey,
+              linkUrl: 'https://openrouter.example/v1',
+              user: { id: userId, email: `${userId}@example.test` },
+            },
+          },
+        }),
+        'utf8',
+      );
+    };
+    const setCatalog = (modelId: string) => {
+      const preset = JSON.stringify({
+        source: 'preset',
+        data: [{ id: modelId, default: true }],
+      });
+      const remote = JSON.stringify({
+        source: 'remote',
+        data: [{ id: modelId, default: true }],
+      });
+      process.env.FAKE_VELA_MODEL_PRESET_JSON = preset;
+      process.env.FAKE_VELA_MODEL_LIST_JSON = remote;
+    };
+    try {
+      process.env.HOME = tempHome;
+      process.env.USERPROFILE = tempHome;
+      process.env.FAKE_VELA_INVOCATION_LOG = logPath;
+      process.env.FAKE_VELA_LOG_SET_MODEL = '1';
+      delete process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+
+      await withFakeAgent(
+        'vela',
+        `void import(${JSON.stringify(pathToFileURL(FAKE_VELA_FIXTURE).href)});\n`,
+        async () => {
+          await writeAmrConfig('rt-before', 'user-before');
+          setCatalog('before-upgrade-model');
+          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
+            .toMatchObject({ ok: true, kind: 'success', model: 'before-upgrade-model' });
+
+          await writeAmrConfig('rt-after', 'user-after');
+          setCatalog('after-upgrade-model');
+          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
+            .toMatchObject({ ok: true, kind: 'success', model: 'after-upgrade-model' });
+        },
+      );
+
+      const methods = (await fsp.readFile(logPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { method: string })
+        .map((entry) => entry.method);
+      expect(methods).toEqual([
+        'new',
+        'set_model:before-upgrade-model',
+        'new',
+        'set_model:after-upgrade-model',
+      ]);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      if (previousLog === undefined) delete process.env.FAKE_VELA_INVOCATION_LOG;
+      else process.env.FAKE_VELA_INVOCATION_LOG = previousLog;
+      if (previousLogSetModel === undefined) delete process.env.FAKE_VELA_LOG_SET_MODEL;
+      else process.env.FAKE_VELA_LOG_SET_MODEL = previousLogSetModel;
+      if (previousRequireSetModel === undefined) delete process.env.FAKE_VELA_REQUIRE_SET_MODEL;
+      else process.env.FAKE_VELA_REQUIRE_SET_MODEL = previousRequireSetModel;
+      if (previousPreset === undefined) delete process.env.FAKE_VELA_MODEL_PRESET_JSON;
+      else process.env.FAKE_VELA_MODEL_PRESET_JSON = previousPreset;
+      if (previousList === undefined) delete process.env.FAKE_VELA_MODEL_LIST_JSON;
+      else process.env.FAKE_VELA_MODEL_LIST_JSON = previousList;
+      await fsp.rm(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('shares AMR model cache invalidation with connection-test default resolution', async () => {
+    const previousPreset = process.env.FAKE_VELA_MODEL_PRESET_JSON;
+    const previousList = process.env.FAKE_VELA_MODEL_LIST_JSON;
+    const setCatalog = (presetModelId: string, remoteModelId: string) => {
+      process.env.FAKE_VELA_MODEL_PRESET_JSON = JSON.stringify({
+        source: 'preset',
+        data: [{ id: presetModelId, default: true }],
+      });
+      process.env.FAKE_VELA_MODEL_LIST_JSON = JSON.stringify({
+        source: 'remote',
+        data: [{ id: remoteModelId, default: true }],
+      });
+    };
+    try {
+      await withFakeAgent(
+        'vela',
+        `void import(${JSON.stringify(pathToFileURL(FAKE_VELA_FIXTURE).href)});\n`,
+        async () => {
+          const def = getAgentDef('amr');
+          expect(def).toBeDefined();
+          const launch = resolveAgentLaunch(def!, {});
+          expect(launch.launchPath).toBeTruthy();
+          const env = applyAgentLaunchEnv(
+            spawnEnvForAgent(
+              def!.id,
+              {
+                ...process.env,
+                ...(def!.env || {}),
+              },
+              {},
+              undefined,
+              { resolvedBin: launch.selectedPath },
+            ),
+            launch,
+          );
+          const normalProbeCacheKey = buildAmrModelCacheKey({
+            launchPath: launch.launchPath!,
+            env,
+            credentialRevision: readVelaCredentialRevision(env),
+          });
+
+          setCatalog('preset-before-upgrade', 'remote-before-upgrade');
+          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
+            .toMatchObject({ ok: true, kind: 'success', model: 'preset-before-upgrade' });
+
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const warmed = await testAgentConnection({ agentId: 'amr', model: 'default' });
+            if (warmed.model === 'remote-before-upgrade') break;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
+            .toMatchObject({ ok: true, kind: 'success', model: 'remote-before-upgrade' });
+
+          setCatalog('preset-after-upgrade', 'remote-after-upgrade');
+          amrModelLoadingCache.invalidate(normalProbeCacheKey);
+
+          expect(await testAgentConnection({ agentId: 'amr', model: 'default' }))
+            .toMatchObject({ ok: true, kind: 'success', model: 'preset-after-upgrade' });
+        },
+      );
+    } finally {
+      if (previousPreset === undefined) delete process.env.FAKE_VELA_MODEL_PRESET_JSON;
+      else process.env.FAKE_VELA_MODEL_PRESET_JSON = previousPreset;
+      if (previousList === undefined) delete process.env.FAKE_VELA_MODEL_LIST_JSON;
+      else process.env.FAKE_VELA_MODEL_LIST_JSON = previousList;
+    }
   });
 
   it('resolves the AMR connection-test scope from the merged launch env', async () => {
@@ -3342,6 +3699,94 @@ process.stdin.on('end', () => {
     }
   });
 
+  it('surfaces OpenCode provider connectivity errors captured before timeout (#4999)', async () => {
+    const oldTimeout = process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS;
+    process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS = '1500';
+    try {
+      await withFakeOpenCode(
+        `
+const args = process.argv.slice(2);
+if (args[0] === 'models') {
+  console.log('ollama/qwen3.5-9b');
+  process.exit(0);
+}
+console.error('Cannot connect to API: Unable to connect. Is the computer able to access the url?');
+console.log('UNRELATED_STDOUT_TAIL_MARKER');
+setInterval(() => {}, 1000);
+`,
+        async () => {
+          const result = await testAgentConnection({
+            agentId: 'opencode',
+            model: 'ollama/qwen3.5-9b',
+          });
+
+          expect(result.ok).toBe(false);
+          expect(result.kind).toBe('upstream_unavailable');
+          expect(result.detail).toContain('OpenCode reported a provider connectivity failure');
+          expect(result.detail).toContain('Cannot connect to API');
+          expect(result.detail).not.toContain('UNRELATED_STDOUT_TAIL_MARKER');
+          expect(result.diagnostics?.phase).toBe('connection_smoke_test');
+          expect(result.diagnostics?.stderrTail).toContain('Cannot connect to API');
+        },
+      );
+    } finally {
+      if (oldTimeout === undefined) {
+        delete process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS;
+      } else {
+        process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS = oldTimeout;
+      }
+    }
+  });
+
+  it.each([
+    [
+      'Unable to connect fallback',
+      'Unable to connect. Is the computer able to access the url?',
+      'Unable to connect',
+    ],
+    [
+      'URL typo fallback',
+      'Was there a typo in the url or port?',
+      'Was there a typo in the url or port?',
+    ],
+  ])(
+    'surfaces OpenCode provider connectivity errors from %s before timeout (#4999)',
+    async (_name, stderrLine, expectedDetail) => {
+      const oldTimeout = process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS;
+      process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS = '1500';
+      try {
+        await withFakeOpenCode(
+          `
+const args = process.argv.slice(2);
+if (args[0] === 'models') {
+  console.log('ollama/qwen3.5-9b');
+  process.exit(0);
+}
+console.error(${JSON.stringify(stderrLine)});
+setInterval(() => {}, 1000);
+`,
+          async () => {
+            const result = await testAgentConnection({
+              agentId: 'opencode',
+              model: 'ollama/qwen3.5-9b',
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.kind).toBe('upstream_unavailable');
+            expect(result.detail).toContain(expectedDetail);
+            expect(result.diagnostics?.phase).toBe('connection_smoke_test');
+          },
+        );
+      } finally {
+        if (oldTimeout === undefined) {
+          delete process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS;
+        } else {
+          process.env.OD_CONNECTION_TEST_AGENT_TIMEOUT_MS = oldTimeout;
+        }
+      }
+    },
+  );
+
   it('launches Kimi connection tests without the legacy acp positional arg', async () => {
     const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-kimi-argv-'));
     const argvFile = path.join(markerDir, 'argv.json');
@@ -3401,6 +3846,89 @@ console.log(JSON.stringify({ role: 'assistant', content: 'ok' }));
     } finally {
       await fsp.rm(markerDir, { recursive: true, force: true });
     }
+  });
+
+  // Regression for #4281: agy print mode is silent on stdout/stderr for
+  // BOTH missing-auth and quota-exhausted failures — it exits 0 without
+  // echoing the upstream error, so the only place the failure shape
+  // surfaces is agy's `--log-file`. Before the fix the connection test
+  // never handed agy a `--log-file` and never inspected it, so every
+  // silent failure collapsed into `kind: 'unknown'` / "Test failed: exit
+  // 0". These three cases pin the actionable auth / quota / fallback
+  // results that let Settings tell the user how to recover.
+  //
+  // The fake agy writes the caller-supplied log body to whatever
+  // `--log-file` path the daemon passes, then exits 0 with no stdout —
+  // exactly the not-logged-in / quota shape captured from the real CLI.
+  const fakeAgyScript = (logBody: string) => `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === '--version') {
+  console.log('1.0.3-test');
+  process.exit(0);
+}
+const logIdx = args.indexOf('--log-file');
+const logPath = logIdx !== -1 ? args[logIdx + 1] : null;
+let stdin = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { stdin += chunk; });
+process.stdin.on('end', () => {
+  const body = ${JSON.stringify(logBody)};
+  if (logPath && body) {
+    try { fs.writeFileSync(logPath, body); } catch {}
+  }
+  // Silent clean exit — no assistant text on stdout, matching agy's
+  // real print-mode behavior when it cannot establish a connection.
+  process.exit(0);
+});
+`;
+
+  it('surfaces antigravity missing-auth as agent_auth_required instead of "exit 0" (#4281)', async () => {
+    await withFakeAntigravity(
+      fakeAgyScript(
+        [
+          'Propagating selected model override to backend: label="Gemini 3.1 Pro (High)"',
+          'error getting token source: You are not logged into Antigravity',
+        ].join('\n'),
+      ),
+      async () => {
+        const result = await testAgentConnection({ agentId: 'antigravity' });
+        expect(result.ok).toBe(false);
+        expect(result.kind).toBe('agent_auth_required');
+        expect(result.agentName).toBe('Antigravity');
+        // The old bug surfaced the bare process-exit line as the detail.
+        expect(result.detail).not.toBe('exit 0');
+        expect(result.detail).toContain('sign in');
+      },
+    );
+  });
+
+  it('surfaces antigravity quota exhaustion as rate_limited (#4281)', async () => {
+    await withFakeAntigravity(
+      fakeAgyScript(
+        [
+          'Propagating selected model override to backend: label="Gemini 3.1 Pro (High)"',
+          'upstream error: code = 429 RESOURCE_EXHAUSTED: Individual quota reached',
+        ].join('\n'),
+      ),
+      async () => {
+        const result = await testAgentConnection({ agentId: 'antigravity' });
+        expect(result.ok).toBe(false);
+        expect(result.kind).toBe('rate_limited');
+        expect(result.detail).toContain('quota');
+      },
+    );
+  });
+
+  it('falls back to agent_auth_required when antigravity exits silently with no log signal (#4281)', async () => {
+    await withFakeAntigravity(fakeAgyScript(''), async () => {
+      const result = await testAgentConnection({ agentId: 'antigravity' });
+      expect(result.ok).toBe(false);
+      // A silent clean exit almost always means missing OAuth; it must
+      // never regress back to the opaque `unknown` / "exit 0" result.
+      expect(result.kind).toBe('agent_auth_required');
+      expect(result.kind).not.toBe('unknown');
+    });
   });
 
   it('keeps OpenCode smoke tests green when git bootstrap is unavailable', async () => {

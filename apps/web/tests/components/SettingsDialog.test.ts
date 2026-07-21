@@ -12,6 +12,7 @@ import {
   isValidApiBaseUrl,
   mergeProviderModelOptions,
   providerModelsCacheKey,
+  resolveSettingsAutosavePayload,
   sanitizeSettingsSavePayload,
   shouldEnableSettingsSave,
   shouldShowCustomModelInput,
@@ -219,7 +220,7 @@ describe('SettingsDialog about update control', () => {
     });
   });
 
-  it('offers a quit retry after the installer has opened', () => {
+  it('shows installer handoff without claiming that quit failed', () => {
     const control = deriveAboutUpdateControl(
       deriveUpdaterModel(
         updateStatus({
@@ -247,8 +248,8 @@ describe('SettingsDialog about update control', () => {
       primaryAction: 'quit',
       primaryLabelKey: 'updater.quitButton',
       showReleaseLink: false,
-      statusKey: 'settings.updateQuitFailed',
-      statusTone: 'warning',
+      statusKey: 'updater.opening',
+      statusTone: 'neutral',
     });
   });
 
@@ -261,9 +262,33 @@ describe('SettingsDialog about update control', () => {
     expect(control).toMatchObject({
       primaryAction: 'check',
       primaryLabelKey: 'settings.updateRetry',
-      statusKey: 'settings.updateStatusFailed',
+      statusKey: 'updater.failed',
       statusTone: 'error',
     });
+  });
+
+  it('retries updater errors from the last actionable phase', () => {
+    const downloadRetry = deriveAboutUpdateControl(
+      deriveUpdaterModel(
+        updateStatus({ availableVersion: '1.2.3-beta.4', state: 'error' }),
+        { hostAvailable: true },
+      ),
+      packagedVersion,
+    );
+    const installRetry = deriveAboutUpdateControl(
+      deriveUpdaterModel(
+        updateStatus({
+          availableVersion: '1.2.3-beta.4',
+          downloadPath: '/tmp/Open Design Beta.dmg',
+          state: 'error',
+        }),
+        { hostAvailable: true },
+      ),
+      packagedVersion,
+    );
+
+    expect(downloadRetry.primaryAction).toBe('download');
+    expect(installRetry.primaryAction).toBe('install');
   });
 
   it('does not offer in-app update actions in development or web-only contexts', () => {
@@ -375,6 +400,27 @@ describe('SettingsDialog API protocol switching', () => {
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o',
       apiProviderBaseUrl: 'https://api.openai.com/v1',
+    });
+  });
+
+  it('keeps Atlas Cloud as an OpenAI-compatible known provider without changing the OpenAI default', () => {
+    const openai = switchApiProtocolConfig(baseConfig, 'openai');
+    const atlas = updateCurrentApiProtocolConfig(openai, {
+      baseUrl: 'https://api.atlascloud.ai/v1',
+      model: 'qwen/qwen3.5-flash',
+      apiProviderBaseUrl: 'https://api.atlascloud.ai/v1',
+    });
+
+    expect(openai).toMatchObject({
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      apiProviderBaseUrl: 'https://api.openai.com/v1',
+    });
+    expect(atlas).toMatchObject({
+      apiProtocol: 'openai',
+      baseUrl: 'https://api.atlascloud.ai/v1',
+      model: 'qwen/qwen3.5-flash',
+      apiProviderBaseUrl: 'https://api.atlascloud.ai/v1',
     });
   });
 
@@ -530,13 +576,23 @@ describe('SettingsDialog provider model fetch helpers', () => {
     expect(
       mergeProviderModelOptions(
         [
-          { id: 'remote-a', label: 'Remote A' },
+          {
+            id: 'remote-a',
+            label: 'Remote A',
+            metadata: { cost: 'low', capability: 'standard' },
+            enabled: false,
+          },
           { id: 'gpt-4o', label: 'Remote GPT' },
         ],
         ['gpt-4o', 'o4-mini'],
       ),
     ).toEqual([
-      { id: 'remote-a', label: 'Remote A' },
+      {
+        id: 'remote-a',
+        label: 'Remote A',
+        metadata: { cost: 'low', capability: 'standard' },
+        enabled: false,
+      },
       { id: 'gpt-4o', label: 'Remote GPT' },
       { id: 'o4-mini', label: 'o4-mini' },
     ]);
@@ -1469,5 +1525,105 @@ describe('sanitizeSettingsSavePayload', () => {
     expect(sanitized.mode).toBe('daemon');
     expect(sanitized.agentId).toBe('claude-code');
     expect(sanitized.theme).toBe('system');
+  });
+});
+
+describe('resolveSettingsAutosavePayload', () => {
+  const activeDaemon: AppConfig = {
+    ...baseConfig,
+    mode: 'daemon',
+    agentId: 'claude-code',
+    apiKey: '',
+  };
+
+  it('persists a cleared API key for the active provider', () => {
+    const activeOpenAi: AppConfig = {
+      ...baseConfig,
+      apiProtocol: 'openai',
+      apiKey: 'sk-openai-test',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      apiProviderBaseUrl: 'https://api.openai.com/v1',
+    };
+    const clearedKey: AppConfig = {
+      ...activeOpenAi,
+      apiKey: '',
+    };
+
+    expect(
+      resolveSettingsAutosavePayload(clearedKey, activeOpenAi, {
+        commitClearedActiveApiKey: true,
+      }),
+    ).toBe(clearedKey);
+  });
+
+  it.each([
+    {
+      name: 'API key',
+      draft: {
+        ...activeDaemon,
+        mode: 'api' as const,
+        apiKey: '',
+      },
+    },
+    {
+      name: 'model',
+      draft: {
+        ...activeDaemon,
+        mode: 'api' as const,
+        apiKey: 'sk-ant-draft',
+        model: '',
+      },
+    },
+    {
+      name: 'base URL',
+      draft: {
+        ...activeDaemon,
+        mode: 'api' as const,
+        apiKey: 'sk-ant-draft',
+        baseUrl: '',
+      },
+    },
+  ])('keeps an incomplete $name in a provider draft', ({ draft }) => {
+    const payload = resolveSettingsAutosavePayload(draft, activeDaemon);
+
+    expect(payload.mode).toBe('daemon');
+    expect(payload.agentId).toBe('claude-code');
+    expect(payload).toMatchObject({
+      byokPendingProviderKey: expect.any(String),
+    });
+    expect(Object.values(payload.byokProviderConfigDrafts ?? {})).toContainEqual(
+      expect.objectContaining({
+        apiConfig: expect.objectContaining({
+          apiKey: draft.apiKey,
+          baseUrl: draft.baseUrl,
+          model: draft.model,
+        }),
+      }),
+    );
+  });
+
+  it('promotes a statically complete BYOK config to active', () => {
+    const complete: AppConfig = {
+      ...activeDaemon,
+      mode: 'api',
+      apiKey: 'sk-ant-complete',
+    };
+
+    expect(resolveSettingsAutosavePayload(complete, activeDaemon)).toBe(complete);
+  });
+
+  it('promotes a complete keyless local provider config to active', () => {
+    const local: AppConfig = {
+      ...activeDaemon,
+      mode: 'api',
+      apiProtocol: 'ollama',
+      apiKey: '',
+      baseUrl: 'http://localhost:11434',
+      model: 'llama3.2',
+      apiProviderBaseUrl: 'http://localhost:11434',
+    };
+
+    expect(resolveSettingsAutosavePayload(local, activeDaemon)).toBe(local);
   });
 });

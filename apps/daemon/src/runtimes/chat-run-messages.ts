@@ -14,6 +14,12 @@ type ChatRunMessageState = {
   agentId?: string | null;
   status?: string;
   createdAt?: number;
+  sessionMode?: string | null;
+  context?: Record<string, unknown> | null;
+  error?: string | null;
+  errorCode?: string | null;
+  failureCategory?: string | null;
+  failureDetail?: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -33,6 +39,74 @@ export function persistRunEventToAssistantMessage(
     appendMessageAgentEvent(db, run.assistantMessageId, persisted);
   } catch (err) {
     console.warn('[runs] message event persistence failed', err);
+  }
+}
+
+/**
+ * Stamp the daemon's finalize-time failure classification onto the persisted
+ * assistant message so a reload — or any consumer that reads the stored
+ * message instead of the live SSE stream — still sees the fine-grained cause.
+ *
+ * The `error` SSE frame is emitted from the child-close handler BEFORE the run
+ * is finalized, so `failureCategory` / `failureDetail` (computed at finalize)
+ * aren't known when that frame is first persisted. This enriches the last
+ * persisted `status:error` event in place once the classification exists, and
+ * appends one only if a failed run somehow never persisted an error frame.
+ * Without this, a daemon-persisted failure (no live web error handler saving
+ * the message, or a conversation reloaded before that save) falls back to the
+ * coarse `errorCode` UI and loses the specific fix guidance.
+ */
+export function persistRunFailureClassification(
+  db: SqliteDb,
+  run: ChatRunMessageState,
+): void {
+  if (!run.assistantMessageId) return;
+  const failureCategory = run.failureCategory ?? null;
+  const failureDetail = run.failureDetail ?? null;
+  if (!failureCategory && !failureDetail) return;
+  try {
+    const row = db
+      .prepare(`SELECT events_json AS eventsJson FROM messages WHERE id = ?`)
+      .get(run.assistantMessageId) as { eventsJson?: string } | undefined;
+    if (!row) return;
+    let events: unknown[] = [];
+    try {
+      const parsed = JSON.parse(row.eventsJson ?? '[]');
+      if (Array.isArray(parsed)) events = parsed;
+    } catch {
+      events = [];
+    }
+    let idx = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i];
+      if (isRecord(event) && event.kind === 'status' && event.label === 'error') {
+        idx = i;
+        break;
+      }
+    }
+    const existing = idx >= 0 ? events[idx] : null;
+    const base: Record<string, unknown> = isRecord(existing)
+      ? existing
+      : { kind: 'status', label: 'error' };
+    const enriched: Record<string, unknown> = {
+      ...base,
+      ...(failureCategory ? { failureCategory } : {}),
+      ...(failureDetail ? { failureDetail } : {}),
+    };
+    if (run.errorCode && typeof enriched.code !== 'string') enriched.code = run.errorCode;
+    if (idx >= 0) {
+      if (JSON.stringify(enriched) === JSON.stringify(events[idx])) return;
+      events[idx] = enriched;
+    } else {
+      if (run.error && typeof enriched.detail !== 'string') enriched.detail = run.error;
+      events.push(enriched);
+    }
+    db.prepare(`UPDATE messages SET events_json = ? WHERE id = ?`).run(
+      JSON.stringify(events),
+      run.assistantMessageId,
+    );
+  } catch (err) {
+    console.warn('[runs] failure classification persistence failed', err);
   }
 }
 
@@ -70,10 +144,28 @@ export function runSseEventToPersistedAgentEvent(
   return daemonAgentPayloadToPersistedAgentEvent(record);
 }
 
+/**
+ * ACP status labels that are purely protocol-internal. They carry no
+ * user-visible detail and must be suppressed at persistence time so that
+ * history replay doesn't render empty expandable rows in the assistant
+ * process panel.
+ */
+const TRANSIENT_ACP_PERSISTED_STATUS_LABELS = new Set([
+  'waiting_for_first_output',
+  'tool_call',
+  'tool_call_update',
+  'session_update',
+]);
+
 export function daemonAgentPayloadToPersistedAgentEvent(data: unknown): PersistedAgentEvent | null {
   if (!isRecord(data)) return null;
   const type = data.type;
   if (type === 'status' && typeof data.label === 'string') {
+    // Filter out transient ACP status events that carry no user-visible content.
+    // The web-side translateAgentEvent already normalizes these for live display,
+    // but the daemon must also suppress them at persistence time so history replay
+    // doesn't show empty expandable rows labelled "tool_call" or "tool_call_update".
+    if (TRANSIENT_ACP_PERSISTED_STATUS_LABELS.has(data.label)) return null;
     const detail =
       typeof data.detail === 'string'
         ? data.detail
@@ -138,6 +230,9 @@ export function daemonAgentPayloadToPersistedAgentEvent(data: unknown): Persiste
       ...(typeof usage.output_tokens === 'number' ? { outputTokens: usage.output_tokens } : {}),
       ...(typeof data.costUsd === 'number' ? { costUsd: data.costUsd } : {}),
       ...(typeof data.durationMs === 'number' ? { durationMs: data.durationMs } : {}),
+      // Persist the terminal stop reason so the project projection can read a
+      // max_tokens truncation as incomplete after reload (#1247 / #1060).
+      ...(typeof data.stopReason === 'string' ? { stopReason: data.stopReason } : {}),
     };
   }
   if (type === 'diagnostic' && typeof data.name === 'string') {
@@ -214,9 +309,18 @@ export function pinAssistantMessageOnRunCreate(db: SqliteDb, run: ChatRunMessage
                 WHEN run_status IN ('succeeded', 'failed', 'canceled') THEN run_status
                 ELSE ?
               END,
+              session_mode = ?,
+              run_context_json = ?,
               started_at = COALESCE(started_at, ?)
         WHERE id = ?`,
-    ).run(run.id, run.status, run.createdAt, run.assistantMessageId);
+    ).run(
+      run.id,
+      run.status,
+      run.sessionMode ?? null,
+      run.context ? JSON.stringify(run.context) : null,
+      run.createdAt,
+      run.assistantMessageId,
+    );
     return;
   }
   upsertMessage(db, run.conversationId, {
@@ -227,6 +331,8 @@ export function pinAssistantMessageOnRunCreate(db: SqliteDb, run: ChatRunMessage
     events: [],
     runId: run.id,
     runStatus: run.status,
+    sessionMode: run.sessionMode ?? undefined,
+    runContext: run.context ?? undefined,
     startedAt: run.createdAt,
   });
 }

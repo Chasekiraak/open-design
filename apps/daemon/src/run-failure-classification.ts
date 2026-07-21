@@ -198,7 +198,10 @@ function isAgentConfigInvalidText(text: string): boolean {
     /\bunknown variant [`'"][^`'"]+[`'"], expected\b[\s\S]*\bin `service_tier`/i.test(text) ||
     /\bdefault_permissions requires a `?\[permissions\]`? table\b/i.test(text) ||
     /\bdefault_permissions refers to undefined profile\b/i.test(text) ||
-    /\bError loading config\.toml:[\s\S]*\bduplicate key\b/i.test(text);
+    /\bError loading config\.toml:[\s\S]*\bduplicate key\b/i.test(text) ||
+    /\bBYOK OpenCode requires a provider, API key, and model for this run\b/i.test(text) ||
+    /\bBYOK_PROVIDER_REQUIRED\b/i.test(text) ||
+    /\bEACCES: permission denied, mkdir\b[\s\S]*\.config[\\/]+opencode\b/i.test(text);
 }
 
 function isCliNotInstalledText(text: string): boolean {
@@ -254,21 +257,77 @@ function isSessionResumeExpiredText(text: string): boolean {
     /\bsession [\w-]+ not found\b/i.test(text);
 }
 
-function isPromptTooLargeText(text: string): boolean {
+function promptTooLargeDetail(text: string): TrackingRunFailureDetail | null {
+  if (
+    /\b(?:Payload Too Large|Request Entity Too Large|request entity too large|request body exceeds configured limit)\b/i.test(text) ||
+    /\[code=request_too_large\]/i.test(text)
+  ) {
+    return 'request_too_large';
+  }
   // `prefill context too large` is the local-runtime (MLX) shape of the same
   // "the prompt does not fit" failure that currently leaks into execution_failed.
-  return /\b(context window|prompt too large|maximum context|too many tokens|input.*too large|output token maximum|maximum output tokens|CLAUDE_CODE_MAX_OUTPUT_TOKENS|exceeds the safe size|composed prompt exceeds|prompt token count .* exceeds|maximum context length|context too large|prefill context too large|reduce the length of (?:the )?(?:messages|input prompt)|request \(\d+ tokens\) exceeds the available context size|n_keep:\s*\d+\s*>=\s*n_ctx)\b/i
-    .test(text);
+  if (
+    /\b(context window|context size (?:has been )?exceeded|prompt too large|maximum context|too many tokens|input.*too large|request (?:body )?exceeds configured limit|output token maximum|maximum output tokens|CLAUDE_CODE_MAX_OUTPUT_TOKENS|exceeds the safe size|composed prompt exceeds|prompt token count .* exceeds|maximum context length|context too large|prefill context too large|reduce the length of (?:the )?(?:messages|input prompt)|request \(\d+ tokens\) exceeds the available context size|n_keep:\s*\d+\s*>=\s*n_ctx)\b/i.test(text)
+  ) {
+    return 'prompt_too_large';
+  }
+  return null;
+}
+
+function clientRequestFailureDetail(text: string): TrackingRunFailureDetail | null {
+  if (
+    /\bsource\.media_type\b[\s\S]*\bInvalid enum value\b[\s\S]*\bapplication\/pdf\b/i.test(text) ||
+    /\bapplication\/pdf\b[\s\S]*\bexpected\b[\s\S]*\bimage\/(?:jpeg|png|gif|webp)\b/i.test(text)
+  ) {
+    return 'attachment_media_type_unsupported';
+  }
+  if (
+    /\bfunction_declarations\[\d+\]\.name\b[\s\S]*\bInvalid function name\b/i.test(text)
+  ) {
+    return 'tool_schema_invalid';
+  }
+  if (/\bFailed to tokenize (?:the )?prompt\b/i.test(text)) {
+    return 'prompt_tokenization_failed';
+  }
+  if (
+    /["']?status["']?\s*:\s*404\b[\s\S]*\bFunction\s+["'][^"']+["']\s+Not found for account\b/i.test(text) ||
+    /\bFunction\s+["'][^"']+["']\s+Not found for account\b[\s\S]*["']?status["']?\s*:\s*404\b/i.test(text)
+  ) {
+    return 'provider_resource_not_found';
+  }
+  return null;
 }
 
 function isUpstreamDetailText(text: string): boolean {
-  return /\b(stream disconnected before completion|response\.completed|Transport error: network error|Upstream request failed|websocket closed|socket connection was closed unexpectedly|tls handshake eof|Connection reset by (?:peer|server)|TLS close_notify|Broken pipe|remote host|远程主机强迫关闭|No route to host|Connection refused|ConnectionRefused|error sending request|Provider returned error|high demand|model is at capacity|selected model is at capacity|temporarily unavailable|upstream_error|http2: response body closed|peer closed connection|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to the Anthropic API|Server error mid-response|empty or malformed response|Unexpected server error|Streaming response failed|Failed to process error response|gateway or proxy|Country, region, or territory not supported|AMR model catalog is (?:temporarily )?unavailable|statusCode[\"']?\s*:\s*(?:400|403|404)|400 Bad Request|403 Forbidden|404 Not Found|NotFoundError|OpenAIException - \{\"detail\":\"Not Found\"\}|API Error:\s*(?:400|403)\b)\b/i
-    .test(text);
+  return isUpstreamClientErrorText(text) ||
+    /\b(stream disconnected before completion|(?:stream|upstream) idle timeout|response\.completed|Transport error: network error|Upstream request failed|websocket closed|socket connection was closed unexpectedly|tls handshake eof|Connection reset by (?:peer|server)|TLS close_notify|Broken pipe|remote host|远程主机强迫关闭|No route to host|Connection refused|ConnectionRefused|error sending request|Provider returned error|high demand|model is at capacity|selected model is at capacity|temporarily unavailable|upstream_error|http2: response body closed|peer closed connection|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Unexpected server error|Streaming response failed|Failed to process error response|AMR model catalog is (?:temporarily )?unavailable)\b/i
+      .test(text);
 }
 
 function isUpstreamClientErrorText(text: string): boolean {
-  return /\b(statusCode[\"']?\s*:\s*(?:400|403|404)|400 Bad Request|403 Forbidden|404 Not Found|NotFoundError|OpenAIException - \{\"detail\":\"Not Found\"\}|API Error:\s*(?:400|403)\b|Country, region, or territory not supported|gateway or proxy|validation error|literal_error|Invalid input|Type validation failed)\b/i
+  return /\b(statusCode[\"']?\s*:\s*(?:400|403|404)|400 Bad Request|403 Forbidden|404 Not Found|404 page not found|Not Found:\s*(?:404 page not found|Not Found)|NotFoundError|OpenAIException - \{\"detail\":\"Not Found\"\}|API Error:\s*(?:400|403)\b|Invalid Responses API request|Country, region, or territory not supported|gateway or proxy|validation error|literal_error|Invalid input|Type validation failed|data did not match any variant of untagged enum InputParam)\b/i
     .test(text);
+}
+
+// OpenCode providers do not consistently preserve HTTP status metadata. Some
+// return only a bare "Not Found" (or an equivalent provider JSON body), which
+// previously fell through to the retryable stream_error close reason. Keep the
+// broad bare-text shapes scoped to BYOK OpenCode so an unrelated agent's local
+// resource/session miss is not reclassified as an upstream provider response.
+function isByokOpenCodeProviderNotFoundText(
+  agentId: string | null | undefined,
+  text: string,
+): boolean {
+  if (agentId !== 'byok-opencode') return false;
+
+  return /(?:^|\n)\s*(?:Not Found|Resource not found|The requested resource was not found)\s*(?=\n|$)/i
+    .test(text) ||
+    /\b(?:404(?:\s+(?:page|route))?\s+not found|resource_not_found_error|the requested resource was not found|Not Found:\s*Not support|NotFoundError)\b/i
+      .test(text) ||
+    /\bopencode (?:session error|event stream):[^\n]*\bNot Found\s*(?=$|\n)/im
+      .test(text) ||
+    /\"(?:detail|message)\"\s*:\s*\"Not Found\"/i.test(text) ||
+    /\bstatusCode[\"']?\s*:\s*404\b/i.test(text);
 }
 
 function modelUnavailableDetail(text: string): TrackingRunFailureDetail | null {
@@ -285,7 +344,7 @@ function modelUnavailableDetail(text: string): TrackingRunFailureDetail | null {
   if (/\b(no endpoints found that support tool use|provider routing)\b/i.test(text)) {
     return 'provider_routing_error';
   }
-  if (/\b(model .*not supported|requested model is not supported|supported api model names|not supported when using codex)\b/i.test(text)) {
+  if (/\b(model .*not supported|not supported model\b|requested model is not supported|supported api model names|not supported when using codex)\b/i.test(text)) {
     return 'model_not_supported';
   }
   if (/\b(model (?:is )?(?:unavailable|not available|unsupported|not found)|selected model is not available|not have access|no access|model .*not found|no healthy deployments|model .*not in (?:the )?allowed list)\b/i.test(text)) {
@@ -321,7 +380,7 @@ function upstreamDetail(text: string): TrackingRunFailureDetail {
     return 'provider_routing_error';
   }
   if (/\bhigh demand|temporary errors|model is at capacity|selected model is at capacity\b/i.test(text)) return 'provider_high_demand';
-  if (/\b(stream disconnected before completion|response\.completed|websocket closed|socket connection was closed unexpectedly|connection reset|ConnectionRefused|tls handshake eof|tls close_notify|broken pipe|peer closed connection|remote host|远程主机强迫关闭|http2: response body closed|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to the Anthropic API|Server error mid-response|empty or malformed response|Streaming response failed)\b/i
+  if (/\b(stream disconnected before completion|(?:stream|upstream) idle timeout|response\.completed|websocket closed|socket connection was closed unexpectedly|connection reset|ConnectionRefused|tls handshake eof|tls close_notify|broken pipe|peer closed connection|remote host|远程主机强迫关闭|http2: response body closed|incomplete chunked read|Client network socket disconnected before secure TLS connection|Connection failed repeatedly|lost its connection to (?:the Anthropic API|the configured custom Anthropic endpoint)|Server error mid-response|empty or malformed response|Streaming response failed)\b/i
     .test(text)) {
     return 'stream_disconnected';
   }
@@ -369,6 +428,9 @@ function signalInterruptClassification(
     return classification('process_exit', 'signal_killed', 'child_close', false, 'none');
   }
   if (PROCESS_CRASH_SIGNALS.has(signal)) {
+    return classification('process_exit', 'process_crashed', 'child_close', false, 'none');
+  }
+  if (isProcessCrashText(text)) {
     return classification('process_exit', 'process_crashed', 'child_close', false, 'none');
   }
   if (signal === 'SIGINT' || isInterruptExit) {
@@ -428,7 +490,35 @@ function processExitDetail(
 
 function isProcessCrashText(text: string): boolean {
   return /\bBun v\d+\.\d+\.\d+\b[\s\S]*\b(oh no: Bun has crashed|panic\(|Illegal instruction|Segmentation fault)\b/i
+    .test(text) ||
+    /\b(?:exit status )?0xc0000409\b/i
     .test(text);
+}
+
+// The child binary executed an instruction this CPU does not implement — in
+// practice a Bun-compiled agent (bundled opencode) built for AVX2 running on a
+// CPU without it (Intel Atom/Celeron/Pentium N-series through 2021, and
+// AVX-but-not-AVX2 Sandy/Ivy Bridge cores). Matched only on signals that
+// prove the unsupported-CPU case:
+// - `no_avx2`: the CPU-feature line Bun's crash banner prints on such
+//   machines. Unconditional — the feature line itself is the proof.
+// - Windows STATUS_ILLEGAL_INSTRUCTION (hex 0xC000001D or Go/Node's decimal
+//   exit-status rendering 3221225501), but ONLY inside vela's bundled-opencode
+//   startup wrapper text ("start opencode server" / "opencode exited before
+//   readiness"). The raw status code is a generic Windows SIGILL that any
+//   agent binary could die with for unrelated reasons; every bannerless
+//   production trace carries the vela wrapper, so the gate costs no recall.
+// A bare "Illegal instruction" line is deliberately NOT matched: any
+// unrelated SIGILL (a runtime bug on an AVX2-capable machine) would then be
+// mislabeled as a processor limitation and lose its retry. The same binary on
+// the same CPU fails deterministically, so cpu_unsupported must never be
+// auto-retried.
+function isCpuUnsupportedCrashText(text: string): boolean {
+  if (/\bno_avx2\b/i.test(text)) return true;
+  return (
+    /0xc000001d|\b3221225501\b/i.test(text) &&
+    /\bstart opencode server\b|\bopencode exited before readiness\b/i.test(text)
+  );
 }
 
 // The daemon emits a `runtime_close` diagnostic into the run's event stream at
@@ -486,8 +576,19 @@ function executionFailedDetail(
 export function isResumableFailure(
   failure: RunFailureClassification | undefined,
 ): boolean {
-  if (!failure) return false;
-  if (failure.failure_category === 'upstream_unavailable') return true;
+  if (!failure?.retryable) return false;
+  if (
+    failure.failure_category === 'upstream_unavailable' &&
+    (
+      failure.failure_detail === 'stream_disconnected' ||
+      failure.failure_detail === 'upstream_5xx' ||
+      failure.failure_detail === 'network_error' ||
+      failure.failure_detail === 'provider_high_demand' ||
+      failure.failure_detail === 'provider_routing_error'
+    )
+  ) {
+    return true;
+  }
   if (
     failure.failure_category === 'timeout' &&
     failure.failure_detail === 'inactivity_timeout'
@@ -531,6 +632,10 @@ export function classifyRunFailure(
   const text = collectFailureText(input);
   const retryableHint = latestRetryable(input.events);
   const amrFailure = classifyAmrAccountFailure(text);
+  const byokOpenCodeProviderNotFound = isByokOpenCodeProviderNotFoundText(
+    input.agentId,
+    text,
+  );
 
   if (
     errorCode === 'AMR_INSUFFICIENT_BALANCE' ||
@@ -542,6 +647,19 @@ export function classifyRunFailure(
       'session_init',
       false,
       'recharge',
+    );
+  }
+
+  if (
+    errorCode === 'AMR_TIER_UPGRADE_REQUIRED' ||
+    amrFailure?.code === 'AMR_TIER_UPGRADE_REQUIRED'
+  ) {
+    return classification(
+      'entitlement_required',
+      'amr_tier_upgrade_required',
+      'session_init',
+      false,
+      'upgrade',
     );
   }
 
@@ -560,10 +678,11 @@ export function classifyRunFailure(
     );
   }
 
-  if (errorCode === 'AGENT_PROMPT_TOO_LARGE' || isPromptTooLargeText(text)) {
+  const promptSizeDetail = promptTooLargeDetail(text);
+  if (errorCode === 'AGENT_PROMPT_TOO_LARGE' || promptSizeDetail) {
     return classification(
       'prompt_too_large',
-      'prompt_too_large',
+      promptSizeDetail ?? 'prompt_too_large',
       'prompt_send',
       false,
       'reduce_context',
@@ -580,6 +699,17 @@ export function classifyRunFailure(
       'model_select',
       false,
       'switch_model',
+    );
+  }
+
+  const clientRequestDetail = clientRequestFailureDetail(text);
+  if (clientRequestDetail) {
+    return classification(
+      'upstream_unavailable',
+      clientRequestDetail,
+      'prompt_send',
+      false,
+      'none',
     );
   }
 
@@ -691,12 +821,18 @@ export function classifyRunFailure(
     errorCode === 'UPSTREAM_UNAVAILABLE' ||
     errorCode === 'AGENT_CONNECTION_DROPPED' ||
     serviceFailure === 'UPSTREAM_UNAVAILABLE' ||
-    isUpstreamDetailText(text)
+    isUpstreamDetailText(text) ||
+    byokOpenCodeProviderNotFound
   ) {
-    const retryable = retryableHint ?? !isUpstreamClientErrorText(text);
+    const upstreamClientError =
+      byokOpenCodeProviderNotFound || isUpstreamClientErrorText(text);
+    // A provider/SDK 4xx or request-shape rejection will deterministically fail
+    // again with the same payload. Do not let a coarse SDK isRetryable=true hint
+    // override the text-level client-error evidence.
+    const retryable = upstreamClientError ? false : retryableHint ?? true;
     return classification(
       'upstream_unavailable',
-      upstreamDetail(text),
+      upstreamClientError ? 'upstream_client_error' : upstreamDetail(text),
       inferFailureStageFromEvents(input.events, 'first_token_wait'),
       retryable,
       retryable ? 'retry' : 'none',
@@ -759,6 +895,47 @@ export function classifyRunFailure(
     );
   }
 
+  // Must be checked BEFORE the fatal_rpc_error close-reason promotion below:
+  // when the bundled agent binary dies of an illegal instruction before
+  // readiness, vela surfaces an ACP fatal and the close reason alone would
+  // classify this as a retryable fatal_rpc_error — but the retry re-runs the
+  // same binary on the same CPU and deterministically fails again.
+  if (isCpuUnsupportedCrashText(text)) {
+    return classification(
+      'process_exit',
+      'cpu_unsupported',
+      inferFailureStageFromEvents(input.events, 'session_init'),
+      false,
+      'none',
+    );
+  }
+
+  // ACP fatal paths ask the host to terminate the child after the protocol
+  // failure. The resulting exit/signal is therefore cleanup, not the cause.
+  // Prefer the runtime_close reason once specific text classifiers above have
+  // had a chance to claim auth, quota, upstream, prompt-size, and other known
+  // failures. Unlike stream_error, fatal_rpc_error may have no structured SSE
+  // error code at all, so it must also refine signal/unknown/exit fallbacks.
+  const runtimeCloseReason = readRuntimeCloseReason(input.events);
+  if (
+    runtimeCloseReason === 'fatal_rpc_error' &&
+    (
+      errorCode === 'AGENT_EXECUTION_FAILED' ||
+      errorCode === 'AGENT_TERMINATED_UNKNOWN' ||
+      errorCode.startsWith('AGENT_SIGNAL_') ||
+      errorCode.startsWith('AGENT_EXIT_')
+    )
+  ) {
+    const retryable = retryableHint ?? true;
+    return classification(
+      'process_exit',
+      'fatal_rpc_error',
+      inferFailureStageFromEvents(input.events, 'child_close'),
+      retryable,
+      retryable ? 'retry' : 'none',
+    );
+  }
+
   const signalInterrupt = signalInterruptClassification(errorCode, text, retryableHint);
   if (signalInterrupt) return signalInterrupt;
 
@@ -768,14 +945,18 @@ export function classifyRunFailure(
     errorCode === 'AGENT_EXECUTION_FAILED'
   ) {
     const baseDetail = processExitDetail(errorCode, text);
+    const refinedDetail = baseDetail === 'execution_failed' ? executionFailedDetail(input.events) : baseDetail;
+    const defaultRetryable =
+      refinedDetail === 'stream_error' ||
+      refinedDetail === 'fatal_rpc_error';
     return classification(
       'process_exit',
       // Only the generic AGENT_EXECUTION_FAILED catch-all is refined; the
       // specific exit_code / terminated_unknown labels already carry meaning.
-      baseDetail === 'execution_failed' ? executionFailedDetail(input.events) : baseDetail,
+      refinedDetail,
       inferFailureStageFromEvents(input.events, 'child_close'),
-      retryableHint ?? false,
-      retryableHint ? 'retry' : 'none',
+      retryableHint ?? defaultRetryable,
+      (retryableHint ?? defaultRetryable) ? 'retry' : 'none',
     );
   }
 

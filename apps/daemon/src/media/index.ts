@@ -76,6 +76,10 @@ import {
   resolveModelAlias,
   resolveProviderConfig,
 } from './config.js';
+import {
+  fetchImageGenerationWithResponseRetry,
+  type ImageGenerationRequestSummary,
+} from './image-generation-retry.js';
 import { codexNeedsDangerFullAccessSandbox } from '../runtimes/defs/codex.js';
 import {
   ensureProject,
@@ -139,6 +143,9 @@ type MediaContext = {
   /** Additional reference images for multi-image i2v / style reference flows. */
   imageRefs: ImageRef[];
   projectRoot: string;
+  onProviderRequestSettled:
+    | ((summary: ImageGenerationRequestSummary & { providerId: string }) => void)
+    | undefined;
 };
 type RenderResult = { bytes: Buffer; providerNote: string; suggestedExt?: string };
 type JsonRecord = Record<string, unknown>;
@@ -318,6 +325,7 @@ export async function generateMedia(args: {
   prompt?: string; output?: string; aspect?: string; length?: number; duration?: number; voice?: string;
   audioKind?: AudioKind; language?: string; loop?: boolean; promptInfluence?: number;
   compositionDir?: string; image?: string; images?: string[]; onProgress?: ProgressFn; requestInit?: MediaRequestInit;
+  onProviderRequestSettled?: (summary: ImageGenerationRequestSummary & { providerId: string }) => void;
 }) {
   const {
     projectRoot,
@@ -338,6 +346,7 @@ export async function generateMedia(args: {
     compositionDir,
     image,
     requestInit,
+    onProviderRequestSettled,
   } = args;
 
   if (!projectRoot) throw new Error('projectRoot required');
@@ -473,7 +482,7 @@ export async function generateMedia(args: {
   // instructions, MINIMAX/FISHAUDIO TTS map) continue to key off the
   // catalog id while the provider's request body carries the alias.
   const wireModel = await resolveModelAlias(projectRoot, model);
-  const ctx = {
+  const ctx: MediaContext = {
     surface,
     model,
     wireModel,
@@ -500,6 +509,7 @@ export async function generateMedia(args: {
     requestInit: requestInit || {},
     imageRefs,
     projectRoot,
+    onProviderRequestSettled,
   };
 
   const credentials = await resolveProviderConfig(projectRoot, def.provider);
@@ -1046,7 +1056,7 @@ function codexImagegenMissingOutputError(threadDir: string, stdout: string): Err
     );
   }
   return new Error(
-    `Codex imagegen completed but did not write an ig_* image under ${threadDir}. Use an API-backed image provider or a Codex CLI build that writes generated_images output.${suffix}`,
+    `Codex imagegen completed but did not write an ig_* or call_* image under ${threadDir}. Use an API-backed image provider or a Codex CLI build that writes generated_images output.${suffix}`,
   );
 }
 
@@ -1065,9 +1075,13 @@ async function readCodexGeneratedImage(
     }
     throw err;
   }
+  const supportedImagePattern = /\.(?:png|jpe?g|webp)$/i;
   const match = entries
-    .filter((name) => /^ig_.*\.(?:png|jpe?g|webp)$/i.test(name))
-    .sort()[0];
+    .filter((name) => /^ig_/i.test(name) && supportedImagePattern.test(name))
+    .sort()[0]
+    ?? entries
+      .filter((name) => /^call_/i.test(name) && supportedImagePattern.test(name))
+      .sort()[0];
   if (!match) {
     throw codexImagegenMissingOutputError(threadDir, stdout);
   }
@@ -1232,16 +1246,28 @@ async function renderCustomOpenAIImage(ctx: MediaContext, credentials: ProviderC
   };
   let url = buildOpenAIImageUrl(baseUrl, false);
   if (ctx.imageRef?.dataUrl) {
-    body.response_format = 'b64_json';
+    // gpt-image-* does NOT accept response_format on /v1/images/edits
+    // (HTTP 400 "Unknown parameter: 'response_format'"). dall-e-2
+    // accepts it; the base b64 path is what callers expect either way,
+    // so we only set response_format for non-gpt-image models.
+    if (!wireModel.startsWith('gpt-image-')) {
+      body.response_format = 'b64_json';
+    }
     body.images = [{ image_url: ctx.imageRef.dataUrl }];
     url = buildOpenAIImageEditUrl(baseUrl);
   }
 
-  const resp = await fetch(url, withMediaRequestInit(ctx, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  }));
+  const resp = await fetchImageGenerationWithResponseRetry(
+    () => fetch(url, withMediaRequestInit(ctx, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })),
+    (summary) => ctx.onProviderRequestSettled?.({
+      providerId: 'custom-image',
+      ...summary,
+    }),
+  );
   const data = await parseOpenAICompatibleJson(resp, 'custom image');
   const bytes = await bytesFromOpenAICompatibleData(data, 'custom image', ctx.requestInit);
   return {
@@ -1812,7 +1838,8 @@ async function renderGrokImage(ctx: MediaContext, credentials: ProviderConfig): 
 }
 
 async function renderNanoBananaImage(ctx: MediaContext, credentials: ProviderConfig): Promise<RenderResult> {
-  if (!credentials.apiKey) {
+  const apiKey = credentials.apiKey;
+  if (!apiKey) {
     throw new Error(
       'no Nano Banana API key — configure it in Settings or set OD_NANOBANANA_API_KEY',
     );
@@ -1835,11 +1862,17 @@ async function renderNanoBananaImage(ctx: MediaContext, credentials: ProviderCon
     },
   };
 
-  const resp = await fetch(`${baseUrl}/v1beta/models/${encodeURIComponent(wireModel)}:generateContent`, withMediaRequestInit(ctx, {
-    method: 'POST',
-    headers: nanoBananaHeaders(baseUrl, credentials.apiKey),
-    body: JSON.stringify(body),
-  }));
+  const resp = await fetchImageGenerationWithResponseRetry(
+    () => fetch(`${baseUrl}/v1beta/models/${encodeURIComponent(wireModel)}:generateContent`, withMediaRequestInit(ctx, {
+      method: 'POST',
+      headers: nanoBananaHeaders(baseUrl, apiKey),
+      body: JSON.stringify(body),
+    })),
+    (summary) => ctx.onProviderRequestSettled?.({
+      providerId: 'nanobanana',
+      ...summary,
+    }),
+  );
   const text = await resp.text();
   if (!resp.ok) {
     throw new Error(`nano-banana image ${resp.status}: ${truncate(text, 240)}`);
@@ -1991,7 +2024,7 @@ async function renderOpenRouterImage(
   };
   body.image_config = imageConfig;
 
-  const resp = await fetch(`${baseUrl}/chat/completions`, {
+  const resp = await fetch(`${baseUrl}/chat/completions`, withMediaRequestInit(ctx, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${credentials.apiKey}`,
@@ -2000,7 +2033,8 @@ async function renderOpenRouterImage(
       'X-Title': 'Open Design',
     },
     body: JSON.stringify(body),
-  });
+    signal: AbortSignal.timeout(Math.max(OPENAI_IMAGE_HEADERS_TIMEOUT_MS, OPENAI_IMAGE_BODY_TIMEOUT_MS)),
+  }));
   const text = await resp.text();
   if (!resp.ok) {
     throw new Error(`openrouter image ${resp.status}: ${truncate(text, 240)}`);
@@ -2038,7 +2072,7 @@ async function renderOpenRouterImage(
     bytes = Buffer.from(b64Match[1]!, 'base64');
   } else if (dataUrl.startsWith('http')) {
     // Some models may return a plain URL instead of inline base64.
-    const imgResp = await fetch(dataUrl);
+    const imgResp = await fetch(dataUrl, withMediaRequestInit(ctx));
     if (!imgResp.ok) throw new Error(`openrouter image download ${imgResp.status}`);
     bytes = Buffer.from(await imgResp.arrayBuffer());
   } else {
@@ -2148,7 +2182,7 @@ async function renderOpenRouterVideo(
   }
 
   // ── Step 1: Submit the generation request ──────────────────────────
-  const submitResp = await fetch(`${baseUrl}/videos`, {
+  const submitResp = await fetch(`${baseUrl}/videos`, withMediaRequestInit(ctx, {
     method: 'POST',
     headers: {
       'authorization': `Bearer ${credentials.apiKey}`,
@@ -2159,7 +2193,7 @@ async function renderOpenRouterVideo(
       'X-Title': 'Open Design',
     },
     body: JSON.stringify(body),
-  });
+  }));
   const submitText = await submitResp.text();
   if (!submitResp.ok) {
     throw new Error(
@@ -2201,13 +2235,13 @@ async function renderOpenRouterVideo(
 
   while (Date.now() - startedAt < maxMs) {
     await sleep(8000);
-    const pollResp = await fetch(pollingUrl, {
+    const pollResp = await fetch(pollingUrl, withMediaRequestInit(ctx, {
       headers: {
         'authorization': `Bearer ${credentials.apiKey}`,
         'HTTP-Referer': 'https://opendesign.dev',
         'X-Title': 'Open Design',
       },
-    });
+    }));
     const pollText = await pollResp.text();
     if (!pollResp.ok) {
       throw new Error(
@@ -2269,7 +2303,7 @@ async function renderOpenRouterVideo(
     dlHeaders['authorization'] = `Bearer ${credentials.apiKey}`;
   }
 
-  const dlResp = await fetch(contentUrl, { headers: dlHeaders });
+  const dlResp = await fetch(contentUrl, withMediaRequestInit(ctx, { headers: dlHeaders }));
   if (!dlResp.ok) {
     throw new Error(`openrouter video download ${dlResp.status}`);
   }

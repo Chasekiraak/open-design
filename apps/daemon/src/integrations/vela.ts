@@ -30,6 +30,7 @@ const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'handoff_amr_website',
   'chat_error_authorize_retry',
   'chat_error_recharge',
+  'chat_error_upgrade',
   'chat_balance_gate_upgrade',
   'home_balance_gate_upgrade',
   'chat_low_balance_warn_recharge',
@@ -44,6 +45,8 @@ const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'inline_amr_upgrade',
   'avatar_amr_upgrade',
   'avatar_amr_agent_card',
+  'artifact_success_upgrade',
+  'home_artifact_upgrade',
 ]);
 
 const AMR_ONBOARDING_PROFILE_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
@@ -80,6 +83,7 @@ const AMR_ENTRY_SOURCE_PAGE_BY_SOURCE: Record<
   handoff_amr_website: 'artifact',
   chat_error_authorize_retry: 'chat_panel',
   chat_error_recharge: 'chat_panel',
+  chat_error_upgrade: 'chat_panel',
   chat_balance_gate_upgrade: 'chat_panel',
   home_balance_gate_upgrade: 'home',
   chat_low_balance_warn_recharge: 'chat_panel',
@@ -94,6 +98,8 @@ const AMR_ENTRY_SOURCE_PAGE_BY_SOURCE: Record<
   inline_amr_upgrade: 'chat_panel',
   avatar_amr_upgrade: 'chat_panel',
   avatar_amr_agent_card: 'chat_panel',
+  artifact_success_upgrade: 'artifact',
+  home_artifact_upgrade: 'home',
 };
 
 const AMR_ANALYTICS_EVENTS_URL =

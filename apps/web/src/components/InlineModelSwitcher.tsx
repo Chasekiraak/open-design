@@ -65,8 +65,15 @@ import {
   notifyAmrLoginStatusChanged,
 } from './amrLoginPolling';
 import { orderAgentsWithOpenDesignFirst } from './agentOrdering';
-import { normalizeAgentModelChoice } from './agentModelSelection';
-import { SearchableModelSelect } from './modelOptions';
+import {
+  defaultAgentModelId,
+  effectiveAgentModelChoice,
+  normalizeAgentModelChoice,
+} from './agentModelSelection';
+import {
+  orderModelOptionsByAvailability,
+  SearchableModelSelect,
+} from './modelOptions';
 import {
   mergeProviderModelOptions,
   providerModelsCacheKey,
@@ -165,6 +172,7 @@ export function InlineModelSwitcher({
   const analytics = useAnalytics();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
   const providerModelsFetchingRef = useRef<Set<string>>(new Set());
   const [amrStatus, setAmrStatus] = useState<VelaLoginStatus | null>(null);
   const [amrWalletSnapshot, setAmrWalletSnapshot] =
@@ -177,6 +185,28 @@ export function InlineModelSwitcher({
     useState(false);
   const amrPollRef = useRef<number | null>(null);
   const amrLoginStartedAtRef = useRef<number | null>(null);
+
+  const getModelPopoverBoundary = useCallback(() => {
+    const scrollContainer = wrapRef.current?.closest<HTMLElement>(
+      '.entry-main--scroll',
+    );
+    const scrollRect = scrollContainer?.getBoundingClientRect();
+    const topbarRect = scrollContainer
+      ?.querySelector<HTMLElement>('.entry-main__topbar')
+      ?.getBoundingClientRect();
+    return {
+      top: Math.max(8, (topbarRect?.bottom ?? scrollRect?.top ?? 0) + 8),
+      right: Math.min(
+        window.innerWidth - 8,
+        (scrollRect?.right ?? window.innerWidth) - 8,
+      ),
+      bottom: Math.min(
+        window.innerHeight - 8,
+        (scrollRect?.bottom ?? window.innerHeight) - 8,
+      ),
+      left: Math.max(8, (scrollRect?.left ?? 0) + 8),
+    };
+  }, []);
 
   const stopAmrPolling = useCallback(() => {
     if (amrPollRef.current !== null) {
@@ -348,6 +378,48 @@ export function InlineModelSwitcher({
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+    const scrollContainer = wrapRef.current?.closest('.entry-main--scroll');
+    if (!(scrollContainer instanceof HTMLElement)) return;
+    let frame = 0;
+    const updateAnchorVisibility = () => {
+      frame = 0;
+      const triggerRect = chipRef.current?.getBoundingClientRect();
+      if (!triggerRect) return;
+      const scrollRect = scrollContainer.getBoundingClientRect();
+      const topbarBottom = scrollContainer
+        .querySelector<HTMLElement>('.entry-main__topbar')
+        ?.getBoundingClientRect().bottom;
+      const safeTop = Math.max(scrollRect.top, topbarBottom ?? scrollRect.top);
+      const safeBottom = Math.min(window.innerHeight, scrollRect.bottom);
+      const safeLeft = Math.max(0, scrollRect.left);
+      const safeRight = Math.min(window.innerWidth, scrollRect.right);
+      if (
+        triggerRect.bottom <= safeTop ||
+        triggerRect.top >= safeBottom ||
+        triggerRect.right <= safeLeft ||
+        triggerRect.left >= safeRight
+      ) {
+        setOpen(false);
+      }
+    };
+    const scheduleVisibilityUpdate = () => {
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(updateAnchorVisibility);
+    };
+    updateAnchorVisibility();
+    scrollContainer.addEventListener('scroll', scheduleVisibilityUpdate, {
+      passive: true,
+    });
+    window.addEventListener('resize', scheduleVisibilityUpdate);
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      scrollContainer.removeEventListener('scroll', scheduleVisibilityUpdate);
+      window.removeEventListener('resize', scheduleVisibilityUpdate);
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (open && agents.some((agent) => agent.id === 'amr' && agent.available)) {
       void refreshAmrStatus();
     }
@@ -401,24 +473,23 @@ export function InlineModelSwitcher({
 
   const currentChoice =
     (config.agentId && config.agentModels?.[config.agentId]) || {};
-  const normalizedCurrentChoice = normalizeAgentModelChoice(
-    currentAgent,
-    currentChoice,
-  );
+  const normalizedCurrentChoice = normalizeAgentModelChoice(currentAgent, currentChoice);
+  const effectiveCurrentChoice = effectiveAgentModelChoice(currentAgent, currentChoice) ?? currentChoice;
   const currentAgentId = currentAgent?.id ?? null;
   const normalizedCurrentModelId = normalizedCurrentChoice?.model ?? null;
   const normalizedCurrentReasoning = normalizedCurrentChoice?.reasoning;
   const currentAgentModelIds = currentAgent?.models?.map((m) => m.id) ?? [];
   const configuredModelId =
-    typeof currentChoice.model === 'string' && currentChoice.model
-      ? currentChoice.model
+    typeof effectiveCurrentChoice.model === 'string' && effectiveCurrentChoice.model
+      ? effectiveCurrentChoice.model
       : null;
   const currentModelId =
     currentAgent?.id === 'amr' &&
     configuredModelId &&
+    configuredModelId !== 'default' &&
     !currentAgentModelIds.includes(configuredModelId)
-      ? currentAgent?.models?.[0]?.id ?? null
-      : configuredModelId ?? currentAgent?.models?.[0]?.id ?? null;
+      ? defaultAgentModelId(currentAgent)
+      : configuredModelId ?? defaultAgentModelId(currentAgent);
 
   useEffect(() => {
     if (!currentAgentId || !normalizedCurrentModelId) return;
@@ -435,6 +506,11 @@ export function InlineModelSwitcher({
 
   const currentModelLabel =
     currentAgent?.models?.find((m) => m.id === currentModelId)?.label ?? null;
+  const inlineAgentModelOptions = useMemo(() => {
+    const models = currentAgent?.models ?? [];
+    if (currentAgent?.id !== 'amr') return models;
+    return orderModelOptionsByAvailability(models);
+  }, [currentAgent]);
   const amrLoggedIn = amrStatus?.loggedIn === true;
 
   useEffect(() => {
@@ -577,8 +653,8 @@ export function InlineModelSwitcher({
     () =>
       Array.from(
         new Set(
-          providerForProtocol?.models?.length
-            ? providerForProtocol.models
+          providerForProtocol?.preferredModels.length
+            ? providerForProtocol.preferredModels
             : SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol],
         ),
       ),
@@ -593,7 +669,7 @@ export function InlineModelSwitcher({
     [apiModelOptions],
   );
   const apiModelChoices = useMemo(
-    () => apiModelOptions.map((model) => ({ id: model.id, label: model.label })),
+    () => apiModelOptions.map((model) => ({ ...model, label: model.label })),
     [apiModelOptions],
   );
 
@@ -641,6 +717,7 @@ export function InlineModelSwitcher({
       data-testid="inline-model-switcher"
     >
       <button
+        ref={chipRef}
         type="button"
         className={
           'inline-switcher__chip od-tooltip' +
@@ -961,8 +1038,9 @@ export function InlineModelSwitcher({
                     searchInputTestId="inline-model-switcher-agent-model-search"
                     popoverTestId="inline-model-switcher-agent-model-popover"
                     searchPlaceholder={t('designs.searchPlaceholder')}
+                    getPopoverBoundary={getModelPopoverBoundary}
                     aria-label={t('inlineSwitcher.modelLabel')}
-                    models={currentAgent.models}
+                    models={inlineAgentModelOptions}
                     value={currentModelId ?? ''}
                     onChange={(nextValue) => {
                       trackExecutionSettingsPopoverClick(analytics.track, {
@@ -986,6 +1064,48 @@ export function InlineModelSwitcher({
                               label: `${currentModelId} ${t('inlineSwitcher.customSuffix')}`,
                             },
                           ]
+                        : undefined
+                    }
+                    disabledOptionHint={
+                      currentAgent?.id === 'amr'
+                        ? (option) =>
+                            option.enabled === false
+                              ? t('settings.amrModelUpgradeHint')
+                              : null
+                        : undefined
+                    }
+                    onDisabledOptionUpgrade={
+                      currentAgent?.id === 'amr'
+                        ? () => {
+                            const attribution = recordAmrEntry(
+                              analytics.track,
+                              'inline_amr_upgrade',
+                              new Date(),
+                              {
+                                metricsConsent:
+                                  config.telemetry?.metrics === true,
+                              },
+                            );
+                            const deviceId = amrHandoffDeviceId({
+                              metricsConsent:
+                                config.telemetry?.metrics === true,
+                              resolvedDeviceId: getResolvedDeviceId(),
+                              installationId: config.installationId,
+                            });
+                            window.open(
+                              attributedAmrUrl(
+                                amrPlansUrlForProfile(
+                                  amrStatus?.profile ??
+                                    config.agentCliEnv?.amr
+                                      ?.OPEN_DESIGN_AMR_PROFILE,
+                                ),
+                                attribution,
+                                deviceId,
+                              ),
+                              '_blank',
+                              'noopener,noreferrer',
+                            );
+                          }
                         : undefined
                     }
                   />
@@ -1044,6 +1164,7 @@ export function InlineModelSwitcher({
                     searchInputTestId="inline-model-switcher-api-model-search"
                     popoverTestId="inline-model-switcher-api-model-popover"
                     searchPlaceholder={t('designs.searchPlaceholder')}
+                    getPopoverBoundary={getModelPopoverBoundary}
                     aria-label={t('inlineSwitcher.modelLabel')}
                     models={apiModelChoices}
                     value={config.model}
