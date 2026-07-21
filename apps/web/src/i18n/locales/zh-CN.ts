@@ -3902,6 +3902,8 @@ export const zhCN: Dict = {
   "pet.communitySyncFailed": "同步失败：{error}",
   "pet.codexBundled": "内置",
   "pet.codexBundledTitle": "Open Design 内置宠物，无需下载。",
+  "settings.systemPrefsTitle": "系统偏好",
+  "settings.systemPrefsHint": "完成提示音、浏览器通知和任务状态提醒。",
   "settings.notifications": "通知",
   "settings.notificationsHint": "任务完成时的声音和桌面通知",
   "settings.notifyCompletionSound": "完成提示音",

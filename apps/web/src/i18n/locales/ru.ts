@@ -3691,6 +3691,8 @@ export const ru: Dict = {
   'pet.communitySyncFailed': 'Ошибка синхронизации: {error}',
   'pet.codexBundled': 'Встроен',
   'pet.codexBundledTitle': 'Поставляется с Open Design — загрузка не нужна.',
+  'settings.systemPrefsTitle': 'Системные настройки',
+  'settings.systemPrefsHint': 'Звук завершения, уведомления браузера и оповещения о статусе задач.',
   'settings.notifications': 'Уведомления',
   'settings.notificationsHint': 'Звук и уведомление при завершении задачи',
   'settings.notifyCompletionSound': 'Звук завершения',

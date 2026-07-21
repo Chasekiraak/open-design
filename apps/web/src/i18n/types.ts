@@ -1009,6 +1009,10 @@ export interface Dict {
   'settings.mcpRunningNote': string;
 
   // Notifications (settings + system notifications)
+  // `systemPrefs*` heads the System preferences block on Settings → General,
+  // which groups the completion sound and desktop notification rows.
+  'settings.systemPrefsTitle': string;
+  'settings.systemPrefsHint': string;
   'settings.notifications': string;
   'settings.notificationsHint': string;
   'settings.notifyCompletionSound': string;

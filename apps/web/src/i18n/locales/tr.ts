@@ -3691,6 +3691,8 @@ export const tr: Dict = {
   'pet.communitySyncFailed': 'Eşitleme başarısız: {error}',
   'pet.codexBundled': 'Yerleşik',
   'pet.codexBundledTitle': 'Open Design ile birlikte gelir — indirme gerekmez.',
+  'settings.systemPrefsTitle': 'Sistem tercihleri',
+  'settings.systemPrefsHint': 'Tamamlanma sesi, tarayıcı bildirimleri ve görev durumu uyarıları.',
   'settings.notifications': 'Bildirimler',
   'settings.notificationsHint': 'Görev tamamlandığında ses ve masaüstü bildirimi',
   'settings.notifyCompletionSound': 'Tamamlanma sesi',

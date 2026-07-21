@@ -3691,6 +3691,8 @@ export const uk: Dict = {
   'pet.communitySyncFailed': 'Синхронізація не вдалася: {error}',
   'pet.codexBundled': 'Упаковано',
   'pet.codexBundledTitle': 'Поставляється з Open Design — завантаження не потрібне.',
+  'settings.systemPrefsTitle': 'Системні налаштування',
+  'settings.systemPrefsHint': 'Звук завершення, сповіщення браузера та сповіщення про стан завдань.',
   'settings.notifications': 'Сповіщення',
   'settings.notificationsHint': 'Звук та сповіщення робочого столу при завершенні завдання',
   'settings.notifyCompletionSound': 'Звук завершення',

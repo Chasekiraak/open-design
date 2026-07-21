@@ -8433,6 +8433,24 @@ function CritiqueTheaterSection() {
   const enabled = useCritiqueTheaterEnabled();
   const route = useRoute();
   const activeProjectId = route.kind === 'project' ? route.projectId : null;
+
+  const handleToggle = () => {
+    const next = !enabled;
+    trackSettingsDesignReviewClick(analytics.track, {
+      page_name: 'settings',
+      area: 'design_review',
+      element: 'enable_toggle',
+      status_before: enabled ? 'on' : 'off',
+      status_after: next ? 'on' : 'off',
+      has_active_project: activeProjectId !== null,
+    });
+    if (activeProjectId !== null) {
+      void setCritiqueTheaterEnabled(next, { projectId: activeProjectId });
+    } else {
+      void setCritiqueTheaterEnabled(next);
+    }
+  };
+
   return (
     <section className="settings-section">
       <div className="section-head">
@@ -8441,44 +8459,32 @@ function CritiqueTheaterSection() {
           <p className="hint">{t('critiqueTheater.settingsNavHint')}</p>
         </div>
       </div>
-      <label className="field">
-        <span className="field-label">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => {
-              const next = e.target.checked;
-              trackSettingsDesignReviewClick(analytics.track, {
-                page_name: 'settings',
-                area: 'design_review',
-                element: 'enable_toggle',
-                status_before: enabled ? 'on' : 'off',
-                status_after: next ? 'on' : 'off',
-                has_active_project: activeProjectId !== null,
-              });
-              if (activeProjectId !== null) {
-                void setCritiqueTheaterEnabled(next, { projectId: activeProjectId });
-              } else {
-                void setCritiqueTheaterEnabled(next);
-              }
-            }}
-          />
-          {' '}
-          {t('critiqueTheater.settingsEnabledLabel')}
+      {/* Renders as the same `toggle-row` switch the rest of General uses, per
+          #5517 — the bare checkbox this replaces floated free of the label
+          because `.settings-general-block` hides the section-head that used to
+          anchor it. The .critique-theater-toggle styles were already shipped. */}
+      <button
+        type="button"
+        className={`toggle-row critique-theater-toggle${enabled ? ' on' : ''}`}
+        role="switch"
+        aria-checked={enabled}
+        onClick={handleToggle}
+      >
+        <span className="toggle-row-text">
+          <span className="toggle-row-label">
+            {t('critiqueTheater.settingsEnabledLabel')}
+          </span>
+          <span className="toggle-row-hint">
+            {t('critiqueTheater.settingsEnabledDescription')}
+          </span>
+          <span className="toggle-row-hint">
+            {activeProjectId !== null
+              ? t('critiqueTheater.settingsEnabledProjectHint')
+              : t('critiqueTheater.settingsEnabledNoProjectHint')}
+          </span>
         </span>
-        <small className="hint">
-          {t('critiqueTheater.settingsEnabledDescription')}
-        </small>
-        {activeProjectId !== null ? (
-          <small className="hint">
-            {t('critiqueTheater.settingsEnabledProjectHint')}
-          </small>
-        ) : (
-          <small className="hint">
-            {t('critiqueTheater.settingsEnabledNoProjectHint')}
-          </small>
-        )}
-      </label>
+        <span className="toggle-row-switch" aria-hidden="true" />
+      </button>
     </section>
   );
 }

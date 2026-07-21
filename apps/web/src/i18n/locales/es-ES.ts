@@ -3691,6 +3691,8 @@ export const esES: Dict = {
   'pet.communitySyncFailed': 'Error al sincronizar: {error}',
   'pet.codexBundled': 'Incluida',
   'pet.codexBundledTitle': 'Viene con Open Design — sin descarga.',
+  'settings.systemPrefsTitle': 'Preferencias del sistema',
+  'settings.systemPrefsHint': 'Sonido de finalización, notificaciones del navegador y avisos de estado de tareas.',
   'settings.notifications': 'Notificaciones',
   'settings.notificationsHint': 'Sonido y notificación al completar la tarea',
   'settings.notifyCompletionSound': 'Sonido al completar',

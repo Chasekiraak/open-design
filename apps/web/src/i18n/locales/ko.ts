@@ -3691,6 +3691,8 @@ export const ko: Dict = {
   'pet.communitySyncFailed': '동기화 실패: {error}',
   'pet.codexBundled': '내장',
   'pet.codexBundledTitle': 'Open Design 에 내장 — 다운로드 불필요.',
+  'settings.systemPrefsTitle': '시스템 환경설정',
+  'settings.systemPrefsHint': '완료 알림음, 브라우저 알림, 작업 상태 알림.',
   'settings.notifications': '알림',
   'settings.notificationsHint': '작업 완료 시 효과음 및 데스크톱 알림',
   'settings.notifyCompletionSound': '완료 사운드',

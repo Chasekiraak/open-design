@@ -3691,6 +3691,8 @@ export const fa: Dict = {
   'pet.communitySyncFailed': 'خطا در همگام‌سازی: {error}',
   'pet.codexBundled': 'همراه',
   'pet.codexBundledTitle': 'همراه Open Design ارائه می‌شود — نیازی به دانلود نیست.',
+  'settings.systemPrefsTitle': 'تنظیمات سیستم',
+  'settings.systemPrefsHint': 'صدای پایان، اعلان‌های مرورگر و هشدارهای وضعیت وظیفه.',
   'settings.notifications': 'اعلان‌ها',
   'settings.notificationsHint': 'صدا و اعلان دسکتاپ هنگام تکمیل وظیفه',
   'settings.notifyCompletionSound': 'صدای تکمیل',

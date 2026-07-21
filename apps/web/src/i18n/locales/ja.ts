@@ -3691,6 +3691,8 @@ export const ja: Dict = {
   'pet.communitySyncFailed': '同期に失敗しました: {error}',
   'pet.codexBundled': '同梱',
   'pet.codexBundledTitle': 'Open Design に同梱 — ダウンロード不要。',
+  'settings.systemPrefsTitle': 'システム設定',
+  'settings.systemPrefsHint': '完了サウンド、ブラウザ通知、タスク状態のアラート。',
   'settings.notifications': '通知',
   'settings.notificationsHint': 'タスク完了時の効果音とデスクトップ通知',
   'settings.notifyCompletionSound': '完了サウンド',

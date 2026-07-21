@@ -3729,6 +3729,8 @@ export const en: Dict = {
   'pet.communitySyncFailed': 'Sync failed: {error}',
   'pet.codexBundled': 'Bundled',
   'pet.codexBundledTitle': 'Ships with Open Design — no download needed.',
+  'settings.systemPrefsTitle': 'System preferences',
+  'settings.systemPrefsHint': 'Completion sound, browser notifications, and task status alerts.',
   'settings.notifications': 'Notifications',
   'settings.notificationsHint': 'Sound and desktop notification on task completion',
   'settings.notifyCompletionSound': 'Completion sound',

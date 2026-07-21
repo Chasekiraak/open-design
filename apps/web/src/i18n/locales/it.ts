@@ -3691,6 +3691,8 @@ export const it: Dict = {
   'pet.communitySyncFailed': 'Sincronizzazione fallita: {error}',
   'pet.codexBundled': 'Fornito',
   'pet.codexBundledTitle': 'Fornito con Open Design — nessun download necessario.',
+  'settings.systemPrefsTitle': 'Preferenze di sistema',
+  'settings.systemPrefsHint': 'Suono di completamento, notifiche del browser e avvisi sullo stato delle attività.',
   'settings.notifications': 'Notifiche',
   'settings.notificationsHint': 'Suono e notifica desktop alla fine di un\'attività',
   'settings.notifyCompletionSound': 'Suono di fine',

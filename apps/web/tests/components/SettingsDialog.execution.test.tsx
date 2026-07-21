@@ -4072,22 +4072,26 @@ describe('SettingsDialog language interactions', () => {
     document.documentElement.removeAttribute('dir');
   });
 
-  it('shows every locale as a tile and marks the current locale as selected', async () => {
+  // #5517 replaced the 4×N locale tile grid with one compact select. The
+  // capability is unchanged — every locale is still offered — so these specs
+  // now drive the <select> instead of clicking radio tiles.
+  it('offers every locale in the language select and shows the current one', async () => {
     renderLanguageSettingsDialog('en');
 
-    const languageGroup = await screen.findByRole('radiogroup', { name: 'Language' });
-    const tiles = within(languageGroup).getAllByRole('radio');
-    expect(tiles).toHaveLength(LOCALES.length);
-    expect(within(languageGroup).getByRole('radio', { name: /English/i }).getAttribute('aria-checked')).toBe('true');
-    expect(within(languageGroup).getByRole('radio', { name: /简体中文/i }).getAttribute('aria-checked')).toBe('false');
+    const select = (await screen.findByLabelText('Language')) as HTMLSelectElement;
+    expect(select.tagName).toBe('SELECT');
+    expect(within(select).getAllByRole('option')).toHaveLength(LOCALES.length);
+    expect(select.value).toBe('en');
+    expect(within(select).getByRole('option', { name: /简体中文/i })).toBeTruthy();
   });
 
   it('switches locale immediately and updates localStorage', async () => {
     renderLanguageSettingsDialog('en');
 
-    fireEvent.click(screen.getByRole('radio', { name: /简体中文/i }));
+    const select = screen.getByLabelText('Language') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'zh-CN' } });
 
-    expect(screen.getByRole('radio', { name: /简体中文/i }).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByLabelText('界面语言') as HTMLSelectElement).value).toBe('zh-CN');
     expect(window.localStorage.getItem('open-design:locale')).toBe('zh-CN');
     expect(document.documentElement.getAttribute('lang')).toBe('zh-CN');
     expect(document.documentElement.getAttribute('dir')).toBe('ltr');
@@ -4096,7 +4100,7 @@ describe('SettingsDialog language interactions', () => {
   it('sets rtl direction for rtl locales', async () => {
     renderLanguageSettingsDialog('en');
 
-    fireEvent.click(screen.getByRole('radio', { name: /فارسی/i }));
+    fireEvent.change(screen.getByLabelText('Language'), { target: { value: 'fa' } });
 
     expect(window.localStorage.getItem('open-design:locale')).toBe('fa');
     expect(document.documentElement.getAttribute('lang')).toBe('fa');
@@ -4106,7 +4110,7 @@ describe('SettingsDialog language interactions', () => {
   it('does not route language changes through autosave and closing does not revert an applied locale', async () => {
     const { onPersist, onClose } = renderLanguageSettingsDialog('en');
 
-    fireEvent.click(screen.getByRole('radio', { name: /Deutsch/i }));
+    fireEvent.change(screen.getByLabelText('Language'), { target: { value: 'de' } });
 
     expect(window.localStorage.getItem('open-design:locale')).toBe('de');
     expect(document.documentElement.getAttribute('lang')).toBe('de');
@@ -4256,44 +4260,52 @@ describe('SettingsDialog appearance interactions', () => {
     document.documentElement.style.removeProperty('--accent-hover');
   });
 
-  // #5517 (product confirmed 2026-07-20) removed the 系统/浅色/深色 segmented
-  // control from Appearance. The theme is now reachable ONLY through the
-  // account menu's 切换主题 row (a light⇄dark toggle) — Settings keeps the
-  // accent swatches and nothing else. The theme behaviors these tests used to
-  // drive through the segmented control (explicit theme writes `data-theme`,
-  // `system` removes it, accent variables survive either way) are unchanged
-  // product behavior, so they are asserted here through the paths that still
-  // exist: the section's live preview on open, and the close-time revert.
-  it('no longer offers a theme segmented control, and System leaves the document theme unset', () => {
+  // #5517 drops the accent-colour swatches from Appearance but keeps the
+  // 系统/浅色/深色 segmented control (its own comment calls the removal
+  // *temporary*, and the account menu no longer carries a 切换主题 row, so this
+  // is the product's only "follow system" entry point — NON-ALIGNMENT #9).
+  it('offers the theme segmented control, and System leaves the document theme unset', () => {
     const { container } = renderSettingsDialog(
       { theme: 'system' },
       { initialSection: 'appearance' },
     );
 
-    // Regression guard: the three theme buttons must not come back to Settings.
-    // Scoped to the appearance group specifically — the General section also
-    // mounts Notifications, whose own seg-controls are unrelated to #5517.
-    expect(screen.queryByRole('button', { name: 'System' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Light' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dark' })).toBeNull();
-    expect(screen.queryByRole('group', { name: 'Appearance' })).toBeNull();
-    expect(container.querySelector('.seg-control[aria-label="Appearance"]')).toBeNull();
-    // …while the accent swatches, the section's surviving control, stay put.
-    expect(screen.getByRole('radiogroup', { name: 'Accent color' })).toBeTruthy();
+    const group = screen.getByRole('group', { name: 'Appearance' });
+    expect(container.querySelector('.seg-control[aria-label="Appearance"]')).toBeTruthy();
+    expect(within(group).getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(group).getByRole('button', { name: 'Light' }).getAttribute('aria-pressed')).toBe('false');
+    expect(within(group).getByRole('button', { name: 'Dark' }).getAttribute('aria-pressed')).toBe('false');
 
-    // The mode itself still behaves: `system` means "no explicit document
-    // theme", so the OS media query keeps ownership.
+    // Regression guard: the accent swatches must not come back — #5517 removed
+    // that control, and `accentColor` is now a stored value with no editor.
+    expect(screen.queryByRole('radiogroup', { name: 'Accent color' })).toBeNull();
+    expect(screen.queryByLabelText('Custom color')).toBeNull();
+
+    // `system` means "no explicit document theme", so the OS media query keeps
+    // ownership.
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
-  it('applies the first accent color as the default appearance color', () => {
+  it('applies the stored default accent color even though the picker is gone', () => {
     renderSettingsDialog(
       { theme: 'system' },
       { initialSection: 'appearance' },
     );
 
-    expect(screen.getByRole('radio', { name: 'Default accent color' }).getAttribute('aria-checked')).toBe('true');
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#353535');
+  });
+
+  it('writes the picked theme to the document and autosaves it', async () => {
+    const { onPersist } = renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex', theme: 'system' },
+      { initialSection: 'appearance' },
+    );
+
+    const group = screen.getByRole('group', { name: 'Appearance' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Dark' }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+
+    await waitForPersist(onPersist, expect.objectContaining({ theme: 'dark' }), {});
   });
 
   // The section still runs the live appearance preview on mount; it just reads
@@ -4317,11 +4329,8 @@ describe('SettingsDialog appearance interactions', () => {
 
   // The close-time revert is unchanged: SettingsDialog's cleanup re-applies the
   // LAST SAVED appearance, so a preview the user never saved is rolled back.
-  // The theme half of this scenario is no longer reachable from the dialog
-  // (see the #5517 note above), so the divergence is driven through the accent
-  // swatches — the only appearance control the dialog still owns. The saved
-  // theme is asserted too, because cleanup re-applies theme AND accent together
-  // and must not drop the theme on the way back.
+  // The stored accent is asserted too, because cleanup re-applies theme AND
+  // accent together and must not drop either on the way back.
   it('reverts an unsaved appearance preview back to the saved appearance when the dialog closes', () => {
     const first = renderSettingsDialog(
       { theme: 'dark', accentColor: '#2563eb' },
@@ -4333,8 +4342,9 @@ describe('SettingsDialog appearance interactions', () => {
 
     // Autosave is debounced (400ms), so closing immediately leaves this edit
     // unsaved — exactly the case the revert exists for.
-    fireEvent.click(screen.getByRole('radio', { name: '#87ea5c' }));
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#87ea5c');
+    const group = screen.getByRole('group', { name: 'Appearance' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Light' }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
 
     fireEvent.click(first.container.querySelector('.settings-close') as HTMLElement);
     expect(first.onClose).toHaveBeenCalledTimes(1);
@@ -4346,27 +4356,26 @@ describe('SettingsDialog appearance interactions', () => {
 
   it('persists System mode explicitly and preserves accent variables without an explicit document theme', async () => {
     const { onPersist } = renderSettingsDialog(
-      { mode: 'daemon', agentId: 'codex', theme: 'system', accentColor: '#2563eb' },
+      { mode: 'daemon', agentId: 'codex', theme: 'light', accentColor: '#2563eb' },
       { initialSection: 'appearance' },
     );
 
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
 
-    // An accent edit is the only autosave this section can now trigger; the
-    // point of the assertion is that the snapshot still carries `system`
-    // EXPLICITLY (it must not be dropped to undefined just because nothing in
-    // the dialog can set it any more), and that a `system` theme keeps the
-    // accent variables applied without an explicit document theme.
-    fireEvent.click(screen.getByRole('radio', { name: '#87ea5c' }));
+    // `system` must be persisted EXPLICITLY (not dropped to undefined), and it
+    // must keep the stored accent variables applied while leaving the document
+    // theme to the OS media query.
+    const group = screen.getByRole('group', { name: 'Appearance' });
+    fireEvent.click(within(group).getByRole('button', { name: 'System' }));
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#87ea5c');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
 
     await waitForPersist(
       onPersist,
       expect.objectContaining({
         theme: 'system',
-        accentColor: '#87ea5c',
+        accentColor: '#2563eb',
       }),
       {},
     );
@@ -4421,17 +4430,15 @@ describe('SettingsDialog appearance interactions', () => {
     );
 
     // Any committed edit will do — this test is about what the draft carries
-    // when it autosaves, not about which control fired it. It used to click the
-    // Appearance theme segmented control, which #5517 removed; the accent
-    // swatch is the equivalent trigger in the same section, so `theme` is now
-    // asserted as pass-through (still 'dark') instead of as the edit.
-    fireEvent.click(screen.getByRole('radio', { name: '#87ea5c' }));
+    // when it autosaves, not about which control fired it.
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Appearance' })).getByRole('button', { name: 'Light' }),
+    );
 
     await waitForPersist(
       view.onPersist,
       expect.objectContaining({
-        theme: 'dark',
-        accentColor: '#87ea5c',
+        theme: 'light',
         agentModels: {},
         agentCliEnv: {
           codex: { CODEX_BIN: '/tmp/codex-dev' },
@@ -4507,37 +4514,27 @@ describe('SettingsDialog appearance interactions', () => {
     });
   });
 
-  it('switches back to the default accent color and persists it explicitly', async () => {
-    const { onPersist } = renderSettingsDialog(
-      { mode: 'daemon', agentId: 'codex', theme: 'light', accentColor: '#2563eb' },
-      { initialSection: 'appearance' },
-    );
-
-    fireEvent.click(screen.getByRole('radio', { name: 'Default accent color' }));
-
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#353535');
-
-    await waitForPersist(
-      onPersist,
-      expect.objectContaining({
-        accentColor: '#353535',
-      }),
-      {},
-    );
-  });
-
-  it('keeps an autosaved accent color applied after the dialog closes', async () => {
+  // #5517 removed the accent-colour editor from Settings, so a stored accent is
+  // now read-only from this surface: it must still be applied on open and
+  // survive a save driven by any other Appearance control, and it must not be
+  // rewritten to the default just because nothing edits it any more.
+  it('keeps a stored non-default accent applied and carries it through an autosave', async () => {
     const view = renderSettingsDialog(
       { mode: 'daemon', agentId: 'codex', theme: 'light', accentColor: '#2563eb' },
       { initialSection: 'appearance' },
     );
 
-    fireEvent.click(screen.getByRole('radio', { name: '#87ea5c' }));
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
+
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Appearance' })).getByRole('button', { name: 'Dark' }),
+    );
 
     await waitForPersist(
       view.onPersist,
       expect.objectContaining({
-        accentColor: '#87ea5c',
+        theme: 'dark',
+        accentColor: '#2563eb',
       }),
       {},
     );
@@ -4546,41 +4543,10 @@ describe('SettingsDialog appearance interactions', () => {
     expect(view.onClose).toHaveBeenCalledTimes(1);
 
     view.unmount();
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#87ea5c');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
   });
 
-  it('live previews and autosaves preset and custom accent colors', async () => {
-    const { onPersist } = renderSettingsDialog(
-      { mode: 'daemon', agentId: 'codex', theme: 'light' },
-      { initialSection: 'appearance' },
-    );
-
-    fireEvent.click(screen.getByRole('radio', { name: '#87ea5c' }));
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#87ea5c');
-
-    await waitForPersist(
-      onPersist,
-      expect.objectContaining({
-        accentColor: '#87ea5c',
-      }),
-      {},
-    );
-
-    fireEvent.change(screen.getByLabelText('Custom color'), {
-      target: { value: '#123456' },
-    });
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#123456');
-
-    await waitForPersist(
-      onPersist,
-      expect.objectContaining({
-        accentColor: '#123456',
-      }),
-      {},
-    );
-  });
-
-  it('localizes the accent color controls in Chinese', () => {
+  it('localizes the theme controls in Chinese', () => {
     render(
       <I18nProvider initial="zh-CN">
         <SettingsDialog
@@ -4597,10 +4563,13 @@ describe('SettingsDialog appearance interactions', () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText('主题色')).toBeTruthy();
-    expect(screen.getByRole('radiogroup', { name: '主题色' })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: '默认主题色' })).toBeTruthy();
-    expect(screen.getByLabelText('自定义颜色')).toBeTruthy();
+    const group = screen.getByRole('group', { name: '外观' });
+    expect(within(group).getByRole('button', { name: '系统' })).toBeTruthy();
+    expect(within(group).getByRole('button', { name: '浅色' })).toBeTruthy();
+    expect(within(group).getByRole('button', { name: '深色' })).toBeTruthy();
+    // The accent picker and its Chinese labels are gone with it.
+    expect(screen.queryByRole('radiogroup', { name: '主题色' })).toBeNull();
+    expect(screen.queryByLabelText('自定义颜色')).toBeNull();
   });
 });
 
@@ -4614,6 +4583,24 @@ describe('SettingsDialog pets interactions', () => {
       Reflect.deleteProperty(window.navigator, 'clipboard');
     }
     cleanup();
+  });
+
+  // #5517 folded the pet picker into General and the nav rail dropped its
+  // standalone "Pets" item. The composer's pet-settings entry point still
+  // deep-links with `initialSection: 'pet'`, so that token must resolve to
+  // General — otherwise the entry point opens a section with no nav item and
+  // nothing rendered.
+  it('lands a pet deep link on the General section with the General nav item active', () => {
+    const { container } = renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      { initialSection: 'pet' },
+    );
+
+    expect(container.querySelector('.settings-general-section')).toBeTruthy();
+    const active = container.querySelector('.settings-nav-item.active');
+    expect(active?.textContent).toContain('General');
+    // The pet block renders inside General, not as its own page.
+    expect(container.querySelector('.settings-general-section .pet-tabs, .settings-general-section [role="tab"]')).toBeTruthy();
   });
 
   it('renders bundled pets by default and exposes community pets in a separate tab', async () => {

@@ -3691,6 +3691,8 @@ export const hu: Dict = {
   'pet.communitySyncFailed': 'A szinkronizálás sikertelen: {error}',
   'pet.codexBundled': 'Beépített',
   'pet.codexBundledTitle': 'Az Open Designgal érkezik — letöltés nem szükséges.',
+  'settings.systemPrefsTitle': 'Rendszerbeállítások',
+  'settings.systemPrefsHint': 'Befejezési hang, böngészőértesítések és feladatállapot-riasztások.',
   'settings.notifications': 'Értesítések',
   'settings.notificationsHint': 'Hang és asztali értesítés a feladat befejezésekor',
   'settings.notifyCompletionSound': 'Befejezési hang',

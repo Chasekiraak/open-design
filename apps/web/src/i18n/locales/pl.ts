@@ -3691,6 +3691,8 @@ export const pl: Dict = {
   'pet.communitySyncFailed': 'Błąd synchronizacji: {error}',
   'pet.codexBundled': 'W zestawie',
   'pet.codexBundledTitle': 'Dostarczany z Open Design — bez pobierania.',
+  'settings.systemPrefsTitle': 'Preferencje systemowe',
+  'settings.systemPrefsHint': 'Dźwięk zakończenia, powiadomienia przeglądarki i alerty o stanie zadań.',
   'settings.notifications': 'Powiadomienia',
   'settings.notificationsHint': 'Dźwięk i powiadomienie pulpitu po zakończeniu zadania',
   'settings.notifyCompletionSound': 'Dźwięk zakończenia',

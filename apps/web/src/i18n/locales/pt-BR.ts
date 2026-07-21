@@ -3691,6 +3691,8 @@ export const ptBR: Dict = {
   'pet.communitySyncFailed': 'Falha na sincronização: {error}',
   'pet.codexBundled': 'Incluído',
   'pet.codexBundledTitle': 'Já vem com o Open Design — sem download.',
+  'settings.systemPrefsTitle': 'Preferências do sistema',
+  'settings.systemPrefsHint': 'Som de conclusão, notificações do navegador e alertas de status das tarefas.',
   'settings.notifications': 'Notificações',
   'settings.notificationsHint': 'Som e notificação na conclusão da tarefa',
   'settings.notifyCompletionSound': 'Som de conclusão',

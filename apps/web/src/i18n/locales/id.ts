@@ -3691,6 +3691,8 @@ export const id: Dict = {
   'pet.communitySyncFailed': 'Sinkronisasi gagal: {error}',
   'pet.codexBundled': 'Bawaan',
   'pet.codexBundledTitle': 'Disertakan dengan Open Design - tidak perlu diunduh.',
+  'settings.systemPrefsTitle': 'Preferensi sistem',
+  'settings.systemPrefsHint': 'Suara penyelesaian, notifikasi browser, dan peringatan status tugas.',
   'settings.notifications': 'Notifikasi',
   'settings.notificationsHint': 'Atur suara dan notifikasi desktop.',
   'settings.notifyCompletionSound': 'Suara saat selesai',
