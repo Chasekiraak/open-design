@@ -821,9 +821,10 @@ function AssistantMessageImpl({
   // generic failed turn: its Continue action is the only way to resume the
   // saved extraction state, even when no artifact was produced yet.
   const isBrandExtractionRecovery =
-    effectiveNextStepVariant === 'brand-extraction-incomplete' ||
-    effectiveNextStepVariant === 'brand-programmatic-incomplete' ||
-    effectiveNextStepVariant === 'brand-ai-incomplete';
+    message.runStatus !== 'canceled' &&
+    (effectiveNextStepVariant === 'brand-extraction-incomplete' ||
+      effectiveNextStepVariant === 'brand-programmatic-incomplete' ||
+      effectiveNextStepVariant === 'brand-ai-incomplete');
   const showNextStepActions =
     !streaming &&
     unfinishedTodos.length === 0 &&

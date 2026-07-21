@@ -1339,12 +1339,13 @@ export function ChatPane({
         runFailureUi.secondaryRetry ||
         canResumeFailedRun),
   );
-  // The failure card exposes one recovery path. A case-specific action wins;
-  // the generic local-CLI escape hatch is only used when no such action exists.
+  // The generic local-CLI escape hatch is only used when the failure card has
+  // no direct recovery action. AMR guidance remains visible whenever the
+  // classifier asks for it, alongside a case-specific retry when applicable.
   const showByokRecoveryCta =
     showByokRecoveryAction && Boolean(onSwitchToLocalCli) && !runFailureHasAction;
   const showErrorActions = showByokRecoveryCta || runFailureHasAction;
-  const showAmrGuidance = Boolean(amrSwitchPayload && !showErrorActions);
+  const showAmrGuidance = Boolean(amrSwitchPayload);
   useEffect(() => {
     if (!displayError || !failedRunErrorEvent?.code || !retryAssistant) return;
     // The hosted-AMR nudge owns this same surface_view when it renders below
@@ -2627,10 +2628,10 @@ export function ChatPane({
                               {t('chat.resumeRunCta')}
                             </button>
                           ) : runFailureUi.primaryAction === 'retry' ||
-                            (runFailureUi.primaryAction === 'none' && runFailureUi.secondaryRetry) ? (
+                            runFailureUi.secondaryRetry ? (
                             <button
                               type="button"
-                              className="chat-error-action"
+                              className="chat-error-action chat-error-retry"
                               onClick={() => onRetry(retryAssistant)}
                             >
                               {t('promptTemplates.retry')}
