@@ -17,7 +17,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useProjectCollab } from '../src/collab/useProjectCollab';
 import {
+  resetTeamProjectsCache,
   resetWorkspaceContextCache,
+  useTeamProjects,
   useWorkspaceContext,
 } from '../src/collab/useWorkspaceContext';
 
@@ -40,6 +42,39 @@ function teamContext(): WorkspaceCollabContext {
   };
 }
 
+/**
+ * Context AND collab status both hang. `viewerOnly` can only come out false if
+ * something other than those two answered — i.e. the seeded context plus the
+ * cached hub catalog. Without both, this is the fail-closed case.
+ */
+function installFullyHangingFetch() {
+  globalThis.fetch = vi.fn(async () => new Promise<Response>(() => {})) as typeof fetch;
+}
+
+/** Resolves context + catalog once, so the module-level caches are warm. */
+function installResolvingFetch(teamProjects: unknown[]) {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const pathname = new URL(String(input), 'http://d.local').pathname;
+    if (pathname.endsWith('/workspace/context')) {
+      return { ok: true, status: 200, json: async () => ({ context: teamContext() }) } as unknown as Response;
+    }
+    if (pathname.endsWith('/workspace/projects/team')) {
+      return { ok: true, status: 200, json: async () => ({ projects: teamProjects }) } as unknown as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+  }) as typeof fetch;
+}
+
+async function warmCaches(teamProjects: unknown[]) {
+  installResolvingFetch(teamProjects);
+  const ctx = renderHook(() => useWorkspaceContext());
+  await waitFor(() => expect(ctx.result.current.loading).toBe(false));
+  ctx.unmount();
+  const team = renderHook(() => useTeamProjects());
+  await waitFor(() => expect(team.result.current.loading).toBe(false));
+  team.unmount();
+}
+
 /** A context read that never settles, so the only context available is the seed. */
 function installNeverResolvingContextFetch() {
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -57,12 +92,14 @@ const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   resetWorkspaceContextCache();
+  resetTeamProjectsCache();
 });
 
 afterEach(() => {
   cleanup();
   globalThis.fetch = originalFetch;
   resetWorkspaceContextCache();
+  resetTeamProjectsCache();
   vi.restoreAllMocks();
 });
 
@@ -91,6 +128,32 @@ describe('useProjectCollab workspace-context seeding', () => {
     await waitFor(() => {
       expect(project.result.current.viewerOnly).toBe(false);
     });
+  });
+
+  // Acceptance #27: a member's OWN fresh private draft flashed the "这是共享项目"
+  // read-only banner while `/collab/status` was still in flight. The hub catalog
+  // already says the project is not shared, so the unknown window has nothing to
+  // protect there. Both network reads hang here, so only the caches can answer.
+  it('does not fail closed for a project the hub catalog does not list', async () => {
+    await warmCaches([]);
+
+    installFullyHangingFetch();
+    const project = renderHook(() => useProjectCollab('p-private'));
+    await waitFor(() => {
+      expect(project.result.current.viewerOnly).toBe(false);
+    });
+  });
+
+  // The negative control: the catalog DOES list it, so the unknown window still
+  // fails closed — a teammate's shared project must never flash writable.
+  it('still fails closed for a project the catalog lists as shared', async () => {
+    await warmCaches([
+      { projectId: 'p-shared', ownerMemberId: 'someone-else', sharedAt: '2026-07-01T00:00:00.000Z' },
+    ]);
+
+    installFullyHangingFetch();
+    const project = renderHook(() => useProjectCollab('p-shared'));
+    expect(project.result.current.viewerOnly).toBe(true);
   });
 
   it('still fails closed on the first read of a session, before any context is known', async () => {

@@ -44,6 +44,26 @@ export function lastResolvedWorkspaceContext(): WorkspaceContextState['context']
   return cachedWorkspaceContext;
 }
 
+// Last team-shared catalog this shell successfully read. `null` means "never
+// loaded", which is NOT the same as "nothing is shared" — consumers that relax
+// a fail-closed gate on this must treat null as "unknown" and keep failing
+// closed.
+let cachedTeamProjects: TeamProject[] | null = null;
+
+/** Test seam: clear the module-level team-project cache between tests. */
+export function resetTeamProjectsCache(): void {
+  cachedTeamProjects = null;
+}
+
+/**
+ * The team-shared catalog the shell last resolved, or null if it never has.
+ * Same source the 全部项目 grid reads, exposed for consumers that need to know
+ * whether a project is shared before `/collab/status` answers.
+ */
+export function lastResolvedTeamProjects(): TeamProject[] | null {
+  return cachedTeamProjects;
+}
+
 export function useWorkspaceContext(): WorkspaceContextState {
   const [state, setState] = useState<WorkspaceContextState>(() => ({
     context: cachedWorkspaceContext,
@@ -301,6 +321,7 @@ export function useTeamProjects(): TeamProjectsState {
         const body = (await res.json()) as WorkspaceTeamProjectsResponse;
         return body.projects ?? [];
       });
+      cachedTeamProjects = projects;
       if (mountedRef.current) {
         setProjects(projects);
         setLoading(false);

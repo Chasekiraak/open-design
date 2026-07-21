@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CollabMemberRole, CollabPresenceMember, WorkspaceCollabContext } from '@open-design/contracts';
 import { resolveCollabSession } from './collab-session';
-import { lastResolvedWorkspaceContext as cachedWorkspaceContext } from './useWorkspaceContext';
+import {
+  lastResolvedTeamProjects as cachedTeamProjects,
+  lastResolvedWorkspaceContext as cachedWorkspaceContext,
+} from './useWorkspaceContext';
 import { useCollab } from './useCollab';
 
 export interface UseProjectCollabOptions {
@@ -170,7 +173,20 @@ export function useProjectCollab(
   const shared = collab.syncState !== 'local_only' && collab.syncState !== null;
   const collabEnabled = decision.enabled && (statusUnknown || shared);
   const isOwner = collab.ownerMemberId != null && collab.ownerMemberId === context?.workspaceMemberId;
-  const sharedReadOnly = statusUnknown || (shared && !isOwner);
+  // A project the hub catalog does not list cannot be shared, so the unknown
+  // window does not have to fail closed for it. That window is why a member's
+  // OWN fresh private draft flashed the "这是共享项目" read-only banner before
+  // `/collab/status` answered (acceptance #27).
+  //
+  // `null` means the catalog was never read, which is NOT "nothing is shared" —
+  // that case keeps failing closed. This only relaxes the UNKNOWN window; once
+  // a status arrives, `shared && !isOwner` decides as before.
+  const knownCatalog = options.fetch || options.baseUrl ? null : cachedTeamProjects();
+  const knownUnshared =
+    knownCatalog !== null
+    && Boolean(projectId)
+    && !knownCatalog.some((entry) => entry.projectId === projectId);
+  const sharedReadOnly = (statusUnknown && !knownUnshared) || (shared && !isOwner);
   const viewerOnly = workspaceContextReadOnly || workspaceReadOnly || sharedReadOnly;
 
   // Member content auto-sync (the last link): when a read-only member sees the
