@@ -49,7 +49,7 @@ function knownModelFamilyContextWindow(modelId: string | null): number | null {
   // OpenCode/provider errors in the 0.15.0 incident report a 204,800-token
   // ceiling for Claude-family routes. Keep this fallback narrow; every other
   // model remains observation-only until its live catalog supplies metadata.
-  if (/(?:^|[/])claude[-_]/u.test(normalized)) return 204_800;
+  if (/(?:^|[/.])claude[-_]/u.test(normalized)) return 204_800;
   return null;
 }
 

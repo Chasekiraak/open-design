@@ -7,6 +7,7 @@ import {
   RUN_RESULT_PACKAGE_SCHEMA,
   type AppliedPluginSnapshot,
   type ArtifactManifest,
+  type ByokChatProviderConfig,
   type ChatRunStatus,
   type ChatRunStatusResponse,
   type ProjectMetadata as ContractProjectMetadata,
@@ -84,6 +85,11 @@ import {
 } from '../run-tool-bundle.js';
 import type { DetectedAgent, RuntimeAgentDef } from '../runtimes/types.js';
 import {
+  buildOpenCodeByokProviderConfig,
+  BYOK_OPENCODE_AGENT_ID,
+  BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+} from '../runtimes/byok-opencode.js';
+import {
   deriveActivationMilestones,
   runAskedUserQuestion,
 } from '../runtimes/run-artifacts.js';
@@ -155,6 +161,11 @@ interface ChatRun {
   clients: Set<SseClient>;
   analyticsContext?: AnalyticsContext;
   analyticsTelemetry?: RunTelemetryTimestamps;
+  // E-lite root-cause telemetry read at run_finished. `stdinBackpressure`: the
+  // prompt write to child stdin was queued (pipe buffer full). `lastAgentActivityAt`:
+  // the inactivity-watchdog clock, used to derive `last_progress_age_ms`.
+  stdinBackpressure?: boolean;
+  lastAgentActivityAt?: number;
   retryAttemptCount?: number;
   retryFinalResult?: string;
   retrySuppressedReason?: string;
@@ -465,6 +476,14 @@ function routeParamId(req: ApiRequest): string | null {
     : null;
 }
 
+function hasCompleteByokOpenCodeConfig(meta: JsonRecord): boolean {
+  if (meta.agentId !== BYOK_OPENCODE_AGENT_ID) return true;
+  return buildOpenCodeByokProviderConfig(
+    meta.byokProvider as ByokChatProviderConfig | null | undefined,
+    typeof meta.model === 'string' ? meta.model : null,
+  ) !== null;
+}
+
 function toOdNativeEvent(record: RunEventRecord): OdNativeEvent | null {
   if (!AGUI_NATIVE_EVENT_KINDS.has(record.event as OdNativeEvent['kind'])) return null;
   return { kind: record.event, ...toJsonRecord(record.data) } as OdNativeEvent;
@@ -523,6 +542,14 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     const toolBundle = parseRunToolBundleForRequest(requestBody.toolBundle);
     if (!toolBundle.ok) {
       return sendApiError(res, 400, 'BAD_REQUEST', toolBundle.message);
+    }
+    if (!hasCompleteByokOpenCodeConfig(requestBody)) {
+      return sendApiError(
+        res,
+        400,
+        'VALIDATION_FAILED',
+        BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+      );
     }
     let resolvedSnapshot = null;
     if (typeof requestBody.projectId === 'string' && requestBody.projectId) {
@@ -621,6 +648,14 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         console.warn('[runs] agent id fallback failed', err);
       }
     }
+    if (!hasCompleteByokOpenCodeConfig(meta)) {
+      return sendApiError(
+        res,
+        400,
+        'VALIDATION_FAILED',
+        BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+      );
+    }
     const toolBundleSupport = validateRunToolBundleForAgent(
       toolBundle.bundle,
       typeof meta.agentId === 'string' ? getAgentDef(meta.agentId) : null,
@@ -681,6 +716,19 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       typeof meta.conversationId === 'string' && meta.conversationId
         ? getConversation(db, meta.conversationId)
         : null;
+    // A run may only attach to a conversation owned by its own project. Without
+    // this guard a request pairing projectId=A with a conversationId owned by
+    // project B runs in A's cwd but pins its messages and native session under
+    // B — corrupting B's chat history and resume identity. Mirror the ownership
+    // check the sibling routes already enforce (handoff.ts, terminal.ts).
+    if (
+      conversationSession &&
+      typeof meta.projectId === 'string' &&
+      meta.projectId &&
+      conversationSession.projectId !== meta.projectId
+    ) {
+      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+    }
     meta.sessionMode =
       meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
         ? normalizeConversationSessionMode(meta.sessionMode)
@@ -1244,6 +1292,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             } : {}),
             ...timingAnalytics,
             ...diagnosticsAnalytics,
+            // E-lite: `approval_requested`/`tool_result_sent` ride in via
+            // `...diagnosticsAnalytics`; these two come off the run object.
+            stdin_backpressure: run.stdinBackpressure === true,
+            ...(typeof run.lastAgentActivityAt === 'number'
+              ? { last_progress_age_ms: Math.max(0, analyticsCapturedAt - run.lastAgentActivityAt) }
+              : {}),
             langfuse_trace_id: run.id,
             ...langfuseDeliveryForAnalytics,
             ...(errorCode ? { error_code: errorCode } : {}),
@@ -1502,12 +1556,32 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     if (!toolBundleSupport.ok) {
       return sendApiError(res, 400, 'BAD_REQUEST', toolBundleSupport.message);
     }
+    // A chat run may only attach to a conversation owned by its own project.
+    // Without this guard, pairing projectId=A with a conversationId owned by
+    // project B runs in A's cwd but pins messages and the native session under
+    // B — corrupting B's history and resume identity. Mirror the ownership
+    // check the sibling routes already enforce (handoff.ts, terminal.ts).
+    if (typeof requestBody.projectId === 'string' && requestBody.projectId &&
+        typeof requestBody.conversationId === 'string' && requestBody.conversationId) {
+      const chatConversation = getConversation(db, requestBody.conversationId);
+      if (chatConversation && chatConversation.projectId !== requestBody.projectId) {
+        return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+      }
+    }
     const meta = {
       ...requestBody,
       mediaExecution: mediaExecution.policy,
       toolBundle: toolBundle.bundle,
       ...(chatProject?.metadata ? { projectMetadata: chatProject.metadata } : {}),
     };
+    if (!hasCompleteByokOpenCodeConfig(meta)) {
+      return sendApiError(
+        res,
+        400,
+        'VALIDATION_FAILED',
+        BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
+      );
+    }
     const run = design.runs.create(meta);
     design.runs.stream(run, req, res);
     reconcileAssistantMessageOnRunEnd(db, design.runs, run);

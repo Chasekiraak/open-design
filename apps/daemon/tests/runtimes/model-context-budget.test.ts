@@ -26,6 +26,20 @@ describe('model context budget', () => {
     expect(decision.error?.code).toBe('AGENT_PROMPT_TOO_LARGE');
   });
 
+  it('recognizes dotted Bedrock Claude model ids when catalog metadata is absent', () => {
+    const decision = evaluateModelContextBudget({
+      prompt: 'x'.repeat(650_000),
+      modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    });
+
+    expect(decision).toMatchObject({
+      action: 'blocked',
+      source: 'known_model_family',
+      contextWindowTokens: 204_800,
+      error: { code: 'AGENT_PROMPT_TOO_LARGE' },
+    });
+  });
+
   it('uses provider metadata and preserves output plus safety headroom', () => {
     const decision = evaluateModelContextBudget({
       prompt: 'short prompt',
