@@ -2,7 +2,12 @@ import type { Express } from 'express';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ProjectMetadata, ProjectSyncIntentEvent, TeamProject } from '@open-design/contracts';
+import type {
+  ProjectMetadata,
+  ProjectSyncIntentEvent,
+  TeamProject,
+  WorkspaceCollabContext,
+} from '@open-design/contracts';
 import type { CollabRuntime } from '../collab/runtime.js';
 import {
   contextToResourceHubPrincipal,
@@ -250,8 +255,40 @@ function workspaceIdentityRequiredBody() {
   return {
     error: 'WORKSPACE_IDENTITY_REQUIRED',
     message:
-      'Publishing a public link needs a team workspace. Switch to a team workspace, ' +
-      'or use Deploy to publish this file from a personal workspace.',
+      'Publishing a public link needs a signed-in workspace. Sign in to Open Design Cloud, ' +
+      'or use Deploy to publish this file without one.',
+  };
+}
+
+/**
+ * Resource-hub principal for the PUBLIC SINGLE-FILE publish routes.
+ *
+ * These routes deliberately do NOT use `contextToResourceHubPrincipal`, which
+ * requires `workspaceContextHasTeamIdentity` and is still exactly right for team
+ * project sharing (a shared project needs teammates to share WITH).
+ *
+ * A public file link needs no such thing. The hub addresses purely by workspace
+ * id, and B stopped refusing a personal workspace on its control-key auth path:
+ * `authenticateSession` now mints a principal whose `teamId` IS the workspace id
+ * — "a partition of one" — and `resolveAccess` only ever compares that id with
+ * the resource's own. So the real requirement here is A workspace, not a TEAM
+ * workspace: an id to publish under and a member id to own the resource with.
+ *
+ * A signed-out session still has neither, and is still refused — this widens the
+ * gate, it does not remove it. The web UI must gate its entry point on the SAME
+ * rule (`canPublishPublicFile` in apps/web/src/collab/public-file-publish.ts);
+ * a button that renders where this returns 409 is the bug this pair exists to
+ * prevent.
+ */
+function publicFilePrincipal(context: WorkspaceCollabContext | null): ResourceHubPrincipal | null {
+  if (!context?.workspaceId || !context.workspaceMemberId) return null;
+  return {
+    memberId: context.workspaceMemberId,
+    // Personal workspaces carry no `teamId`; the workspace id is the scope.
+    teamId: context.teamId ?? context.workspaceId,
+    role: context.role,
+    lifecycleState: context.lifecycleState,
+    workspaceType: context.workspaceType,
   };
 }
 
@@ -307,6 +344,22 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
       ? req.headers.authorization[0]
       : req.headers.authorization;
     return headerPrincipalForRequest(req) ?? contextToResourceHubPrincipal(await workspaceContext.current({ authorization }));
+  }
+
+  /**
+   * Principal for the public single-file publish routes only. Same header
+   * short-circuit as `principalForRequest` (tests and the CLI assert identity
+   * through headers), but the context fallback accepts ANY workspace — see
+   * `publicFilePrincipal` for why a personal workspace is a valid publisher.
+   */
+  async function publicFilePrincipalForRequest(req: {
+    get(name: string): string | undefined;
+    headers: { authorization?: string | string[] | undefined };
+  }) {
+    const authorization = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    return headerPrincipalForRequest(req) ?? publicFilePrincipal(await workspaceContext.current({ authorization }));
   }
 
   async function resourcePrincipalForSharedProject(
@@ -439,7 +492,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     if (!projectId || !filePath) {
       return res.status(400).json({ error: 'invalid_file_path' });
     }
-    const principal = await principalForRequest(req);
+    const principal = await publicFilePrincipalForRequest(req);
     if (!principal) {
       return res.status(409).json(workspaceIdentityRequiredBody());
     }
@@ -533,7 +586,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     if (!projectId || !filePath || !slug) {
       return res.status(400).json({ error: 'invalid_public_file' });
     }
-    const principal = await principalForRequest(req);
+    const principal = await publicFilePrincipalForRequest(req);
     if (!principal) {
       return res.status(409).json(workspaceIdentityRequiredBody());
     }
@@ -571,7 +624,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     if (!projectId || !filePath) {
       return res.status(400).json({ error: 'invalid_file_path' });
     }
-    const principal = await principalForRequest(req);
+    const principal = await publicFilePrincipalForRequest(req);
     if (!principal) {
       return res.status(409).json(workspaceIdentityRequiredBody());
     }

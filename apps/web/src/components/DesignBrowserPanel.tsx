@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
-  type CSSProperties,
   type FormEvent,
   type ReactNode,
 } from 'react';
@@ -47,7 +46,6 @@ import {
   BROWSER_PAGE_ARCHIVE_INDEX_FILE,
   BROWSER_PAGE_ARCHIVE_SCHEMA,
   BROWSER_SERIALIZE_HTML_SCRIPT,
-  BROWSER_VIEWPORT_PRESETS,
   type BrowserPageArchiveCapture,
   type BrowserPageArchiveManifest,
   type BrowserElementSnapshot,
@@ -59,7 +57,6 @@ import {
   browserSnapshotFromUnknown,
   isProjectHtmlBrowserUrl,
   projectRelativePathFromBrowserUrl,
-  type BrowserViewportId,
 } from './design-browser-tools';
 import { Icon } from './Icon';
 import { BoardComposerPopover } from './BoardComposerPopover';
@@ -78,12 +75,6 @@ type BrowserNavigationEntry = {
   title: string;
   url: string;
 };
-
-function browserViewportIcon(viewport: BrowserViewportId): string {
-  if (viewport === 'tablet') return 'tablet-line';
-  if (viewport === 'mobile') return 'smartphone-line';
-  return 'computer-line';
-}
 
 type ReferenceSite = {
   label: string;
@@ -315,24 +306,6 @@ function localizedReferenceSiteDetail(
   t?: (key: keyof Dict) => string,
 ): string {
   return t ? t(referenceSiteDetailKey(site)) : site.detail;
-}
-
-function browserViewportLabel(
-  t: (key: keyof Dict) => string,
-  viewport: BrowserViewportId,
-): string {
-  if (viewport === 'tablet') return t('fileViewer.viewportTablet');
-  if (viewport === 'mobile') return t('fileViewer.viewportMobile');
-  return t('fileViewer.viewportDesktop');
-}
-
-function browserViewportTitle(
-  t: (key: keyof Dict) => string,
-  viewport: BrowserViewportId,
-): string {
-  if (viewport === 'tablet') return t('fileViewer.viewportTabletTitle');
-  if (viewport === 'mobile') return t('fileViewer.viewportMobileTitle');
-  return t('fileViewer.viewportDesktopTitle');
 }
 
 function initialBrowserState(initialUrl?: string, initialTitle?: string): {
@@ -834,7 +807,6 @@ export function DesignBrowserPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [webviewNode, setWebviewNode] = useState<WebviewElement | null>(null);
   const [drawOverlayOpen, setDrawOverlayOpen] = useState(false);
-  const [viewport, setViewport] = useState<BrowserViewportId>('desktop');
   const [activeTool, setActiveTool] = useState<BrowserTool | null>(null);
   const [activeCommentTarget, setActiveCommentTarget] = useState<BrowserElementSnapshot | null>(null);
   const [activePreviewCommentId, setActivePreviewCommentId] = useState<string | null>(null);
@@ -2080,14 +2052,6 @@ export function DesignBrowserPanel({
     }
   }
 
-  const viewportPreset =
-    BROWSER_VIEWPORT_PRESETS.find((preset) => preset.id === viewport) ?? BROWSER_VIEWPORT_PRESETS[0]!;
-  const viewportStyle = viewportPreset.width
-    ? {
-        '--db-viewport-width': `${viewportPreset.width}px`,
-        '--db-viewport-height': `${viewportPreset.height}px`,
-      } as CSSProperties
-    : undefined;
   const browserPopoverBounds = (() => {
     const rect = webviewNode?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) return undefined;
@@ -2195,11 +2159,6 @@ export function DesignBrowserPanel({
           >
             <Icon name={isLoading ? 'close' : 'reload'} size={isLoading ? 16 : 15} />
           </IconTooltipButton>
-          <BrowserViewportControls
-            viewport={viewport}
-            onViewport={setViewport}
-            disabled={isBlank}
-          />
         </div>
         <form className="db-address-form" onSubmit={handleAddressSubmit}>
           <BrowserSiteIcon
@@ -2405,7 +2364,7 @@ export function DesignBrowserPanel({
         </div>
       ) : null}
       {browserPreviewImageModal}
-      <div className={`db-content db-content-viewport-${isBlank ? 'desktop' : viewport}`}>
+      <div className="db-content">
         <PreviewDrawOverlay
           active={drawOverlayOpen}
           captureTarget={activeCommentTarget ? browserTargetFromSnapshot(activeCommentTarget) : null}
@@ -2418,10 +2377,7 @@ export function DesignBrowserPanel({
           sendDisabled={sendDisabled}
           sendDisabledReason={t('chat.annotationSendDisabledReason')}
         >
-          <div
-            className={`db-viewport-frame db-viewport-${isBlank ? 'desktop' : viewport}`}
-            style={isBlank ? undefined : viewportStyle}
-          >
+          <div className="db-viewport-frame">
             {isBlank ? (
               <DesignBrowserStart
                 onNavigate={navigateTo}
@@ -2569,80 +2525,6 @@ function BrowserUseMenu({
           <div className="db-browser-use-empty" role="status">{t('browserUse.empty')}</div>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function BrowserViewportControls({
-  disabled,
-  onViewport,
-  viewport,
-}: {
-  disabled?: boolean;
-  onViewport: (viewport: BrowserViewportId) => void;
-  viewport: BrowserViewportId;
-}) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const activePreset =
-    BROWSER_VIEWPORT_PRESETS.find((preset) => preset.id === viewport) ?? BROWSER_VIEWPORT_PRESETS[0]!;
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div className="db-viewport-switcher" ref={menuRef}>
-      <IconTooltipButton
-        label={browserViewportTitle(t, activePreset.id)}
-        disabled={disabled}
-        className={open ? 'is-active' : ''}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <RemixIcon
-          name={browserViewportIcon(activePreset.id)}
-          size={14}
-          className="db-viewport-icon"
-        />
-        <span className="db-viewport-label">{browserViewportLabel(t, activePreset.id)}</span>
-        <RemixIcon name="arrow-down-s-line" size={13} />
-      </IconTooltipButton>
-      {open ? (
-        <div className="db-viewport-menu" role="listbox" aria-label={t('designBrowser.viewportAria')}>
-          {BROWSER_VIEWPORT_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              role="option"
-              aria-selected={preset.id === viewport}
-              className={preset.id === viewport ? 'active' : ''}
-              onClick={() => {
-                onViewport(preset.id);
-                setOpen(false);
-              }}
-            >
-              <span className="db-viewport-menu-label">
-                <RemixIcon name={browserViewportIcon(preset.id)} size={14} />
-                <span>{browserViewportLabel(t, preset.id)}</span>
-              </span>
-              {preset.id === viewport ? <Icon name="check" size={13} /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

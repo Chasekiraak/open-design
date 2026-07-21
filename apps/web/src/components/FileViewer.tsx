@@ -118,7 +118,6 @@ import {
   exportProjectImageDataUrl,
   exportProjectScreenshotPdf,
   exportSnapshotAsPdf,
-  copyImageDataUrlToClipboard,
   exportReactComponentAsHtml,
   exportReactComponentAsZip,
   captureHostIframeSnapshot,
@@ -5613,7 +5612,7 @@ function ReactComponentViewer({
   // used to leave no trace on screen at all — the button simply returned to idle.
   const [publishFailureKey, setPublishFailureKey] = useState<PublicFilePublishFailureKey | null>(null);
   const filePublished = publishedFileUrl.length > 0;
-  // Public links live in the team-scoped resource hub; see canPublishPublicFile.
+  // Public links need a signed-in workspace (any type); see canPublishPublicFile.
   const canPublishPublic = canPublishPublicFile(workspaceContext);
   const publicFileRequestSeqRef = useRef(0);
   const publicFileIdentityRef = useRef({ projectId, fileName: file.name });
@@ -6647,7 +6646,7 @@ function HtmlViewer({
   // used to leave no trace on screen at all — the button simply returned to idle.
   const [publishFailureKey, setPublishFailureKey] = useState<PublicFilePublishFailureKey | null>(null);
   const filePublished = publishedFileUrl.length > 0;
-  // Public links live in the team-scoped resource hub; see canPublishPublicFile.
+  // Public links need a signed-in workspace (any type); see canPublishPublicFile.
   const canPublishPublic = canPublishPublicFile(workspaceContext);
   const publicFileRequestSeqRef = useRef(0);
   const publicFileIdentityRef = useRef({ projectId, fileName: file.name });
@@ -11007,40 +11006,9 @@ function HtmlViewer({
     file.name,
   ]);
 
-  const handleCopyScreenshot = useCallback(async () => {
-    fireArtifactToolbarClick('screenshot');
-    if (screenshotInFlightRef.current) return;
-    screenshotInFlightRef.current = true;
-    setExportToast({ message: t('fileViewer.screenshotCopying'), tone: 'loading' });
-    try {
-      const snap = await captureExportImageSnapshot();
-      if (!snap) {
-        setExportToast({ message: t('fileViewer.screenshotPreviewLoading'), tone: 'error' });
-        return;
-      }
-      const result = await copyImageDataUrlToClipboard(snap.dataUrl);
-      setExportToast(
-        result === 'copied'
-          ? { message: t('fileViewer.screenshotCopied'), tone: 'success' }
-          : {
-              message: t(
-                result === 'denied'
-                  ? 'fileViewer.screenshotClipboardDenied'
-                  : 'fileViewer.screenshotCaptureFailed',
-              ),
-              tone: 'error',
-            },
-      );
-    } catch (err) {
-      console.warn('[handleCopyScreenshot] failed:', err);
-      // Surface a semantic failure message (e.g. "page is too tall — export as
-      // PDF") rather than a generic one when the renderer gave us a reason.
-      const message = err instanceof Error && err.message ? err.message : t('fileViewer.screenshotCaptureFailed');
-      setExportToast({ message, tone: 'error' });
-    } finally {
-      screenshotInFlightRef.current = false;
-    }
-  }, [captureExportImageSnapshot, t]);
+  // NOTE: the clipboard-capture handler that used to live here was removed with
+  // the export menu's 截图 row — that row was its only caller. Screenshot-to-chat
+  // below is the viewer's capture affordance.
 
   // Screenshot → chat. Captures the current preview and stages it into the chat
   // composer as a draft attachment; it never auto-sends, so the user still owns
@@ -12472,27 +12440,10 @@ function HtmlViewer({
                       <span>{t('fileViewer.exportImage')}</span>
                     </button>
                   ) : null}
-                  {/* Copy-to-clipboard capture. It used to be the toolbar's first
-                      action, but the toolbar now leads with screenshot-to-chat —
-                      the job users actually come here for. Clipboard capture is
-                      still the right tool when the destination is somewhere else
-                      entirely (a ticket, a doc), so it lives with the other
-                      "get this artifact out of here" actions instead of being
-                      dropped. */}
-                  <button
-                    type="button"
-                    className="share-menu-item"
-                    role="menuitem"
-                    disabled={viewerOnly}
-                    title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
-                    onClick={() => {
-                      setDeployMenuOpen(false);
-                      void handleCopyScreenshot();
-                    }}
-                  >
-                    <span className="share-menu-icon"><RemixIcon name="screenshot-2-line" size={15} /></span>
-                    <span>{t('fileViewer.screenshot')}</span>
-                  </button>
+                  {/* NOTE: no clipboard-capture ("截图") row here. Export is the
+                      "produce a file/link out of this artifact" menu; a capture
+                      that only lands on the clipboard is a different job and the
+                      toolbar's screenshot-to-chat already leads with it. */}
                   <button
                     type="button"
                     className="share-menu-item"
@@ -14198,6 +14149,14 @@ export function SvgViewer({
   );
 }
 
+// Read-only fallback viewer for `text` / `code` files (JSON tokens, configs,
+// source dumps). It renders the file body through `CodeWithLines` / `<pre>` and
+// owns no editable buffer, so there is no state in which a save could ever
+// apply. Its toolbar therefore exposes only reload + copy: a Save control here
+// would be permanently unreachable, not merely idle. Viewers that DO own an
+// editable buffer (MarkdownViewer's autosave, HtmlViewer's manual-edit save)
+// keep their save affordance even while it is momentarily disabled, because
+// there the disabled state is transient rather than structural.
 function TextViewer({
   projectId,
   file,
@@ -14263,15 +14222,6 @@ function TextViewer({
           >
             <Icon name="reload" size={13} />
             <span>{t('fileViewer.reload')}</span>
-          </button>
-          <button
-            type="button"
-            className="viewer-action"
-            disabled
-            title={t('fileViewer.saveDisabled')}
-          >
-            <Icon name="check" size={13} />
-            <span>{t('fileViewer.save')}</span>
           </button>
           <button
             type="button"

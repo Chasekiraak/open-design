@@ -109,7 +109,6 @@ import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
 import { localizePluginDescription } from './plugins-home/localization';
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { RecentProjectsStrip } from './RecentProjectsStrip';
-import { RecommendedStartRegion } from './RecommendedStartRegion';
 import type { Recommendation } from '../onboarding/recommendation';
 import type { OnboardingEntry } from '../onboarding/onboarding-entry';
 import { AnimatePresence } from 'motion/react';
@@ -250,6 +249,8 @@ interface Props {
   promptTemplates?: PromptTemplateSummary[];
   // Personalized first-run starting point (spec §7). Null unless the user just
   // finished the About-you survey this session; EntryShell owns the state.
+  // Accepted for API compatibility but no longer rendered — see
+  // `recommendationSlot` below for why the strip was removed from Home.
   recommendation?: Recommendation | null;
   onRecommendationStart?: (input: {
     name: string;
@@ -2204,41 +2205,15 @@ export function HomeView({
           void startBlankProject();
         }}
         executionSwitcher={executionSwitcher}
-        recommendationSlot={
-          recommendation && onRecommendationStart && onRecommendationDismiss ? (
-            <RecommendedStartRegion
-              recommendation={recommendation}
-              onStart={async (input) => {
-                // Route recommendation-start failures into the same Home error
-                // channel every other entry action uses, so a failed "Start
-                // creating" surfaces a visible, retryable message instead of a
-                // silent no-op. `onRecommendationStart` returns `false` for a
-                // clean no-project result and throws on real create failures;
-                // both land here as the localized error, and returning `false`
-                // lets RecommendedStartRegion drop its pending state for retry.
-                setError(null);
-                try {
-                  const ok = await onRecommendationStart(input);
-                  if (ok === false) {
-                    setError(t('home.recommendation.startFailed'));
-                    return false;
-                  }
-                  return true;
-                } catch {
-                  setError(t('home.recommendation.startFailed'));
-                  return false;
-                }
-              }}
-              onDismiss={() => {
-                onRecommendationDismiss();
-                // "浏览全部类型" must land the user somewhere concrete — open
-                // the template picker (the "all types" catalogue) instead of
-                // the strip silently vanishing (spec §7.4: 放弃推荐, 进入通用选择).
-                onOpenNewProject?.('template');
-              }}
-            />
-          ) : artifactUpgradeSlot
-        }
+        // The onboarding "recommended start" strip (「Start with your first
+        // project」 + 全部类型 / 开始创作) no longer renders here. Home already
+        // asks the user for a first request in the composer directly above it,
+        // and the line below it ("Start with a template… / start a blank
+        // project") already covers the pick-a-shape path — the strip was a
+        // third way to say the same thing, wedged between the two. The
+        // recommendation engine and `RecommendedStartRegion` are left intact;
+        // only this mount point is gone.
+        recommendationSlot={artifactUpgradeSlot}
       />
 
       {recentProjectsEmpty ? null : (

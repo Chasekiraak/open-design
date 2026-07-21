@@ -8,9 +8,11 @@
 // `ChatSessionMode` ('design' | 'chat' | 'plan') instead of the demo's
 // app-wide mock store: the component is controlled via `mode`/`onModeChange`,
 // so the home composer and the project chat composer each reflect their own
-// conversation's persisted mode. `design` is the app default, so it renders
-// as the neutral (unselected) trigger until the user explicitly picks 设计 —
-// and the clear × simply returns to that default.
+// conversation's persisted mode. `design` is the app default AND it is shown
+// as selected by default: the composer opens carrying the 「设计 ×」 pill, so
+// the mode the request will actually run in is stated on screen instead of
+// being an invisible default behind a neutral glyph. The × still clears it
+// back to the neutral trigger.
 import {
   useEffect,
   useLayoutEffect,
@@ -103,7 +105,8 @@ const MENU_EST_HEIGHT = 290;
 
 export interface ComposerModePickerProps {
   /** The conversation's real session mode. `design` (the app default) renders
-   *  as the neutral trigger until the user explicitly picks it. */
+   *  as a SELECTED pill from first paint; clearing it with the × returns the
+   *  trigger to neutral without changing the session mode. */
   mode: ChatSessionMode;
   onModeChange?: (mode: ChatSessionMode) => void;
   /** Collapse the selected pill to icon + clear only (hide the mode name) —
@@ -115,9 +118,12 @@ export interface ComposerModePickerProps {
 export function ComposerModePicker({ mode, onModeChange, labelHidden = false }: ComposerModePickerProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  // `design` doubles as "no mode forced" (the default), so it only shows as a
-  // selected pill after the user explicitly picks it from this menu.
-  const [designExplicit, setDesignExplicit] = useState(false);
+  // 设计 is the default mode AND the default selection, so the pill is showing
+  // when the composer first paints. This is INITIAL state only — the user's own
+  // choice (picking another mode, or clearing with ×) flips it and is never
+  // re-forced on a later render, which is why it is `useState`'s initial value
+  // and not an effect that resyncs on `mode`.
+  const [designExplicit, setDesignExplicit] = useState(true);
   const selected: ChatSessionMode | null =
     mode !== 'design' ? mode : designExplicit ? 'design' : null;
   const [pos, setPos] = useState<CSSProperties | null>(null);

@@ -3154,6 +3154,7 @@ export const id: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Batalkan publikasi',
   'fileViewer.publishFileRequiresTeam': 'Menerbitkan tautan publik memerlukan ruang kerja tim. Beralihlah ke ruang kerja tim, atau gunakan Deploy untuk menerbitkan berkas ini.',
+  'fileViewer.publishFileRequiresWorkspace': 'Menerbitkan tautan publik memerlukan ruang kerja yang sudah masuk. Masuk ke Open Design Cloud, atau gunakan Deploy untuk menerbitkan berkas ini.',
   'fileViewer.publishFileFailed': 'Tidak dapat menerbitkan berkas ini. Silakan coba lagi.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

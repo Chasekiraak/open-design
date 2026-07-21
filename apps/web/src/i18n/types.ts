@@ -3970,7 +3970,10 @@ export interface Dict {
   'fileViewer.openFileRequired': string;
   'fileViewer.publishFile': string;
   'fileViewer.unpublishFile': string;
+  /** @deprecated Orphaned: the public-file gate is no longer team-scoped.
+   *  `fileViewer.publishFileRequiresWorkspace` replaced it. */
   'fileViewer.publishFileRequiresTeam': string;
+  'fileViewer.publishFileRequiresWorkspace': string;
   'fileViewer.publishFileFailed': string;
   'fileViewer.workspaceShareSuccess': string;
   'fileViewer.workspaceShareFailed': string;

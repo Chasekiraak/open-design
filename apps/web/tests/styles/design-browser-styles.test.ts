@@ -54,10 +54,6 @@ const STYLELESS_HOOKS = new Set([
   'db-inspect-padding',
   'db-inspect-radius',
   'db-inspect-weight',
-  'db-viewport-height',
-  'db-viewport-icon',
-  'db-viewport-menu-label',
-  'db-viewport-width',
 ]);
 
 describe('design browser panel styles', () => {

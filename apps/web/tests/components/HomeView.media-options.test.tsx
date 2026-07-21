@@ -67,9 +67,12 @@ describe('HomeView media composer options', () => {
 
     await screen.findByTestId('home-hero-input');
 
-    // Design is the app default, so the picker renders its neutral
-    // (unselected) trigger — and the submitted payload still carries design.
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    // 设计 is the app default AND the default SELECTION: the composer opens with
+    // the Design pill showing, so the mode the request will run in is stated on
+    // screen rather than hidden behind a neutral glyph. The submitted payload
+    // carries design either way.
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
+    expect(screen.getByTestId('composer-mode-clear')).toBeTruthy();
 
     await setHomePrompt('Create a clean loading animation');
     await submitHome();

@@ -3224,16 +3224,28 @@ describe('FileViewer SVG artifacts', () => {
     expect(menuItems).not.toContain('Export as PPTX (images)');
     expect(menuItems).not.toContain('Export as PPTX (editable)');
     expect(menuItems).not.toContain('Export as Markdown');
+
+    // 「截图」 (clipboard capture) is NOT an export. Export produces a file or a
+    // link to hand to someone; a clipboard copy is a different job that the
+    // toolbar's screenshot-to-chat already leads with. "Export as image" — the
+    // row that DOES write a file — stays, and is asserted present above.
+    expect(menuItems).not.toContain('Screenshot');
   });
 
-  // Regression guard for the dogfood report "publish as public link fails with
-  // 409 WORKSPACE_IDENTITY_REQUIRED". A public link is a snapshot in the
-  // team-scoped resource hub, so the daemon refuses every non-team caller before
-  // it reads anything. The card used to render regardless, and the refusal was
-  // swallowed — `publishLinkFeedback` only renders in the already-published
-  // branch — so the button just returned to idle with no explanation.
-  it('hides the public publish entry when the workspace is not a team', async () => {
-    const file = baseFile({
+  // The per-file "Publish" entry point (a single file → a backend link) is
+  // gated on HAVING A WORKSPACE, not on having a TEAM one.
+  //
+  // It was briefly team-only, on the premise that a public link is a hub
+  // snapshot keyed by teamId and a personal session had nothing to publish
+  // under. B's control-key auth path stopped refusing non-team callers — it now
+  // mints a principal whose teamId IS the workspace id, and its access check
+  // only compares that id against the resource's own — so a personal workspace
+  // publishes into its own partition of one. The daemon's `publicFilePrincipal`
+  // was widened to match, and these two tests pin both halves of the rule: the
+  // card renders for a personal workspace, and is still gone with no workspace
+  // at all (where the daemon really does answer 409).
+  function publicPublishFile() {
+    return baseFile({
       name: 'index.html',
       path: 'index.html',
       mime: 'text/html',
@@ -3247,33 +3259,54 @@ describe('FileViewer SVG artifacts', () => {
         exports: ['html'],
       },
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/workspace/context')) {
-        return new Response(
-          JSON.stringify({ context: { ...teamWorkspaceContext(), workspaceType: 'personal', teamId: undefined } }),
-          { status: 200 },
-        );
-      }
-      return new Response(JSON.stringify({ deployments: [] }), { status: 200 });
+  }
+
+  it('offers the public publish entry to a personal workspace', async () => {
+    stubFetchWithWorkspaceContext({
+      ...teamWorkspaceContext(),
+      workspaceType: 'personal',
+      teamId: undefined,
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     render(
-      <FileViewer projectId="project-1" projectKind="prototype" file={file}
+      <FileViewer projectId="project-1" projectKind="prototype" file={publicPublishFile()}
         liveHtml="<html><body><h1>Hello</h1></body></html>"
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /share/i }));
     expect(await screen.findByRole('tab', { name: /share/i })).toBeTruthy();
-    // The workspace-share card still belongs to a personal workspace…
     expect(screen.getByText('Share project in workspace')).toBeTruthy();
-    // …but the hub-backed public-link card must be gone, not merely disabled.
+    // The single-file publish card — the thing the dogfood report said was
+    // missing — is back for a personal workspace.
+    expect(await screen.findByText('Publish this file for everyone')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Publish file/i })).toBeTruthy();
+  });
+
+  it('hides the public publish entry when there is no workspace at all', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/workspace/context')) {
+        return new Response(JSON.stringify({ context: null }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ deployments: [] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={publicPublishFile()}
+        liveHtml="<html><body><h1>Hello</h1></body></html>"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /share/i }));
+    expect(await screen.findByRole('tab', { name: /share/i })).toBeTruthy();
+    // Gone, not merely disabled — a signed-out caller has no id to publish
+    // under and the daemon answers 409 WORKSPACE_IDENTITY_REQUIRED.
     expect(screen.queryByText('Publish this file for everyone')).toBeNull();
     expect(screen.queryByRole('button', { name: /Publish file/i })).toBeNull();
 
-    // And nothing may probe the team-only endpoint on behalf of a personal user.
+    // And nothing may probe the endpoint on behalf of a caller it will refuse.
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const requested = fetchMock.mock.calls.map(([input]) =>
       typeof input === 'string' ? input : String(input),
@@ -4451,8 +4484,9 @@ describe('FileViewer tweaks toolbar', () => {
     expect(screen.queryByRole('menuitem', { name: 'Region' })).toBeNull();
     expect(screen.getByTestId('draw-overlay-toggle')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Mark' })).toBeTruthy();
-    // Screenshot-to-chat is the toolbar's primary capture tool in preview mode;
-    // clipboard capture moved into the export menu.
+    // Screenshot-to-chat is the toolbar's ONLY capture tool in preview mode:
+    // clipboard capture used to live in the export menu and has been removed
+    // from there too, so this is the single 截图 affordance in the viewer.
     expect(screen.getByTestId('edit-screenshot-to-chat-button')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Screenshot to chat' })).toBeTruthy();
     expect(screen.queryByTestId('screenshot-copy-button')).toBeNull();

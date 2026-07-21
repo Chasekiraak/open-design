@@ -622,9 +622,22 @@ describe('ComposerPlusMenu module wiring', () => {
 
     clickRow('composer-plus-figma');
     expect(props.onImportFigma).toHaveBeenCalledTimes(1);
+  });
 
-    clickRow('composer-plus-figma-help');
-    expect(props.onShowFigmaHelp).toHaveBeenCalledTimes(1);
+  // The "+" menu lists things to ATTACH to the message. 「查看方法」 (the .fig
+  // download guide) was a help article wedged into that list, so it is gone —
+  // even when a caller still passes the handler, which both composers do.
+  it('does not offer the Figma help article as a row', () => {
+    renderMenu({
+      onImportFigma: vi.fn(),
+      onShowFigmaHelp: vi.fn(),
+    });
+    openMenu();
+
+    expect(screen.queryByTestId('composer-plus-figma-help')).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /Learn how/i })).toBeNull();
+    // The import row it sat beside is untouched.
+    expect(screen.getByTestId('composer-plus-figma')).toBeTruthy();
   });
 
   // Skills and design systems are deliberately NOT "+" menu rows: skills are

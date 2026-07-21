@@ -62,8 +62,8 @@ function fakeProjectStore(): PulledProjectStore & {
 }
 
 /** A personal (non-team) workspace context — the default a fresh account lands
- *  on. Non-null and fully populated, but with no `teamId`, so it can never
- *  address the team-scoped resource hub. */
+ *  on. Non-null and fully populated, but with no `teamId`: the resource hub is
+ *  addressed by its `workspaceId` instead, as a partition of one. */
 function personalContextProvider(): WorkspaceContextProvider {
   const context: WorkspaceCollabContext = {
     workspaceId: 'ws-personal-1',
@@ -759,20 +759,83 @@ describe('collab sync routes', () => {
     expect(res.body.error).toBe('WORKSPACE_PROJECT_UNSHARE_DENIED');
   });
 
-  it('explains, rather than bare-codes, a public file publish from a personal workspace', async () => {
-    // Regression guard for the dogfood report "publish as public link fails with
-    // 409 WORKSPACE_IDENTITY_REQUIRED". Public links are team-scoped resource-hub
-    // snapshots, so refusing a personal workspace is correct — but the refusal
-    // reached the user as a raw error code with no explanation. Every one of the
-    // three handlers must answer with a sentence alongside the code, since the
-    // `od` CLI and embedding agents surface the body verbatim.
+  it('publishes a public file from a personal workspace, scoped by its workspace id', async () => {
+    // The public-file routes require A workspace, not a TEAM workspace.
+    //
+    // They were briefly team-only, on the premise that a hub snapshot is keyed
+    // by teamId and a personal session had nothing to publish under. B's
+    // control-key auth path stopped refusing non-team callers: it mints a
+    // principal whose teamId IS the workspace id, and its access check only
+    // compares that id against the resource's own — a partition of one. So a
+    // personal workspace must get through, and must be scoped by its OWN id.
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-public-file-'));
+    tempDirs.push(dir);
+    await writeFile(path.join(dir, 'index.html'), '<h1>Published</h1>');
+    vi.mocked(readVelaControlApiContext).mockReturnValue({
+      profile: 'test',
+      apiUrl: 'https://hub.example.test',
+      controlKey: 'ctrl-test',
+      user: null,
+      configMtimeMs: null,
+    });
+    vi.mocked(runVelaResourceCommand).mockImplementation(async (args) => {
+      if (args[0] === 'snapshot') {
+        return JSON.stringify({
+          slug: 'personal-slug',
+          name: 'index.html',
+          kind: 'project',
+          versionId: 'v1',
+          createdAt: new Date(1).toISOString(),
+        });
+      }
+      return JSON.stringify({ version: 1 });
+    });
+    const api = await startSyncServer(personalContextProvider(), {
+      resolveProjectDir: () => dir,
+      resolveSharedProject: async () => null,
+    });
+
+    const publish = await api.json('/api/projects/p1/files/index.html/publish-public', {
+      method: 'POST',
+    });
+
+    expect(publish.status).toBe(200);
+    expect(publish.body).toEqual({
+      url: 'https://hub.example.test/api/v1/public/snapshots/personal-slug/files/index.html',
+      slug: 'personal-slug',
+      fileName: 'index.html',
+    });
+    // Every hub call carries the personal workspace's own id as the scope —
+    // there is no teamId on this context, and nothing may invent one.
+    expect(runVelaResourceCommand).toHaveBeenCalled();
+    for (const call of vi.mocked(runVelaResourceCommand).mock.calls) {
+      expect(call[1]).toBe('ws-personal-1');
+    }
+
+    // The published link then reads back and clears like any other.
+    const current = await api.json('/api/projects/p1/files/index.html/publish-public');
+    expect(current.body.publication?.slug).toBe('personal-slug');
+    const unpublish = await api.json('/api/projects/p1/files/index.html/publish-public', {
+      method: 'DELETE',
+      body: { slug: 'personal-slug' },
+    });
+    expect(unpublish.status).toBe(200);
+  });
+
+  it('explains, rather than bare-codes, a public file publish with no workspace at all', async () => {
+    // The gate was widened, not removed. A signed-out caller (or a context read
+    // that came back empty) has no id to publish under and no member id to own
+    // the resource with, so all three handlers still refuse it — and must ship a
+    // human-readable reason alongside the code, since the `od` CLI and embedding
+    // agents surface the body verbatim. The sentence now says SIGN IN; telling a
+    // personal user to "switch to a team workspace" is no longer true.
     const resolveProjectDir = vi.fn(() => {
       throw new Error('project dir should not be read');
     });
-    const api = await startSyncServer(personalContextProvider(), {
-      resolveProjectDir,
-      resolveSharedProject: async () => null,
-    });
+    const api = await startSyncServer(
+      { current: async () => null },
+      { resolveProjectDir, resolveSharedProject: async () => null },
+    );
 
     const publish = await api.json('/api/projects/p1/files/index.html/publish-public', {
       method: 'POST',
@@ -788,7 +851,8 @@ describe('collab sync routes', () => {
       expect(res.body.error).toBe('WORKSPACE_IDENTITY_REQUIRED');
       // The load-bearing assertion: a human-readable reason ships with the code.
       expect(typeof res.body.message).toBe('string');
-      expect(res.body.message).toMatch(/team workspace/i);
+      expect(res.body.message).toMatch(/sign in/i);
+      expect(res.body.message).not.toMatch(/team workspace/i);
     }
     // The gate must short-circuit before any project read or hub call.
     expect(resolveProjectDir).not.toHaveBeenCalled();

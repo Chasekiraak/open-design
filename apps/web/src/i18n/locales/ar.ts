@@ -3154,6 +3154,7 @@ export const ar: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'إلغاء النشر',
   'fileViewer.publishFileRequiresTeam': 'يتطلب نشر رابط عام مساحة عمل جماعية. بدّل إلى مساحة عمل جماعية، أو استخدم النشر لإتاحة هذا الملف.',
+  'fileViewer.publishFileRequiresWorkspace': 'يتطلب نشر رابط عام تسجيل الدخول إلى مساحة عمل. سجّل الدخول إلى Open Design Cloud، أو استخدم النشر لإتاحة هذا الملف.',
   'fileViewer.publishFileFailed': 'تعذّر نشر هذا الملف. يُرجى المحاولة مرة أخرى.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

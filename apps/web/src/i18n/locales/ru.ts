@@ -3154,6 +3154,7 @@ export const ru: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Отменить публикацию',
   'fileViewer.publishFileRequiresTeam': 'Для публикации общедоступной ссылки нужно командное рабочее пространство. Переключитесь на командное пространство или опубликуйте файл через «Развернуть».',
+  'fileViewer.publishFileRequiresWorkspace': 'Для публикации общедоступной ссылки нужно войти в рабочее пространство. Войдите в Open Design Cloud или опубликуйте файл через «Развернуть».',
   'fileViewer.publishFileFailed': 'Не удалось опубликовать этот файл. Попробуйте ещё раз.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

@@ -3154,6 +3154,7 @@ export const tr: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Yayından kaldır',
   'fileViewer.publishFileRequiresTeam': 'Herkese açık bağlantı yayınlamak için ekip çalışma alanı gerekir. Bir ekip çalışma alanına geçin veya bu dosyayı Dağıt ile yayınlayın.',
+  'fileViewer.publishFileRequiresWorkspace': 'Herkese açık bağlantı yayınlamak için bir çalışma alanında oturum açmanız gerekir. Open Design Cloud’da oturum açın veya bu dosyayı Dağıt ile yayınlayın.',
   'fileViewer.publishFileFailed': 'Bu dosya yayınlanamadı. Lütfen tekrar deneyin.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

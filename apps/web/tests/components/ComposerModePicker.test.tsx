@@ -14,19 +14,21 @@ import { I18nProvider } from '../../src/i18n';
 afterEach(() => cleanup());
 
 describe('ComposerModePicker', () => {
-  it('renders the neutral trigger for the design default and opens the menu on demand', () => {
+  it('selects Design by default and opens the menu on demand', () => {
     render(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
 
-    // design is the app default — no pill, no label, neutral aria copy.
+    // 设计 is the app default AND the default selection: the pill, its label,
+    // and the clear × are all present on first paint.
     const trigger = screen.getByTestId('composer-mode-trigger');
-    expect(trigger.getAttribute('aria-label')).toBe('Choose a mode');
-    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
+    expect(trigger.getAttribute('aria-label')).toBe('Mode: Design');
+    expect(trigger.textContent).toContain('Design');
+    expect(screen.getByTestId('composer-mode-clear')).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
 
     fireEvent.click(trigger);
 
     expect(screen.getAllByRole('menuitemradio')).toHaveLength(3);
-    expect(screen.getByTestId('composer-mode-menu-design').getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByTestId('composer-mode-menu-design').getAttribute('aria-checked')).toBe('true');
     expect(screen.getByTestId('composer-mode-menu-plan').getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('composer-mode-menu-chat').getAttribute('aria-checked')).toBe('false');
   });
@@ -75,21 +77,40 @@ describe('ComposerModePicker', () => {
     expect(onModeChange).toHaveBeenCalledWith('design');
   });
 
-  it('only pins the design pill after an explicit pick, and clear returns to neutral', () => {
+  it('keeps the default-selected design pill removable, and re-pickable after clearing', () => {
     const onModeChange = vi.fn();
     render(<ComposerModePicker mode="design" onModeChange={onModeChange} />);
 
-    // Explicitly picking 设计 pins the pill even though the mode is unchanged
-    // (no onModeChange call — design was already active).
+    // The default selection is a real selection, not a decoration: the × drops
+    // it back to the neutral trigger. The session mode itself is unchanged
+    // (design was and remains the mode), so no redundant change fires.
+    fireEvent.click(screen.getByTestId('composer-mode-clear'));
+    expect(onModeChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
+
+    // …and picking 设计 again re-pins it, still without a redundant change.
     fireEvent.click(screen.getByTestId('composer-mode-trigger'));
     fireEvent.click(screen.getByTestId('composer-mode-menu-design'));
     expect(onModeChange).not.toHaveBeenCalled();
     expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
+  });
 
-    // Clearing drops back to the neutral default without a redundant change.
+  it('does not re-force the design pill once the user has cleared it', () => {
+    // The default is INITIAL state, not a per-render assertion: a re-render
+    // (new props, parent state change) must not resurrect the pill the user
+    // just dismissed.
+    const { rerender } = render(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
+
     fireEvent.click(screen.getByTestId('composer-mode-clear'));
-    expect(onModeChange).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
+
+    rerender(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
     expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+
+    rerender(<ComposerModePicker mode="design" onModeChange={vi.fn()} labelHidden />);
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
   });
 
   it('keeps every mode description visible inside the open menu', () => {

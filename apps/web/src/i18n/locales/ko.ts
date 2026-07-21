@@ -3154,6 +3154,7 @@ export const ko: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': '게시 취소',
   'fileViewer.publishFileRequiresTeam': '공개 링크를 게시하려면 팀 워크스페이스가 필요합니다. 팀 워크스페이스로 전환하거나 배포를 사용해 이 파일을 게시하세요.',
+  'fileViewer.publishFileRequiresWorkspace': '공개 링크를 게시하려면 워크스페이스에 로그인해야 합니다. Open Design Cloud에 로그인하거나 배포를 사용해 이 파일을 게시하세요.',
   'fileViewer.publishFileFailed': '이 파일을 게시하지 못했습니다. 다시 시도해 주세요.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

@@ -3154,6 +3154,7 @@ export const fr: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Annuler la publication',
   'fileViewer.publishFileRequiresTeam': 'La publication d’un lien public nécessite un espace de travail d’équipe. Passez à un espace d’équipe ou utilisez Déployer pour publier ce fichier.',
+  'fileViewer.publishFileRequiresWorkspace': 'La publication d’un lien public nécessite d’être connecté à un espace de travail. Connectez-vous à Open Design Cloud ou utilisez Déployer pour publier ce fichier.',
   'fileViewer.publishFileFailed': 'Impossible de publier ce fichier. Veuillez réessayer.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

@@ -3331,6 +3331,7 @@ export const zhCN: Dict = {
   "fileViewer.publishFile": "发布文件",
   "fileViewer.unpublishFile": "取消发布",
   "fileViewer.publishFileRequiresTeam": "发布公开链接需要团队工作区。请切换到团队工作区，或使用「部署」发布此文件。",
+  "fileViewer.publishFileRequiresWorkspace": "发布公开链接需要登录工作区。请登录 Open Design Cloud，或使用「部署」发布此文件。",
   "fileViewer.publishFileFailed": "无法发布此文件，请重试。",
   "fileViewer.workspaceShareSuccess": "已分享给工作空间成员",
   "fileViewer.workspaceShareFailed": "分享到工作空间失败",

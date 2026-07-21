@@ -3154,6 +3154,7 @@ export const ja: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': '公開を取り消す',
   'fileViewer.publishFileRequiresTeam': '公開リンクの発行にはチームワークスペースが必要です。チームワークスペースに切り替えるか、デプロイでこのファイルを公開してください。',
+  'fileViewer.publishFileRequiresWorkspace': '公開リンクの発行にはワークスペースへのサインインが必要です。Open Design Cloud にサインインするか、デプロイでこのファイルを公開してください。',
   'fileViewer.publishFileFailed': 'このファイルを公開できませんでした。もう一度お試しください。',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

@@ -3154,6 +3154,7 @@ export const hu: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Közzététel visszavonása',
   'fileViewer.publishFileRequiresTeam': 'A nyilvános hivatkozás közzétételéhez csapatmunkaterület szükséges. Válts csapatmunkaterületre, vagy tedd közzé a fájlt a Közzététel funkcióval.',
+  'fileViewer.publishFileRequiresWorkspace': 'A nyilvános hivatkozás közzétételéhez be kell jelentkezned egy munkaterületre. Jelentkezz be az Open Design Cloudba, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileFailed': 'Nem sikerült közzétenni ezt a fájlt. Próbáld újra.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

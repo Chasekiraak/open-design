@@ -3154,6 +3154,7 @@ export const uk: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Скасувати публікацію',
   'fileViewer.publishFileRequiresTeam': 'Щоб опублікувати загальнодоступне посилання, потрібен командний робочий простір. Перейдіть до командного простору або скористайтеся «Розгорнути».',
+  'fileViewer.publishFileRequiresWorkspace': 'Щоб опублікувати загальнодоступне посилання, потрібно ввійти в робочий простір. Увійдіть в Open Design Cloud або скористайтеся «Розгорнути».',
   'fileViewer.publishFileFailed': 'Не вдалося опублікувати цей файл. Спробуйте ще раз.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

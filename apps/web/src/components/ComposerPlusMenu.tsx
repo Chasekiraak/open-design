@@ -199,7 +199,13 @@ export interface ComposerPlusMenuProps {
   /** Opens the "Import from Figma" dialog (offline .fig decode or a Figma
    *  URL → webpage); omit to hide the row. */
   onImportFigma?: () => void;
-  /** Opens the "how to download a .fig" guide; omit to hide the row. */
+  /**
+   * Accepted for API compatibility but no longer rendered. The "查看方法"
+   * (.fig download guide) row was removed from this menu: the "+" menu is a
+   * list of things to ATTACH to the message, and a help article is not one of
+   * them — it pushed a documentation detour into the middle of the attach
+   * flow. The Figma import row itself stays.
+   */
   onShowFigmaHelp?: () => void;
   /**
    * Accepted for API compatibility but no longer rendered: both callers
@@ -289,7 +295,6 @@ export function ComposerPlusMenu({
   onLinkLocalCode,
   onSelectFromLibrary,
   onImportFigma,
-  onShowFigmaHelp,
   renderToolbox,
   toolboxLabel,
   triggerTestId,
@@ -614,21 +619,6 @@ export function ComposerPlusMenu({
             >
               <Icon name="import" size={15} className="plus-menu__item-icon" />
               <span>{t('chat.importFigma')}</span>
-            </button>
-          ) : null}
-          {onShowFigmaHelp ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="plus-menu__item"
-              data-testid="composer-plus-figma-help"
-              onClick={() => {
-                close();
-                onShowFigmaHelp();
-              }}
-            >
-              <Icon name="help-circle" size={15} className="plus-menu__item-icon" />
-              <span>{t('chat.plus.learnHow')}</span>
             </button>
           ) : null}
           <PlusSubmenuRow

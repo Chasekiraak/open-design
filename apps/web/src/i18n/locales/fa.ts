@@ -3154,6 +3154,7 @@ export const fa: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'لغو انتشار',
   'fileViewer.publishFileRequiresTeam': 'انتشار پیوند عمومی به فضای کاری تیمی نیاز دارد. به یک فضای کاری تیمی بروید یا این فایل را با «استقرار» منتشر کنید.',
+  'fileViewer.publishFileRequiresWorkspace': 'انتشار پیوند عمومی به ورود به یک فضای کاری نیاز دارد. به Open Design Cloud وارد شوید یا این فایل را با «استقرار» منتشر کنید.',
   'fileViewer.publishFileFailed': 'انتشار این فایل ممکن نشد. لطفاً دوباره تلاش کنید.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',

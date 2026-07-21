@@ -3154,6 +3154,7 @@ export const ptBR: Dict = {
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Cancelar publicação',
   'fileViewer.publishFileRequiresTeam': 'Publicar um link público exige um espaço de trabalho de equipe. Mude para um espaço de equipe ou use Implantar para publicar este arquivo.',
+  'fileViewer.publishFileRequiresWorkspace': 'Publicar um link público exige estar conectado a um espaço de trabalho. Entre no Open Design Cloud ou use Implantar para publicar este arquivo.',
   'fileViewer.publishFileFailed': 'Não foi possível publicar este arquivo. Tente novamente.',
   'fileViewer.workspaceShareSuccess': 'Shared with workspace members',
   'fileViewer.workspaceShareFailed': 'Could not share with workspace',
