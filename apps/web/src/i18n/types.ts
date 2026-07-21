@@ -1033,6 +1033,22 @@ export interface Dict {
   'entry.navDesignSystems': string;
   'entry.navBrands': string;
   'entry.navIntegrations': string;
+  // Client message center
+  'messageCenter.openAria': string;
+  'messageCenter.unreadCount': string;
+  'messageCenter.title': string;
+  'messageCenter.subtitle': string;
+  'messageCenter.filterAll': string;
+  'messageCenter.filterUnread': string;
+  'messageCenter.filterRead': string;
+  'messageCenter.markAllRead': string;
+  'messageCenter.emptyAllTitle': string;
+  'messageCenter.emptyUnreadTitle': string;
+  'messageCenter.emptyReadTitle': string;
+  'messageCenter.emptyBody': string;
+  'messageCenter.close': string;
+  'messageCenter.desktopSettings': string;
+  'messageCenter.desktopSettingsHint': string;
   'workspaceTabs.project': string;
   'workspaceTabs.pluginDetails': string;
   'workspaceTabs.marketplace': string;
@@ -2521,7 +2537,9 @@ export interface Dict {
   'chat.runError.title.emptyOutput': string;
   'chat.runError.title.sessionExpired': string;
   'chat.runError.title.gitBashMissing': string;
+  'chat.runError.title.cpuUnsupported': string;
   'chat.runError.title.generic': string;
+  'chat.runError.title.artifactMissing': string;
   'chat.runError.signInMessage.amr': string;
   'chat.runError.signInMessage.other': string;
   'chat.runError.cliMissingMessage': string;
@@ -2539,6 +2557,7 @@ export interface Dict {
   'chat.runError.emptyOutputMessage': string;
   'chat.runError.sessionExpiredMessage': string;
   'chat.runError.gitBashMissingMessage': string;
+  'chat.runError.cpuUnsupportedMessage': string;
   'chat.runError.agentFallback': string;
   'chat.runError.sourceLabel': string;
   'chat.runError.sourceExpandAria': string;
@@ -3610,6 +3629,8 @@ export interface Dict {
   'fileViewer.speakerNotesSaved': string;
   'fileViewer.speakerNotesSaveFailed': string;
   'fileViewer.speakerNotesPlaceholder': string;
+  'fileViewer.previewAssetBlockedTitle': string;
+  'fileViewer.previewAssetBlockedDetail': string;
   'fileViewer.presenterReset': string;
   'fileViewer.present': string;
   'fileViewer.presentInTab': string;
