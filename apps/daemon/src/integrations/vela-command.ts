@@ -20,46 +20,17 @@ export interface VelaCommandOptions {
 }
 
 export function velaWorkspaceCommandOptions(
-  _workspaceId?: string | null | undefined,
-): VelaCommandOptions {
-  return { configuredEnv: { VELA_INVOCATION_SOURCE: 'open-design' } };
-}
-
-/**
- * Append the explicit `--workspace-id` every workspace-scoped Vela command must
- * carry, and REFUSE to build the command without one.
- *
- * The workspace used to travel as a `VELA_WORKSPACE_ID` environment variable.
- * Nothing on the other side ever read it — the name has zero references in the
- * vela repository — so every collab call silently fell through to a
- * server-side "current workspace" that the client has no way to set. A user who
- * switched workspaces in the client kept talking to whichever workspace the
- * server still had selected, which surfaced as `403 missing_principal` on the
- * whole collab plane once that happened to be a personal workspace.
- *
- * Two properties matter here and neither survives in an env var:
- *  - it is per-CALL, not ambient process state, so two projects in two
- *    workspaces cannot be conflated;
- *  - a missing workspace throws HERE, at the call site, instead of producing a
- *    command that looks correct and quietly asks about the wrong workspace.
- *    That silence is what made this bug expensive to find: the failing command
- *    printed as a bare `vela collab presence list <id>` with no workspace in
- *    sight.
- *
- * `vela billing` already took an explicit required `--workspace-id`; this is
- * the rest of the surface catching up to it.
- */
-export function withWorkspaceIdFlag(
-  args: string[],
   workspaceId: string | null | undefined,
-): string[] {
-  const resolved = workspaceId?.trim();
-  if (!resolved) {
-    throw new Error(
-      `vela ${args[0] ?? 'command'}: a workspace id is required; refusing to run a workspace-scoped command without --workspace-id`,
-    );
-  }
-  return [...args, '--workspace-id', resolved];
+): VelaCommandOptions {
+  const requestedWorkspaceId = workspaceId?.trim();
+  return {
+    configuredEnv: {
+      VELA_INVOCATION_SOURCE: 'open-design',
+      ...(requestedWorkspaceId
+        ? { VELA_WORKSPACE_ID: requestedWorkspaceId }
+        : {}),
+    },
+  };
 }
 
 function configuredAmrEnv(

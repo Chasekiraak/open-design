@@ -8,7 +8,6 @@ import type {
 import {
   runVelaCommand,
   velaWorkspaceCommandOptions,
-  withWorkspaceIdFlag,
 } from '../integrations/vela-command.js';
 
 const PROJECT_RESOURCE_PREFIX = 'project-';
@@ -449,12 +448,12 @@ function fallbackProjectId(
 
 const defaultRunVelaTeamProjects: RunVelaTeamProjects = (args, workspaceId) =>
   runVelaCommand(
-    withWorkspaceIdFlag(['team-projects', ...args], workspaceId),
-    velaWorkspaceCommandOptions(),
+    ['team-projects', ...args],
+    velaWorkspaceCommandOptions(workspaceId),
   );
 
 const defaultRunVelaResources: RunVelaResources = (args, workspaceId) =>
   runVelaCommand(
-    withWorkspaceIdFlag(['resource', ...args], workspaceId),
-    velaWorkspaceCommandOptions(),
+    ['resource', ...args],
+    velaWorkspaceCommandOptions(workspaceId),
   );

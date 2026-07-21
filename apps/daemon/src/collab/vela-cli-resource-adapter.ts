@@ -5,7 +5,6 @@ import {
 import {
   runVelaCommand,
   velaWorkspaceCommandOptions,
-  withWorkspaceIdFlag,
 } from '../integrations/vela-command.js';
 import { projectResourceIdFor } from '../integrations/vela-team-projects.js';
 import type { ResourcePublishAdapter } from './publish-scheduler.js';
@@ -229,8 +228,8 @@ export function parseVelaResourceSnapshot(stdout: string): VelaResourceSnapshotR
 
 export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) =>
   runVelaCommand(
-    withWorkspaceIdFlag(['resource', ...args], workspaceId),
-    velaWorkspaceCommandOptions(),
+    ['resource', ...args],
+    velaWorkspaceCommandOptions(workspaceId),
   );
 
 const defaultRunVelaResource: RunVelaResource = runVelaResourceCommand;
