@@ -582,6 +582,30 @@
   aspect-ratio: 16 / 9;
   --deck-preview-scale: 0.208;
 }
+/* Gallery tile hover actions (Use / Duplicate).
+   The preview surface inside the frame is `position: absolute; inset: 0`, so
+   these buttons have to be lifted onto their own layer — in normal flow they
+   render underneath the preview and the primary CTA is unclickable. Mirrors
+   the rich card's `__card-overlay` contract: hidden until hover/focus, and
+   `pointer-events` gated so a hidden overlay never swallows tile clicks. */
+.plugins-home__gallery-actions {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.62) 100%);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+  pointer-events: none;
+}
+.plugins-home__card--gallery:hover .plugins-home__gallery-actions,
+.plugins-home__card--gallery:focus-within .plugins-home__gallery-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
 .plugins-home__card--gallery[data-od-mode="deck"] .plugins-home__html-iframe,
 .plugins-home__card--gallery[data-od-mode="deck"]:hover .plugins-home__html-iframe {
   top: 0;
@@ -1204,7 +1228,8 @@ button.plugins-home__use-menu-item:focus-visible {
 /* Touch/coarse-pointer fallback — overlays should be visible
    without hover so phone/tablet users can still see metadata. */
 @media (hover: none) {
-  .plugins-home__card-overlay {
+  .plugins-home__card-overlay,
+  .plugins-home__gallery-actions {
     opacity: 1;
     pointer-events: auto;
   }
