@@ -2,11 +2,12 @@ import type { Express } from 'express';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type {
-  ProjectMetadata,
-  ProjectSyncIntentEvent,
-  TeamProject,
-  WorkspaceCollabContext,
+import {
+  workspaceContextHasWorkspaceIdentity,
+  type ProjectMetadata,
+  type ProjectSyncIntentEvent,
+  type TeamProject,
+  type WorkspaceCollabContext,
 } from '@open-design/contracts';
 import type { CollabRuntime } from '../collab/runtime.js';
 import {
@@ -281,11 +282,15 @@ function workspaceIdentityRequiredBody() {
  * prevent.
  */
 function publicFilePrincipal(context: WorkspaceCollabContext | null): ResourceHubPrincipal | null {
-  if (!context?.workspaceId || !context.workspaceMemberId) return null;
+  if (!workspaceContextHasWorkspaceIdentity(context) || !context) return null;
+  // The predicate above already proved both ids are present; this is the type
+  // narrowing TS needs, not a second copy of the rule.
+  const { workspaceId, workspaceMemberId } = context;
+  if (!workspaceId || !workspaceMemberId) return null;
   return {
-    memberId: context.workspaceMemberId,
+    memberId: workspaceMemberId,
     // Personal workspaces carry no `teamId`; the workspace id is the scope.
-    teamId: context.teamId ?? context.workspaceId,
+    teamId: context.teamId ?? workspaceId,
     role: context.role,
     lifecycleState: context.lifecycleState,
     workspaceType: context.workspaceType,

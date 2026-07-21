@@ -1,4 +1,7 @@
-import type { WorkspaceCollabContext } from '@open-design/contracts';
+import {
+  workspaceContextHasWorkspaceIdentity,
+  type WorkspaceCollabContext,
+} from '@open-design/contracts';
 
 /**
  * Whether the public single-file "Publish" entry point may be rendered.
@@ -28,7 +31,7 @@ import type { WorkspaceCollabContext } from '@open-design/contracts';
 export function canPublishPublicFile(
   context: WorkspaceCollabContext | null | undefined,
 ): boolean {
-  return Boolean(context && context.workspaceId && context.workspaceMemberId);
+  return workspaceContextHasWorkspaceIdentity(context);
 }
 
 /** Dict keys this module may return; keeps the i18n contract explicit. */

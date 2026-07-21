@@ -278,8 +278,9 @@ export function isWorkspaceLifecycleReadable(state: WorkspaceLifecycleState): bo
  * The hub keys every resource by a TEAM workspace: `teamId` is populated only
  * for `workspaceType === 'team'` (see the field's doc above), so a personal or
  * signed-out session has no id to push, snapshot, or redact under. Everything
- * built on the hub — team project sharing and public single-file links — is
- * therefore team-only by construction, not by policy choice.
+ * built on the hub USED to be team-only by construction. That is still true of
+ * team project SHARING, which needs teammates to share with — but no longer of
+ * public single-file links: see {@link workspaceContextHasWorkspaceIdentity}.
  *
  * This is the ONE predicate both sides must agree on: the daemon refuses hub
  * writes when it is false, and the web UI must not render a hub-backed entry
@@ -295,6 +296,31 @@ export function workspaceContextHasTeamIdentity(
     context.workspaceId &&
     context.workspaceMemberId,
   );
+}
+
+/**
+ * Whether this session can address a resource hub partition AT ALL.
+ *
+ * The hub addresses purely by workspace id, and B mints a principal for any
+ * workspace a caller belongs to — a personal one included, where the principal's
+ * `teamId` simply IS that workspace id, a partition of one. So the requirement
+ * for a hub write is an id to publish under and a member id to own the result
+ * with; the workspace TYPE is not part of it.
+ *
+ * Use this for surfaces that only need somewhere to put a resource — the public
+ * single-file link is the one today. Use {@link workspaceContextHasTeamIdentity}
+ * where the feature genuinely needs a TEAM, such as sharing a project with
+ * teammates.
+ *
+ * Same rule as its sibling: the daemon refuses the write when this is false and
+ * the web UI must not render the entry point when it is false. Deriving it twice
+ * is how a UI grows a button that can only ever fail — which is exactly what
+ * happened here before this helper existed.
+ */
+export function workspaceContextHasWorkspaceIdentity(
+  context: WorkspaceCollabContext | null | undefined,
+): boolean {
+  return Boolean(context && context.workspaceId && context.workspaceMemberId);
 }
 
 export function isWorkspaceLifecycleWritable(state: WorkspaceLifecycleState): boolean {
