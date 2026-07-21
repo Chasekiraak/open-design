@@ -644,7 +644,7 @@ export function BoardComposerPopover({
   return (
     <div
       ref={popoverRef}
-      className={`comment-popover${docked ? ' comment-popover-docked' : ''}${dragging ? ' comment-popover-dragging' : ''}`}
+      className={`comment-popover comment-popover-composer${docked ? ' comment-popover-docked' : ''}${dragging ? ' comment-popover-dragging' : ''}`}
       data-testid="comment-popover"
       role="dialog"
       aria-modal="false"
@@ -673,237 +673,244 @@ export function BoardComposerPopover({
           </span>
         </div>
       ) : null}
-      <section className="comment-popover-section comment-popover-section-params">
-        <AnnotationStyleSummary target={target} testId="comment-popover-style-summary" />
-      </section>
-      {podMembers.length > 0 ? (
-        <div className="board-pod-summary">
-          <strong>{t('chat.comments.capturedItems', { n: target.memberCount || podMembers.length })}</strong>
-          <div className="board-pod-members">
-            {podMembers.map((member) => (
-              <span
-                key={member.elementId}
-                className="board-pod-chip"
-                onPointerEnter={(e) => {
-                  if (e.pointerType && e.pointerType !== 'mouse') return;
-                  onHoverMember?.(member.elementId);
-                }}
-                onPointerLeave={(e) => {
-                  if (e.pointerType && e.pointerType !== 'mouse') return;
-                  onHoverMember?.(null);
-                }}
-              >
-                {summarizeMember(member)}
-                <button
-                  type="button"
-                  className="board-pod-chip-remove"
-                  onClick={() => onRemoveMember(member.elementId)}
-                  onFocus={() => onHoverMember?.(member.elementId)}
-                  onBlur={() => onHoverMember?.(null)}
-                  aria-label={t('chat.comments.remove')}
-                  title={t('chat.comments.remove')}
+      {/* Everything above the action row scrolls; the action row itself lives
+          outside this box (see below) so a height-clamped card can never push
+          the buttons out of view. */}
+      <div className="comment-popover-body">
+        <section className="comment-popover-section comment-popover-section-params">
+          <AnnotationStyleSummary target={target} testId="comment-popover-style-summary" />
+        </section>
+        {podMembers.length > 0 ? (
+          <div className="board-pod-summary">
+            <strong>{t('chat.comments.capturedItems', { n: target.memberCount || podMembers.length })}</strong>
+            <div className="board-pod-members">
+              {podMembers.map((member) => (
+                <span
+                  key={member.elementId}
+                  className="board-pod-chip"
+                  onPointerEnter={(e) => {
+                    if (e.pointerType && e.pointerType !== 'mouse') return;
+                    onHoverMember?.(member.elementId);
+                  }}
+                  onPointerLeave={(e) => {
+                    if (e.pointerType && e.pointerType !== 'mouse') return;
+                    onHoverMember?.(null);
+                  }}
                 >
-                  <Icon name="close" size={14} />
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {commenting ? (
-        <section className="comment-popover-section comment-popover-section-compose">
-          {notes.length > 0 ? (
-            <div className="board-note-list">
-              {notes.map((note, index) => (
-                <div key={`${target.elementId}-${index}`} className="board-note-item">
-                  <span>{note}</span>
-                  <Button variant="ghost" onClick={() => onRemoveQueuedNote(index)}>
-                    {t('chat.comments.remove')}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {existingImages.length > 0 || images.length > 0 ? (
-            <div className="comment-popover-images">
-              {existingImages.map((item) => (
-                <div key={`saved-${item.url}`} className="comment-popover-image">
-                  <a
-                    className="comment-popover-image-thumb"
-                    data-testid="comment-popover-existing-image"
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={item.name}
-                  >
-                    <img src={item.url} alt="" aria-hidden />
-                  </a>
-                </div>
-              ))}
-              {images.map((item, index) => (
-                <div key={item.url} className="comment-popover-image">
+                  {summarizeMember(member)}
                   <button
                     type="button"
-                    className="comment-popover-image-thumb"
-                    onClick={() => onPreviewImage?.(index)}
-                    title={item.file.name}
-                    aria-label={item.file.name}
-                  >
-                    <img src={item.url} alt="" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    className="comment-popover-image-remove"
-                    onClick={() => onRemoveImage?.(index)}
-                    aria-label={t('chat.annotationAttachedRemove')}
-                    title={t('chat.annotationAttachedRemove')}
+                    className="board-pod-chip-remove"
+                    onClick={() => onRemoveMember(member.elementId)}
+                    onFocus={() => onHoverMember?.(member.elementId)}
+                    onBlur={() => onHoverMember?.(null)}
+                    aria-label={t('chat.comments.remove')}
+                    title={t('chat.comments.remove')}
                   >
                     <Icon name="close" size={14} />
                   </button>
-                </div>
+                </span>
               ))}
             </div>
-          ) : null}
-          <Textarea
-            data-testid="comment-popover-input"
-            className={!canEditComment ? 'composer-note--readonly' : undefined}
-            value={draft}
-            autoFocus={canEditComment}
-            readOnly={!canEditComment}
-            aria-label={t('chat.comments.placeholder')}
-            placeholder={t('chat.comments.placeholder')}
-            onChange={(event) => onDraft(event.target.value)}
-            onPaste={onComposerPaste}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-            }}
-            onKeyDown={(event) => {
-              if (isImeComposing(event, composingRef.current)) return;
-              if (
-                event.key === 'Enter' &&
-                !event.shiftKey &&
-                !event.altKey
-              ) {
-                event.preventDefault();
-                // Enter triggers the primary CTA: comment (save) for element
-                // selections, send-to-chat for pod selections. Respect the same
-                // permission gates as the visible buttons so Enter can't perform
-                // an action whose button is hidden.
-                if (isPodSelection) {
-                  if (canSendToAgent && !sendBlocked) void onSendBatch();
-                } else if (canEditComment && !saveDisabled) {
-                  void onSaveComment();
+          </div>
+        ) : null}
+        {commenting ? (
+          <section className="comment-popover-section comment-popover-section-compose">
+            {notes.length > 0 ? (
+              <div className="board-note-list">
+                {notes.map((note, index) => (
+                  <div key={`${target.elementId}-${index}`} className="board-note-item">
+                    <span>{note}</span>
+                    <Button variant="ghost" onClick={() => onRemoveQueuedNote(index)}>
+                      {t('chat.comments.remove')}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {existingImages.length > 0 || images.length > 0 ? (
+              <div className="comment-popover-images">
+                {existingImages.map((item) => (
+                  <div key={`saved-${item.url}`} className="comment-popover-image">
+                    <a
+                      className="comment-popover-image-thumb"
+                      data-testid="comment-popover-existing-image"
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={item.name}
+                    >
+                      <img src={item.url} alt="" aria-hidden />
+                    </a>
+                  </div>
+                ))}
+                {images.map((item, index) => (
+                  <div key={item.url} className="comment-popover-image">
+                    <button
+                      type="button"
+                      className="comment-popover-image-thumb"
+                      onClick={() => onPreviewImage?.(index)}
+                      title={item.file.name}
+                      aria-label={item.file.name}
+                    >
+                      <img src={item.url} alt="" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className="comment-popover-image-remove"
+                      onClick={() => onRemoveImage?.(index)}
+                      aria-label={t('chat.annotationAttachedRemove')}
+                      title={t('chat.annotationAttachedRemove')}
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <Textarea
+              data-testid="comment-popover-input"
+              className={!canEditComment ? 'composer-note--readonly' : undefined}
+              value={draft}
+              autoFocus={canEditComment}
+              readOnly={!canEditComment}
+              aria-label={t('chat.comments.placeholder')}
+              placeholder={t('chat.comments.placeholder')}
+              onChange={(event) => onDraft(event.target.value)}
+              onPaste={onComposerPaste}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
+              onKeyDown={(event) => {
+                if (isImeComposing(event, composingRef.current)) return;
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.altKey
+                ) {
+                  event.preventDefault();
+                  // Enter triggers the primary CTA: comment (save) for element
+                  // selections, send-to-chat for pod selections. Respect the same
+                  // permission gates as the visible buttons so Enter can't perform
+                  // an action whose button is hidden.
+                  if (isPodSelection) {
+                    if (canSendToAgent && !sendBlocked) void onSendBatch();
+                  } else if (canEditComment && !saveDisabled) {
+                    void onSaveComment();
+                  }
                 }
-              }
-            }}
-          />
-          <div className="comment-popover-actions">
-            <div className="comment-popover-actions-start">
-              {onAttachImages && canEditComment ? (
-                <>
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    style={{ display: 'none' }}
-                    onChange={onImageInputChange}
-                  />
-                  <button
-                    type="button"
-                    className="comment-popover-close"
-                    onClick={() => imageInputRef.current?.click()}
-                    title={t('chat.annotationAttachImage')}
-                    aria-label={t('chat.annotationAttachImage')}
-                  >
-                    <Icon name="attach" size={14} />
-                  </button>
-                </>
-              ) : null}
-              {existing && onDeleteComment && canDeleteComment ? (
-                <button
-                  type="button"
-                  className="comment-popover-close comment-popover-delete"
-                  onClick={() => void onDeleteComment(existing.id)}
-                  title={t('common.delete')}
-                  aria-label={t('common.delete')}
-                >
-                  <Icon name="trash" size={14} />
-                </button>
-              ) : (
+              }}
+            />
+          </section>
+        ) : null}
+      </div>
+      {commenting ? (
+        <div className="comment-popover-actions">
+          <div className="comment-popover-actions-start">
+            {onAttachImages && canEditComment ? (
+              <>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={onImageInputChange}
+                />
                 <button
                   type="button"
                   className="comment-popover-close"
-                  onClick={onClose}
-                  title={t('common.close')}
-                  aria-label={t('common.close')}
+                  onClick={() => imageInputRef.current?.click()}
+                  title={t('chat.annotationAttachImage')}
+                  aria-label={t('chat.annotationAttachImage')}
                 >
-                  <Icon name="close" size={14} />
+                  <Icon name="attach" size={14} />
                 </button>
-              )}
-            </div>
-            <div className="comment-popover-actions-end">
-              {isPodSelection ? (
-                <>
-                  {/* Pod: add-note is secondary, send-to-chat is the primary CTA.
-                      Add-note composes new note text (an edit), so it is gated by
-                      canEditComment; send-to-chat by canSendToAgent. */}
-                  {canEditComment ? (
-                    <Button
-                      variant="ghost"
-                      data-testid="comment-popover-add-note"
-                      disabled={!draft.trim()}
-                      onClick={onAddDraft}
-                    >
-                      {t('chat.comments.addNote')}
-                    </Button>
-                  ) : null}
-                  {canSendToAgent && allowSendToChat ? (
-                    <Button
-                      variant="primary"
-                      data-testid="comment-add-send"
-                      disabled={sendBlocked}
-                      title={sendDisabled ? sendDisabledReason : undefined}
-                      onClick={() => void onSendBatch()}
-                    >
-                      {primaryLabel}
-                    </Button>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  {/* Element: comment (save) is the primary CTA (also Enter);
-                      send-to-chat is secondary. Save (edit) is gated by
-                      canEditComment; send-to-chat by canSendToAgent. */}
-                  {canSendToAgent && allowSendToChat ? (
-                    <Button
-                      variant="ghost"
-                      data-testid="comment-add-send"
-                      disabled={sendBlocked}
-                      title={sendDisabled ? sendDisabledReason : undefined}
-                      onClick={() => void onSendBatch()}
-                    >
-                      {primaryLabel}
-                    </Button>
-                  ) : null}
-                  {canEditComment ? (
-                    <Button
-                      variant="primary"
-                      data-testid="comment-popover-save"
-                      disabled={saveDisabled}
-                      onClick={() => void onSaveComment()}
-                    >
-                      {t('chat.comments.comment')}
-                    </Button>
-                  ) : null}
-                </>
-              )}
-            </div>
+              </>
+            ) : null}
+            {existing && onDeleteComment && canDeleteComment ? (
+              <button
+                type="button"
+                className="comment-popover-close comment-popover-delete"
+                onClick={() => void onDeleteComment(existing.id)}
+                title={t('common.delete')}
+                aria-label={t('common.delete')}
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="comment-popover-close"
+                onClick={onClose}
+                title={t('common.close')}
+                aria-label={t('common.close')}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            )}
           </div>
-        </section>
+          <div className="comment-popover-actions-end">
+            {isPodSelection ? (
+              <>
+                {/* Pod: add-note is secondary, send-to-chat is the primary CTA.
+                    Add-note composes new note text (an edit), so it is gated by
+                    canEditComment; send-to-chat by canSendToAgent. */}
+                {canEditComment ? (
+                  <Button
+                    variant="ghost"
+                    data-testid="comment-popover-add-note"
+                    disabled={!draft.trim()}
+                    onClick={onAddDraft}
+                  >
+                    {t('chat.comments.addNote')}
+                  </Button>
+                ) : null}
+                {canSendToAgent && allowSendToChat ? (
+                  <Button
+                    variant="primary"
+                    data-testid="comment-add-send"
+                    disabled={sendBlocked}
+                    title={sendDisabled ? sendDisabledReason : undefined}
+                    onClick={() => void onSendBatch()}
+                  >
+                    {primaryLabel}
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {/* Element: comment (save) is the primary CTA (also Enter);
+                    send-to-chat is secondary. Save (edit) is gated by
+                    canEditComment; send-to-chat by canSendToAgent. */}
+                {canSendToAgent && allowSendToChat ? (
+                  <Button
+                    variant="ghost"
+                    data-testid="comment-add-send"
+                    disabled={sendBlocked}
+                    title={sendDisabled ? sendDisabledReason : undefined}
+                    onClick={() => void onSendBatch()}
+                  >
+                    {primaryLabel}
+                  </Button>
+                ) : null}
+                {canEditComment ? (
+                  <Button
+                    variant="primary"
+                    data-testid="comment-popover-save"
+                    disabled={saveDisabled}
+                    onClick={() => void onSaveComment()}
+                  >
+                    {t('chat.comments.comment')}
+                  </Button>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
       ) : null}
     </div>
   );

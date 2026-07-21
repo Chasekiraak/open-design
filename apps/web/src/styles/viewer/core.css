@@ -469,6 +469,12 @@
 .viewer-tab {
   background: transparent;
   border: var(--stroke-thin, 1px) solid transparent;
+  /* Reset the global `button` rule (primitives.css: height: 36px). A 36px
+     segment plus the track's 2px padding made the switch 40px tall, so it stood
+     4px proud of every sibling control on the toolbar (`.viewer-action` /
+     `.viewer-viewport-trigger` are 36px). Sizing the segment at 32px lands the
+     track on exactly 36px and the row reads as one height. */
+  height: 32px;
   padding: 3px 12px;
   font-size: 12px;
   /* Segment stays a capsule inside the switch track. */
@@ -1547,6 +1553,29 @@
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
   box-shadow: var(--shadow-lg);
+}
+/* Composer variant (BoardComposerPopover). The card's height is clamped to the
+   space left in the preview stage, so when the anchored element sits low the
+   card is shorter than its content. With the whole card as the scroller the
+   action row simply fell below the fold and the user could not reach cancel /
+   send at all. Invariant: the card is a fixed frame — only the body scrolls,
+   and the action row is always inside the visible box.
+   The read-only `.annotation-hover-popover` keeps the plain scrolling card;
+   it has no `.comment-popover-body` and no actions to protect. */
+.comment-popover-composer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.comment-popover-body {
+  flex: 1 1 auto;
+  /* Without this a flex item refuses to shrink below its content height, which
+     would push the action row back out of the frame. */
+  min-height: 0;
+  overflow: auto;
+}
+.comment-popover-composer .comment-popover-actions {
+  flex: 0 0 auto;
 }
 .comment-popover-titlebar {
   display: flex;

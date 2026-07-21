@@ -12,11 +12,14 @@ import {
 } from '../../src/components/RecentProjectsStrip';
 import type { Project } from '../../src/types';
 
-const moveWorkspaceProject = vi.fn(async () => undefined);
+// Typed on the argument the component actually passes, so `.mock.calls`
+// destructures instead of widening to the empty tuple.
+interface MoveCall { projectId: string; visibility: string }
+const moveWorkspaceProject = vi.fn(async (_input: MoveCall) => undefined);
 
 vi.mock('../../src/state/projects', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  moveWorkspaceProject: (...args: unknown[]) => moveWorkspaceProject(...(args as [])),
+  moveWorkspaceProject: (...args: unknown[]) => moveWorkspaceProject(args[0] as MoveCall),
 }));
 
 vi.mock('../../src/providers/registry', () => ({
@@ -224,7 +227,7 @@ describe('RecentProjectsStrip bulk selection bar (#75)', () => {
       expect(moveWorkspaceProject).toHaveBeenCalledTimes(2);
     });
     expect(
-      moveWorkspaceProject.mock.calls.map(([input]: [{ projectId: string; visibility: string }]) => [
+      moveWorkspaceProject.mock.calls.map(([input]) => [
         input.projectId,
         input.visibility,
       ]),
@@ -240,7 +243,7 @@ describe('RecentProjectsStrip bulk selection bar (#75)', () => {
   });
 
   it('confirms before deleting the whole selection', async () => {
-    const onDelete = vi.fn(() => true);
+    const onDelete = vi.fn((_id: string) => true);
     const { container } = renderGrid({
       canManageProjectCollection: true,
       collaborationEnabled: true,
@@ -280,7 +283,7 @@ describe('RecentProjectsStrip bulk selection bar (#75)', () => {
   });
 
   it('cancel leaves selection mode without touching anything', () => {
-    const onDelete = vi.fn(() => true);
+    const onDelete = vi.fn((_id: string) => true);
     const { container } = renderGrid({
       canManageProjectCollection: true,
       collaborationEnabled: true,
