@@ -20,20 +20,10 @@ interface MessageCenterPage {
 
 const ACCOUNT_PROXY = '/api/integrations/vela/message-center';
 const ANONYMOUS_PROXY = '/api/integrations/vela/api-proxy/api/v1/message-center';
-const WINDOW_KEY = 'open-design.message-center.anonymous-started-at.v1';
+const LEGACY_WINDOW_KEY = 'open-design.message-center.anonymous-started-at.v1';
 const MESSAGES_KEY = 'open-design.message-center.anonymous-messages.v1';
 const READ_KEY = 'open-design.message-center.anonymous-read-ids.v1';
 const MAX_MESSAGE_CENTER_PAGES = 20;
-
-export function anonymousStartedAt(storage: Storage, now = new Date()): string {
-  const existing = storage.getItem(WINDOW_KEY);
-  if (existing) return existing;
-  const value = now.toISOString();
-  storage.setItem(WINDOW_KEY, value);
-  storage.setItem(MESSAGES_KEY, '[]');
-  storage.setItem(READ_KEY, '[]');
-  return value;
-}
 
 export function readAnonymousMessages(storage: Storage): MessageCenterMessage[] {
   return parseArray<MessageCenterMessage>(storage.getItem(MESSAGES_KEY));
@@ -55,6 +45,7 @@ export function writeAnonymousState(
 export function clearAnonymousState(storage: Storage): void {
   storage.removeItem(MESSAGES_KEY);
   storage.removeItem(READ_KEY);
+  storage.removeItem(LEGACY_WINDOW_KEY);
 }
 
 export async function isAmrLoggedIn(): Promise<boolean> {
@@ -67,7 +58,6 @@ export async function isAmrLoggedIn(): Promise<boolean> {
 export async function pullMessageCenter(input: {
   locale: string;
   loggedIn: boolean;
-  startedAt?: string;
   filter?: MessageCenterFilter;
 }): Promise<MessageCenterMessage[]> {
   const messages: MessageCenterMessage[] = [];
@@ -83,10 +73,6 @@ export async function pullMessageCenter(input: {
       filter: input.filter ?? 'all',
       limit: '100',
     });
-    if (!input.loggedIn) {
-      if (!input.startedAt) throw new Error('Anonymous Message Center requires startedAt');
-      query.set('startedAt', input.startedAt);
-    }
     if (cursor) query.set('cursor', cursor);
     const proxy = input.loggedIn ? ACCOUNT_PROXY : ANONYMOUS_PROXY;
     const response = await fetch(`${proxy}/messages?${query}`, { cache: 'no-store' });

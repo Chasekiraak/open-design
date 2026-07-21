@@ -4,7 +4,6 @@ import { createPortal } from 'react-dom';
 
 import { useI18n } from '../i18n';
 import {
-  anonymousStartedAt,
   clearAnonymousState,
   isAmrLoggedIn,
   markAccountMessageRead,
@@ -72,8 +71,7 @@ export function MessageCenterDemo({ onOpenNotificationSettings }: Props) {
       readIdsRef.current = new Set();
       pendingReadIdsRef.current = new Set();
     }
-    const startedAt = anonymousStartedAt(window.localStorage);
-    const pulled = await pullMessageCenter({ locale, loggedIn: account, startedAt });
+    const pulled = await pullMessageCenter({ locale, loggedIn: account });
     if (requestId !== syncRequestIdRef.current) return;
     const serverReadIds = new Set(pulled.filter((message) => Boolean(message.readAt)).map((message) => message.id));
     if (account) {
@@ -111,7 +109,6 @@ export function MessageCenterDemo({ onOpenNotificationSettings }: Props) {
   }, []);
 
   useEffect(() => {
-    anonymousStartedAt(window.localStorage);
     commitState(
       readAnonymousMessages(window.localStorage),
       readAnonymousReadIds(window.localStorage),
