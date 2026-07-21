@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type Dispatch,
+  type KeyboardEvent,
   type SetStateAction,
 } from 'react';
 import { Dialog } from '@open-design/components';
@@ -61,11 +62,13 @@ import {
 import { Icon } from './Icon';
 import { Toast } from './Toast';
 import { PluginDetailsModal } from './PluginDetailsModal';
+import { SkillDetailsModal } from './SkillDetailsModal';
 import { PluginsHomeSection } from './PluginsHomeSection';
 import { humanizeCategory } from './SkillsSection';
 import { buildCategoryCatalog, extractCategories } from './plugins-home/facets';
 import { TrustBadge } from './TrustBadge';
 import { useI18n } from '../i18n';
+import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import { localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
 import { copyToClipboard } from '../lib/copy-to-clipboard';
 import type { PluginUseAction } from './plugins-home/useActions';
@@ -792,7 +795,20 @@ function skillCardCategory(skill: SkillSummary): MarketCardCategory | null {
 type MarketCardAction =
   | { kind: 'try'; record: InstalledPluginRecord }
   | { kind: 'install'; plugin: AvailableMarketplacePlugin }
+  // A skill's row action. Skills are not installed — using one hands the
+  // composer a preselected skill, the same way the home skill picker does.
+  | { kind: 'use-skill'; skill: SkillSummary }
   | { kind: 'none' };
+
+/**
+ * What clicking the card body opens. Every card that has a record behind it is
+ * inspectable; a team card whose resource is not on this machine has nothing to
+ * inspect, so it stays `null` and the row keeps its non-clickable affordance.
+ */
+type MarketCardDetail =
+  | { kind: 'plugin'; record: InstalledPluginRecord }
+  | { kind: 'available'; plugin: AvailableMarketplacePlugin }
+  | { kind: 'skill'; skill: SkillSummary };
 
 interface MarketCardStats {
   skills: number;
@@ -824,6 +840,8 @@ interface MarketCard {
   description: string;
   accent: string;
   action: MarketCardAction;
+  // what the card body opens when clicked; null when nothing local backs it
+  detail: MarketCardDetail | null;
   // present only for a personal resource that is not yet shared to the team
   share: { kind: MarketMode; id: string } | null;
   // present for a resource currently in the team index
@@ -841,11 +859,18 @@ interface MarketCard {
 interface ExtensionsMarketplaceProps {
   onCreatePlugin?: (goal?: string) => void;
   onUsePlugin?: (record: InstalledPluginRecord, action: PluginUseAction) => void;
+  /**
+   * Hands a skill to the home composer as the run's preselected skill — the
+   * same destination the home skill picker reaches. Without it a skill card has
+   * no way to actually run the skill.
+   */
+  onUseSkill?: (skill: SkillSummary) => void;
 }
 
 export function ExtensionsMarketplace({
   onCreatePlugin,
   onUsePlugin,
+  onUseSkill,
 }: ExtensionsMarketplaceProps) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
@@ -879,6 +904,13 @@ export function ExtensionsMarketplace({
   // Selected category chip (`null` = 全部). Slugs come from the cards in scope.
   const [category, setCategory] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
+  // One ref for the whole list: only the open card renders a menu, so the wrap
+  // that claims it is always the one the user could be pressing inside.
+  const openMenuRef = useRef<HTMLSpanElement | null>(null);
+  useDismissOnOutsideInteraction(menuId !== null, openMenuRef, () => {
+    setMenuId(null);
+    setConfirmUninstallId(null);
+  });
   // Uninstall is destructive, so the menu item arms an inline confirmation
   // first instead of firing on the opening click.
   const [confirmUninstallId, setConfirmUninstallId] = useState<string | null>(null);
@@ -898,6 +930,16 @@ export function ExtensionsMarketplace({
   const [uninstallingId, setUninstallingId] = useState<string | null>(null);
   const [installingKey, setInstallingKey] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  // The card the user drilled into. #5517's rows are click-to-inspect; the port
+  // shipped them as inert markup, so no card in 扩展 opened anything (issue #129).
+  const [cardDetail, setCardDetail] = useState<MarketCardDetail | null>(null);
+
+  function openCardDetail(detail: MarketCardDetail | null) {
+    if (!detail) return;
+    setMenuId(null);
+    setConfirmUninstallId(null);
+    setCardDetail(detail);
+  }
 
   // "新增" import dialog (ported verbatim from the demo's PluginMarketplaceDemo
   // create panel). The demo shipped a pure UI stub; here every action is wired
@@ -926,6 +968,21 @@ export function ExtensionsMarketplace({
     setCreateOpen(false);
   }
 
+  /**
+   * Everything the import dialog can create lands in the user's own registry,
+   * which only the 个人的 scope lists. The dialog can be opened from any
+   * mode/scope (and its Plugin/Skill toggle is independent of the current
+   * mode), so after a successful import the catalog behind it was routinely
+   * showing a list the new resource is not part of — the import read as a
+   * no-op (issue #132). Point the catalog at the tab that holds it.
+   */
+  function revealImported(kind: 'plugin' | 'skill') {
+    setMode(kind === 'skill' ? 'skills' : 'plugins');
+    setScope('personal');
+    setQuery('');
+    setCategory(null);
+  }
+
   function switchCreateKind(next: 'plugin' | 'skill') {
     if (createBusy) return;
     setCreateKind(next);
@@ -952,6 +1009,7 @@ export function ExtensionsMarketplace({
       if (outcome.ok) {
         await refresh();
         setCreateOpen(false);
+        revealImported('plugin');
         setToast({ message: t('pluginsView.importPluginSuccess'), tone: 'success' });
       } else {
         setToast({ message: outcome.message || t('pluginsView.importFailed'), tone: 'error' });
@@ -970,6 +1028,7 @@ export function ExtensionsMarketplace({
         if (outcome.ok) {
           await refresh();
           setCreateOpen(false);
+          revealImported('plugin');
           setToast({ message: t('pluginsView.uploadPluginSuccess'), tone: 'success' });
         } else {
           setToast({ message: outcome.message || t('pluginsView.uploadFailed'), tone: 'error' });
@@ -991,6 +1050,7 @@ export function ExtensionsMarketplace({
       }
       await refresh();
       setCreateOpen(false);
+      revealImported('skill');
       setToast({
         message: t('pluginsView.importSkillSuccess', { name: localizeSkillName(locale, result.skill) }),
         tone: 'success',
@@ -1180,6 +1240,11 @@ export function ExtensionsMarketplace({
       const outcome = await installPluginSource(plugin.installSource ?? plugin.entry.name);
       if (outcome.ok) {
         await refresh();
+        // The open detail modal holds the pre-install catalog entry, so leaving
+        // it up would keep offering an Install for something already installed.
+        setCardDetail((current) =>
+          current?.kind === 'available' && current.plugin.key === plugin.key ? null : current,
+        );
         setToast({ message: t('pluginsView.installSuccess', { title }), tone: 'success' });
       } else {
         setToast({ message: outcome.message || t('pluginsView.installFailed', { title }), tone: 'error' });
@@ -1200,6 +1265,7 @@ export function ExtensionsMarketplace({
         description: localizePluginDescription(locale, record) || '',
         accent: marketAccent(record.id),
         action: { kind: 'try', record },
+        detail: { kind: 'plugin', record },
         share: personal && !shared ? { kind: 'plugins', id: record.id } : null,
         unshare: shared && canUnshare ? { kind: 'plugins', id: record.id } : null,
         uninstall:
@@ -1218,7 +1284,11 @@ export function ExtensionsMarketplace({
         title,
         description: skill.description || '',
         accent: marketAccent(skill.id),
-        action: { kind: 'none' },
+        // #5517's skill row carries a "试一试" action just like a plugin row;
+        // the port dropped it, which left every skill card with no way to use
+        // the skill at all (issue #131).
+        action: { kind: 'use-skill', skill },
+        detail: { kind: 'skill', skill },
         share: personal && !shared ? { kind: 'skills', id: skill.id } : null,
         unshare: shared && canUnshare ? { kind: 'skills', id: skill.id } : null,
         uninstall: skill.source === 'user' ? { kind: 'skills', id: skill.id } : null,
@@ -1252,6 +1322,9 @@ export function ExtensionsMarketplace({
             action: installed
               ? { kind: 'try', record: installed }
               : { kind: 'install', plugin },
+            detail: installed
+              ? { kind: 'plugin', record: installed }
+              : { kind: 'available', plugin },
             share: null,
             unshare: null,
             // Official entries are bundled with the app — nothing for the user
@@ -1278,6 +1351,7 @@ export function ExtensionsMarketplace({
           description: (record ? localizePluginDescription(locale, record) || '' : '') || meta?.description || '',
           accent: marketAccent(id),
           action: record ? { kind: 'try', record } : { kind: 'none' },
+          detail: record ? { kind: 'plugin', record } : null,
           share: null,
           unshare: canUnshare ? { kind: 'plugins', id } : null,
           // Removing a team resource from your own disk is not the team action;
@@ -1313,7 +1387,8 @@ export function ExtensionsMarketplace({
         title,
         description: skill?.description || meta?.description || '',
         accent: marketAccent(id),
-        action: { kind: 'none' },
+        action: skill ? { kind: 'use-skill', skill } : { kind: 'none' },
+        detail: skill ? { kind: 'skill', skill } : null,
         share: null,
         unshare: canUnshare ? { kind: 'skills', id } : null,
         uninstall: null,
@@ -1507,7 +1582,14 @@ export function ExtensionsMarketplace({
               // not then be repeated in the menu.
               const rowHasRunOrInstall =
                 (card.action.kind === 'try' && Boolean(onUsePlugin)) ||
+                (card.action.kind === 'use-skill' && Boolean(onUseSkill)) ||
                 card.action.kind === 'install';
+              // Installing is serialized daemon-side (the plugin lockfile is a
+              // read-modify-write), so a second install cannot start while one
+              // is in flight. Say so on the button instead of letting the click
+              // land on nothing (issue #109).
+              const blockedByOtherInstall =
+                card.action.kind === 'install' && installingKey !== null && !busy;
               const menuActions = [
                 ...(rowHasRunOrInstall && card.share ? (['share'] as const) : []),
                 ...(rowHasRunOrInstall && card.unshare ? (['unshare'] as const) : []),
@@ -1516,7 +1598,20 @@ export function ExtensionsMarketplace({
               return (
                 <article
                   key={card.id}
-                  className={`plugin-marketplace__item${mode === 'skills' ? ' plugin-marketplace__item--skill' : ''}`}
+                  className={`plugin-marketplace__item${mode === 'skills' ? ' plugin-marketplace__item--skill' : ''}${card.detail ? ' is-clickable' : ''}`}
+                  {...(card.detail
+                    ? {
+                      role: 'button',
+                      tabIndex: 0,
+                      'data-testid': `plugins-card-${card.id}`,
+                      onClick: () => openCardDetail(card.detail),
+                      onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        openCardDetail(card.detail);
+                      },
+                    }
+                    : {})}
                 >
                   <div className="plugin-marketplace__row">
                     <span
@@ -1549,9 +1644,23 @@ export function ExtensionsMarketplace({
                       <button
                         type="button"
                         className="plugin-marketplace__row-action"
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           const action = card.action as { kind: 'try'; record: InstalledPluginRecord };
                           onUsePlugin(action.record, 'use');
+                        }}
+                      >
+                        {t('pluginsView.tryIt')}
+                      </button>
+                    ) : card.action.kind === 'use-skill' && onUseSkill ? (
+                      <button
+                        type="button"
+                        className="plugin-marketplace__row-action"
+                        data-testid={`plugins-card-use-skill-${card.id}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const action = card.action as { kind: 'use-skill'; skill: SkillSummary };
+                          onUseSkill(action.skill);
                         }}
                       >
                         {t('pluginsView.tryIt')}
@@ -1560,20 +1669,28 @@ export function ExtensionsMarketplace({
                       <button
                         type="button"
                         className="plugin-marketplace__row-action"
-                        disabled={busy}
-                        onClick={() => {
+                        disabled={busy || blockedByOtherInstall}
+                        title={blockedByOtherInstall ? t('pluginsView.installQueuedHint') : undefined}
+                        data-testid={`plugins-card-install-${card.id}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
                           const action = card.action as { kind: 'install'; plugin: AvailableMarketplacePlugin };
                           void installAvailable(action.plugin, card.title);
                         }}
                       >
-                        {busy ? t('pluginsView.installing') : t('pluginsView.install')}
+                        {busy
+                          ? t('pluginsView.installing')
+                          : blockedByOtherInstall
+                            ? t('pluginsView.installWaiting')
+                            : t('pluginsView.install')}
                       </button>
                     ) : card.share ? (
                       <button
                         type="button"
                         className="plugin-marketplace__row-action"
                         disabled={busy}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           const share = card.share!;
                           void shareResource(share.kind, share.id, card.title);
                         }}
@@ -1585,7 +1702,8 @@ export function ExtensionsMarketplace({
                         type="button"
                         className="plugin-marketplace__row-action"
                         disabled={busy}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           const unshare = card.unshare!;
                           void unshareResource(unshare.kind, unshare.id, card.title);
                         }}
@@ -1595,7 +1713,15 @@ export function ExtensionsMarketplace({
                     ) : null}
 
                     {menuActions.length > 0 ? (
-                      <span className="plugin-marketplace__menu-wrap">
+                      <span
+                        className="plugin-marketplace__menu-wrap"
+                        ref={menuId === card.id ? openMenuRef : undefined}
+                        // One guard for the whole overflow affordance: the more
+                        // button and every menu item sit inside a card that is
+                        // itself a button, and none of them should also open the
+                        // detail modal.
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <button
                           type="button"
                           className="plugin-marketplace__more"
@@ -1674,6 +1800,55 @@ export function ExtensionsMarketplace({
         )}
       </div>
 
+      <AnimatePresence>
+        {cardDetail?.kind === 'plugin' ? (
+          <PluginDetailsModal
+            record={cardDetail.record}
+            onClose={() => setCardDetail(null)}
+            onUse={(record, action) => {
+              setCardDetail(null);
+              onUsePlugin?.(record, action);
+            }}
+            // The marketplace has no project to apply into; hide the Use action
+            // when the shell did not hand us a handler for it.
+            hideUseAction={!onUsePlugin}
+          />
+        ) : null}
+      </AnimatePresence>
+      <AnimatePresence>
+        {cardDetail?.kind === 'available' ? (
+          <AvailablePluginDetailsModal
+            plugin={cardDetail.plugin}
+            pending={installingKey === cardDetail.plugin.key}
+            onClose={() => {
+              if (installingKey !== cardDetail.plugin.key) setCardDetail(null);
+            }}
+            onUseInstalled={(record) => {
+              setCardDetail(null);
+              onUsePlugin?.(record, 'use');
+            }}
+            onInstall={(plugin) => {
+              void installAvailable(plugin, availablePluginTitle(plugin.entry, locale));
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
+      {cardDetail?.kind === 'skill' ? (
+        <SkillDetailsModal
+          skillId={cardDetail.skill.id}
+          summary={cardDetail.skill}
+          onClose={() => setCardDetail(null)}
+          {...(onUseSkill
+            ? {
+              onUse: () => {
+                const skill = cardDetail.skill;
+                setCardDetail(null);
+                onUseSkill(skill);
+              },
+            }
+            : {})}
+        />
+      ) : null}
       {createOpen ? (
         <div
           className="plugin-marketplace__modal-backdrop"

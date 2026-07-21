@@ -41,6 +41,7 @@ import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
 import { CreditsPanel } from './CreditsPanel';
 import { useI18n } from '../i18n';
+import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import {
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
@@ -336,6 +337,15 @@ export function EntryNavRail({
     return () => document.removeEventListener('pointerover', onDocPointerOver, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountOpen]);
+  // Hover-out alone leaves the menu open for anyone who never hovers: a touch
+  // user, or a click that lands somewhere else without the pointer crossing
+  // this container. Press-outside closes it now rather than 220ms later, and
+  // Escape gives the keyboard the same exit. Still a listener, not a backdrop,
+  // so the pointerover tracking above keeps receiving its events.
+  useDismissOnOutsideInteraction(accountOpen, accountContainerRef, () => {
+    cancelAccountClose();
+    setAccountOpen(false);
+  });
   const [teamOpen, setTeamOpen] = useState(false);
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>(
     () => cachedWorkspaceDirectory ?? [],

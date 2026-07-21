@@ -454,6 +454,30 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // prompt examples, then to a localized chip-label prompt. That keeps every
   // create template submittable from an empty composer instead of silently
   // disabling Send.
+  // #118: once the caret is in the editor, the animating placeholder reads as a
+  // second cursor. Tracked with native focusin/focusout on the wrapper rather
+  // than an editor prop, so this works for the Lexical editor without widening
+  // its API. `carouselActive` deliberately stays true — Send must still submit
+  // the current scenario from an empty composer.
+  const [promptFocused, setPromptFocused] = useState(false);
+  useEffect(() => {
+    const node = promptEditorRef.current;
+    if (!node) return;
+    const onIn = () => setPromptFocused(true);
+    const onOut = (ev: FocusEvent) => {
+      // focusout fires for moves *within* the editor too; only a target outside
+      // the wrapper is a real blur.
+      if (node.contains(ev.relatedTarget as Node | null)) return;
+      setPromptFocused(false);
+    };
+    node.addEventListener('focusin', onIn);
+    node.addEventListener('focusout', onOut);
+    return () => {
+      node.removeEventListener('focusin', onIn);
+      node.removeEventListener('focusout', onOut);
+    };
+  }, []);
+
   const carouselActive =
     active &&
     !submitting &&
@@ -1594,6 +1618,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             />
             <PlaceholderCarousel
               active={carouselActive}
+              paused={promptFocused}
               scenarios={carouselScenarios}
               onScenarioChange={setCarouselScenario}
             />

@@ -70,6 +70,22 @@ export function coalescedGet<T>(
 }
 
 /**
+ * Drop one key's in-flight/settled entry so the next call goes to the network.
+ *
+ * For callers that KNOW the cached answer is void — an identity change, not a
+ * routine revalidation. Coalescing assumes sub-second staleness is invisible,
+ * which stops being true the moment the user signs in: the read that just
+ * settled describes the previous identity, and sharing it would answer the
+ * post-sign-in refresh with the signed-out result it was fired to replace.
+ *
+ * Evicting an IN-FLIGHT entry is deliberate too — that request may have been
+ * issued before the change and cannot see it.
+ */
+export function evictCoalescedGet(key: string): void {
+  entries.delete(key);
+}
+
+/**
  * Drop every in-flight/settled entry. The module-level cache would otherwise
  * leak a settled result from one test into the next same-key call within the
  * share window; a global test `beforeEach` calls this so each test starts clean.

@@ -1331,6 +1331,15 @@ function AppInner() {
     setDesignSystems(list);
   }, []);
 
+  // The design-system catalog is workspace-scoped on the daemon (#145), so it
+  // is stale the moment the active workspace changes. Only the boot pass and a
+  // route change into home refetched it, and switching workspaces does neither
+  // — the switcher lives ON the home view, so `route.kind` stays 'home' — which
+  // left the previous workspace's library on screen until a reload.
+  useEffect(() => {
+    void refreshDesignSystems();
+  }, [workspaceContext?.workspaceId, refreshDesignSystems]);
+
   const refreshSkills = useCallback(async () => {
     const list = await fetchSkills();
     setSkills(list);

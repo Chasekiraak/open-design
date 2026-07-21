@@ -45,7 +45,15 @@ export interface PathDeps {
 
 export interface ResourceDeps {
   FIRST_PARTY_ATOMS?: Array<any>;
-  listAllDesignSystems: () => Promise<Array<DesignSystemSummary & { source?: string }>>;
+  // `workspaceId` scopes the user half of the catalog to one workspace (#145).
+  // Omit it to resolve a design system by id from anywhere.
+  listAllDesignSystems: (options?: {
+    workspaceId?: string | null;
+  }) => Promise<Array<DesignSystemSummary & { source?: string }>>;
+  // The workspace a catalog read should be scoped to (#145). Resolves the
+  // explicit local pin first and the workspace context otherwise; null when
+  // signed out / single-player.
+  resolveWorkspaceScope?: () => Promise<string | null>;
   listAllSkills: () => Promise<Array<SkillInfo & { source?: string }>>;
   // Mirrors listAllSkills but scans DESIGN_TEMPLATE_ROOTS so the Templates
   // surface only sees rendering-catalogue entries.

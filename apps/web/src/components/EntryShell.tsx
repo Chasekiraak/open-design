@@ -110,6 +110,7 @@ import { RecentProjectsStrip } from './RecentProjectsStrip';
 import {
   createPluginAuthoringHandoff,
   createPluginUseHandoff,
+  createSkillUseHandoff,
   type HomePromptHandoff,
 } from './home-hero/plugin-authoring';
 import {
@@ -793,6 +794,11 @@ export function EntryShell({
     changeView('home');
   }
 
+  function useSkillFromLibrary(skill: SkillSummary) {
+    setHomePromptHandoff(createSkillUseHandoff(Date.now(), skill));
+    changeView('home');
+  }
+
   useEffect(() => {
     if (view !== 'home' || !homePromptHandoff) return;
     const frame = window.requestAnimationFrame(() => {
@@ -997,6 +1003,26 @@ export function EntryShell({
     });
   }
 
+  /**
+   * Re-read every workspace surface because onboarding just ended.
+   *
+   * Onboarding is where a signed-out user signs IN, so the workspace context
+   * the shell resolved before it is stale by definition. Without this the rail
+   * came back in its signed-out shape — no workspace switcher, no 草稿 / 全部项目
+   * / Workspace 设置, and the "sign in to Open Design Cloud" callout still in
+   * the bottom-left corner (#140) — until a focus or the 30s poll happened to
+   * re-read it. `CloudSignInTip` fires the same three after its own sign-in.
+   *
+   * EVERY exit from onboarding must call this. It used to live inline in
+   * `finishOnboarding` only, so the "go build a design system" door left the
+   * shell on the stale signed-out context.
+   */
+  function refreshWorkspaceSurfacesAfterOnboarding() {
+    notifyWorkspaceContextRefresh();
+    notifyWorkspaceBillingRefresh();
+    notifyTeamProjectsChanged();
+  }
+
   // Called when the welcome flow ends. `survey` is present on the About-you
   // completion paths; we only build a recommendation when the user actually
   // provided a role or use-case, so a skipped/blank survey lands on the
@@ -1006,15 +1032,7 @@ export function EntryShell({
       setOnboardingRec(buildRecommendation(survey));
     }
     onCompleteOnboarding();
-    // Onboarding is where a signed-out user signs IN, so the workspace context
-    // the shell resolved before it is stale by definition. Without this the
-    // rail came back in its signed-out shape — no workspace switcher, no 草稿 /
-    // 全部项目 / Workspace 设置 — until a focus or the 30s poll happened to
-    // re-read it. `CloudSignInTip` already fires the same three after its own
-    // sign-in; this is the same moment reached by the other door.
-    notifyWorkspaceContextRefresh();
-    notifyWorkspaceBillingRefresh();
-    notifyTeamProjectsChanged();
+    refreshWorkspaceSurfacesAfterOnboarding();
     changeView('home');
   }
 
@@ -1126,6 +1144,7 @@ export function EntryShell({
             onThemeChange={onThemeChange}
             onGoBuild={() => {
               onCompleteOnboarding();
+              refreshWorkspaceSurfacesAfterOnboarding();
               setPendingDesignSystemCreateEntry('onboarding');
               navigate({ kind: 'design-system-create' });
             }}
@@ -1299,6 +1318,7 @@ export function EntryShell({
               <ExtensionsMarketplace
                 onCreatePlugin={startPluginAuthoring}
                 onUsePlugin={usePluginFromLibrary}
+                onUseSkill={useSkillFromLibrary}
               />
             </div>
             <div data-testid="entry-view-design-systems" data-active={view === 'design-systems' ? 'true' : 'false'} {...inactiveViewProps(view === 'design-systems')}>

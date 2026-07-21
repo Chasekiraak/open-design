@@ -15,9 +15,15 @@ interface Props {
   skillId: string;
   summary?: SkillSummary | null;
   onClose: () => void;
+  /**
+   * Runs the skill. Optional because most call sites open this modal purely to
+   * read a skill; only surfaces that can hand a skill to a composer pass it,
+   * and the footer action appears only for those.
+   */
+  onUse?: () => void;
 }
 
-export function SkillDetailsModal({ skillId, summary, onClose }: Props) {
+export function SkillDetailsModal({ skillId, summary, onClose, onUse }: Props) {
   const { locale, t } = useI18n();
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
@@ -181,6 +187,16 @@ export function SkillDetailsModal({ skillId, summary, onClose }: Props) {
         >
           {t('common.close')}
         </button>
+        {onUse ? (
+          <button
+            type="button"
+            className="plugin-details-modal__primary"
+            onClick={onUse}
+            data-testid="skill-details-use"
+          >
+            {t('pluginsView.tryIt')}
+          </button>
+        ) : null}
       </footer>
     </Dialog>
   );

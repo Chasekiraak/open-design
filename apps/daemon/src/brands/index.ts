@@ -119,6 +119,11 @@ export interface StartBrandExtractionOptions {
    *  brand stays `extracting` for the agent to drive (the legacy behavior tests
    *  use). */
   userDesignSystemsRoot?: string;
+  /** Workspace to claim the extracted design system for (#145). Design systems
+   *  share one directory, so the claim is what keeps a brand extracted in one
+   *  workspace out of the next workspace's library. Omitted (signed out /
+   *  single-player) leaves it unclaimed and visible everywhere. */
+  designSystemWorkspaceId?: string | null;
   /** Runtime data dir so the programmatically-built design system is sedimented
    *  into memory. Optional. */
   dataDir?: string;
@@ -351,6 +356,9 @@ export async function startBrandExtraction(
           sourceUrls: [url],
           sourceNotes: `Extracting from ${url}`,
         },
+        ...(opts.designSystemWorkspaceId?.trim()
+          ? { workspaceId: opts.designSystemWorkspaceId.trim() }
+          : {}),
       });
       draftDesignSystemId = draft.id;
       meta.designSystemId = draft.id;
@@ -1264,6 +1272,10 @@ export interface FinalizeBrandOptions {
   id: string;
   brandsRoot: string;
   userDesignSystemsRoot: string;
+  /** Workspace to claim a newly registered design system for (#145). A
+   *  re-finalize reuses the draft, whose claim is already preserved, so this
+   *  only matters on the agent-driven path that registers without a draft. */
+  designSystemWorkspaceId?: string | null;
   projectsRoot: string;
   /** Skills root so the final `brand.html` re-render can read the template. */
   skillsRoot: string;
@@ -1443,6 +1455,9 @@ async function finalizeBrandCore(opts: FinalizeBrandCoreOptions): Promise<BrandF
       ...(brand.description ? { companyBlurb: brand.description } : {}),
       sourceNotes: `Extracted from ${meta.sourceUrl}`,
     },
+    ...(opts.designSystemWorkspaceId?.trim()
+      ? { workspaceId: opts.designSystemWorkspaceId.trim() }
+      : {}),
   });
   throwIfProgrammaticExtractionNotCurrent(opts);
   const designSystemId = summary.id;

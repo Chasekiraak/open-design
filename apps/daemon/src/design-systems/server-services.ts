@@ -110,7 +110,16 @@ export function createDesignSystemServerServices({
     return skills.listSkills(roots.ALL_SKILL_LIKE_ROOTS);
   }
 
-  async function listAllDesignSystems() {
+  /**
+   * The design-system catalog.
+   *
+   * `workspaceId` narrows the USER half to the systems that workspace may see
+   * (#145); the built-in half is shipped with the app and stays global. Callers
+   * that resolve a system BY ID — project validation, install/import lookups —
+   * must keep omitting it, or a project would stop finding its own design
+   * system whenever the user is working from another workspace.
+   */
+  async function listAllDesignSystems(options: { workspaceId?: string | null } = {}) {
     const builtIn = (await designSystems.listDesignSystems(paths.DESIGN_SYSTEMS_DIR)).map((s) => ({
       ...s,
       source: 'built-in',
@@ -124,6 +133,7 @@ export function createDesignSystemServerServices({
         source: 'user',
         isEditable: true,
         defaultStatus: 'draft',
+        ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       });
     } catch {
       // User directory may not exist yet or be unreadable.

@@ -352,7 +352,12 @@ export function DesignSystemsTab({
   // simply empty and the share action is available but a no-op.
   const refreshTeamShared = useCallback(async (options: { refreshSystems?: boolean } = {}) => {
     try {
-      const ids = await coalescedGet('workspace-design-systems-team', async () => {
+      // Key the coalescing window by workspace (#145): the response is the
+      // ACTIVE workspace's shared set, so a constant key let a switch that
+      // landed inside the in-flight/TTL window serve the previous workspace's
+      // ids to the new one.
+      const cacheKey = `workspace-design-systems-team:${workspaceContext?.workspaceId ?? 'none'}`;
+      const ids = await coalescedGet(cacheKey, async () => {
         const res = await fetch('/api/workspace/design-systems/team', { cache: 'no-store' });
         if (!res.ok) throw new Error(`design-systems-team ${res.status}`);
         const body = (await res.json()) as { ids?: unknown };
@@ -366,7 +371,7 @@ export function DesignSystemsTab({
     } catch {
       // Non-fatal: leave the team collection empty on a transient failure.
     }
-  }, [onSystemsRefresh]);
+  }, [onSystemsRefresh, workspaceContext?.workspaceId]);
 
   useEffect(() => {
     void refreshTeamShared();

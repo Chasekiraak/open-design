@@ -46,6 +46,13 @@ export type DesignSystemSummary = {
   provenance?: DesignSystemProvenance;
   projectId?: string;
   teamSynced?: boolean;
+  /**
+   * The workspace this user design system belongs to, when one claimed it.
+   *
+   * Absent means UNCLAIMED, not "belongs to no workspace" — see
+   * `DesignSystemListOptions.workspaceId`.
+   */
+  workspaceId?: string;
 };
 
 export type DesignSystemFileKind =
@@ -201,6 +208,8 @@ type UserDesignSystemMetadata = {
   provenance?: DesignSystemProvenance;
   projectId?: string;
   teamSynced?: boolean;
+  /** Workspace that claimed this system; absent on anything written before #145. */
+  workspaceId?: string;
 };
 
 type AtomicTextFileWrite = {
@@ -250,6 +259,15 @@ export type UserDesignSystemInput = {
   body?: string;
   sourceNotes?: string;
   provenance?: DesignSystemProvenance;
+  /**
+   * Workspace to claim the new system for (#145). Set by the daemon from the
+   * active workspace selection at creation time; omitted leaves the system
+   * unclaimed and therefore visible from every workspace.
+   *
+   * Only `createUserDesignSystem` reads it — an update must never re-home an
+   * existing system just because the caller happened to be elsewhere.
+   */
+  workspaceId?: string;
 };
 
 export type UserDesignSystemRevisionInput = {
@@ -266,6 +284,27 @@ export type DesignSystemListOptions = {
   source?: DesignSystemSource;
   isEditable?: boolean;
   defaultStatus?: DesignSystemStatus;
+  /**
+   * Restrict the listing to design systems visible from this workspace (#145).
+   *
+   * User design systems all live in ONE flat directory under the daemon data
+   * root — there is no per-workspace store — so without this filter a system
+   * authored in workspace A also showed up in a brand-new workspace B.
+   *
+   * The rule is deliberately one-way: a system CLAIMED by another workspace is
+   * hidden, and an UNCLAIMED one (no `workspaceId` in its metadata) stays
+   * visible everywhere. Unclaimed is what every system written before this
+   * filter existed looks like, and hiding those would make design systems
+   * vanish from an upgrading user's library — a worse bug than the leak. New
+   * systems are stamped on write, so the reported flow (author in A, create a
+   * fresh B) is isolated from here on.
+   *
+   * Omitted / empty means "no workspace scope" and lists everything, which is
+   * what every non-catalog caller wants: resolving a design system BY ID (a
+   * project's `design_system_id`, validation, install/import lookups) must keep
+   * working regardless of which workspace happens to be active.
+   */
+  workspaceId?: string | null;
 };
 
 export async function listDesignSystems(
@@ -289,6 +328,7 @@ export async function listDesignSystems(
       if (!stats.isFile()) continue;
       const raw = await readFile(designPath, 'utf8');
       const metadata = await readUserMetadata(root, entry.name);
+      if (!designSystemVisibleFromWorkspace(metadata.workspaceId, options.workspaceId)) continue;
       const { data: frontmatter, body } = parseFrontmatter(raw);
       const titleMatch = /^#\s+(.+?)\s*$/m.exec(body);
       const markdownTitle =
@@ -333,12 +373,35 @@ export async function listDesignSystems(
         ...(metadata.provenance ? { provenance: metadata.provenance } : {}),
         ...(metadata.projectId ? { projectId: metadata.projectId } : {}),
         ...(metadata.teamSynced ? { teamSynced: true } : {}),
+        ...(metadata.workspaceId ? { workspaceId: metadata.workspaceId } : {}),
       });
     } catch {
       // Skip.
     }
   }
   return out;
+}
+
+/**
+ * Whether a design system claimed by `owner` should be listed while `scope` is
+ * the active workspace.
+ *
+ * Both halves of the "unknown" case resolve to VISIBLE, and for different
+ * reasons. No `scope` means the caller asked for the unscoped catalog (id
+ * resolution, install/import lookups), which must never hide anything. No
+ * `owner` means the system predates workspace stamping, and an upgrading user
+ * must not watch their library empty out. Only a positive disagreement — this
+ * system belongs to a DIFFERENT workspace — hides it.
+ */
+function designSystemVisibleFromWorkspace(
+  owner: string | undefined,
+  scope: string | null | undefined,
+): boolean {
+  const scopeId = scope?.trim();
+  if (!scopeId) return true;
+  const ownerId = owner?.trim();
+  if (!ownerId) return true;
+  return ownerId === scopeId;
 }
 
 function stringField(data: FrontmatterObject, key: string): string {
@@ -1186,6 +1249,9 @@ export async function createUserDesignSystem(
       createdAt: now,
       updatedAt: now,
       ...(provenance ? { provenance } : {}),
+      // Claim the system for the workspace it was authored in, so switching to
+      // another workspace no longer shows it (#145).
+      ...(input.workspaceId?.trim() ? { workspaceId: input.workspaceId.trim() } : {}),
     });
     if (artifactMode !== 'agent-managed') {
       await writeGeneratedDesignSystemFiles(root, dirId, {
@@ -2593,10 +2659,25 @@ async function readUserMetadata(root: string, id: string): Promise<UserDesignSys
       ...(provenance ? { provenance } : {}),
       ...(projectId ? { projectId } : {}),
       ...(parsed.teamSynced === true ? { teamSynced: true } : {}),
+      ...(cleanWorkspaceIdForMetadata(parsed.workspaceId)
+        ? { workspaceId: cleanWorkspaceIdForMetadata(parsed.workspaceId)! }
+        : {}),
     };
   } catch {
     return {};
   }
+}
+
+/**
+ * Accept a workspace id only in the opaque-token shape B issues. A malformed
+ * value is dropped rather than trusted, which lands the system in the UNCLAIMED
+ * bucket — visible everywhere — instead of silently claimed by garbage.
+ */
+function cleanWorkspaceIdForMetadata(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value) return null;
+  return /^[A-Za-z0-9._:-]{1,160}$/.test(value) ? value : null;
 }
 
 function cleanProjectIdForMetadata(raw: unknown): string | null {

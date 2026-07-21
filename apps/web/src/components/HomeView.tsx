@@ -702,6 +702,14 @@ export function HomeView({
       return;
     }
 
+    if (promptHandoff.source === 'skill-use') {
+      // Same destination as picking the skill from the composer's own picker:
+      // the skill becomes the run's active skill and seeds its example prompt.
+      useSkill(promptHandoff.skill, null);
+      scrollHomeToTop();
+      return;
+    }
+
     setActive(null);
     setActiveSkill(null);
     setSelectedPluginContexts([]);

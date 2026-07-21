@@ -73,6 +73,8 @@ export interface Dict {
   'workspaceInvite.title': string;
   'workspaceInvite.freePlanBody': string;
   'workspaceInvite.teamPlanBody': string;
+  'workspaceInvite.seatsExhaustedBody': string;
+  'workspaceInvite.seatsExhaustedAction': string;
   'workspaceInvite.emailLabel': string;
   'workspaceInvite.roleLabel': string;
   'workspaceInvite.defaultRoleLabel': string;
@@ -1607,6 +1609,8 @@ export interface Dict {
   'pluginsView.availableEmptyFiltered': string;
   'pluginsView.availableEmptyNoSources': string;
   'pluginsView.installing': string;
+  'pluginsView.installWaiting': string;
+  'pluginsView.installQueuedHint': string;
   'pluginsView.install': string;
   'pluginsView.sourcesTitle': string;
   'pluginsView.sourcesSubtitle': string;

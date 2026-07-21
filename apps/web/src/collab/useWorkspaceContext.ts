@@ -7,7 +7,7 @@ import type {
   WorkspaceContextResponse,
   WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
-import { coalescedGet } from '../lib/coalesced-get';
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 import { useWorkspaceInvalidation } from './workspace-events';
 
 // One shared read of the workspace context (`GET /api/workspace/context`) for the
@@ -21,6 +21,10 @@ export interface WorkspaceContextState {
   context: WorkspaceCollabContext | null;
   loading: boolean;
 }
+
+/** Coalescing key for `GET /api/workspace/context`; shared so an identity
+ *  change can evict exactly this read instead of the whole cache. */
+const WORKSPACE_CONTEXT_COALESCE_KEY = 'workspace-context';
 
 // Last successfully-resolved workspace context, kept at module scope so it
 // survives a component unmount/remount. Returning to the home view remounts the
@@ -78,12 +82,37 @@ export function useWorkspaceContext(): WorkspaceContextState {
     };
   }, []);
 
-  const loadContext = useCallback(async () => {
+  /**
+   * Read the workspace context.
+   *
+   * `markLoading` announces that this read was triggered by something that just
+   * CHANGED the identity (a sign-in), so the shell should treat the answer it
+   * currently holds as void rather than authoritative. It only ever promotes
+   * "no context" to "loading": a read that starts while a context is already in
+   * hand keeps showing it, which is what stops the rail flashing signed-out.
+   *
+   * Without it, signing in during onboarding left the bottom-left "sign in to
+   * Open Design Cloud" callout on screen for the whole (vela-backed,
+   * up-to-seconds) re-read, because `loading` had already settled to false on
+   * the earlier signed-out read and only `context !== null` gates the callout
+   * (#140). It also drops the coalescing entry, whose whole premise — that
+   * sub-second staleness is invisible — stops holding at exactly this moment:
+   * the cached answer describes the identity the user just replaced.
+   */
+  const loadContext = useCallback(async (options: { markLoading?: boolean } = {}) => {
+    if (options.markLoading) {
+      evictCoalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY);
+      if (mountedRef.current) {
+        setState((prev) =>
+          prev.context === null && !prev.loading ? { ...prev, loading: true } : prev,
+        );
+      }
+    }
     try {
       // Coalesced: every mounted consumer of this hook (and every focus/pageshow
       // refresh across them) fires the same read on a home-view burst — collapse
       // them to one request. The nav shell tolerates sub-second staleness.
-      const body = await coalescedGet('workspace-context', async () => {
+      const body = await coalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, async () => {
         const res = await fetch('/api/workspace/context', { cache: 'no-store' });
         if (!res.ok) throw new Error(`workspace-context ${res.status}`);
         return (await res.json()) as WorkspaceContextResponse;
@@ -129,21 +158,28 @@ export function useWorkspaceContext(): WorkspaceContextState {
     const refresh = () => {
       void loadContext();
     };
+    // An EXPLICIT refresh means a caller just changed the identity (signed in
+    // through onboarding or the rail callout) and is telling us so. Focus and
+    // visibility are ambient revalidation and stay silent — only the deliberate
+    // signal may blank a stale signed-out answer while the re-read runs (#140).
+    const refreshAfterIdentityChange = () => {
+      void loadContext({ markLoading: true });
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') refresh();
     };
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WORKSPACE_CONTEXT_REFRESH_STORAGE_KEY) refresh();
+      if (event.key === WORKSPACE_CONTEXT_REFRESH_STORAGE_KEY) refreshAfterIdentityChange();
     };
     window.addEventListener('focus', refresh);
     window.addEventListener('pageshow', refresh);
-    window.addEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, refresh);
+    window.addEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, refreshAfterIdentityChange);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pageshow', refresh);
-      window.removeEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, refresh);
+      window.removeEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, refreshAfterIdentityChange);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };

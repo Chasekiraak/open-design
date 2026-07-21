@@ -2620,6 +2620,61 @@ export async function startServer({
   };
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
   const getActiveWorkspaceId = () => activeWorkspace.get();
+
+  /**
+   * The workspace design systems are scoped to right now (#145).
+   *
+   * NOT simply `activeWorkspace.get()`. That store holds an EXPLICIT local pin,
+   * written only by `PUT /api/workspace/active` or the fresh-account bootstrap,
+   * so a user who has never switched workspaces has none at all — B's
+   * `workspaces/current` answers straight from the session and the pin is never
+   * written. Reading the pin alone therefore returned null for the most common
+   * install and stamped every design system as unclaimed, which looked exactly
+   * like the bug it was meant to fix.
+   *
+   * So: the pin wins when present (it is the deliberate choice, and a switch
+   * writes it before anything else reads), and otherwise the workspace context
+   * — the same authority every other workspace surface uses — answers.
+   *
+   * The context read is a vela round trip, so it is memoized briefly. The value
+   * only changes on a switch, and a switch writes the pin, which takes priority
+   * and bypasses this cache entirely.
+   */
+  let cachedWorkspaceScope: { id: string | null; at: number } | null = null;
+  const WORKSPACE_SCOPE_TTL_MS = 10_000;
+  async function resolveDesignSystemWorkspaceScope(): Promise<string | null> {
+    const pinned = getActiveWorkspaceId()?.trim();
+    if (pinned) return pinned;
+    if (cachedWorkspaceScope && Date.now() - cachedWorkspaceScope.at < WORKSPACE_SCOPE_TTL_MS) {
+      return cachedWorkspaceScope.id;
+    }
+    const context = await collab.workspaceContext.current({}).catch(() => null);
+    const id = context?.workspaceId?.trim() || null;
+    cachedWorkspaceScope = { id, at: Date.now() };
+    return id;
+  }
+
+  /**
+   * Create a user design system CLAIMED by the workspace it was authored in.
+   *
+   * User design systems share one flat directory, so the claim written here is
+   * the only thing that lets `GET /api/design-systems` keep one workspace's
+   * library out of another's (#145). Stamping at creation is deliberate: it is
+   * the one moment the authoring workspace is unambiguous, whereas deciding
+   * ownership later (at read time, from whatever workspace happens to be
+   * active) would re-home a system every time the user switched.
+   *
+   * A signed-out / single-player daemon resolves no workspace and writes no
+   * claim, which leaves the system visible everywhere — the correct answer when
+   * there are no workspaces to isolate.
+   */
+  const createWorkspaceOwnedDesignSystem: typeof createUserDesignSystem = async (root, input) => {
+    const workspaceId = await resolveDesignSystemWorkspaceScope();
+    return createUserDesignSystem(root, {
+      ...input,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
+  };
   // Persistent half of the sync design: a cheap digest GET decides whether the
   // catalog / member payload this daemon already has on disk is still current,
   // so a cold start (or a workspace not touched in a while) can skip the real
@@ -3466,7 +3521,15 @@ export async function startServer({
       }
       await fs.promises.writeFile(
         metadataPath,
-        `${JSON.stringify({ ...metadata, teamSynced: true }, null, 2)}\n`,
+        // Claim the pulled copy for the workspace whose hub served it (#145).
+        // A team-shared system is workspace-owned by construction, so leaving
+        // it unclaimed would keep leaking one team's library into the next
+        // workspace the user switches to.
+        `${JSON.stringify(
+          { ...metadata, teamSynced: true, ...(workspaceId ? { workspaceId } : {}) },
+          null,
+          2,
+        )}\n`,
         'utf8',
       );
     }
@@ -4319,6 +4382,7 @@ export async function startServer({
       listAllDesignTemplates,
       listAllSkillLikeEntries,
       listAllDesignSystems,
+      resolveWorkspaceScope: resolveDesignSystemWorkspaceScope,
       mimeFor,
     },
     tokenContractRebuild: {
@@ -4344,7 +4408,7 @@ export async function startServer({
     projectFiles: projectFileDeps,
     designSystems: {
       buildUserDesignSystemArchive,
-      createUserDesignSystem,
+      createUserDesignSystem: createWorkspaceOwnedDesignSystem,
       deleteUserDesignSystem,
       ensureUserDesignSystemWorkspaceProject,
       listAllDesignSystems,
@@ -4366,6 +4430,7 @@ export async function startServer({
   registerBrandRoutes(app, {
     brandsRoot: BRANDS_DIR,
     userDesignSystemsRoot: USER_DESIGN_SYSTEMS_DIR,
+    resolveDesignSystemWorkspaceId: resolveDesignSystemWorkspaceScope,
     projectsRoot: PROJECTS_DIR,
     skillsRoot: SKILLS_DIR,
     dataDir: RUNTIME_DATA_DIR,

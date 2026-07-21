@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import type { WorkspaceInviteRole } from '@open-design/contracts';
+import { Button } from '@open-design/components';
 import { Icon } from './Icon';
 import { useI18n } from '../i18n';
 
@@ -25,6 +26,19 @@ interface Props {
   onClose: () => void;
   /** Shows "你的团队有 1人" for single-seat plans (vs the team default). */
   freePlan?: boolean;
+  /**
+   * Seats the workspace can still fill. The daemon already computes this
+   * (`seatSummary.availableSeats`); until this dialog consumed it, a workspace
+   * with zero seats let the user type addresses, press 确认并邀请, and get a
+   * per-row failure back from B — the plan limit surfaced as a send error
+   * rather than as the reason they cannot invite yet (#115).
+   *
+   * `undefined` means "seat state unknown" and stays permissive, so a context
+   * that has not loaded yet never blocks a workspace that does have seats.
+   */
+  availableSeats?: number;
+  /** Opens B's plan-change flow. Rendered only when seats run out. */
+  onUpgrade?: () => void;
   /** Called with the entered rows when "确认并邀请" is pressed. The host
    *  decides whether to send invites directly or route through upgrade. */
   onSubmit?: (rows: InviteRow[]) => void;
@@ -42,7 +56,15 @@ function toCanonicalRole(role: string): WorkspaceInviteRole {
   return role === 'admin' || role === '管理员' ? 'admin' : 'member';
 }
 
-export function InviteDialog({ open, onClose, freePlan = false, onSubmit, canAssignRoles = true }: Props) {
+export function InviteDialog({
+  open,
+  onClose,
+  freePlan = false,
+  availableSeats,
+  onUpgrade,
+  onSubmit,
+  canAssignRoles = true,
+}: Props) {
   const { t } = useI18n();
   const [rows, setRows] = useState<InviteRow[]>([{ email: '', role: DEFAULT_ROLE }]);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
@@ -101,9 +123,14 @@ export function InviteDialog({ open, onClose, freePlan = false, onSubmit, canAss
     }
   }
 
+  // Seats are the gate B enforces anyway; checking here turns a post-send row
+  // failure into an up-front reason the user can act on. Unknown (undefined)
+  // stays permissive — see the prop docs.
+  const seatsExhausted = availableSeats !== undefined && availableSeats <= 0;
+
   async function handleConfirm() {
     const valid = rows.filter((r) => isEmail(r.email));
-    if (valid.length === 0 || submitting || success) return;
+    if (valid.length === 0 || submitting || success || seatsExhausted) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -158,10 +185,17 @@ export function InviteDialog({ open, onClose, freePlan = false, onSubmit, canAss
         <div className="entry-invite__form">
           <h2 className="entry-invite__title">{t('workspaceInvite.title')}</h2>
           <p className="entry-invite__teamsize">
-            {freePlan
-              ? t('workspaceInvite.freePlanBody')
-              : t('workspaceInvite.teamPlanBody')}
+            {seatsExhausted
+              ? t('workspaceInvite.seatsExhaustedBody')
+              : freePlan
+                ? t('workspaceInvite.freePlanBody')
+                : t('workspaceInvite.teamPlanBody')}
           </p>
+          {seatsExhausted && onUpgrade ? (
+            <Button variant="primary-ghost" onClick={onUpgrade}>
+              {t('workspaceInvite.seatsExhaustedAction')}
+            </Button>
+          ) : null}
 
           <div className="entry-invite__field-labels">
             <span className="entry-invite__label">{t('workspaceInvite.emailLabel')}</span>
@@ -235,7 +269,7 @@ export function InviteDialog({ open, onClose, freePlan = false, onSubmit, canAss
             type="button"
             className="entry-invite__submit"
             onClick={handleConfirm}
-            disabled={!hasValidEmail || submitting || success}
+            disabled={!hasValidEmail || submitting || success || seatsExhausted}
           >
             {success
               ? t('workspaceInvite.sent')

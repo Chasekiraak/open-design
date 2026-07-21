@@ -43,6 +43,8 @@ export const zhCN: Dict = {
   "workspaceInvite.title": "邀请成员加入你的团队",
   "workspaceInvite.freePlanBody": "免费版含 1 个席位，邀请同事后将引导你升级到团队版。",
   "workspaceInvite.teamPlanBody": "邀请同事加入团队，一起共享项目、设计系统与插件。",
+  "workspaceInvite.seatsExhaustedBody": "当前工作空间的席位已用完，先增加席位后即可邀请同事。",
+  "workspaceInvite.seatsExhaustedAction": "查看席位与套餐",
   "workspaceInvite.emailLabel": "通过电子邮件邀请成员",
   "workspaceInvite.roleLabel": "分配角色",
   "workspaceInvite.defaultRoleLabel": "默认身份",
@@ -1249,6 +1251,8 @@ export const zhCN: Dict = {
   "pluginsView.availableEmptyNoSources":
     "暂无可用条目。请在“来源”标签页添加来源。",
   "pluginsView.installing": "正在安装…",
+  "pluginsView.installWaiting": "等待中…",
+  "pluginsView.installQueuedHint": "正在安装另一个插件。安装会逐个进行，等它完成后即可安装这个。",
   "pluginsView.install": "安装",
   "pluginsView.sourcesTitle": "Registry 来源",
   "pluginsView.sourcesSubtitle": "为“可用插件”提供条目的插件市场目录。",

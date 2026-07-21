@@ -1,3 +1,4 @@
+import type { SkillSummary } from '@open-design/contracts';
 import type { PluginUseAction } from '../plugins-home/useActions';
 
 export type HomePromptHandoff =
@@ -17,6 +18,12 @@ export type HomePromptHandoff =
     source: 'plugin-use';
     action: PluginUseAction;
     inputs?: Record<string, unknown>;
+  }
+  | {
+    id: number;
+    skill: SkillSummary;
+    focus: boolean;
+    source: 'skill-use';
   };
 
 export const PLUGIN_AUTHORING_GOAL_INPUT = 'pluginGoal';
@@ -93,6 +100,17 @@ export function createPluginAuthoringHandoff(
     inputs,
     queryTemplate: PLUGIN_AUTHORING_PROMPT_TEMPLATE,
   };
+}
+
+/**
+ * Hands a skill picked outside the composer (the 扩展 marketplace) to the home
+ * hero, which selects it exactly as the composer's own skill picker would.
+ */
+export function createSkillUseHandoff(
+  id: number,
+  skill: SkillSummary,
+): HomePromptHandoff {
+  return { id, skill, focus: true, source: 'skill-use' };
 }
 
 export function createPluginUseHandoff(

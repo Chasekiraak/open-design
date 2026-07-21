@@ -569,9 +569,17 @@
   cursor: pointer;
 }
 
-.plugin-marketplace__row-action:hover {
+.plugin-marketplace__row-action:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+
+/* A row action that cannot run right now (an install waiting behind another
+   install, a share already in flight) had no disabled affordance at all, so the
+   click simply landed on nothing. */
+.plugin-marketplace__row-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .plugin-marketplace__more {

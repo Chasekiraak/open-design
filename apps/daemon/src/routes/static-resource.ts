@@ -95,6 +95,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     listAllDesignTemplates,
     listAllSkillLikeEntries,
     listAllDesignSystems,
+    resolveWorkspaceScope,
     mimeFor,
   } = ctx.resources;
   const { isLocalSameOrigin, resolvedPortRef, sendApiError } = ctx.http;
@@ -406,7 +407,13 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
 
   app.get('/api/design-systems', async (_req, res) => {
     try {
-      const systems = await listAllDesignSystems();
+      // The library CATALOG is workspace-scoped (#145): user design systems all
+      // share one directory on disk, so without this the systems authored in
+      // one workspace also filled a brand-new one. Every other caller of
+      // `listAllDesignSystems` resolves a system by id and stays unscoped.
+      const systems = await listAllDesignSystems({
+        workspaceId: (await resolveWorkspaceScope?.()) ?? null,
+      });
       res.json({
         designSystems: systems.map(({ body, ...rest }) => rest),
       });

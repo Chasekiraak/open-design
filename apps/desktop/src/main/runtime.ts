@@ -1036,6 +1036,11 @@ interface RendererCrashScreenContext {
 
 const CRASH_REPORT_ISSUES_URL = "https://github.com/nexu-io/open-design/issues/new";
 const SUPPORT_EMAIL = "support@open-design.ai";
+// Every address the app is allowed to hand to the OS mail client. Keep this in
+// sync with the renderer's own contact affordances (`CONTACT_EMAIL_URL` in
+// `apps/web/src/components/EntryNavRail.tsx`); an address that is not listed
+// here silently does nothing when clicked in the packaged shell.
+const FIRST_PARTY_EMAILS = new Set([SUPPORT_EMAIL, "contact@open.design"]);
 
 // Narrow allowlist for the crash screen's "Email us" action: only a mailto
 // addressed to our own support address, carrying nothing but the crash-screen's
@@ -1047,10 +1052,24 @@ const SUPPORT_EMAIL = "support@open-design.ai";
 // renderer could otherwise launch the mail client with arbitrary recipients, so
 // reject any `to`/`cc`/`bcc`/unknown query key.
 export function isSupportMailtoUrl(url: string): boolean {
+  return isMailtoUrlAddressedTo(url, (address) => address === SUPPORT_EMAIL);
+}
+
+// Same allowlist discipline as `isSupportMailtoUrl`, widened to every address
+// this app owns. A `mailto:` the user clicks in the UI never reaches the OS on
+// its own: Electron raises `will-navigate` for it, and a handler that only
+// recognises http(s) leaves the navigation to be dropped, so the click reads as
+// dead. Routing first-party mailtos through `shell.openExternal` is what
+// actually opens the mail client.
+export function isFirstPartyMailtoUrl(url: string): boolean {
+  return isMailtoUrlAddressedTo(url, (address) => FIRST_PARTY_EMAILS.has(address));
+}
+
+function isMailtoUrlAddressedTo(url: string, allow: (address: string) => boolean): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "mailto:") return false;
-    if (parsed.pathname.toLowerCase() !== SUPPORT_EMAIL) return false;
+    if (!allow(parsed.pathname.toLowerCase())) return false;
     for (const [key, value] of parsed.searchParams) {
       if (key !== "subject" && key !== "body") return false;
       // Reject a decoded CR/LF in the value: `subject=ok%0D%0ABcc:attacker@…`
@@ -2522,11 +2541,19 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedChildWindowUrl(url)) return { action: "allow" };
-    if (isHttpUrl(url)) void shell.openExternal(url);
+    if (isHttpUrl(url) || isFirstPartyMailtoUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 
   window.webContents.on("will-navigate", (event, url) => {
+    // A `mailto:` never belongs in this window. Hand it to the OS mail client
+    // and cancel the navigation, otherwise Electron drops it and the user sees
+    // the page sit there unchanged.
+    if (isFirstPartyMailtoUrl(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+      return;
+    }
     if (!isHttpUrl(url) || url === currentUrl) return;
     const currentOrigin = currentUrl ? new URL(currentUrl).origin : null;
     const nextOrigin = new URL(url).origin;

@@ -49,6 +49,10 @@ export interface BrandRoutesDeps {
    *  `user:<id>` design system, so selecting a brand in the composer reuses
    *  the existing design-system apply flow. */
   userDesignSystemsRoot: string;
+  /** The workspace an extracted brand's design system should be claimed by
+   *  (#145), so a brand extracted in one workspace does not fill the next
+   *  one's library. Resolves to null when signed out / single-player. */
+  resolveDesignSystemWorkspaceId?: () => Promise<string | null>;
   /** `<dataDir>/projects` — backing brand-extraction projects. */
   projectsRoot: string;
   /** Skills root — the agent-driven kit page is rendered from the bundled
@@ -239,6 +243,7 @@ export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): vo
         // returning, then harvests + synthesizes + finalizes the design system
         // in the background.
         userDesignSystemsRoot,
+        designSystemWorkspaceId: (await deps.resolveDesignSystemWorkspaceId?.()) ?? null,
         dataDir,
         programmaticAbortSignal: programmaticAbortController.signal,
         onBackgroundExtraction: (settled) => {
@@ -412,6 +417,7 @@ export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): vo
         id,
         brandsRoot,
         userDesignSystemsRoot,
+        designSystemWorkspaceId: (await deps.resolveDesignSystemWorkspaceId?.()) ?? null,
         projectsRoot,
         skillsRoot,
         dataDir,

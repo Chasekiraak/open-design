@@ -21,6 +21,7 @@ import { isDesignSystemProject, isPublishedDesignSystemProject } from './design-
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { useTeamMembers } from '../collab/useTeamMembers';
 import { notifyTeamProjectsChanged, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { teamConsoleUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 
 /** Which project space this strip renders. Drives the per-card 共享 badge
@@ -1224,6 +1225,18 @@ export function RecentProjectsStrip({
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
         canAssignRoles={canInvite}
+        availableSeats={workspaceContext?.seatSummary?.availableSeats}
+        onUpgrade={
+          workspaceContext?.workspaceSettingsUrl
+            ? () => {
+                window.open(
+                  teamConsoleUrl(workspaceContext.workspaceSettingsUrl!, 'upgrade'),
+                  '_blank',
+                  'noopener,noreferrer',
+                );
+              }
+            : undefined
+        }
       />
     </section>
   );

@@ -43,6 +43,8 @@ export const zhTW: Dict = {
   "workspaceInvite.title": "Invite members to your team",
   "workspaceInvite.freePlanBody": "The free plan includes 1 seat. Inviting teammates will guide you to upgrade to Teams.",
   "workspaceInvite.teamPlanBody": "Invite teammates to share projects, design systems, and plugins together.",
+  "workspaceInvite.seatsExhaustedBody": "目前工作空間的席次已用完，先增加席次後即可邀請同事。",
+  "workspaceInvite.seatsExhaustedAction": "查看席次與方案",
   "workspaceInvite.emailLabel": "Invite members by email",
   "workspaceInvite.roleLabel": "Assign role",
   "workspaceInvite.defaultRoleLabel": "Default role",
@@ -1252,6 +1254,8 @@ export const zhTW: Dict = {
   "pluginsView.availableEmptyNoSources":
     "目前沒有可用的項目。請在「來源」分頁中新增來源。",
   "pluginsView.installing": "安裝中…",
+  "pluginsView.installWaiting": "等待中…",
+  "pluginsView.installQueuedHint": "正在安裝另一個外掛。安裝會逐一進行，等它完成後即可安裝這個。",
   "pluginsView.install": "安裝",
   "pluginsView.sourcesTitle": "登錄來源",
   "pluginsView.sourcesSubtitle": "提供「可用」外掛項目的市集目錄。",
