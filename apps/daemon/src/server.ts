@@ -6814,6 +6814,12 @@ export async function startServer({
     // plain streams (most other CLIs) we forward raw chunks unchanged so
     // the browser can append them to the assistant's text buffer.
     let agentStreamError = null;
+    // Preserve whether a latched error predates a later cancel request. The
+    // close handler runs after cancel() has already flipped cancelRequested,
+    // so consulting only the current flag loses the ordering of those events.
+    let agentStreamErrorObservedBeforeCancellation = false;
+    let acpFatalErrorObservedBeforeCancellation = false;
+    run.runtimeFailureObservedBeforeCancellation = false;
     // Holds buffered plain-text stdout chunks for agents (currently
     // antigravity) where we need to inspect the full output at close
     // time before deciding whether to forward it. The auth-prompt guard
@@ -7080,6 +7086,8 @@ export async function startServer({
           String(ev.message || 'Agent stream error'),
           failureText,
         );
+        agentStreamErrorObservedBeforeCancellation = true;
+        run.runtimeFailureObservedBeforeCancellation = true;
         clearInactivityWatchdog();
         const authFailure = classifyAgentAuthFailure(agentId, failureText);
         if (authFailure?.status === 'missing') {
@@ -7224,6 +7232,8 @@ export async function startServer({
           const serviceCode = classifyAgentServiceFailure(failureText);
           agentStreamError = diagnostic?.message
             ?? rewriteKnownAgentStreamError(agentId, message, failureText);
+          agentStreamErrorObservedBeforeCancellation = true;
+          run.runtimeFailureObservedBeforeCancellation = true;
           send('error', createSseErrorPayload(
             diagnostic?.code ?? serviceCode ?? 'AGENT_EXECUTION_FAILED',
             agentStreamError,
@@ -7319,9 +7329,13 @@ export async function startServer({
           if (channel === 'agent') {
             sendAgentEvent(payload);
           } else if (channel === 'error') {
+            if (run.cancelRequested) return;
             if (agentStreamError) return;
             flushVisibleAgentStderr();
             agentStreamError = String(payload?.message || 'Pi session error');
+            agentStreamErrorObservedBeforeCancellation = true;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
             const piErrorCode = typeof payload?.code === 'string' ? payload.code : null;
             if (piErrorCode) {
               run.errorCode = piErrorCode;
@@ -7363,6 +7377,11 @@ export async function startServer({
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
         send: (event, data) => {
+          if (event === 'error') {
+            if (run.cancelRequested) return;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
+          }
           if (event === 'agent') {
             lastAgentEventPhase = summarizeAgentEventForInactivity(data);
           }
@@ -7585,13 +7604,13 @@ export async function startServer({
         ));
         return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
       }
-      if (!run.cancelRequested && acpSession?.hasFatalError()) {
+      if (acpFatalErrorObservedBeforeCancellation && acpSession?.hasFatalError()) {
         markRpcCloseReason('fatal_rpc_error');
         return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       parseBufferedAntigravityGeminiJsonEventStream();
       flushAgentTitleMarkerBuffer();
-      if (!run.cancelRequested && agentStreamError) {
+      if (agentStreamErrorObservedBeforeCancellation && agentStreamError) {
         markRpcCloseReason('stream_error');
         return finishWithRetryDecision('failed', code === 0 ? 1 : (code ?? 1), signal ?? null);
       }
