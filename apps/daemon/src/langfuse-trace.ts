@@ -134,6 +134,20 @@ export interface RunSummary {
     truncated: boolean;
   };
   diagnostics?: unknown;
+  contextBudget?: {
+    action: string;
+    source: string;
+    estimatedPromptTokens: number;
+    contextWindowTokens?: number;
+    reservedOutputTokens?: number;
+    inputBudgetTokens?: number;
+    budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
+  };
 }
 
 export interface MessageSummary {
@@ -1455,6 +1469,18 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
     stderr: ctx.run.stderr,
     stdout: ctx.run.stdout,
     diagnostics: ctx.run.diagnostics,
+    contextBudgetAction: ctx.run.contextBudget?.action,
+    contextBudgetSource: ctx.run.contextBudget?.source,
+    estimatedPromptTokens: ctx.run.contextBudget?.estimatedPromptTokens,
+    contextWindowTokens: ctx.run.contextBudget?.contextWindowTokens,
+    reservedOutputTokens: ctx.run.contextBudget?.reservedOutputTokens,
+    inputBudgetTokens: ctx.run.contextBudget?.inputBudgetTokens,
+    contextBudgetRatio: ctx.run.contextBudget?.budgetRatio,
+    priorSessionInputTokens: ctx.run.contextBudget?.priorSessionInputTokens,
+    projectedSessionInputTokens: ctx.run.contextBudget?.projectedInputTokens,
+    rolloverThresholdTokens: ctx.run.contextBudget?.rolloverThresholdTokens,
+    compactedPromptTokens: ctx.run.contextBudget?.compactedPromptTokens,
+    omittedTranscriptMessageBlocks: ctx.run.contextBudget?.omittedTranscriptMessageBlocks,
     eventsSummary: ctx.eventsSummary,
     tokens,
     cost_usd: costBreakdown.cost_usd,

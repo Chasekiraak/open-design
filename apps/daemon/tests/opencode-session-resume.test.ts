@@ -174,6 +174,62 @@ describe('opencode native session resume', () => {
     expect(turn2.argv[0]).toBe('run');
     expect(turn2.argv).not.toContain('-s');
   });
+
+  it('rolls over and compacts before a resumed session reaches its model context limit', async () => {
+    binDir = await mkdtemp(path.join(os.tmpdir(), 'od-opencode-context-rollover-bin-'));
+    const { bin, logPath } = await writeHighContextOpencode(binDir, 'opencode-context-rollover');
+
+    clearTelemetryEnv();
+    started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
+    await putConfig(started.url, {
+      agentId: 'opencode',
+      agentCliEnv: { opencode: { OPENCODE_BIN: bin } },
+      telemetry: { metrics: true, content: false, artifactManifest: false },
+      privacyDecisionAt: Date.now(),
+    });
+
+    const conversationId = await createConversation(started.url);
+    const model = 'anthropic/claude-sonnet-4-5';
+    expect((await sendRunAndWait(started.url, conversationId, 'first request', model)).status)
+      .toBe('succeeded');
+
+    const transcript = Array.from({ length: 40 }, (_, index) => [
+      `## ${index % 2 === 0 ? 'user' : 'assistant'}`,
+      `rollover-turn-${index} ${'x'.repeat(10_000)}`,
+    ].join('\n')).join('\n\n');
+    const turn2 = await sendRunAndWait(
+      started.url,
+      conversationId,
+      transcript,
+      model,
+      'latest rollover request',
+    );
+    expect(turn2.status).toBe('succeeded');
+
+    const runs = await readChatTurnRuns(logPath, conversationId);
+    expect(runs).toHaveLength(2);
+    const [, rollover] = runs as [RunInvocation, RunInvocation];
+    expect(rollover.argv).not.toContain('-s');
+    expect(rollover.stdin).toContain('Open Design compacted');
+    expect(rollover.stdin).not.toContain('rollover-turn-0');
+    expect(rollover.stdin).toContain('rollover-turn-39');
+
+    const events = await readRunEvents(turn2.eventsLogPath);
+    expect(hasDiagnostic(events, {
+      type: 'model_context_budget',
+      action: 'rollover',
+    })).toBe(true);
+    expect(events).toContainEqual(expect.objectContaining({
+      event: 'diagnostic',
+      data: expect.objectContaining({
+        type: 'native_session_recovery',
+        nativeSessionRecovery: expect.objectContaining({
+          state: 'resume_skipped',
+          guardReason: 'context_budget',
+        }),
+      }),
+    }));
+  });
 });
 
 // Fake opencode CLI: stamps a FIXED session id on a create turn and echoes it
@@ -248,6 +304,28 @@ async function writeNoHandleOpencode(
   console.log(JSON.stringify({ type: 'step_start', part: { type: 'step-start' } }));
   console.log(JSON.stringify({ type: 'text', part: { type: 'text', text: 'Reply without session id.' } }));
   console.log(JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', tokens: { input: 8, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 } }));
+  setTimeout(() => process.exit(0), 10);`,
+    }),
+    'utf8',
+  );
+  await chmod(bin, 0o755);
+  return { bin, logPath };
+}
+
+async function writeHighContextOpencode(
+  dir: string,
+  name: string,
+): Promise<{ bin: string; logPath: string }> {
+  const bin = path.join(dir, name);
+  const logPath = path.join(dir, `${name}-log.jsonl`);
+  await writeFile(
+    bin,
+    fakeOpencodeSource({
+      logPath,
+      body: `
+  console.log(JSON.stringify({ type: 'step_start', sessionID: SESSION, part: { type: 'step-start' } }));
+  console.log(JSON.stringify({ type: 'text', sessionID: SESSION, part: { type: 'text', text: 'High context reply.' } }));
+  console.log(JSON.stringify({ type: 'step_finish', sessionID: SESSION, part: { type: 'step-finish', tokens: { input: 170000, output: 7, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 } }));
   setTimeout(() => process.exit(0), 10);`,
     }),
     'utf8',
@@ -342,6 +420,8 @@ async function sendRunAndWait(
   url: string,
   encoded: string,
   message: string,
+  model?: string,
+  currentPrompt = message,
 ): Promise<RunStatus> {
   const [projectId, conversationId] = encoded.split('::');
   const assistantMessageId = `assistant_opencode_${randomUUID()}`;
@@ -359,8 +439,9 @@ async function sendRunAndWait(
       assistantMessageId,
       clientRequestId: `client_opencode_${randomUUID()}`,
       agentId: 'opencode',
+      ...(model ? { model } : {}),
       message,
-      currentPrompt: message,
+      currentPrompt,
     }),
   });
   expect(runResponse.status).toBe(202);

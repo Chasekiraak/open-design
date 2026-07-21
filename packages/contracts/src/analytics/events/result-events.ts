@@ -369,6 +369,18 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   retry_attempt_count?: number;
   retry_final_result?: TrackingRunRetryFinalResult;
   retry_suppressed_reason?: TrackingRunRetrySuppressedReason;
+  context_budget_action?: TrackingContextBudgetAction;
+  context_budget_source?: TrackingContextBudgetSource;
+  estimated_prompt_tokens?: number;
+  context_window_tokens?: number;
+  reserved_output_tokens?: number;
+  input_budget_tokens?: number;
+  context_budget_ratio?: number;
+  prior_session_input_tokens?: number;
+  projected_session_input_tokens?: number;
+  rollover_threshold_tokens?: number;
+  compacted_prompt_tokens?: number;
+  omitted_transcript_message_blocks?: number;
 }
 
 export interface LangfuseReportResultProps {

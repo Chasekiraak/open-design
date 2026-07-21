@@ -98,6 +98,20 @@ interface DaemonRunRecord {
   promptTelemetry?: PromptStackTelemetry;
   projectAttachmentPaths?: string[];
   projectMetadata?: Record<string, unknown> | null;
+  contextBudget?: {
+    action: string;
+    source: string;
+    estimatedPromptTokens: number;
+    contextWindowTokens?: number;
+    reservedOutputTokens?: number;
+    inputBudgetTokens?: number;
+    budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
+  };
 }
 
 interface TraceSafeManifestResult {

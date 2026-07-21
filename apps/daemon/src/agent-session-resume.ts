@@ -25,8 +25,45 @@ export interface AgentResumeContext {
   isResuming: boolean;
   /** Hash of the stable instruction block last sent on this session, or null. */
   storedStablePromptHash: string | null;
+  /** Effective provider input size recorded on the session's last turn. */
+  storedInputTokens: number | null;
   /** Set when a stored session existed but was rejected; see the type. */
   invalidationReason: ResumeInvalidationReason | null;
+}
+
+function readStoredSessionInputTokens(
+  db: SqliteDb,
+  messageId: string | null | undefined,
+): number | null {
+  if (!messageId) return null;
+  const row = db
+    .prepare('SELECT events_json AS eventsJson FROM messages WHERE id = ?')
+    .get(messageId) as { eventsJson?: unknown } | undefined;
+  if (!row || typeof row.eventsJson !== 'string') return null;
+  let events: unknown;
+  try {
+    events = JSON.parse(row.eventsJson);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(events)) return null;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
+    const usage = event as {
+      kind?: unknown;
+      inputTokens?: unknown;
+      inputTokensEffective?: unknown;
+    };
+    if (usage.kind !== 'usage') continue;
+    const effective = typeof usage.inputTokensEffective === 'number'
+      ? usage.inputTokensEffective
+      : usage.inputTokens;
+    if (typeof effective === 'number' && Number.isFinite(effective) && effective > 0) {
+      return Math.floor(effective);
+    }
+  }
+  return null;
 }
 
 export type CapturedAgentSessionResult = 'stored' | 'cleared' | 'skipped';
@@ -112,6 +149,9 @@ export function resolveAgentResumeContext(
     newSessionId: randomUUID(),
     isResuming: resumable,
     storedStablePromptHash: resumable ? (record?.stablePromptHash ?? null) : null,
+    storedInputTokens: resumable
+      ? readStoredSessionInputTokens(db, record?.lastMessageId)
+      : null,
     invalidationReason,
   };
 }
