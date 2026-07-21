@@ -230,6 +230,56 @@ describe('opencode native session resume', () => {
       }),
     }));
   });
+
+  it('rolls over when changed stable instructions push the exact resume payload past the threshold', async () => {
+    binDir = await mkdtemp(path.join(os.tmpdir(), 'od-opencode-stable-rollover-bin-'));
+    const { bin, logPath } = await writeHighContextOpencode(
+      binDir,
+      'opencode-stable-rollover',
+      100_000,
+    );
+
+    clearTelemetryEnv();
+    started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
+    await putConfig(started.url, {
+      agentId: 'opencode',
+      agentCliEnv: { opencode: { OPENCODE_BIN: bin } },
+      telemetry: { metrics: true, content: false, artifactManifest: false },
+      privacyDecisionAt: Date.now(),
+    });
+
+    const conversationId = await createConversation(started.url);
+    const model = 'anthropic/claude-sonnet-4-5';
+    expect((await sendRunAndWait(
+      started.url,
+      conversationId,
+      'first request',
+      model,
+      'first request',
+      'stable-v1',
+    )).status).toBe('succeeded');
+
+    const turn2 = await sendRunAndWait(
+      started.url,
+      conversationId,
+      'second request',
+      model,
+      'second request',
+      `stable-v2 ${'s'.repeat(180_000)}`,
+    );
+    expect(turn2.status).toBe('succeeded');
+
+    const runs = await readChatTurnRuns(logPath, conversationId);
+    expect(runs).toHaveLength(2);
+    const [, rollover] = runs as [RunInvocation, RunInvocation];
+    expect(rollover.argv).not.toContain('-s');
+
+    const events = await readRunEvents(turn2.eventsLogPath);
+    expect(hasDiagnostic(events, {
+      type: 'model_context_budget',
+      action: 'rollover',
+    })).toBe(true);
+  });
 });
 
 // Fake opencode CLI: stamps a FIXED session id on a create turn and echoes it
@@ -315,6 +365,7 @@ async function writeNoHandleOpencode(
 async function writeHighContextOpencode(
   dir: string,
   name: string,
+  inputTokens = 170_000,
 ): Promise<{ bin: string; logPath: string }> {
   const bin = path.join(dir, name);
   const logPath = path.join(dir, `${name}-log.jsonl`);
@@ -325,7 +376,7 @@ async function writeHighContextOpencode(
       body: `
   console.log(JSON.stringify({ type: 'step_start', sessionID: SESSION, part: { type: 'step-start' } }));
   console.log(JSON.stringify({ type: 'text', sessionID: SESSION, part: { type: 'text', text: 'High context reply.' } }));
-  console.log(JSON.stringify({ type: 'step_finish', sessionID: SESSION, part: { type: 'step-finish', tokens: { input: 170000, output: 7, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 } }));
+  console.log(JSON.stringify({ type: 'step_finish', sessionID: SESSION, part: { type: 'step-finish', tokens: { input: ${inputTokens}, output: 7, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 } }));
   setTimeout(() => process.exit(0), 10);`,
     }),
     'utf8',
@@ -422,6 +473,7 @@ async function sendRunAndWait(
   message: string,
   model?: string,
   currentPrompt = message,
+  systemPrompt?: string,
 ): Promise<RunStatus> {
   const [projectId, conversationId] = encoded.split('::');
   const assistantMessageId = `assistant_opencode_${randomUUID()}`;
@@ -440,6 +492,7 @@ async function sendRunAndWait(
       clientRequestId: `client_opencode_${randomUUID()}`,
       agentId: 'opencode',
       ...(model ? { model } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
       message,
       currentPrompt,
     }),

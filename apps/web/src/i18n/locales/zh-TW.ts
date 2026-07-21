@@ -56,12 +56,13 @@ export const zhTW: Dict = {
   "chat.runError.title.signInRequired": "需要登入",
   "chat.runError.title.rateLimited": "已達用量上限",
   "chat.runError.title.generic": "任務執行失敗",
+  "chat.runError.title.artifactMissing": "未產生檔案產物",
   "chat.runError.signInMessage.amr":
     "Open Design Cloud 智慧體尚未登入，前往登入即可正常使用",
   "chat.runError.signInMessage.other":
     "{agent}尚未登入，請在本機檢查登入狀態。推薦使用 Open Design Cloud 智慧體，更穩定划算",
   "chat.runError.agentFallback": "智慧體",
-  "chat.runError.sourceLabel": "錯誤原始碼",
+  "chat.runError.sourceLabel": "查看錯誤詳情",
   "chat.runError.sourceExpandAria": "展開錯誤原始碼",
   "chat.runError.sourceCollapseAria": "收合錯誤原始碼",
   "chat.runError.title.cliMissing": "智慧體尚未安裝",

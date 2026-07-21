@@ -40,6 +40,7 @@ import {
   upsertMessage,
 } from '../db.js';
 import { readVelaLoginStatus } from '../integrations/vela.js';
+import { getDetectedRuntimeVersions } from '../runtimes/detection.js';
 import {
   deriveLangfuseDeliveryState,
   readTelemetrySinkConfig,
@@ -183,6 +184,13 @@ interface ChatRun {
     rolloverThresholdTokens?: number;
     compactedPromptTokens?: number;
     omittedTranscriptMessageBlocks?: number;
+  };
+  retryOriginalFailure?: {
+    failure_category?: string;
+    failure_detail?: string;
+    failure_stage?: string;
+    retryable?: boolean;
+    user_action?: string;
   };
   artifactOutcome?: {
     artifactCount: number;
@@ -1239,6 +1247,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
           : modelIdForTracking(usageAnalytics.agent_reported_model);
+        const runtimeVersions = getDetectedRuntimeVersions(run.agentId);
         for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
           design.analytics.capture({
             eventName: retryEvent.event,
@@ -1301,6 +1310,33 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
               : {}),
             ...(run.contextBudget?.omittedTranscriptMessageBlocks !== undefined
               ? { omitted_transcript_message_blocks: run.contextBudget.omittedTranscriptMessageBlocks }
+              : {}),
+            ...(runtimeVersions?.agentCliVersion
+              ? { agent_cli_version: runtimeVersions.agentCliVersion }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionName
+              ? { runtime_companion_name: runtimeVersions.runtimeCompanionName }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionVersion
+              ? { runtime_companion_version: runtimeVersions.runtimeCompanionVersion }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_category
+              ? {
+                  retry_original_failure_category:
+                    run.retryOriginalFailure.failure_category,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_detail
+              ? {
+                  retry_original_failure_detail:
+                    run.retryOriginalFailure.failure_detail,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_stage
+              ? {
+                  retry_original_failure_stage:
+                    run.retryOriginalFailure.failure_stage,
+                }
               : {}),
             ...(run.retrySuppressedReason
               ? { retry_suppressed_reason: run.retrySuppressedReason }

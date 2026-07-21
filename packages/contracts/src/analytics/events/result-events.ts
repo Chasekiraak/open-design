@@ -373,6 +373,12 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   rollover_threshold_tokens?: number;
   compacted_prompt_tokens?: number;
   omitted_transcript_message_blocks?: number;
+  agent_cli_version?: string;
+  runtime_companion_name?: string;
+  runtime_companion_version?: string;
+  retry_original_failure_category?: TrackingRunFailureCategory;
+  retry_original_failure_detail?: TrackingRunFailureDetail;
+  retry_original_failure_stage?: TrackingRunFailureStage;
 }
 
 export interface LangfuseReportResultProps {

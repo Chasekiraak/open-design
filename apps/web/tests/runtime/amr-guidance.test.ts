@@ -142,7 +142,8 @@ describe('resolveRunFailureUi', () => {
   // actionable fix, resolved the same way for any agent, with a plain Retry and
   // no AMR promotion (these aren't "switch to hosted model" cases).
   it('maps agent-agnostic root-cause codes to a named type + guidance for any agent', () => {
-    const cases: Array<[string, string, string]> = [
+    const cases: Array<[string, string, string | null]> = [
+      ['ARTIFACT_NOT_FOUND', 'chat.runError.title.artifactMissing', null],
       ['AGENT_UNAVAILABLE', 'chat.runError.title.cliMissing', 'chat.runError.cliMissingMessage'],
       ['AGENT_PROMPT_TOO_LARGE', 'chat.runError.title.promptTooLarge', 'chat.runError.promptTooLargeMessage'],
       ['AMR_MODEL_UNAVAILABLE', 'chat.runError.title.modelUnavailable', 'chat.runError.modelUnavailableMessage'],

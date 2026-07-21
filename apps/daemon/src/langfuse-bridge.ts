@@ -53,10 +53,14 @@ import {
   collectStdoutTailSummary,
   summarizeRunDiagnosticsForAnalytics,
 } from './run-diagnostics.js';
-import { classifyRunFailure } from './run-failure-classification.js';
+import {
+  classifyRunFailure,
+  type RunFailureClassification,
+} from './run-failure-classification.js';
 import { deriveRunErrorCode, runResultFromStatus } from './run-result.js';
 import { buildTraceObjectManifests } from './trace-object-manifest.js';
 import type { TraceArtifactObjectSource, TraceObjectUploadManifests } from './trace-object-manifest.js';
+import { getDetectedRuntimeVersions } from './runtimes/detection.js';
 
 interface DaemonRunRecord {
   id: string;
@@ -111,6 +115,10 @@ interface DaemonRunRecord {
     compactedPromptTokens?: number;
     omittedTranscriptMessageBlocks?: number;
   };
+  retryAttemptCount?: number;
+  retryFinalResult?: string;
+  retrySuppressedReason?: string;
+  retryOriginalFailure?: RunFailureClassification;
 }
 
 interface TraceSafeManifestResult {
@@ -1039,6 +1047,7 @@ export async function reportRunCompletedFromDaemon(
     const runtime: RuntimeInfo = {
       ...getRuntimeInfo(opts.appVersion ?? null),
       ...(run.clientType ? { clientType: run.clientType } : {}),
+      ...(getDetectedRuntimeVersions(run.agentId) ?? {}),
     };
     const artifacts = summarizeProducedFiles(traceObjectFilesRaw);
     const diagnostics = summarizeRunDiagnosticsForAnalytics({
@@ -1092,6 +1101,16 @@ export async function reportRunCompletedFromDaemon(
         ...(stdout ? { stdout } : {}),
         diagnostics,
         ...(run.contextBudget ? { contextBudget: run.contextBudget } : {}),
+        retryAttemptCount: run.retryAttemptCount ?? 0,
+        ...(run.retryFinalResult
+          ? { retryFinalResult: run.retryFinalResult }
+          : {}),
+        ...(run.retrySuppressedReason
+          ? { retrySuppressedReason: run.retrySuppressedReason }
+          : {}),
+        ...(run.retryOriginalFailure
+          ? { retryOriginalFailure: run.retryOriginalFailure }
+          : {}),
       },
       message: {
         messageId: run.assistantMessageId ?? '',

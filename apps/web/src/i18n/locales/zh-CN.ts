@@ -56,12 +56,13 @@ export const zhCN: Dict = {
   "chat.runError.title.signInRequired": "需要登录",
   "chat.runError.title.rateLimited": "已达用量上限",
   "chat.runError.title.generic": "任务执行失败",
+  "chat.runError.title.artifactMissing": "未生成文件产物",
   "chat.runError.signInMessage.amr":
     "Open Design Cloud 智能体尚未登录，前往登录即可正常使用",
   "chat.runError.signInMessage.other":
     "{agent}尚未登录，请本地检查登录状态。推荐使用 Open Design Cloud 智能体，更稳定划算",
   "chat.runError.agentFallback": "智能体",
-  "chat.runError.sourceLabel": "报错源码",
+  "chat.runError.sourceLabel": "查看错误详情",
   "chat.runError.sourceExpandAria": "展开报错源码",
   "chat.runError.sourceCollapseAria": "收起报错源码",
   "chat.runError.title.cliMissing": "智能体未安装",

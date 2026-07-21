@@ -73,11 +73,40 @@ function knownModelFamilyContextWindow(modelId: string | null): number | null {
   return null;
 }
 
-function compactionMarker(omittedMessageBlocks: number): string {
+function compactionMarker(
+  omittedMessageBlocks: number,
+  trimmedRetainedBlock = false,
+): string {
+  const compactedDescription = omittedMessageBlocks > 0
+    ? `${omittedMessageBlocks} older transcript message block${omittedMessageBlocks === 1 ? '' : 's'}${trimmedRetainedBlock ? ' and trimmed the oldest content from the retained block' : ''}`
+    : 'the retained transcript message block by trimming its oldest content';
   return [
-    `[Open Design compacted ${omittedMessageBlocks} older transcript message block${omittedMessageBlocks === 1 ? '' : 's'} while rolling over the upstream agent session.`,
+    `[Open Design compacted ${compactedDescription} while rolling over the upstream agent session.`,
     'The complete history remains persisted; continue from the retained recent turns.]',
   ].join(' ');
+}
+
+function utf8HeadWithinBytes(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, 'utf8');
+  if (bytes.length <= maxBytes) return value;
+  let end = Math.max(0, maxBytes);
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString('utf8');
+}
+
+function utf8TailWithinBytes(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value, 'utf8');
+  if (bytes.length <= maxBytes) return value;
+  let start = Math.max(0, bytes.length - maxBytes);
+  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1;
+  return bytes.subarray(start).toString('utf8');
+}
+
+function fitPromptTail(prefix: string, tail: string, maxTokens: number): string {
+  const maxBytes = maxTokens * 3;
+  const prefixBytes = Buffer.byteLength(prefix, 'utf8');
+  if (prefixBytes >= maxBytes) return utf8HeadWithinBytes(prefix, maxBytes);
+  return `${prefix}${utf8TailWithinBytes(tail, maxBytes - prefixBytes)}`;
 }
 
 export function compactTranscriptForSessionRollover(
@@ -100,9 +129,7 @@ export function compactTranscriptForSessionRollover(
     .filter((index) => index >= 0);
   if (starts.length === 0) {
     const marker = compactionMarker(1);
-    const maxBytes = Math.max(1, safeMaxTokens * 3 - Buffer.byteLength(`${marker}\n\n`, 'utf8'));
-    const tail = Buffer.from(transcript, 'utf8').subarray(-maxBytes).toString('utf8');
-    const prompt = `${marker}\n\n${tail}`;
+    const prompt = fitPromptTail(`${marker}\n\n`, transcript, safeMaxTokens);
     return {
       prompt,
       originalTokens,
@@ -115,7 +142,7 @@ export function compactTranscriptForSessionRollover(
     transcript.slice(start, starts[index + 1] ?? transcript.length).trim(),
   );
   let firstRetained = blocks.length - 1;
-  let prompt = `${compactionMarker(firstRetained)}\n\n${blocks[firstRetained]}`;
+  let prompt = `${compactionMarker(firstRetained)}\n\n${blocks[firstRetained]!}`;
   for (let index = blocks.length - 2; index >= 0; index -= 1) {
     const candidate = index === 0
       ? blocks.slice(index).join('\n\n')
@@ -123,6 +150,17 @@ export function compactTranscriptForSessionRollover(
     if (estimatePromptTokens(candidate) > safeMaxTokens) break;
     firstRetained = index;
     prompt = candidate;
+  }
+  if (estimatePromptTokens(prompt) > safeMaxTokens) {
+    const retainedBlock = blocks[firstRetained]!;
+    const headingMatch = /^(## (?:user|assistant)[ \t]*\r?\n)/u.exec(retainedBlock);
+    const heading = headingMatch?.[1] ?? '';
+    const retainedTail = heading ? retainedBlock.slice(heading.length) : retainedBlock;
+    prompt = fitPromptTail(
+      `${compactionMarker(firstRetained, true)}\n\n${heading}`,
+      retainedTail,
+      safeMaxTokens,
+    );
   }
   const omittedMessageBlocks = firstRetained;
   return {

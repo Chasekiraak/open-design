@@ -136,6 +136,7 @@ export type RunFailureTitleKey =
   | 'chat.runError.title.emptyOutput'
   | 'chat.runError.title.sessionExpired'
   | 'chat.runError.title.gitBashMissing'
+  | 'chat.runError.title.artifactMissing'
   | 'chat.runError.title.cpuUnsupported'
   | 'chat.runError.title.generic';
 
@@ -176,6 +177,12 @@ function retryWithGuidance(
 // of that taxonomy — a human-readable type name plus a one-line instruction,
 // with the raw upstream string preserved in the card's collapsible source area.
 const AGENT_AGNOSTIC_FAILURE_UI: Record<string, RunFailureUi> = {
+  // The run completed but did not leave a deliverable file. Name the actual
+  // missing outcome in the compact card and keep the raw reason in details.
+  ARTIFACT_NOT_FOUND: retryWithGuidance(
+    'chat.runError.title.artifactMissing',
+    null,
+  ),
   // CLI binary not found on PATH (user_action: install_cli).
   AGENT_UNAVAILABLE: retryWithGuidance(
     'chat.runError.title.cliMissing',

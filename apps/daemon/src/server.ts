@@ -4944,27 +4944,6 @@ export async function startServer({
             currentAssistantMessageId: run.assistantMessageId ?? null,
           })
         : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, storedInputTokens: null as number | null, invalidationReason: null };
-    const sessionContextBudget = agentResumeCtx.isResuming
-      ? evaluateModelContextBudget({
-          prompt: typeof currentPrompt === 'string' ? currentPrompt : String(message ?? ''),
-          modelId: safeModel,
-          metadata: getKnownModelOption(
-            def,
-            safeModel,
-            requestedLiveModelScope,
-          )?.metadata,
-          priorSessionInputTokens: agentResumeCtx.storedInputTokens,
-        })
-      : null;
-    if (sessionContextBudget?.action === 'rollover') {
-      agentResumeCtx = {
-        ...agentResumeCtx,
-        resumeSessionId: null,
-        isResuming: false,
-        storedStablePromptHash: null,
-        invalidationReason: 'context_budget',
-      };
-    }
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
       design.runs.emit(run, 'diagnostic', {
@@ -4972,25 +4951,9 @@ export async function startServer({
         nativeSessionRecovery: run.nativeSessionRecovery,
       });
     };
-    run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
-      agent: def,
-      supportsSessionResume: agentSupportsSessionResume,
-      isResuming: agentResumeCtx.isResuming,
-      resumeSessionId: agentResumeCtx.resumeSessionId,
-      storedSessionId: agentResumeCtx.storedSessionId,
-      invalidationReason: agentResumeCtx.invalidationReason,
-    });
-    publishNativeSessionRecoveryMetadata();
-    const rolloverCompaction =
-      sessionContextBudget?.action === 'rollover' &&
-      sessionContextBudget.inputBudgetTokens
-        ? compactTranscriptForSessionRollover(
-            typeof message === 'string' ? message : String(message ?? ''),
-            Math.max(4_096, Math.floor(sessionContextBudget.inputBudgetTokens * 0.6)),
-          )
-        : null;
-    const userRequestPrompt = composeChatUserRequestForAgent(
-      rolloverCompaction?.prompt ?? message,
+    let rolloverCompaction: ReturnType<typeof compactTranscriptForSessionRollover> | null = null;
+    let userRequestPrompt = composeChatUserRequestForAgent(
+      message,
       currentPrompt,
       // Only trim to the latest turn when we are actually resuming an
       // existing session. A create turn still sends the full transcript so
@@ -5013,7 +4976,7 @@ export async function startServer({
     // `runtimeToolPrompt` is part of the fingerprint and varies only when the
     // tool-token grant's presence flips between turns (rare cwd/projectId edge
     // cases); any such change correctly forces a full re-send that turn.
-    const includeStableInstructions = computeIncludeStable(
+    let includeStableInstructions = computeIncludeStable(
       agentResumeCtx.isResuming,
       agentResumeCtx.storedStablePromptHash,
       currentStableHash,
@@ -5024,20 +4987,30 @@ export async function startServer({
       currentStableHash,
     });
     const browserUsePromptGuard = renderBrowserUseUnavailablePrompt(run.browserUse ?? null);
-    const titleGenerationRequested =
-      titleGeneration &&
-      typeof titleGeneration === 'object' &&
-      titleGeneration.enabled === true &&
-      !agentResumeCtx.isResuming;
-    const titleGenerationPrompt = titleGenerationRequested
-      ? [
-          'Internal title task:',
-          'Before answering the user request, emit exactly one short title marker:',
-          '<od-title>Title Here</od-title>',
-          'Rules: 2-6 words, preserve the user request language, no quotes, no markdown, no punctuation unless necessary.',
-          'Do not mention this title task to the user. Continue with the normal answer after the title marker.',
-        ].join('\n')
-      : '';
+    const titleGenerationForResumeState = (isResuming: boolean) => {
+      const requested = Boolean(
+        titleGeneration &&
+        typeof titleGeneration === 'object' &&
+        titleGeneration.enabled === true &&
+        !isResuming,
+      );
+      return {
+        requested,
+        prompt: requested
+          ? [
+              'Internal title task:',
+              'Before answering the user request, emit exactly one short title marker:',
+              '<od-title>Title Here</od-title>',
+              'Rules: 2-6 words, preserve the user request language, no quotes, no markdown, no punctuation unless necessary.',
+              'Do not mention this title task to the user. Continue with the normal answer after the title marker.',
+            ].join('\n')
+          : '',
+      };
+    };
+    let {
+      requested: titleGenerationRequested,
+      prompt: titleGenerationPrompt,
+    } = titleGenerationForResumeState(agentResumeCtx.isResuming);
     // The connected-external-MCP directive reflects live OAuth token state,
     // which flips mid-conversation as Bearers expire/refresh. Keeping it out of
     // the cached stable prefix (daemonSystemPrompt) and re-sending it here in
@@ -5045,19 +5018,35 @@ export async function startServer({
     // across resumes (protecting the conversation-history cache) while still
     // giving the model the current MCP auth state on every turn.
     const mcpConnectedDirective = renderConnectedExternalMcpDirective(connectedExternalMcp);
-    const clientInstructionParts = includeStableInstructions
-      ? [researchCommandContract, runContextPrompt, mcpConnectedDirective, browserUsePromptGuard, titleGenerationPrompt, systemPrompt]
-      : [researchCommandContract, runContextPrompt, mcpConnectedDirective, browserUsePromptGuard, titleGenerationPrompt];
-    const clientInstructionPrompt = clientInstructionParts
-      .map((part) => (typeof part === 'string' ? part.trim() : ''))
-      .filter(Boolean)
-      .join('\n\n---\n\n');
-    const instructionPrompt = composeLiveInstructionPrompt({
-      daemonSystemPrompt: includeStableInstructions ? daemonSystemPrompt : '',
-      runtimeToolPrompt: includeStableInstructions ? runtimeToolPrompt : '',
-      clientSystemPrompt: clientInstructionPrompt,
-      finalPromptOverride: codexImagegenOverride,
-    });
+    const instructionsForResumeState = (
+      includeStable: boolean,
+      currentTitleGenerationPrompt: string,
+    ) => {
+      const clientInstructionPrompt = (
+        includeStable
+          ? [researchCommandContract, runContextPrompt, mcpConnectedDirective, browserUsePromptGuard, currentTitleGenerationPrompt, systemPrompt]
+          : [researchCommandContract, runContextPrompt, mcpConnectedDirective, browserUsePromptGuard, currentTitleGenerationPrompt]
+      )
+        .map((part) => (typeof part === 'string' ? part.trim() : ''))
+        .filter(Boolean)
+        .join('\n\n---\n\n');
+      return {
+        clientInstructionPrompt,
+        instructionPrompt: composeLiveInstructionPrompt({
+          daemonSystemPrompt: includeStable ? daemonSystemPrompt : '',
+          runtimeToolPrompt: includeStable ? runtimeToolPrompt : '',
+          clientSystemPrompt: clientInstructionPrompt,
+          finalPromptOverride: codexImagegenOverride,
+        }),
+      };
+    };
+    let {
+      clientInstructionPrompt,
+      instructionPrompt,
+    } = instructionsForResumeState(
+      includeStableInstructions,
+      titleGenerationPrompt,
+    );
     // Some models (notably claude-opus-4-7 with --include-partial-messages)
     // start their reply by echoing the top of the user message verbatim,
     // so the rendered chat shows a "# Instructions ..." block ahead of the
@@ -5084,9 +5073,12 @@ export async function startServer({
       safeImages,
       amrStagedImages,
     );
-    const composed = [
-      instructionPrompt
-        ? `# Instructions (read first)\n\n${formOverride}${instructionPrompt}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
+    const composeTurnPrompt = (
+      currentInstructionPrompt: string,
+      currentUserRequestPrompt: string,
+    ) => [
+      currentInstructionPrompt
+        ? `# Instructions (read first)\n\n${formOverride}${currentInstructionPrompt}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
         : cwdHint
           ? `# Instructions\n\n${formOverride}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
           : linkedDirsHint
@@ -5094,11 +5086,75 @@ export async function startServer({
             : formOverride
               ? `# Instructions\n\n${formOverride}${ECHO_GUARD}\n\n---\n`
               : '',
-      `# User request\n\n${userRequestPrompt}${attachmentHint}${commentHint}`,
+      `# User request\n\n${currentUserRequestPrompt}${attachmentHint}${commentHint}`,
       promptImagePaths.length
         ? `\n\n${promptImagePaths.map((p) => `@${p}`).join(' ')}`
         : '',
     ].join('');
+    let composed = composeTurnPrompt(instructionPrompt, userRequestPrompt);
+    const sessionContextBudget = agentResumeCtx.isResuming
+      ? evaluateModelContextBudget({
+          prompt: composed,
+          modelId: safeModel,
+          metadata: getKnownModelOption(
+            def,
+            safeModel,
+            requestedLiveModelScope,
+          )?.metadata,
+          priorSessionInputTokens: agentResumeCtx.storedInputTokens,
+        })
+      : null;
+    if (sessionContextBudget?.action === 'rollover') {
+      agentResumeCtx = {
+        ...agentResumeCtx,
+        resumeSessionId: null,
+        isResuming: false,
+        storedStablePromptHash: null,
+        invalidationReason: 'context_budget',
+      };
+      rolloverCompaction = sessionContextBudget.inputBudgetTokens
+        ? compactTranscriptForSessionRollover(
+            typeof message === 'string' ? message : String(message ?? ''),
+            Math.max(4_096, Math.floor(sessionContextBudget.inputBudgetTokens * 0.6)),
+          )
+        : null;
+      userRequestPrompt = composeChatUserRequestForAgent(
+        rolloverCompaction?.prompt ?? message,
+        currentPrompt,
+        { skipTranscript: false },
+      );
+      includeStableInstructions = computeIncludeStable(
+        agentResumeCtx.isResuming,
+        agentResumeCtx.storedStablePromptHash,
+        currentStableHash,
+      );
+      run.promptCache = describeStablePromptCache({
+        isResuming: agentResumeCtx.isResuming,
+        storedStablePromptHash: agentResumeCtx.storedStablePromptHash,
+        currentStableHash,
+      });
+      ({
+        requested: titleGenerationRequested,
+        prompt: titleGenerationPrompt,
+      } = titleGenerationForResumeState(agentResumeCtx.isResuming));
+      ({
+        clientInstructionPrompt,
+        instructionPrompt,
+      } = instructionsForResumeState(
+        includeStableInstructions,
+        titleGenerationPrompt,
+      ));
+      composed = composeTurnPrompt(instructionPrompt, userRequestPrompt);
+    }
+    run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
+      agent: def,
+      supportsSessionResume: agentSupportsSessionResume,
+      isResuming: agentResumeCtx.isResuming,
+      resumeSessionId: agentResumeCtx.resumeSessionId,
+      storedSessionId: agentResumeCtx.storedSessionId,
+      invalidationReason: agentResumeCtx.invalidationReason,
+    });
+    publishNativeSessionRecoveryMetadata();
     run.promptTelemetry = buildPromptStackTelemetry({
       composedPrompt: composed,
       sections: [
@@ -5492,6 +5548,7 @@ export async function startServer({
         sideEffects,
       });
       if (decision.shouldRetry && !design.runs.isTerminal(run.status)) {
+        run.retryOriginalFailure ??= failure ?? undefined;
         if ((run.retryAttemptCount ?? 0) === 0) {
           run.retryOriginFailure = failure ? { ...failure } : null;
           run.retryOriginErrorCode = errorCode ?? null;
@@ -6908,6 +6965,12 @@ export async function startServer({
     // plain streams (most other CLIs) we forward raw chunks unchanged so
     // the browser can append them to the assistant's text buffer.
     let agentStreamError = null;
+    // Preserve whether a latched error predates a later cancel request. The
+    // close handler runs after cancel() has already flipped cancelRequested,
+    // so consulting only the current flag loses the ordering of those events.
+    let agentStreamErrorObservedBeforeCancellation = false;
+    let acpFatalErrorObservedBeforeCancellation = false;
+    run.runtimeFailureObservedBeforeCancellation = false;
     // Holds buffered plain-text stdout chunks for agents (currently
     // antigravity) where we need to inspect the full output at close
     // time before deciding whether to forward it. The auth-prompt guard
@@ -7157,6 +7220,10 @@ export async function startServer({
 
     const sendAgentEvent = (ev) => {
       if (ev?.type === 'error') {
+        // Cancellation is the terminal user intent. Some CLIs flush a final
+        // error record while reacting to SIGTERM; treating that late frame as
+        // a run failure races the cancel route and can make it return failed.
+        if (run.cancelRequested) return;
         if (agentStreamError) return;
         flushVisibleAgentStderr();
         const failureText = [
@@ -7170,6 +7237,8 @@ export async function startServer({
           String(ev.message || 'Agent stream error'),
           failureText,
         );
+        agentStreamErrorObservedBeforeCancellation = true;
+        run.runtimeFailureObservedBeforeCancellation = true;
         clearInactivityWatchdog();
         const authFailure = classifyAgentAuthFailure(agentId, failureText);
         if (authFailure?.status === 'missing') {
@@ -7260,6 +7329,10 @@ export async function startServer({
         // init/system line arrives well before the model's first token.
         noteCliReadyAt();
         if (ev?.type === 'error') {
+          // Claude commonly reports its SIGTERM shutdown as an assistant or
+          // result error frame. Once cancellation has been requested, that
+          // frame is shutdown noise rather than a new user-visible failure.
+          if (run.cancelRequested) return;
           if (agentStreamError) return;
           // Hold back a resume-failure error so the close handler's transparent
           // reseed stays invisible. An is_error result frame on a dead --resume
@@ -7310,6 +7383,8 @@ export async function startServer({
           const serviceCode = classifyAgentServiceFailure(failureText);
           agentStreamError = diagnostic?.message
             ?? rewriteKnownAgentStreamError(agentId, message, failureText);
+          agentStreamErrorObservedBeforeCancellation = true;
+          run.runtimeFailureObservedBeforeCancellation = true;
           send('error', createSseErrorPayload(
             diagnostic?.code ?? serviceCode ?? 'AGENT_EXECUTION_FAILED',
             agentStreamError,
@@ -7405,9 +7480,13 @@ export async function startServer({
           if (channel === 'agent') {
             sendAgentEvent(payload);
           } else if (channel === 'error') {
+            if (run.cancelRequested) return;
             if (agentStreamError) return;
             flushVisibleAgentStderr();
             agentStreamError = String(payload?.message || 'Pi session error');
+            agentStreamErrorObservedBeforeCancellation = true;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
             const piErrorCode = typeof payload?.code === 'string' ? payload.code : null;
             if (piErrorCode) {
               run.errorCode = piErrorCode;
@@ -7449,6 +7528,11 @@ export async function startServer({
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
         send: (event, data) => {
+          if (event === 'error') {
+            if (run.cancelRequested) return;
+            acpFatalErrorObservedBeforeCancellation = true;
+            run.runtimeFailureObservedBeforeCancellation = true;
+          }
           if (event === 'agent') {
             lastAgentEventPhase = summarizeAgentEventForInactivity(data);
           }
@@ -7574,12 +7658,25 @@ export async function startServer({
       emitVisibleAgentStderr(chunk);
     });
 
+    const finishCanceledIfRequested = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): boolean => {
+      if (!run.cancelRequested) return false;
+      if (!design.runs.isTerminal(run.status)) {
+        markRpcCloseReason('cancel_requested');
+        finishWithRetryDecision('canceled', code, signal);
+      }
+      return true;
+    };
+
     child.on('error', (err) => {
       clearInactivityWatchdog();
       cleanupPromptFile();
       flushVisibleAgentStderr();
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
+      if (finishCanceledIfRequested(1, null)) return;
       send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', err.message));
       finishWithRetryDecision('failed', 1, null);
     });
@@ -7658,13 +7755,13 @@ export async function startServer({
         ));
         return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
       }
-      if (acpSession?.hasFatalError()) {
+      if (acpFatalErrorObservedBeforeCancellation && acpSession?.hasFatalError()) {
         markRpcCloseReason('fatal_rpc_error');
         return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       parseBufferedAntigravityGeminiJsonEventStream();
       flushAgentTitleMarkerBuffer();
-      if (agentStreamError) {
+      if (agentStreamErrorObservedBeforeCancellation && agentStreamError) {
         markRpcCloseReason('stream_error');
         return finishWithRetryDecision('failed', code === 0 ? 1 : (code ?? 1), signal ?? null);
       }

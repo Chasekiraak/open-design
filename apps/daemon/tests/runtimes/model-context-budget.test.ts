@@ -123,4 +123,15 @@ describe('model context budget', () => {
     expect(compacted.prompt).toContain('turn-7');
     expect(compacted.compactedTokens).toBeLessThanOrEqual(5_000);
   });
+
+  it('trims a single oversized transcript block to the requested rollover budget', () => {
+    const transcript = `## user\nlatest request ${'界'.repeat(8_000)}`;
+
+    const compacted = compactTranscriptForSessionRollover(transcript, 1_000);
+
+    expect(compacted.prompt).toContain('Open Design compacted');
+    expect(compacted.prompt).toContain('## user');
+    expect(compacted.prompt).toContain('界');
+    expect(compacted.compactedTokens).toBeLessThanOrEqual(1_000);
+  });
 });
