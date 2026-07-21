@@ -671,9 +671,17 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     await waitForPersist(
       first.onPersist,
       expect.objectContaining({
-        apiProviderBaseUrl: 'https://api.deepseek.com',
-        baseUrl: 'https://api.deepseek.com',
+        apiProviderBaseUrl: 'https://api.openai.com/v1',
+        baseUrl: 'https://api.openai.com/v1',
+        byokPendingProviderKey: 'openai:https://api.deepseek.com',
         byokProviderConfigDrafts: expect.objectContaining({
+          'openai:https://api.deepseek.com': expect.objectContaining({
+            apiConfig: expect.objectContaining({
+              apiKey: '',
+              baseUrl: 'https://api.deepseek.com',
+              model: 'deepseek-v4-flash',
+            }),
+          }),
           'openai:https://api.openai.com/v1': expect.objectContaining({
             apiConfig: expect.objectContaining({
               apiKey: 'sk-openai-provider',
@@ -733,7 +741,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
   });
 
   it('only persists Max tokens overrides within the supported BYOK range', async () => {
-    const { onPersist } = renderSettingsDialog({ apiKey: 'sk-test' });
+    const { onPersist } = renderSettingsDialog({ apiKey: 'sk-ant-test' });
 
     const maxTokensInput = screen.getByRole('spinbutton', { name: /Max tokens/ }) as HTMLInputElement;
     expect(maxTokensInput.min).toBe(String(MIN_MAX_TOKENS));
@@ -801,7 +809,9 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'OpenAI' }));
     selectGatewayPreset('DeepSeek — OpenAI');
 
-    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toContain('deepseek-chat');
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toContain(
+      'deepseek-v4-flash',
+    );
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe('https://api.deepseek.com');
   });
 
@@ -843,7 +853,9 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
 
     fireEvent.click(within(providerPopover).getByRole('option', { name: 'DeepSeek — Anthropic' }));
 
-    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toContain('deepseek-chat');
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toContain(
+      'deepseek-v4-flash',
+    );
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe(
       'https://api.deepseek.com/anthropic',
     );
@@ -935,10 +947,12 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     await waitFor(() => {
       expect(screen.getByText(/Connected\. Replied in 28 ms/)).toBeTruthy();
     });
-    const testConnectionCalls = fetchMock.mock.calls.filter(
-      ([input]) => input.toString() === '/api/test/connection',
-    );
-    expect(testConnectionCalls).toHaveLength(1);
+    await waitFor(() => {
+      const testConnectionCalls = fetchMock.mock.calls.filter(
+        ([input]) => input.toString() === '/api/test/connection',
+      );
+      expect(testConnectionCalls).toHaveLength(1);
+    });
   });
 
   it('keeps protocol drafts isolated without leaking API keys between tabs', () => {
@@ -996,11 +1010,143 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     );
   });
 
+  it('keeps a first-time incomplete BYOK setup as a draft until it is complete', async () => {
+    const first = renderSettingsDialog({
+      mode: 'daemon',
+      agentId: 'codex',
+      apiKey: '',
+      apiProtocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-5',
+      apiProviderBaseUrl: 'https://api.anthropic.com',
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: /BYOK.*API provider/i }));
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'unfinished-key' },
+    });
+
+    expect(screen.getByTestId('settings-byok-draft-notice').textContent).toBe(
+      'This setup remains a draft until the required fields are complete. Your current execution setup stays active.',
+    );
+
+    await waitFor(() => expect(first.onPersist).toHaveBeenCalled());
+    expect(first.onPersist.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'daemon',
+      agentId: 'codex',
+      byokPendingProviderKey: 'anthropic:https://api.anthropic.com',
+      byokProviderConfigDrafts: {
+        'anthropic:https://api.anthropic.com': {
+          apiConfig: {
+            apiKey: 'unfinished-key',
+            baseUrl: 'https://api.anthropic.com',
+            model: 'claude-sonnet-4-5',
+          },
+        },
+      },
+    });
+    expect(analyticsTrackMock).toHaveBeenCalledWith(
+      'byok_preflight_blocked',
+      {
+        source: 'settings',
+        reason: 'api_key_invalid',
+        provider_id: 'anthropic',
+        active_execution_mode: 'local_cli',
+      },
+      undefined,
+    );
+
+    const persistedDraft = first.onPersist.mock.calls.at(-1)?.[0] as AppConfig;
+    first.unmount();
+
+    const reopened = renderSettingsDialog(persistedDraft);
+    fireEvent.click(screen.getByRole('tab', { name: /BYOK.*API provider/i }));
+    expect((screen.getByLabelText('API key') as HTMLInputElement).value).toBe(
+      'unfinished-key',
+    );
+
+    reopened.onPersist.mockClear();
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'sk-ant-complete' },
+    });
+
+    await waitFor(() =>
+      expect(reopened.onPersist).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'api',
+          apiKey: 'sk-ant-complete',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        }),
+        expect.any(Object),
+      ),
+    );
+  });
+
+  it('keeps the last valid BYOK config active while an edited replacement is incomplete', async () => {
+    const { onPersist } = renderSettingsDialog({
+      mode: 'api',
+      apiKey: 'sk-ant-active',
+      apiProtocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-5',
+      apiProviderBaseUrl: 'https://api.anthropic.com',
+    });
+
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: '' },
+    });
+
+    await waitFor(() => expect(onPersist).toHaveBeenCalled());
+    expect(onPersist.mock.calls.at(-1)?.[0]).toMatchObject({
+      mode: 'api',
+      apiKey: 'sk-ant-active',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-5',
+      byokProviderConfigDrafts: {
+        'anthropic:https://api.anthropic.com': {
+          apiConfig: {
+            apiKey: '',
+            baseUrl: 'https://api.anthropic.com',
+            model: 'claude-sonnet-4-5',
+          },
+        },
+      },
+    });
+  });
+
+  it('persists a cleared API key after the active provider field is committed', async () => {
+    const { onPersist } = renderSettingsDialog({
+      mode: 'api',
+      apiKey: 'sk-ant-active',
+      apiProtocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-5',
+      apiProviderBaseUrl: 'https://api.anthropic.com',
+    });
+    const apiKeyInput = screen.getByLabelText('API key');
+
+    fireEvent.change(apiKeyInput, { target: { value: '' } });
+    fireEvent.blur(apiKeyInput);
+
+    await waitFor(() =>
+      expect(onPersist).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'api',
+          apiKey: '',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        }),
+        expect.any(Object),
+      ),
+    );
+  });
+
   it('surfaces autosave progress, success, and failure states in the modal chrome', async () => {
     const first = renderSettingsDialog();
 
     fireEvent.change(screen.getByLabelText('API key'), {
-      target: { value: 'sk-saved' },
+      target: { value: 'sk-ant-saved' },
     });
 
     await waitFor(() => {
@@ -1010,7 +1156,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       expect(screen.getByText('All changes saved')).toBeTruthy();
     });
     expect(first.onPersist).toHaveBeenCalledWith(
-      expect.objectContaining({ apiKey: 'sk-saved' }),
+      expect.objectContaining({ apiKey: 'sk-ant-saved' }),
       expect.any(Object),
     );
 
@@ -1020,7 +1166,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     second.onPersist.mockRejectedValueOnce(new Error('daemon offline'));
 
     fireEvent.change(screen.getByLabelText('API key'), {
-      target: { value: 'sk-error' },
+      target: { value: 'sk-ant-error' },
     });
 
     await waitFor(() => {
@@ -1253,6 +1399,112 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       expect.objectContaining({
         apiProtocol: 'openai',
         model: 'account-ready-model',
+      }),
+      {},
+    );
+  });
+
+  it('replaces a retired preset with the first provider preference available to the account', async () => {
+    const testedModels: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      expect(url).toBe('/api/test/connection');
+      const body = JSON.parse(String(init?.body)) as { model?: string };
+      testedModels.push(body.model ?? '');
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          kind: 'ok',
+          latencyMs: 7,
+          model: body.model,
+          sample: 'pong',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    fetchProviderModelsMock.mockResolvedValueOnce({
+      ok: true,
+      kind: 'success',
+      latencyMs: 12,
+      models: [
+        { id: 'account-first', label: 'Account First' },
+        { id: 'kimi-k2.6', label: 'Kimi K2.6' },
+      ],
+    });
+    const { onPersist } = renderSettingsDialog({
+      apiProtocol: 'openai',
+      apiKey: 'sk-moonshot',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k2-0711-preview',
+      apiProviderBaseUrl: 'https://api.moonshot.cn/v1',
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Moonshot' }));
+
+    expect(await screen.findByText(/✓ Loaded \d+ models(?: from your account)?\./)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toContain(
+      'Kimi K2.6 (kimi-k2.6) · From your account',
+    );
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).not.toContain(
+      'account-first',
+    );
+    await waitForPersist(
+      onPersist,
+      expect.objectContaining({
+        apiProtocol: 'openai',
+        model: 'kimi-k2.6',
+      }),
+      {},
+    );
+    await waitFor(() => {
+      expect(testedModels).toEqual(['kimi-k2.6']);
+    });
+  });
+
+  it('does not treat the first upstream model as the default when no preference matches', async () => {
+    fetchProviderModelsMock.mockResolvedValueOnce({
+      ok: true,
+      kind: 'success',
+      latencyMs: 12,
+      models: [
+        { id: 'account-first', label: 'Account First' },
+        { id: 'account-second', label: 'Account Second' },
+      ],
+    });
+    const { onPersist } = renderSettingsDialog({
+      apiProtocol: 'openai',
+      apiKey: 'sk-openai',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o',
+      apiProviderBaseUrl: 'https://api.openai.com/v1',
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'OpenAI' }));
+
+    expect(await screen.findByText(/✓ Loaded \d+ models(?: from your account)?\./)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Model' }).textContent).not.toContain(
+      'account-first',
+    );
+    await waitForPersist(
+      onPersist,
+      expect.objectContaining({
+        apiProtocol: 'openai',
+        model: 'gpt-4o',
+        byokPendingProviderKey: 'openai:https://api.openai.com/v1',
+        byokProviderConfigDrafts: expect.objectContaining({
+          'openai:https://api.openai.com/v1': expect.objectContaining({
+            apiConfig: expect.objectContaining({
+              model: '',
+            }),
+          }),
+        }),
       }),
       {},
     );
@@ -1996,10 +2248,12 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       expect(apiKeyInput.value).toBe('sk-ant-test-provider');
     });
     expect(screen.getByText(en['settings.apiKeyCleaned'])).toBeTruthy();
-    const testConnectionCalls = fetchMock.mock.calls.filter(
-      ([input]) => input.toString() === '/api/test/connection',
-    );
-    expect(testConnectionCalls).toHaveLength(1);
+    await waitFor(() => {
+      const testConnectionCalls = fetchMock.mock.calls.filter(
+        ([input]) => input.toString() === '/api/test/connection',
+      );
+      expect(testConnectionCalls).toHaveLength(1);
+    });
   });
 
   it('lets users retry a failed BYOK connection test without editing the API key', async () => {
@@ -2373,6 +2627,40 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     const modelPopover = screen.getByTestId('settings-agent-model-popover-codex');
     expect(optionNames(modelPopover)).toEqual(['gpt-4.1-mini', 'gpt-5.5', 'Custom (type below)…']);
+  });
+
+  it('keeps the Local CLI custom model input clearable when default is the fallback model', () => {
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        agents: [
+          {
+            ...availableAgents[0]!,
+            models: [{ id: 'default', label: 'Default' }],
+          },
+        ],
+      },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
+    fireEvent.click(screen.getByRole('combobox', {
+      name: en['settings.modelPicker'],
+    }));
+    const modelPopover = screen.getByTestId('settings-agent-model-popover-codex');
+    fireEvent.click(within(modelPopover).getByRole('option', {
+      name: en['settings.modelCustom'],
+    }));
+
+    const customModelInput = screen.getByLabelText(
+      en['settings.modelCustomLabel'],
+    ) as HTMLInputElement;
+    expect(customModelInput.value).toBe('');
+
+    fireEvent.change(customModelInput, { target: { value: 'default' } });
+    expect(customModelInput.value).toBe('default');
+
+    fireEvent.change(customModelInput, { target: { value: '' } });
+    expect(customModelInput.value).toBe('');
   });
 
   it('labels live CLI model metadata in the model picker', () => {
@@ -5002,7 +5290,7 @@ describe('SettingsDialog about interactions', () => {
     });
   });
 
-  it('keeps a quit retry action when update install succeeds but quit fails', async () => {
+  it('keeps a quit retry action when update install succeeds but quit throws or fails', async () => {
     const payloadReady = updateStatus({
       artifact: {
         name: 'open-design-1.2.3-beta.4-mac-arm64-payload.zip',
@@ -5029,10 +5317,12 @@ describe('SettingsDialog about interactions', () => {
       },
     });
     const install = vi.fn(async () => installed);
-    const quit = vi.fn(async () => ({
-      ok: false as const,
-      reason: 'desktop quit is not available',
-    }));
+    const quit = vi.fn()
+      .mockRejectedValueOnce(new Error('desktop quit failed'))
+      .mockResolvedValue({
+        ok: false as const,
+        reason: 'desktop quit is not available',
+      });
     restoreOpenDesignHost = installMockOpenDesignHost({
       host: {
         updater: {
@@ -5066,7 +5356,7 @@ describe('SettingsDialog about interactions', () => {
       expect(quit).toHaveBeenCalledTimes(1);
     });
     expect(screen.getByRole('button', { name: en['updater.quitButton'] })).toBeTruthy();
-    expect(screen.getAllByText(en['settings.updateQuitFailed']).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(en['updater.quitFailedTitle']).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: en['updater.quitButton'] }));
 

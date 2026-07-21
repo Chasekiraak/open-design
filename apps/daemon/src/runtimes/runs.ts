@@ -103,6 +103,11 @@ export function createChatRunService({
       errorCode: null,
       cancelRequested: false,
       retryRestartTimer: null,
+      // First failure that triggered a same-run retry. The next attempt creates
+      // a fresh startChatRun closure and clears run.error/errorCode, so keep the
+      // compact analytics snapshot on the shared run until terminal telemetry.
+      retryOriginFailure: null,
+      retryOriginErrorCode: null,
       stdinOpen: false,
       // Work-completeness signals (#1247 / #1060), folded from agent events by
       // captureRunWorkCompletenessSignals (server.ts). `lastTodoSnapshot` is the

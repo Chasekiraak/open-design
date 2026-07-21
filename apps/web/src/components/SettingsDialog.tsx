@@ -19,6 +19,7 @@ import {
 import { getResolvedDeviceId } from '../analytics/client';
 import {
   trackSettingsAppearanceClick,
+  trackByokPreflightBlocked,
   trackSettingsByokModelsFetchResult,
   trackSettingsByokTestResult,
   trackSettingsCliTestResult,
@@ -67,8 +68,10 @@ import {
   SearchableModelSelect,
 } from './modelOptions';
 import {
+  BYOK_PROVIDER_PRESETS,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_ORBIT,
+  defaultKnownProviderModel,
   isStoredMediaProviderEntryEmpty,
   isStoredMediaProviderEntryPresent,
   KNOWN_PROVIDERS,
@@ -141,9 +144,12 @@ import {
   openUpdaterInstaller,
   quitAfterUpdaterInstallerOpen,
   readUpdaterStatus,
+  restartSafetyFromActionResult,
+  restartSafetyFromUpdaterStatus,
   subscribeToUpdaterStatus,
   type UpdaterActionResult,
   type UpdaterModel,
+  type UpdaterRestartSafety,
 } from '../lib/updater';
 import { PetSettings } from './pet/PetSettings';
 import { McpClientSection } from './McpClientSection';
@@ -159,6 +165,7 @@ import { ByokKeyField } from './byok/ByokKeyField';
 import { ByokModelField } from './byok/ByokModelField';
 import { ByokProviderBaseUrl } from './byok/ByokProviderBaseUrl';
 import { ByokProviderPicker } from './byok/ByokProviderPicker';
+import { byokPreflightBlockReason } from './byok/preflight';
 import {
   blockingByokDraftFields,
   blockingByokDraftIssues,
@@ -221,7 +228,7 @@ interface ByokProviderPreset {
   title: string;
   protocol: ApiProtocol;
   baseUrl: string;
-  model: string;
+  preferredModels: readonly string[];
   custom?: boolean;
 }
 
@@ -315,8 +322,8 @@ export function deriveAboutUpdateControl(
           primaryAction: 'quit',
           primaryLabelKey: 'updater.quitButton',
           showReleaseLink: false,
-          statusKey: 'settings.updateQuitFailed',
-          statusTone: 'warning',
+          statusKey: model.updateKind === 'payload' ? 'updater.installingRestart' : 'updater.opening',
+          statusTone: 'neutral',
         };
       }
       const canInstallUpdate = model.canOpenInstaller || model.canApplyInPlace;
@@ -343,14 +350,22 @@ export function deriveAboutUpdateControl(
         statusKey: 'settings.updateStatusInstalling',
         statusTone: 'neutral',
       };
-    case 'error':
+    case 'error': {
+      const canRetryInstall = model.status.downloadPath != null
+        && (model.canOpenInstaller || model.canApplyInPlace);
+      const primaryAction: AboutUpdatePrimaryAction = canRetryInstall
+        ? 'install'
+        : model.availableVersion != null && model.canDownload
+          ? 'download'
+          : 'check';
       return {
-        primaryAction: 'check',
+        primaryAction,
         primaryLabelKey: 'settings.updateRetry',
         showReleaseLink: true,
-        statusKey: 'settings.updateStatusFailed',
+        statusKey: 'updater.failed',
         statusTone: 'error',
       };
+    }
     case 'unsupported':
       return {
         primaryAction: null,
@@ -866,7 +881,7 @@ function defaultApiProtocolConfig(protocol: ApiProtocol): ApiProtocolConfig {
   return {
     apiKey: '',
     baseUrl: provider?.baseUrl ?? '',
-    model: provider?.model ?? '',
+    model: defaultKnownProviderModel(provider),
     apiVersion: '',
     apiProviderBaseUrl: provider ? provider.baseUrl : null,
   };
@@ -910,7 +925,7 @@ function nextApiProtocolConfig(
     return {
       ...defaultApiProtocolConfig(protocol),
       baseUrl: siblingProvider.baseUrl,
-      model: siblingProvider.model,
+      model: defaultKnownProviderModel(siblingProvider),
       apiProviderBaseUrl: siblingProvider.baseUrl,
     };
   }
@@ -975,6 +990,90 @@ function byokProviderKeyForConfig(config: AppConfig): string {
     apiConfig.apiProviderBaseUrl,
     apiConfig.baseUrl,
   );
+}
+
+/**
+ * Keeps an incomplete replacement BYOK form durable without promoting it to
+ * the active execution config. The selected provider's current fields are
+ * stored under `byokProviderConfigDrafts`; the last successfully persisted
+ * execution mode and BYOK projection stay active until the replacement is
+ * complete.
+ */
+export function resolveSettingsAutosavePayload(
+  draft: AppConfig,
+  active: AppConfig,
+  intent: { commitClearedActiveApiKey?: boolean } = {},
+): AppConfig {
+  if (draft.mode !== 'api') return draft;
+  if (byokPreflightBlockReason(draft) === null) {
+    if (!draft.byokPendingProviderKey) return draft;
+    return { ...draft, byokPendingProviderKey: undefined };
+  }
+
+  const draftKey = byokProviderKeyForConfig(draft);
+  const clearsActiveApiKey =
+    intent.commitClearedActiveApiKey === true
+    && active.mode === 'api'
+    && draftKey === byokProviderKeyForConfig(active)
+    && active.apiKey.trim() !== ''
+    && draft.apiKey.trim() === '';
+  if (clearsActiveApiKey) {
+    if (!draft.byokPendingProviderKey) return draft;
+    return { ...draft, byokPendingProviderKey: undefined };
+  }
+
+  const withCurrentDraft = persistByokProviderConfigDraft(
+    draft,
+    draftKey,
+    currentApiProtocolConfig(draft),
+  );
+  return {
+    ...withCurrentDraft,
+    byokPendingProviderKey: draftKey,
+    mode: active.mode,
+    apiKey: active.apiKey,
+    apiProtocol: active.apiProtocol,
+    apiVersion: active.apiVersion,
+    apiProviderBaseUrl: active.apiProviderBaseUrl,
+    apiProtocolConfigs: active.apiProtocolConfigs,
+    baseUrl: active.baseUrl,
+    model: active.model,
+    byokImageModel: active.byokImageModel,
+    byokVideoModel: active.byokVideoModel,
+    byokSpeechModel: active.byokSpeechModel,
+    byokSpeechVoice: active.byokSpeechVoice,
+    maxTokens: active.maxTokens,
+  };
+}
+
+function apiProtocolFromProviderDraftKey(draftKey: string): ApiProtocol | null {
+  const separator = draftKey.indexOf(':');
+  if (separator <= 0) return null;
+  const protocol = draftKey.slice(0, separator);
+  return API_PROTOCOL_TABS.some((tab) => tab.id === protocol)
+    ? (protocol as ApiProtocol)
+    : null;
+}
+
+function restorePendingByokProviderDraft(config: AppConfig): AppConfig {
+  const currentDraftKey = byokProviderKeyForConfig(config);
+  const candidateKeys = config.byokPendingProviderKey
+    ? [config.byokPendingProviderKey, currentDraftKey]
+    : [currentDraftKey];
+  for (const draftKey of candidateKeys) {
+    const draft = config.byokProviderConfigDrafts?.[draftKey];
+    const protocol = apiProtocolFromProviderDraftKey(draftKey);
+    if (!draft || !protocol) continue;
+    return applyApiProtocolConfig(
+      {
+        ...config,
+        maxTokens: draft.maxTokens,
+      },
+      protocol,
+      draft.apiConfig,
+    );
+  }
+  return config;
 }
 
 function applyApiProtocolConfig(
@@ -1290,6 +1389,7 @@ export function sanitizeSettingsSavePayload(
     apiVersion: initial.apiVersion,
     apiProtocolConfigs: initial.apiProtocolConfigs,
     byokProviderConfigDrafts: initial.byokProviderConfigDrafts,
+    byokPendingProviderKey: initial.byokPendingProviderKey,
     apiProviderBaseUrl: initial.apiProviderBaseUrl,
     baseUrl: initial.baseUrl,
     model: initial.model,
@@ -1358,12 +1458,16 @@ export function SettingsDialog({
   // Backfill the fixed-origin base URL on mount too, so a config persisted with
   // an empty baseUrl (e.g. selected AIHubMix before this resolution existed)
   // isn't stuck blocking the live model fetch until the user re-selects the tab.
-  const [cfg, setCfg] = useState<AppConfig>(() => ({
+  const normalizedInitialConfig: AppConfig = {
     ...initial,
     baseUrl: resolveFixedOriginBaseUrl(initial.apiProtocol ?? 'anthropic', initial.baseUrl),
-  }));
+  };
+  const initialFormConfig = initial.mode === 'api'
+    ? restorePendingByokProviderDraft(normalizedInitialConfig)
+    : normalizedInitialConfig;
+  const [cfg, setCfg] = useState<AppConfig>(() => initialFormConfig);
   const [maxTokensInput, setMaxTokensInput] = useState(
-    initial.maxTokens == null ? '' : String(initial.maxTokens),
+    initialFormConfig.maxTokens == null ? '' : String(initialFormConfig.maxTokens),
   );
   const [pendingMediaProviderEditIds, setPendingMediaProviderEditIds] = useState<
     ReadonlySet<string>
@@ -1690,17 +1794,22 @@ export function SettingsDialog({
   >(() => new Set());
   const [aboutUpdaterModel, setAboutUpdaterModel] = useState<UpdaterModel>(() => deriveUpdaterModel(null));
   const [aboutUpdateActionBusy, setAboutUpdateActionBusy] = useState(false);
+  const [aboutUpdateQuitFailed, setAboutUpdateQuitFailed] = useState(false);
   const [aboutToast, setAboutToast] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     const unsubscribe = subscribeToUpdaterStatus((status) => {
       if (!mounted) return;
-      setAboutUpdaterModel(deriveUpdaterModel(status, { hostAvailable: true }));
+      const nextModel = deriveUpdaterModel(status, { hostAvailable: true });
+      setAboutUpdaterModel(nextModel);
+      if (!nextModel.installerOpened) setAboutUpdateQuitFailed(false);
     });
     void readUpdaterStatus({ payload: { source: 'settings-about:mount' } }).then((result) => {
       if (!mounted) return;
-      setAboutUpdaterModel(result.ok ? result.model : deriveUpdaterModel(null, { hostAvailable: false }));
+      const nextModel = result.ok ? result.model : deriveUpdaterModel(null, { hostAvailable: false });
+      setAboutUpdaterModel(nextModel);
+      if (!nextModel.installerOpened) setAboutUpdateQuitFailed(false);
     });
     return () => {
       mounted = false;
@@ -1708,9 +1817,30 @@ export function SettingsDialog({
     };
   }, []);
 
-  const aboutUpdateControl = useMemo(
-    () => deriveAboutUpdateControl(aboutUpdaterModel, appVersionInfo),
-    [aboutUpdaterModel, appVersionInfo],
+  const aboutUpdateControl = useMemo(() => {
+    const control = deriveAboutUpdateControl(aboutUpdaterModel, appVersionInfo);
+    if (!aboutUpdateQuitFailed || !aboutUpdaterModel.installerOpened) return control;
+    return {
+      ...control,
+      primaryAction: 'quit' as const,
+      primaryLabelKey: 'updater.quitButton' as const,
+      showReleaseLink: false,
+      statusKey: 'updater.quitFailedTitle' as const,
+      statusTone: 'warning' as const,
+    };
+  }, [aboutUpdateQuitFailed, aboutUpdaterModel, appVersionInfo]);
+
+  // Restart-safety preflight denials stay hard-blocked in Settings → About
+  // (the force path lives in the app-menu UpdateDialog), but the toast must
+  // explain the active-run situation instead of a generic failure.
+  const aboutUpdaterToastText = useCallback(
+    (safety: UpdaterRestartSafety | null, fallback: string): string => {
+      if (safety == null) return fallback;
+      return safety.state === 'blocked'
+        ? t('updater.activeRunsBody', { count: safety.activeRunCount })
+        : t('updater.activeRunsUnknownBody');
+    },
+    [t],
   );
 
   const applyAboutUpdaterResult = useCallback((result: UpdaterActionResult): boolean => {
@@ -1720,15 +1850,18 @@ export function SettingsDialog({
     }
     setAboutUpdaterModel(result.model);
     if (result.model.errorMessage != null) {
-      setAboutToast(t('settings.updateActionFailed'));
+      const safety = restartSafetyFromUpdaterStatus(result.status);
+      setAboutToast(aboutUpdaterToastText(safety, t('settings.updateActionFailed')));
       return false;
     }
     return true;
-  }, [t]);
+  }, [aboutUpdaterToastText, t]);
 
   const handleAboutUpdateAction = useCallback(async () => {
     if (aboutUpdateActionBusy || aboutUpdaterModel.busy || aboutUpdateControl.primaryAction == null) return;
     setAboutUpdateActionBusy(true);
+    setAboutUpdateQuitFailed(false);
+    let quitAttempted = false;
     try {
       const options = { payload: { source: 'settings-about' } };
       if (aboutUpdateControl.primaryAction === 'check') {
@@ -1736,16 +1869,25 @@ export function SettingsDialog({
       } else if (aboutUpdateControl.primaryAction === 'download') {
         applyAboutUpdaterResult(await downloadUpdaterUpdate(options));
       } else if (aboutUpdateControl.primaryAction === 'quit') {
+        quitAttempted = true;
         const quitResult = await quitAfterUpdaterInstallerOpen(options);
-        if (!quitResult.ok) setAboutToast(t('settings.updateQuitFailed'));
+        if (!quitResult.ok) {
+          setAboutUpdateQuitFailed(true);
+          setAboutToast(aboutUpdaterToastText(restartSafetyFromActionResult(quitResult), t('updater.quitFailedTitle')));
+        }
       } else {
         const installed = applyAboutUpdaterResult(await openUpdaterInstaller(options));
         if (installed) {
+          quitAttempted = true;
           const quitResult = await quitAfterUpdaterInstallerOpen(options);
-          if (!quitResult.ok) setAboutToast(t('settings.updateQuitFailed'));
+          if (!quitResult.ok) {
+            setAboutUpdateQuitFailed(true);
+            setAboutToast(aboutUpdaterToastText(restartSafetyFromActionResult(quitResult), t('updater.quitFailedTitle')));
+          }
         }
       }
     } catch {
+      if (quitAttempted) setAboutUpdateQuitFailed(true);
       setAboutToast(t('settings.updateActionFailed'));
     } finally {
       setAboutUpdateActionBusy(false);
@@ -1754,6 +1896,7 @@ export function SettingsDialog({
     aboutUpdateActionBusy,
     aboutUpdateControl.primaryAction,
     aboutUpdaterModel.busy,
+    aboutUpdaterToastText,
     applyAboutUpdaterResult,
     t,
   ]);
@@ -1932,6 +2075,9 @@ export function SettingsDialog({
           mode_after: modeAfter,
         });
       }
+      if (mode === 'api' && c.mode !== 'api') {
+        return restorePendingByokProviderDraft({ ...c, mode });
+      }
       return { ...c, mode };
     });
   };
@@ -2040,7 +2186,7 @@ export function SettingsDialog({
       return updateCurrentApiProtocolConfig(switchedWithCurrentDraft, {
         ...(providerChanged ? { apiKey: '' } : {}),
         baseUrl: provider.baseUrl,
-        model: provider.model,
+        model: provider.preferredModels[0] ?? '',
         apiProviderBaseUrl: provider.baseUrl,
       });
     });
@@ -2718,187 +2864,13 @@ export function SettingsDialog({
   const apiProtocol = cfg.apiProtocol ?? 'anthropic';
   const defaultApiKeyConsoleLink = API_KEY_CONSOLE_LINKS[apiProtocol];
   const byokProviderPresets: ReadonlyArray<ByokProviderPreset> = [
-    {
-      id: 'anthropic',
-      title: 'Anthropic',
-      protocol: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
-      model: 'claude-sonnet-4-5',
-    },
-    {
-      id: 'openai',
-      title: 'OpenAI',
-      protocol: 'openai',
-      baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-4o',
-    },
-    {
-      id: 'atlascloud',
-      title: 'Atlas Cloud',
-      protocol: 'openai',
-      baseUrl: 'https://api.atlascloud.ai/v1',
-      model: 'qwen/qwen3.5-flash',
-    },
-    {
-      id: 'google-ai-studio',
-      title: 'Google Gemini',
-      protocol: 'google',
-      baseUrl: 'https://generativelanguage.googleapis.com',
-      model: 'gemini-3.5-flash',
-    },
-    {
-      id: 'ollama',
-      title: 'Ollama Cloud',
-      protocol: 'ollama',
-      baseUrl: 'https://ollama.com',
-      model: 'gpt-oss:120b',
-    },
-    {
-      id: 'azure',
-      title: 'Azure OpenAI',
-      protocol: 'azure',
-      baseUrl: '',
-      model: '',
-    },
-    {
-      id: 'siliconflow-cn',
-      title: 'SiliconFlow (CN)',
-      protocol: 'openai',
-      baseUrl: 'https://api.siliconflow.cn/v1',
-      model: 'deepseek-ai/DeepSeek-V3.1',
-    },
-    {
-      id: 'siliconflow-global',
-      title: 'SiliconFlow (Global)',
-      protocol: 'openai',
-      baseUrl: 'https://api.siliconflow.com/v1',
-      model: 'deepseek-ai/DeepSeek-V3.1',
-    },
-    {
-      id: 'ppio',
-      title: 'PPIO',
-      protocol: 'openai',
-      baseUrl: 'https://api.ppinfra.com/v3/openai',
-      model: 'deepseek/deepseek-v3.1',
-    },
-    {
-      id: 'nvidia',
-      title: 'NVIDIA',
-      protocol: 'openai',
-      baseUrl: 'https://integrate.api.nvidia.com/v1',
-      model: 'openai/gpt-oss-120b',
-    },
-    {
-      id: 'stepfun',
-      title: 'StepFun',
-      protocol: 'openai',
-      baseUrl: 'https://api.stepfun.ai/v1',
-      model: 'step-2-mini',
-    },
-    {
-      id: 'deepseek',
-      title: 'DeepSeek',
-      protocol: 'openai',
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
-    },
-    {
-      id: 'openrouter',
-      title: 'OpenRouter',
-      protocol: 'openai',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'anthropic/claude-3.7-sonnet',
-    },
-    {
-      id: 'mistral',
-      title: 'Mistral AI',
-      protocol: 'openai',
-      baseUrl: 'https://api.mistral.ai/v1',
-      model: 'mistral-large-latest',
-    },
-    {
-      id: 'xai',
-      title: 'xAI',
-      protocol: 'openai',
-      baseUrl: 'https://api.x.ai/v1',
-      model: 'grok-4',
-    },
-    {
-      id: 'together',
-      title: 'Together AI',
-      protocol: 'openai',
-      baseUrl: 'https://api.together.xyz/v1',
-      model: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-    },
-    {
-      id: 'huggingface',
-      title: 'Hugging Face',
-      protocol: 'openai',
-      baseUrl: 'https://router.huggingface.co/v1',
-      model: 'openai/gpt-oss-120b',
-    },
-    {
-      id: 'qwen',
-      title: '千问',
-      protocol: 'openai',
-      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      model: 'qwen-plus',
-    },
-    {
-      id: 'volcengine',
-      title: '火山引擎',
-      protocol: 'openai',
-      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-      model: 'doubao-seed-1-6',
-    },
-    {
-      id: 'qianfan',
-      title: '百度千帆',
-      protocol: 'openai',
-      baseUrl: 'https://qianfan.baidubce.com/v2',
-      model: 'ernie-4.5-turbo-128k',
-    },
-    {
-      id: 'vllm',
-      title: 'vLLM',
-      protocol: 'openai',
-      baseUrl: 'http://127.0.0.1:8000/v1',
-      model: 'model',
-    },
-    {
-      id: 'mimo',
-      title: '小米 MiMo',
-      protocol: 'openai',
-      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
-      model: 'mimo-v2.5-pro',
-    },
-    {
-      id: 'minimax',
-      title: 'MiniMax',
-      protocol: 'anthropic',
-      baseUrl: 'https://api.minimaxi.com/anthropic',
-      model: 'MiniMax-M2.7-highspeed',
-    },
-    {
-      id: 'moonshot',
-      title: 'Moonshot',
-      protocol: 'openai',
-      baseUrl: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2-0711-preview',
-    },
-    {
-      id: 'zhipu',
-      title: '智谱',
-      protocol: 'openai',
-      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-      model: 'glm-4.6',
-    },
+    ...BYOK_PROVIDER_PRESETS,
     {
       id: 'custom',
       title: t('settings.customProvider'),
       protocol: apiProtocol,
       baseUrl: cfg.baseUrl,
-      model: cfg.model,
+      preferredModels: cfg.model ? [cfg.model] : [],
       custom: true,
     },
   ];
@@ -2907,7 +2879,7 @@ export function SettingsDialog({
     title: t('settings.customProvider'),
     protocol: apiProtocol,
     baseUrl: cfg.baseUrl,
-    model: cfg.model,
+    preferredModels: cfg.model ? [cfg.model] : [],
     custom: true,
   };
   const byokPresetProtocols = new Set(
@@ -2924,7 +2896,9 @@ export function SettingsDialog({
         title: tab.title,
         protocol: tab.id,
         baseUrl: fallback.baseUrl || DEFAULT_BASE_URL_BY_PROTOCOL[tab.id],
-        model: fallback.model || SUGGESTED_MODELS_BY_PROTOCOL[tab.id][0] || '',
+        preferredModels: [
+          fallback.model || SUGGESTED_MODELS_BY_PROTOCOL[tab.id][0] || '',
+        ].filter(Boolean),
       };
     }),
     customByokProvider,
@@ -3058,6 +3032,8 @@ export function SettingsDialog({
   const autosaveSavedTimerRef = useRef<number | null>(null);
   const autosaveRetryTimerRef = useRef<number | null>(null);
   const autosavePendingFlushRef = useRef(false);
+  const byokPreflightTrackingRef = useRef<string | null>(null);
+  const committedClearedByokProviderKeyRef = useRef<string | null>(null);
   const autosaveLatestRef = useRef<AppConfig>(cfg);
   // Baseline used by the draft-only detector: the snapshot at the most
   // recent successful autosave (or the initial cfg on mount). Compared
@@ -3065,15 +3041,15 @@ export function SettingsDialog({
   // since last save are intentionally-stripped fields like the
   // Composio API key — in which case we must NOT flash "All changes
   // saved", because the draft has not actually been persisted.
-  const autosaveLastSavedRef = useRef<AppConfig>(cfg);
+  const autosaveLastSavedRef = useRef<AppConfig>(normalizedInitialConfig);
   const mediaProvidersChangeVersionRef = useRef(0);
   const lastSyncedMediaProvidersVersionRef = useRef(0);
+  const [autosaveCommitTick, setAutosaveCommitTick] = useState(0);
   const [autosaveRetryTick, setAutosaveRetryTick] = useState(0);
   autosaveLatestRef.current = cfg;
   useEffect(() => {
     if (autosaveSkipFirstRef.current) {
       autosaveSkipFirstRef.current = false;
-      autosaveLastSavedRef.current = cfg;
       return;
     }
     if (suppressNextAutosaveRef.current) {
@@ -3097,6 +3073,38 @@ export function SettingsDialog({
       autosavePendingFlushRef.current = false;
       autosaveTimerRef.current = null;
       const snapshot = autosaveLatestRef.current;
+      const preflightReason = snapshot.mode === 'api'
+        ? byokPreflightBlockReason(snapshot)
+        : null;
+      if (preflightReason) {
+        const providerId = byokProtocolToTracking(snapshot.apiProtocol) ?? 'unknown';
+        const activeExecutionMode = executionModeToTracking(autosaveLastSavedRef.current.mode);
+        const trackingKey = [
+          byokProviderKeyForConfig(snapshot),
+          preflightReason,
+          activeExecutionMode,
+        ].join(':');
+        if (byokPreflightTrackingRef.current !== trackingKey) {
+          byokPreflightTrackingRef.current = trackingKey;
+          trackByokPreflightBlocked(analytics.track, {
+            source: 'settings',
+            reason: preflightReason,
+            provider_id: providerId,
+            active_execution_mode: activeExecutionMode,
+          });
+        }
+      } else {
+        byokPreflightTrackingRef.current = null;
+      }
+      const committedClearedProviderKey = committedClearedByokProviderKeyRef.current;
+      const persistedSnapshot = resolveSettingsAutosavePayload(
+        snapshot,
+        autosaveLastSavedRef.current,
+        {
+          commitClearedActiveApiKey:
+            committedClearedProviderKey === byokProviderKeyForConfig(snapshot),
+        },
+      );
       const mediaProvidersVersion = mediaProvidersChangeVersionRef.current;
       const persistOptions = {
         forceMediaProviderSync: mediaProvidersVersion > lastSyncedMediaProvidersVersionRef.current,
@@ -3112,7 +3120,7 @@ export function SettingsDialog({
       // hasn't changed.
       if (
         !persistOptions.forceMediaProviderSync
-        && isAutosaveDraftOnlyChange(snapshot, autosaveLastSavedRef.current)
+        && isAutosaveDraftOnlyChange(persistedSnapshot, autosaveLastSavedRef.current)
       ) {
         setAutosaveStatus('idle');
         return;
@@ -3120,11 +3128,17 @@ export function SettingsDialog({
       setAutosaveStatus('saving');
       void (async () => {
         try {
-          await onPersist(snapshot, persistOptions);
-          autosaveLastSavedRef.current = snapshot;
+          await onPersist(persistedSnapshot, persistOptions);
+          autosaveLastSavedRef.current = persistedSnapshot;
+          if (
+            committedClearedProviderKey
+            && committedClearedByokProviderKeyRef.current === committedClearedProviderKey
+          ) {
+            committedClearedByokProviderKeyRef.current = null;
+          }
           lastSavedAppearanceRef.current = {
-            theme: snapshot.theme ?? 'system',
-            accentColor: resolveAccentColor(snapshot.accentColor),
+            theme: persistedSnapshot.theme ?? 'system',
+            accentColor: resolveAccentColor(persistedSnapshot.accentColor),
           };
           // If a newer edit landed while the request was in flight,
           // leave the status as 'pending' so the next debounce tick
@@ -3175,7 +3189,7 @@ export function SettingsDialog({
         autosaveTimerRef.current = null;
       }
     };
-  }, [cfg, onPersist, autosaveRetryTick]);
+  }, [analytics.track, autosaveCommitTick, cfg, onPersist, autosaveRetryTick]);
   // Flush any pending autosave on unmount so a fast-closing dialog
   // never strands an in-flight edit. We also clear the "Saved" toast
   // timer to avoid setState after unmount.
@@ -3187,7 +3201,16 @@ export function SettingsDialog({
         // the latest copy from the synchronous saveConfig call inside
         // onPersist.
         autosavePendingFlushRef.current = false;
-        void Promise.resolve(onPersist(autosaveLatestRef.current, {
+        const persistedSnapshot = resolveSettingsAutosavePayload(
+          autosaveLatestRef.current,
+          autosaveLastSavedRef.current,
+          {
+            commitClearedActiveApiKey:
+              committedClearedByokProviderKeyRef.current ===
+              byokProviderKeyForConfig(autosaveLatestRef.current),
+          },
+        );
+        void Promise.resolve(onPersist(persistedSnapshot, {
           forceMediaProviderSync: mediaProvidersVersion > lastSyncedMediaProvidersVersionRef.current,
         })).catch(() => undefined);
       }
@@ -3298,6 +3321,16 @@ export function SettingsDialog({
     () => blockingByokDraftIssues(byokDraftValidation),
     [byokDraftValidation],
   );
+  const byokActivationPreflightReason = useMemo(
+    () => byokPreflightBlockReason(cfg),
+    [
+      cfg.apiKey,
+      cfg.apiProtocol,
+      cfg.apiProviderBaseUrl,
+      cfg.baseUrl,
+      cfg.model,
+    ],
+  );
   const apiKeyDraftInvalid = byokBlockingDraftIssues.some((issue) =>
     issue.field === 'api_key' && issue.code !== 'api_key_required'
   );
@@ -3337,10 +3370,41 @@ export function SettingsDialog({
     apiProtocol !== 'azure' &&
     apiProtocol !== 'ollama' &&
     isProviderModelDiscoveryUnsupported(apiProtocol, cfg.baseUrl);
+  const providerModelDiscoverySupported =
+    apiProtocol !== 'azure' &&
+    apiProtocol !== 'ollama' &&
+    !providerModelDiscoveryUnavailable;
   const fetchedApiModelOptions =
     providerModelDiscoveryUnavailable
       ? []
       : activeProviderModelsCache[providerModelsKey] ?? [];
+  const providerPreferredModels =
+    selectedProvider?.preferredModels ?? SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol];
+  const providerManagedModelIds = useMemo(
+    () => new Set([
+      ...providerPreferredModels,
+      ...(selectedProvider?.retiredModels ?? []),
+    ]),
+    [providerPreferredModels, selectedProvider],
+  );
+  const fetchedApiModelIds = useMemo(
+    () => new Set(fetchedApiModelOptions.map((model) => model.id.trim())),
+    [fetchedApiModelOptions],
+  );
+  const pendingProviderModelReconciliation = (() => {
+    if (cfg.mode !== 'api' || apiModelCustomEditing) return null;
+    if (apiModelUserSelectedRef.current) return null;
+    if (fetchedApiModelOptions.length === 0) return null;
+    const currentModel = cfg.model.trim();
+    if (currentModel && fetchedApiModelIds.has(currentModel)) return null;
+    if (currentModel && !providerManagedModelIds.has(currentModel)) return null;
+    const preference = resolveByokModelPreference({
+      currentModel: '',
+      accountModels: fetchedApiModelOptions,
+      providerPreferredModels,
+    });
+    return preference.model === currentModel ? null : preference.model;
+  })();
   const commitProviderModelsInputs = () => {
     if (
       byokFirstPartyBaseUrl?.hostTypo ||
@@ -3358,22 +3422,32 @@ export function SettingsDialog({
     // characters — otherwise a key like "sk-ant-...\n" would only raise a
     // non-blocking warning yet still go out malformed over the wire.
     const cleanedApiKey = cleanByokApiKey(cfg.apiKey);
+    const currentProviderKey = byokProviderKeyForConfig(cfg);
+    const activeConfig = autosaveLastSavedRef.current;
+    const commitsClearedActiveApiKey =
+      cleanedApiKey === ''
+      && activeConfig.mode === 'api'
+      && activeConfig.apiKey.trim() !== ''
+      && currentProviderKey === byokProviderKeyForConfig(activeConfig);
+    committedClearedByokProviderKeyRef.current = commitsClearedActiveApiKey
+      ? currentProviderKey
+      : null;
+    if (commitsClearedActiveApiKey) {
+      setAutosaveCommitTick((tick) => tick + 1);
+    }
     if (cleanedApiKey !== cfg.apiKey) {
       // Writing the cleaned key changes cfg.apiKey, which re-runs the reset
       // effects above: one nulls providerModelsCommittedKey, the other bumps
       // providerTestRevisionRef / clears providerAutoTestKeyRef. So committing
       // the model key or starting the auto-test here would be clobbered — the
-      // model commit before the auto-fetch effect reads it, and the auto-test
-      // result dropped by the stale-revision guard. Defer both until the
-      // cleaned value has landed (effect below), otherwise account models
-      // never auto-load and the auto-test success/error never reaches the UI
-      // for the exact dirty-paste case this handles.
+      // model commit before the auto-fetch effect reads it. Defer the commit
+      // until the cleaned value has landed (effect below); connection testing
+      // waits for model discovery and reconciliation.
       deferAfterKeyCleanRef.current = true;
       updateApiConfig({ apiKey: cleanedApiKey });
       return;
     }
     commitProviderModelsInputs();
-    handleAutoTestProvider();
   };
   useEffect(() => {
     if (!deferAfterKeyCleanRef.current) return;
@@ -3386,9 +3460,6 @@ export function SettingsDialog({
     } else {
       setProviderModelsCommittedKey(providerModelsKey);
     }
-    // Runs after the provider-test reset effect (declaration order) bumped the
-    // revision for the cleaned key, so this auto-test is not flagged stale.
-    handleAutoTestProvider();
   }, [
     byokFirstPartyBaseUrl?.hostTypo,
     byokModelFetchDraftValidation,
@@ -3401,11 +3472,34 @@ export function SettingsDialog({
     if (providerTestState.status === 'running') return;
     if (byokFirstPartyBaseUrl?.hostTypo) return;
     if (blockingByokDraftIssues(byokDraftValidation).length > 0) return;
+    if (providerModelDiscoverySupported) {
+      if (
+        apiProtocol !== 'aihubmix' &&
+        providerModelsCommittedKey !== providerModelsKey
+      ) {
+        const timer = window.setTimeout(() => {
+          setProviderModelsCommittedKey(providerModelsKey);
+        }, 200);
+        return () => window.clearTimeout(timer);
+      }
+      if (
+        providerModelsState.status !== 'done' ||
+        providerModelsState.cacheKey !== providerModelsKey
+      ) return;
+      if (
+        !providerModelsState.result.ok &&
+        (
+          providerModelsState.result.kind === 'auth_failed' ||
+          providerModelsState.result.kind === 'forbidden'
+        )
+      ) return;
+      if (pendingProviderModelReconciliation !== null) return;
+    }
     const key = providerConnectionTestKey(apiProtocol, cfg);
     if (providerAutoTestKeyRef.current === key) return;
     const timer = window.setTimeout(() => {
       handleAutoTestProvider();
-    }, 500);
+    }, providerModelDiscoverySupported ? 0 : 500);
     return () => window.clearTimeout(timer);
   }, [
     apiProtocol,
@@ -3416,6 +3510,11 @@ export function SettingsDialog({
     cfg.baseUrl,
     cfg.mode,
     cfg.model,
+    providerModelDiscoverySupported,
+    pendingProviderModelReconciliation,
+    providerModelsCommittedKey,
+    providerModelsKey,
+    providerModelsState,
     providerTestState.status,
     visualStabilityMode,
   ]);
@@ -3490,13 +3589,13 @@ export function SettingsDialog({
   const suggestedApiModelIds = useMemo(
     () => {
       if (providerModelDiscoveryUnavailable) {
-        return selectedProvider?.models?.length
-          ? Array.from(new Set(selectedProvider.models))
+        return selectedProvider?.preferredModels.length
+          ? Array.from(new Set(selectedProvider.preferredModels))
           : [];
       }
       return Array.from(new Set(
-        selectedProvider?.models?.length
-          ? selectedProvider.models
+        selectedProvider?.preferredModels.length
+          ? selectedProvider.preferredModels
           : SUGGESTED_MODELS_BY_PROTOCOL[apiProtocol],
       ));
     },
@@ -3514,42 +3613,15 @@ export function SettingsDialog({
   const byokImageModelOptions = useByokImageModelOptions(apiProtocol);
   const byokVideoModelOptions = useByokVideoModelOptions(apiProtocol);
   const byokSpeechModelOptions = useByokSpeechModelOptions(apiProtocol);
-  const fetchedApiModelIds = useMemo(
-    () => new Set(fetchedApiModelOptions.map((model) => model.id.trim())),
-    [fetchedApiModelOptions],
-  );
   const apiModelIds = useMemo(
     () => apiModelOptions.map((m) => m.id),
     [apiModelOptions],
   );
-  const providerDefaultModel =
-    selectedProvider?.model.trim() || suggestedApiModelIds[0] || '';
   useEffect(() => {
-    if (cfg.mode !== 'api') return;
-    if (apiModelCustomEditing) return;
-    // Respect an explicit user pick — even when it equals the provider preset
-    // id, the user deliberately chose it and discovery must not rewrite it.
-    if (apiModelUserSelectedRef.current) return;
-    if (fetchedApiModelOptions.length === 0) return;
-    const currentModel = cfg.model.trim();
-    if (currentModel && fetchedApiModelIds.has(currentModel)) return;
-    if (currentModel && currentModel !== providerDefaultModel) return;
-
-    const preference = resolveByokModelPreference({
-      currentModel: '',
-      accountModels: fetchedApiModelOptions,
-      providerDefaultModel,
-    });
-    if (preference.source !== 'account') return;
-    if (preference.model === currentModel) return;
-    updateApiConfig({ model: preference.model });
+    if (pendingProviderModelReconciliation === null) return;
+    updateApiConfig({ model: pendingProviderModelReconciliation });
   }, [
-    apiModelCustomEditing,
-    cfg.mode,
-    cfg.model,
-    fetchedApiModelIds,
-    fetchedApiModelOptions,
-    providerDefaultModel,
+    pendingProviderModelReconciliation,
   ]);
   const apiModelCustomActive =
     shouldShowCustomModelInput(
@@ -3708,9 +3780,14 @@ export function SettingsDialog({
     // (AMR routes through ACP `session/set_model` and validates against
     // a live catalog). Undefined === allow, matching today's UX.
     const allowCustomModel = selected.supportsCustomModel !== false;
+    const explicitCustomMode = agentCustomModelIds.has(selected.id);
     const configuredModel =
       typeof effectiveChoice.model === 'string' && effectiveChoice.model
         ? effectiveChoice.model
+        : null;
+    const customModelDraft =
+      explicitCustomMode && typeof choice.model === 'string'
+        ? choice.model
         : null;
     const setChoice = (
       next: { model?: string; reasoning?: string },
@@ -3726,12 +3803,13 @@ export function SettingsDialog({
         };
       });
     };
-    const modelValue =
+    const fallbackModelValue =
       selected.id === 'amr' &&
       configuredModel &&
       !knownModelIds.includes(configuredModel)
         ? defaultAgentModelId(selected) ?? ''
         : configuredModel ?? defaultAgentModelId(selected) ?? '';
+    const modelValue = customModelDraft ?? fallbackModelValue;
     const reasoningValue =
       effectiveChoice.reasoning ??
       choice.reasoning ??
@@ -3742,7 +3820,7 @@ export function SettingsDialog({
       shouldShowCustomModelInput(
         modelValue,
         knownModelIds,
-        agentCustomModelIds.has(selected.id),
+        explicitCustomMode,
       );
     const selectValue = customActive
       ? CUSTOM_MODEL_SENTINEL
@@ -5103,6 +5181,15 @@ export function SettingsDialog({
                   onTestProvider={() => handleTestProvider()}
                 />
               </div>
+              {byokActivationPreflightReason ? (
+                <p
+                  className="settings-test-status warn"
+                  role="status"
+                  data-testid="settings-byok-draft-notice"
+                >
+                  {t('settings.byokDraftNotice')}
+                </p>
+              ) : null}
               {byokPreconditionNotice && !byokPreconditionNotice.field ? (
                 <p
                   className="settings-test-status error"
@@ -5131,7 +5218,7 @@ export function SettingsDialog({
                     setApiModelCustomEditing(false);
                     updateApiConfig({
                       baseUrl: p.baseUrl,
-                      model: p.model,
+                      model: defaultKnownProviderModel(p),
                       apiProviderBaseUrl: p.baseUrl,
                     });
                   }}
@@ -5164,7 +5251,10 @@ export function SettingsDialog({
                 )}
                 showApiKey={showApiKey}
                 onBlur={onByokKeyCommit}
-                onChange={(value) => updateApiConfig({ apiKey: value })}
+                onChange={(value) => {
+                  committedClearedByokProviderKeyRef.current = null;
+                  updateApiConfig({ apiKey: value });
+                }}
                 onFocus={() => {
                   const byokProviderId = byokProtocolToTracking(apiProtocol);
                   if (byokProviderId) {
@@ -7536,7 +7626,7 @@ function MediaProvidersSection({
 //
 // Schemas drift between clients in deliberate ways. VS Code keys
 // servers under "servers" with a required "type" field; Zed uses
-// "context_servers"; Cursor, Windsurf, and Antigravity share
+// "context_servers"; Cursor, Kiro, Windsurf, and Antigravity share
 // "mcpServers"; Claude Code is best served by its CLI which writes
 // to the local config for you. Verified against each tool's official
 // docs in May 2026.
@@ -7551,6 +7641,7 @@ type McpClientId =
   | 'claude'
   | 'codex'
   | 'cursor'
+  | 'kiro'
   | 'vscode'
   | 'zed'
   | 'windsurf'
@@ -7813,6 +7904,17 @@ function IntegrationsSection() {
         return `cursor://anysphere.cursor-deeplink/mcp/install?name=open-design&config=${encoded}`;
       },
       deeplinkLabel: () => t('settings.mcpDeeplinkInstallCursor'),
+    },
+    {
+      id: 'kiro',
+      label: 'Kiro CLI',
+      buildMethod: () => t('settings.mcpMethodJson'),
+      buildInstruction: (info) =>
+        t('settings.mcpInstructionKiro', {
+          path: homeConfigPath(info.platform, '~/.kiro/settings/mcp.json', '%USERPROFILE%\\.kiro\\settings\\mcp.json'),
+        }),
+      buildSnippet: buildSharedMcpJson,
+      buildSnippetLang: () => 'json',
     },
     {
       id: 'vscode',
