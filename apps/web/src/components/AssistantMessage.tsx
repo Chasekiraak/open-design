@@ -817,13 +817,20 @@ function AssistantMessageImpl({
     turnArtifactOps.length > 0 ||
     displayedProduced.length > 0 ||
     pluginActionFolders.length > 0;
+  // Incomplete brand extraction is an explicit recovery workflow, not a
+  // generic failed turn: its Continue action is the only way to resume the
+  // saved extraction state, even when no artifact was produced yet.
+  const isBrandExtractionRecovery =
+    effectiveNextStepVariant === 'brand-extraction-incomplete' ||
+    effectiveNextStepVariant === 'brand-programmatic-incomplete' ||
+    effectiveNextStepVariant === 'brand-ai-incomplete';
   const showNextStepActions =
     !streaming &&
-    runSucceeded &&
     unfinishedTodos.length === 0 &&
-    hasTurnDeliverable &&
     !hasPendingQuestionForm &&
-    ((!!isLast && hasNextStepPrimary) || showOpenDesignSubmission);
+    ((!!isLast && hasNextStepPrimary &&
+      ((runSucceeded && hasTurnDeliverable) || isBrandExtractionRecovery)) ||
+      showOpenDesignSubmission);
   // Pre-output vs working: before any real content (text / thinking / tools /
   // files) the footer shimmers "Preparing…"; the moment content lands it
   // flips to "Working". The elapsed clock stays anchored to the persisted run
