@@ -80,24 +80,49 @@ interface Props {
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
 /** Fallback for a caller with no sharing surface (no workspace, no grids). */
 const NOTHING_SHARED: SharedProjectPredicate = () => false;
+/** The chip a design-system project wears. Product name, not a translated
+ *  string — shared by the card tag and the type filter so both read alike. */
+const DESIGN_SYSTEM_TAG_LABEL = 'Design System';
+
+type DictKey = Parameters<ReturnType<typeof useT>>[0];
 
 type OwnerFilter = 'all' | 'mine' | 'others';
-type ProjectKindFilter = 'all' | 'prototype' | 'deck' | 'media' | 'other';
+/** The type filter speaks the SAME vocabulary the cards stamp on themselves
+ *  ({@link projectCardCategory}), so "原型 / 幻灯片 / 实时看板 / 媒体 /
+ *  Design System" in the dropdown mean exactly the chips a user can read off
+ *  the grid. It used to run a private taxonomy off `metadata.kind`
+ *  (prototype/deck/media/other), which offered a 其他 bucket no card ever
+ *  shows and no 实时看板 / Design System filter for chips every card does. */
+type ProjectKindFilter = 'all' | ProjectCardCategory;
 type ProjectSort = 'updatedDesc' | 'updatedAsc' | 'nameAsc';
 
-const OWNER_FILTER_OPTIONS: Array<{ id: OwnerFilter; labelKey: Parameters<ReturnType<typeof useT>>[0] }> = [
+const OWNER_FILTER_OPTIONS: Array<{ id: OwnerFilter; labelKey: DictKey }> = [
   { id: 'all', labelKey: 'recentProjects.ownerAll' },
   { id: 'mine', labelKey: 'recentProjects.ownerMine' },
   { id: 'others', labelKey: 'recentProjects.ownerOthers' },
 ];
 
-const KIND_FILTER_OPTIONS: Array<{ id: ProjectKindFilter; labelKey: Parameters<ReturnType<typeof useT>>[0] }> = [
+type KindFilterOption =
+  | { id: ProjectKindFilter; labelKey: DictKey; label?: undefined }
+  | { id: ProjectKindFilter; label: string; labelKey?: undefined };
+
+// One entry per chip the grid can render, reusing that chip's own i18n key so
+// the filter label and the card label can never drift apart. `brand` is absent
+// on purpose: `projectCardCategory` resolves every brand-kind project to
+// 'design-system' first (see `isDesignSystemProject`), so a 'brand' option
+// could only ever match nothing.
+const KIND_FILTER_OPTIONS: KindFilterOption[] = [
   { id: 'all', labelKey: 'recentProjects.kindAll' },
-  { id: 'prototype', labelKey: 'recentProjects.kindPrototype' },
-  { id: 'deck', labelKey: 'recentProjects.kindSlides' },
-  { id: 'media', labelKey: 'recentProjects.kindMedia' },
-  { id: 'other', labelKey: 'recentProjects.kindOther' },
+  { id: 'prototype', labelKey: 'designs.tagPrototype' },
+  { id: 'slide', labelKey: 'designs.tagSlide' },
+  { id: 'live-artifact', labelKey: 'designs.tagLiveArtifact' },
+  { id: 'media', labelKey: 'designs.tagMedia' },
+  { id: 'design-system', label: DESIGN_SYSTEM_TAG_LABEL },
 ];
+
+function kindFilterLabel(option: KindFilterOption, t: ReturnType<typeof useT>): string {
+  return option.labelKey === undefined ? option.label : t(option.labelKey);
+}
 
 const SORT_OPTIONS: Array<{ id: ProjectSort; labelKey: Parameters<ReturnType<typeof useT>>[0] }> = [
   { id: 'updatedDesc', labelKey: 'recentProjects.sortNewest' },
@@ -169,6 +194,11 @@ export function RecentProjectsStrip({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
+  // Confirmation gates for the bulk bar. Batch move reuses the single-card
+  // 不再提示 opt-out; batch delete always confirms (it is irreversible and
+  // spans N projects), mirroring the projects grid's own batch delete.
+  const [bulkMoveAction, setBulkMoveAction] = useState<'to-team' | 'to-personal' | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (limit !== undefined) return;
@@ -249,7 +279,7 @@ export function RecentProjectsStrip({
           ownerFilter === 'all' ||
           (ownerFilter === 'mine' && creator.ownedBySelf) ||
           (ownerFilter === 'others' && !creator.ownedBySelf);
-        const kindMatches = kindFilter === 'all' || filterKindForProject(project) === kindFilter;
+        const kindMatches = kindFilter === 'all' || projectCardCategory(project) === kindFilter;
         return ownerMatches && kindMatches;
       })
       .slice(0, resolvedLimit),
@@ -259,6 +289,8 @@ export function RecentProjectsStrip({
   const renameTitleId = useId();
   const confirmTitleId = useId();
   const moveTitleId = useId();
+  const bulkMoveTitleId = useId();
+  const bulkDeleteTitleId = useId();
   // #5517 move confirmation: moving a project in/out of the team space asks
   // once, with a persisted 不再提示 opt-out (the demo keeps it per-session;
   // the product remembers the choice).
@@ -292,6 +324,22 @@ export function RecentProjectsStrip({
     void (action === 'to-team' ? handleShareToTeam(project) : handleUnshareFromTeam(project));
   }
   const actionsAvailable = Boolean(onDelete || onDuplicate || onRename || collaborationAvailable);
+
+  // Bulk-action state for the 多选 bar. Every action below is the batch form of
+  // an action the per-card ⋯ menu already offers (move in/out of the team
+  // space, delete); nothing new is exposed here that a single card cannot do.
+  const selectedProjects = visibleProjects.filter(({ project }) => selectedProjectIds.has(project.id));
+  const selectedCount = selectedProjectIds.size;
+  // Same gate as the per-card menu: only your own projects can be moved or
+  // deleted, so a selection containing someone else's shared project disables
+  // the mutations instead of half-applying them.
+  const selectionHasForeignProject = selectedProjects.some(({ creator }) => !creator.ownedBySelf);
+  const bulkMutationDisabled = selectedCount === 0 || selectionHasForeignProject;
+  const bulkMutationTitle = selectionHasForeignProject
+    ? t('recentProjects.ownOnlyMutation')
+    : selectedProjects.map(({ project }) => project.name).join('、') || undefined;
+  const canBulkMoveToTeam = collaborationAvailable && space !== 'team';
+  const canBulkMoveToPersonal = collaborationAvailable && space !== 'drafts';
 
   useEffect(() => {
     setSelectedProjectIds((current) => {
@@ -508,7 +556,81 @@ export function RecentProjectsStrip({
     });
   }
 
-  const selectedCount = selectedProjectIds.size;
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedProjectIds(new Set());
+  }
+
+  /** Shared by the single-card and the bulk move confirmations so both spell
+   *  out the same consequence of crossing the team-space boundary. */
+  function moveDescription(action: 'to-team' | 'to-personal') {
+    return action === 'to-team' ? (
+      <>
+        {t('recentProjects.moveToTeamDescPre')}
+        <strong>{t('recentProjects.moveToTeamDescStrong')}</strong>
+        {t('recentProjects.moveToTeamDescPost')}
+      </>
+    ) : (
+      <>
+        {t('recentProjects.moveToPersonalDescPre')}
+        <strong>{t('recentProjects.moveToPersonalDescStrong')}</strong>
+        {t('recentProjects.moveToPersonalDescPost')}
+      </>
+    );
+  }
+
+  function requestBulkMove(action: 'to-team' | 'to-personal') {
+    if (bulkMutationDisabled) return;
+    if (moveDontRemind) {
+      void commitBulkMove(action);
+      return;
+    }
+    setBulkMoveAction(action);
+  }
+
+  /** Batch form of the per-card 转入/移出团队空间 action: the very same
+   *  `moveWorkspaceProject` call, once per selected project. Failures are
+   *  reported per project and never abort the rest of the batch. */
+  async function commitBulkMove(action: 'to-team' | 'to-personal') {
+    const ids = selectedProjects.map(({ project }) => project.id);
+    setBulkMoveAction(null);
+    exitSelectionMode();
+    if (ids.length === 0) return;
+    const visibility = action === 'to-team' ? 'team' : 'personal';
+    const moved = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await moveWorkspaceProject({ projectId: id, visibility, workspaceContext });
+          return id;
+        } catch (err) {
+          console.warn('[RecentProjectsStrip] bulk move project failed:', err);
+          return null;
+        }
+      }),
+    );
+    const succeeded = moved.filter((id): id is string => id !== null);
+    for (const id of succeeded) {
+      if (action === 'to-team') onProjectShared?.(id);
+      else onProjectUnshared?.(id);
+    }
+    if (succeeded.length > 0) notifyTeamProjectsChanged();
+  }
+
+  async function commitBulkDelete() {
+    const ids = selectedProjects.map(({ project }) => project.id);
+    setBulkDeleteOpen(false);
+    exitSelectionMode();
+    if (!onDelete || ids.length === 0) return;
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await onDelete(id);
+        } catch (err) {
+          console.warn('[RecentProjectsStrip] bulk delete project failed:', err);
+        }
+      }),
+    );
+  }
 
   return (
     <section className="recent-projects" data-testid="recent-projects-strip">
@@ -579,7 +701,10 @@ export function RecentProjectsStrip({
                 aria-expanded={openHeaderMenu === 'kind'}
                 onClick={() => setOpenHeaderMenu((current) => current === 'kind' ? null : 'kind')}
               >
-                {t(KIND_FILTER_OPTIONS.find((option) => option.id === kindFilter)?.labelKey ?? 'recentProjects.kindAll')}
+                {kindFilterLabel(
+                  KIND_FILTER_OPTIONS.find((option) => option.id === kindFilter) ?? KIND_FILTER_OPTIONS[0]!,
+                  t,
+                )}
                 <Icon name="chevron-down" size={13} />
               </button>
               {openHeaderMenu === 'kind' ? (
@@ -594,7 +719,7 @@ export function RecentProjectsStrip({
                         setOpenHeaderMenu(null);
                       }}
                     >
-                      {t(option.labelKey)}
+                      {kindFilterLabel(option, t)}
                     </button>
                   ))}
                 </div>
@@ -671,10 +796,50 @@ export function RecentProjectsStrip({
         </header>
       )}
       {selectionMode ? (
-        <div className="recent-projects__bulkbar" role="status">
+        <div
+          className="recent-projects__bulkbar"
+          role="toolbar"
+          aria-label={t('recentProjects.multiSelect')}
+        >
           <span className="recent-projects__bulkbar-count">
             {t('designs.selectedCount', { n: selectedCount })}
           </span>
+          <div className="recent-projects__bulkbar-actions">
+            {canBulkMoveToTeam ? (
+              <button
+                type="button"
+                disabled={bulkMutationDisabled}
+                title={bulkMutationTitle}
+                onClick={() => requestBulkMove('to-team')}
+              >
+                <Icon name="import" size={14} /> {t('recentProjects.moveToTeam')}
+              </button>
+            ) : null}
+            {canBulkMoveToPersonal ? (
+              <button
+                type="button"
+                disabled={bulkMutationDisabled}
+                title={bulkMutationTitle}
+                onClick={() => requestBulkMove('to-personal')}
+              >
+                <Icon name="log-out" size={14} /> {t('recentProjects.moveOutOfTeam')}
+              </button>
+            ) : null}
+            {onDelete ? (
+              <button
+                type="button"
+                className="danger"
+                disabled={bulkMutationDisabled}
+                title={bulkMutationTitle}
+                onClick={() => setBulkDeleteOpen(true)}
+              >
+                <Icon name="trash" size={14} /> {t('designs.deleteSelected')}
+              </button>
+            ) : null}
+            <button type="button" className="ghost" onClick={exitSelectionMode}>
+              {t('designs.cancelSelect')}
+            </button>
+          </div>
         </div>
       ) : null}
       <div
@@ -990,21 +1155,7 @@ export function RecentProjectsStrip({
               ? t('recentProjects.moveToTeam')
               : t('recentProjects.moveOutOfTeam')}
           </DialogTitle>
-          <DialogDescription>
-            {moveTarget.action === 'to-team' ? (
-              <>
-                {t('recentProjects.moveToTeamDescPre')}
-                <strong>{t('recentProjects.moveToTeamDescStrong')}</strong>
-                {t('recentProjects.moveToTeamDescPost')}
-              </>
-            ) : (
-              <>
-                {t('recentProjects.moveToPersonalDescPre')}
-                <strong>{t('recentProjects.moveToPersonalDescStrong')}</strong>
-                {t('recentProjects.moveToPersonalDescPost')}
-              </>
-            )}
-          </DialogDescription>
+          <DialogDescription>{moveDescription(moveTarget.action)}</DialogDescription>
           <DialogFooter className="row">
             <label className="recent-projects__move-remind">
               <input
@@ -1021,6 +1172,70 @@ export function RecentProjectsStrip({
               {moveTarget.action === 'to-team'
                 ? t('recentProjects.confirmMoveToTeam')
                 : t('recentProjects.confirmMoveToPersonal')}
+            </button>
+          </DialogFooter>
+        </Dialog>
+      ) : null}
+      {bulkMoveAction ? (
+        <Dialog
+          className="modal-confirm"
+          role="alertdialog"
+          onClose={() => setBulkMoveAction(null)}
+          closeOnEscape
+          ariaLabelledBy={bulkMoveTitleId}
+        >
+          <DialogTitle id={bulkMoveTitleId}>
+            {bulkMoveAction === 'to-team'
+              ? t('recentProjects.moveToTeam')
+              : t('recentProjects.moveOutOfTeam')}
+          </DialogTitle>
+          <DialogDescription>{moveDescription(bulkMoveAction)}</DialogDescription>
+          <DialogFooter className="row">
+            <label className="recent-projects__move-remind">
+              <input
+                type="checkbox"
+                checked={moveDontRemind}
+                onChange={(event) => setMoveDontRemind(event.target.checked)}
+              />
+              {t('recentProjects.moveDontRemind')}
+            </label>
+            <button type="button" onClick={() => setBulkMoveAction(null)}>
+              {t('designs.renameCancel')}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void commitBulkMove(bulkMoveAction)}
+            >
+              {bulkMoveAction === 'to-team'
+                ? t('recentProjects.confirmMoveToTeam')
+                : t('recentProjects.confirmMoveToPersonal')}
+            </button>
+          </DialogFooter>
+        </Dialog>
+      ) : null}
+      {bulkDeleteOpen ? (
+        <Dialog
+          className="modal-confirm"
+          role="alertdialog"
+          onClose={() => setBulkDeleteOpen(false)}
+          closeOnEscape
+          ariaLabelledBy={bulkDeleteTitleId}
+        >
+          <DialogTitle id={bulkDeleteTitleId}>{t('designs.deleteTitle')}</DialogTitle>
+          <DialogDescription>
+            {t('designs.deleteSelectedConfirm', { n: selectedCount })}
+          </DialogDescription>
+          <DialogFooter className="row">
+            <button type="button" onClick={() => setBulkDeleteOpen(false)}>
+              {t('designs.renameCancel')}
+            </button>
+            <button
+              type="button"
+              className="primary danger"
+              onClick={() => void commitBulkDelete()}
+            >
+              {t('designs.deleteSelected')}
             </button>
           </DialogFooter>
         </Dialog>
@@ -1280,15 +1495,23 @@ export function projectCover(
   return { kind: 'fallback', style, initial };
 }
 
-function filterKindForProject(project: Project): ProjectKindFilter {
-  const kind = project.metadata?.kind;
-  if (kind === 'deck') return 'deck';
-  if (kind === 'image' || kind === 'video' || kind === 'audio') return 'media';
-  if (kind === 'prototype' || kind === 'template') return 'prototype';
-  return 'other';
-}
-
 export type ProjectCategory = 'prototype' | 'live-artifact' | 'slide' | 'media' | 'brand';
+
+/** Every chip a project card can wear, `ProjectCategory` plus the
+ *  design-system tag the card substitutes for it. */
+export type ProjectCardCategory = ProjectCategory | 'design-system';
+
+/**
+ * The type a card actually advertises — the single source of truth behind both
+ * the chip in the card footer and the header's type filter. It mirrors the
+ * card's own branch: a design-system project wears the Design System tag,
+ * everything else falls through to {@link projectCategory}. Filtering must go
+ * through this, never through the raw `metadata.kind`, or the dropdown starts
+ * offering types no chip displays.
+ */
+export function projectCardCategory(project: Project): ProjectCardCategory {
+  return isDesignSystemProject(project) ? 'design-system' : projectCategory(project);
+}
 
 export function projectCategory(project: Project): ProjectCategory {
   const meta = project.metadata;
@@ -1319,7 +1542,7 @@ export function ProjectTag({ category }: { category: ProjectCategory }) {
 }
 
 function DesignSystemProjectTag() {
-  return <span className="design-card-tag tag-design-system">Design System</span>;
+  return <span className="design-card-tag tag-design-system">{DESIGN_SYSTEM_TAG_LABEL}</span>;
 }
 
 function findDesignSystemLogoFile(files: ProjectFile[]): ProjectFile | null {
