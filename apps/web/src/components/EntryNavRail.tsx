@@ -56,6 +56,17 @@ const X_URL = 'https://x.com/OpenDesignHQ';
 const CONTACT_EMAIL_URL = 'mailto:contact@open.design';
 const externalLinkProps = { target: '_blank', rel: 'noreferrer noopener' } as const;
 
+// Last directory this shell successfully read. `coalescedGet` only collapses
+// CONCURRENT reads, so without this every open of the switcher started from an
+// empty list and showed a loading row before the same names reappeared. Kept at
+// module scope so it survives the rail unmounting (returning from a project).
+let cachedWorkspaceDirectory: WorkspaceDirectoryItem[] | null = null;
+
+/** Test seam: clear the module-level directory cache between tests. */
+export function resetWorkspaceDirectoryCache(): void {
+  cachedWorkspaceDirectory = null;
+}
+
 // The rail's destination ids are the entry-shell home views (kept in sync with
 // the router so `navigate({ kind: 'home', view })` type-checks for every item).
 export type EntryView = EntryHomeView;
@@ -314,7 +325,9 @@ export function EntryNavRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountOpen]);
   const [teamOpen, setTeamOpen] = useState(false);
-  const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>([]);
+  const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>(
+    () => cachedWorkspaceDirectory ?? [],
+  );
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -351,7 +364,9 @@ export function EntryNavRail({
         : [];
 
   async function loadWorkspaceDirectory() {
-    setWorkspaceDirectoryLoading(true);
+    // Only show the loading row when there is nothing to show yet. With a warm
+    // cache the list is already on screen and this read just revalidates it.
+    if (cachedWorkspaceDirectory === null) setWorkspaceDirectoryLoading(true);
     try {
       const items = await coalescedGet('workspace-directory', async () => {
         const response = await fetch('/api/workspace/directory', { cache: 'no-store' });
@@ -359,9 +374,12 @@ export function EntryNavRail({
         const body = (await response.json()) as WorkspaceDirectoryResponse;
         return body.items ?? [];
       });
+      cachedWorkspaceDirectory = items;
       setWorkspaceItems(items);
     } catch {
-      setWorkspaceItems([]);
+      // A failed revalidation must not blank a list the user is looking at —
+      // keep the last known names and let the next open try again.
+      if (cachedWorkspaceDirectory === null) setWorkspaceItems([]);
     } finally {
       setWorkspaceDirectoryLoading(false);
     }
