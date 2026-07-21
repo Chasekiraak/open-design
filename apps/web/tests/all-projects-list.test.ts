@@ -23,7 +23,7 @@ function teamContext(overrides: Partial<WorkspaceCollabContext> = {}): Workspace
   } as WorkspaceCollabContext;
 }
 
-function localProject(id: string, name: string): Project {
+function localProject(id: string, name: string, workspaceId?: string | null): Project {
   return {
     id,
     name,
@@ -31,6 +31,7 @@ function localProject(id: string, name: string): Project {
     designSystemId: null,
     createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
   } as Project;
 }
 
@@ -193,6 +194,76 @@ describe('buildDraftsList', () => {
     );
     for (const id of inDrafts) expect(inAll.has(id)).toBe(false);
     expect([...inDrafts, ...inAll].sort()).toEqual(['p-draft', 'p-shared']);
+  });
+
+  // THE BUG (product ruling 2026-07-21): 「草稿和分享的方案都是和 workspace 绑定
+  // 的」. A draft created in workspace A must not show up in workspace B's 草稿.
+  // Before the fix this list was "every local project minus the shared ones",
+  // with no workspace filter at all, so every workspace rendered the same 草稿.
+  it('leaves a draft that belongs to another workspace out', () => {
+    const list = drafts(
+      [
+        localProject('p-here', 'Mine here', 'ws-1'),
+        localProject('p-elsewhere', 'Someone else’s workspace', 'ws-2'),
+      ],
+      [],
+    );
+
+    expect(list.map((p) => p.id)).toEqual(['p-here']);
+  });
+
+  // Evidence-gated: a project the daemon has not bound yet (pre-workspace, still
+  // awaiting adoption) carries no workspace. Hiding it would make it unreachable
+  // in every grid, which is indistinguishable from losing it.
+  it('keeps a project whose workspace is not known yet', () => {
+    const list = drafts([localProject('p-unbound', 'Legacy', null), localProject('p-legacy', 'Older')], []);
+
+    expect(list.map((p) => p.id)).toEqual(['p-unbound', 'p-legacy']);
+  });
+
+  it('drops another workspace’s project from 全部项目 too, so it lands in neither grid', () => {
+    const projects = [
+      localProject('p-here', 'Mine here', 'ws-1'),
+      localProject('p-elsewhere', 'Elsewhere', 'ws-2'),
+    ];
+    // The other workspace's project is shared THERE, but this workspace's hub
+    // does not list it, so nothing here should surface it.
+    const list = buildAllProjectsList({
+      projects,
+      teamProjects: [sharedProject({ projectId: 'p-here', ownerMemberId: SELF })],
+      workspaceContext: teamContext(),
+      sharedFallbackName: '共享项目',
+      now: () => 1_700_000_000_000,
+    });
+
+    expect(list.map((p) => p.id)).toEqual(['p-here']);
+  });
+
+  // The partition still holds, now over the workspace's projects rather than
+  // over every local row: each of this workspace's projects lands in exactly one
+  // grid, and a project bound elsewhere lands in neither.
+  it('partitions this workspace’s projects and excludes other workspaces’ entirely', () => {
+    const projects = [
+      localProject('p-shared', 'Shared', 'ws-1'),
+      localProject('p-draft', 'Draft', 'ws-1'),
+      localProject('p-elsewhere', 'Elsewhere', 'ws-2'),
+    ];
+    const teamProjects = [sharedProject({ projectId: 'p-shared', ownerMemberId: SELF })];
+    const inDrafts = new Set(drafts(projects, teamProjects).map((p) => p.id));
+    const inAll = new Set(
+      buildAllProjectsList({
+        projects,
+        teamProjects,
+        workspaceContext: teamContext(),
+        sharedFallbackName: '共享项目',
+        now: () => 1_700_000_000_000,
+      }).map((p) => p.id),
+    );
+
+    for (const id of inDrafts) expect(inAll.has(id)).toBe(false);
+    expect([...inDrafts, ...inAll].sort()).toEqual(['p-draft', 'p-shared']);
+    expect(inDrafts.has('p-elsewhere')).toBe(false);
+    expect(inAll.has('p-elsewhere')).toBe(false);
   });
 
   // Same regression as 全部项目's personal-workspace case, seen from the other

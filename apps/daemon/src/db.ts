@@ -15,6 +15,10 @@ import type {
 } from '@open-design/contracts';
 import { eventsEndedWithUnfinishedWork } from '@open-design/contracts';
 import { migrateCollabSyncSnapshots } from './collab/sync-snapshot-store.js';
+import {
+  collapseWorkspaceProjectHomes,
+  type WorkspaceProjectHomeRow,
+} from './collab/workspace-project-home.js';
 import { migrateCritique } from './critique/persistence.js';
 import { migrateMediaTasks } from './media/tasks.js';
 import { migrateLibrary } from './library-store.js';
@@ -71,8 +75,10 @@ function migrate(db: SqliteDb): void {
       updated_at INTEGER NOT NULL
     );
 
+    -- A project belongs to exactly ONE workspace, so project_id is the key.
+    -- See collab/workspace-project-home.ts for the ruling and the repair path.
     CREATE TABLE IF NOT EXISTS workspace_projects (
-      project_id TEXT NOT NULL,
+      project_id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,
       visibility TEXT NOT NULL CHECK (visibility IN ('personal', 'team')),
       resource_state TEXT NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
@@ -84,7 +90,6 @@ function migrate(db: SqliteDb): void {
       version INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY(workspace_id, project_id),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
@@ -297,7 +302,7 @@ function migrate(db: SqliteDb): void {
   if (!workspaceProjectCols.some((c: DbRow) => c.name === 'cloud_tombstoned_at')) {
     db.exec(`ALTER TABLE workspace_projects ADD COLUMN cloud_tombstoned_at INTEGER`);
   }
-  migrateWorkspaceProjectsCompositePrimaryKey(db);
+  migrateWorkspaceProjectsSingleHome(db);
   const conversationCols = db.prepare(`PRAGMA table_info(conversations)`).all() as DbRow[];
   if (!conversationCols.some((c: DbRow) => c.name === 'session_mode')) {
     db.exec(`ALTER TABLE conversations ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'design'`);
@@ -438,17 +443,78 @@ function migrate(db: SqliteDb): void {
   migrateCollabSyncSnapshots(db);
 }
 
-function migrateWorkspaceProjectsCompositePrimaryKey(db: SqliteDb): void {
+/**
+ * Bind every project to exactly ONE workspace, and make any other state
+ * unrepresentable.
+ *
+ * Product ruling (2026-07-21): a project is created in a workspace and lives
+ * there; sharing flips `visibility` within that workspace rather than projecting
+ * the project into a second one. See collab/workspace-project-home.ts for the
+ * full statement and for the rule that picks the surviving row.
+ *
+ * Two steps, in this order, inside one transaction:
+ *   1. collapse the duplicate rows an older build's blanket back-fill wrote —
+ *      on the dogfood database 23 of 31 projects had rows in 2-4 workspaces;
+ *   2. narrow the primary key from `(workspace_id, project_id)` back to
+ *      `project_id`, which is what it was before a migration widened it (the
+ *      table it renamed was called `workspace_projects_legacy_single_project`).
+ *
+ * The order matters: the rebuild's INSERT would fail on the narrowed key if the
+ * duplicates were still there. Step 1 therefore runs on every startup, not just
+ * on the one that narrows the key, so a row that predates this build is repaired
+ * even if the key was already narrow. It is idempotent and costs one indexed
+ * scan.
+ *
+ * A migration rather than the startup reconciliation used for impossible team
+ * shares (server.ts `reconcileImpossibleTeamShares`): that one needs the
+ * workspace DIRECTORY to decide, which is a signed-in network fact, so it cannot
+ * run before the first read. This one decides from the table alone, so it can —
+ * and it must, because the read path below now assumes at most one row.
+ */
+function migrateWorkspaceProjectsSingleHome(db: SqliteDb): void {
+  const collapse = db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT project_id AS projectId,
+                workspace_id AS workspaceId,
+                visibility,
+                created_by_workspace_member_id AS createdByWorkspaceMemberId,
+                created_at AS createdAt
+           FROM workspace_projects`,
+      )
+      .all() as WorkspaceProjectHomeRow[];
+    const decisions = collapseWorkspaceProjectHomes(rows);
+    if (decisions.length === 0) return 0;
+    const drop = db.prepare(
+      `DELETE FROM workspace_projects WHERE workspace_id = ? AND project_id = ?`,
+    );
+    let dropped = 0;
+    for (const decision of decisions) {
+      for (const row of decision.drop) {
+        drop.run(row.workspaceId, row.projectId);
+        dropped += 1;
+      }
+    }
+    return dropped;
+  });
+  const dropped = collapse();
+  if (dropped > 0) {
+    console.warn(
+      `[od] bound ${dropped} duplicated workspace project row(s) to a single workspace each. ` +
+        'A project belongs to one workspace; the extras came from an older blanket back-fill.',
+    );
+  }
+
   const cols = db.prepare(`PRAGMA table_info(workspace_projects)`).all() as DbRow[];
   const projectPk = cols.find((c: DbRow) => c.name === 'project_id')?.pk ?? 0;
   const workspacePk = cols.find((c: DbRow) => c.name === 'workspace_id')?.pk ?? 0;
-  if (projectPk > 0 && workspacePk > 0) return;
+  if (projectPk === 1 && workspacePk === 0) return;
 
   db.exec(`
     DROP INDEX IF EXISTS idx_workspace_projects_workspace_visibility;
-    ALTER TABLE workspace_projects RENAME TO workspace_projects_legacy_single_project;
+    ALTER TABLE workspace_projects RENAME TO workspace_projects_legacy_multi_workspace;
     CREATE TABLE workspace_projects (
-      project_id TEXT NOT NULL,
+      project_id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,
       visibility TEXT NOT NULL CHECK (visibility IN ('personal', 'team')),
       resource_state TEXT NOT NULL CHECK (resource_state IN ('active', 'frozen', 'deleted')),
@@ -460,7 +526,6 @@ function migrateWorkspaceProjectsCompositePrimaryKey(db: SqliteDb): void {
       version INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY(workspace_id, project_id),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
     INSERT INTO workspace_projects
@@ -472,8 +537,8 @@ function migrateWorkspaceProjectsCompositePrimaryKey(db: SqliteDb): void {
            created_by_workspace_member_id, updated_by_workspace_member_id,
            resource_hub_resource_id, cloud_tombstoned_at,
            sync_state, version, created_at, updated_at
-      FROM workspace_projects_legacy_single_project;
-    DROP TABLE workspace_projects_legacy_single_project;
+      FROM workspace_projects_legacy_multi_workspace;
+    DROP TABLE workspace_projects_legacy_multi_workspace;
     CREATE INDEX IF NOT EXISTS idx_workspace_projects_workspace_visibility
       ON workspace_projects(workspace_id, visibility, updated_at DESC);
   `);
@@ -828,6 +893,18 @@ export function listWorkspaceProjects(db: SqliteDb, workspaceId: string) {
     .all(workspaceId) as DbRow[];
 }
 
+/**
+ * Every project's workspace, as one map. The bulk form of
+ * {@link getWorkspaceProjectByProjectId}, for list endpoints that would
+ * otherwise issue one lookup per project on a hot path.
+ */
+export function listWorkspaceProjectBindings(db: SqliteDb): Map<string, string> {
+  const rows = db
+    .prepare(`SELECT project_id AS projectId, workspace_id AS workspaceId FROM workspace_projects`)
+    .all() as Array<{ projectId: string; workspaceId: string }>;
+  return new Map(rows.map((row) => [row.projectId, row.workspaceId]));
+}
+
 export function listTeamWorkspaceProjectShares(db: SqliteDb) {
   return db
     .prepare(
@@ -844,9 +921,49 @@ export function listTeamWorkspaceProjectShares(db: SqliteDb) {
     .all() as DbRow[];
 }
 
+/**
+ * The workspace a project belongs to, looked up by project alone.
+ *
+ * A project has exactly one workspace (see collab/workspace-project-home.ts), so
+ * this — not `getWorkspaceProject(db, workspaceId, projectId)` — is the question
+ * to ask before binding a project anywhere. Asking the two-key form and getting
+ * nothing back means "not in THIS workspace", which an older build mistook for
+ * "not bound anywhere" and answered by writing another row.
+ */
+export function getWorkspaceProjectByProjectId(db: SqliteDb, projectId: string) {
+  return db
+    .prepare(
+      `SELECT project_id AS projectId,
+              workspace_id AS workspaceId,
+              visibility,
+              resource_state AS resourceState,
+              created_by_workspace_member_id AS createdByWorkspaceMemberId,
+              updated_by_workspace_member_id AS updatedByWorkspaceMemberId,
+              resource_hub_resource_id AS resourceHubResourceId,
+              cloud_tombstoned_at AS cloudTombstonedAt,
+              sync_state AS syncState,
+              version,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+         FROM workspace_projects
+        WHERE project_id = ?`,
+    )
+    .get(projectId) as DbRow | undefined;
+}
+
+/**
+ * Bind a project to a workspace, or return the binding it already has.
+ *
+ * Deliberately keyed on the PROJECT, not on `(workspace, project)`: a project
+ * already bound elsewhere is returned as-is rather than bound a second time.
+ * That is what makes the caller's "ensure" idempotent across workspaces instead
+ * of one back-fill per workspace visited — and it is also what the narrowed
+ * primary key now enforces, so an accidental second insert throws instead of
+ * silently duplicating.
+ */
 export function ensureWorkspaceProject(db: SqliteDb, input: DbRow) {
   const now = Date.now();
-  const existing = getWorkspaceProject(db, input.workspaceId, input.projectId);
+  const existing = getWorkspaceProjectByProjectId(db, input.projectId);
   if (existing) return existing;
   db.prepare(
     `INSERT INTO workspace_projects

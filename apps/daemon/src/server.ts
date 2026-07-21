@@ -525,6 +525,8 @@ import {
   countWorkspaceProjectRefs,
   findTeamWorkspaceIdForProject,
   getWorkspaceProject,
+  getWorkspaceProjectByProjectId,
+  listWorkspaceProjectBindings,
   getTemplate,
   ensureWorkspaceProject,
   insertConversation,
@@ -2657,7 +2659,10 @@ export async function startServer({
     const workspaceId = input.principal?.teamId;
     if (!workspaceId) return;
     const project = getProject(db, input.projectId);
-    if (project && !getWorkspaceProject(db, workspaceId, input.projectId)) {
+    // Keyed on the PROJECT, not on (workspace, project): a project belongs to
+    // exactly one workspace (collab/workspace-project-home.ts), so a project
+    // already bound elsewhere must not gain a second row here.
+    if (project && !getWorkspaceProjectByProjectId(db, input.projectId)) {
       ensureWorkspaceProject(db, {
         projectId: input.projectId,
         workspaceId,
@@ -3877,6 +3882,8 @@ export async function startServer({
   const projectStoreDeps = {
     getProject,
     getWorkspaceProject,
+    getWorkspaceProjectByProjectId,
+    listWorkspaceProjectBindings,
     ensureWorkspaceProject,
     listWorkspaceProjects,
     updateWorkspaceProject,

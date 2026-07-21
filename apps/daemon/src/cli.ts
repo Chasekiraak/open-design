@@ -6358,6 +6358,7 @@ async function runWorkspace(args) {
   od workspace projects batch-delete --workspace <id> --project <id> [--project <id> ...] [--json]
   od workspace projects batch-move --workspace <id> --visibility personal|team --project <id> [--project <id> ...] [--json]
   od workspace members list [--json]
+  od workspace billing [--json]
 
 Common options:
   --daemon-url <url>   Open Design daemon HTTP base.
@@ -6369,12 +6370,12 @@ Common options:
     process.exit(args.length === 0 ? 2 : 0);
   }
   const area = args[0];
-  if (!['invite', 'projects', 'members'].includes(area)) {
+  if (!['invite', 'projects', 'members', 'billing'].includes(area)) {
     console.error(`unknown subcommand: od workspace ${area}`);
     process.exit(2);
   }
   const sub = args[1] ?? 'list';
-  const rest = area === 'invite' ? args.slice(1) : args.slice(2);
+  const rest = area === 'invite' || area === 'billing' ? args.slice(1) : args.slice(2);
   const flags = parseFlags(rest, { string: WORKSPACE_STRING_FLAGS, boolean: WORKSPACE_BOOLEAN_FLAGS });
   const base = (await projectDaemonUrl(flags)).replace(/\/$/, '');
 
@@ -6413,6 +6414,28 @@ Common options:
     for (const result of results) {
       console.log(`${result.email}\t${result.ok ? 'invited' : `failed:${result.error ?? 'unknown'}`}`);
     }
+    return;
+  }
+
+  // Dual-track parity for the account menu's credits card: the same
+  // /api/workspace/billing the UI reads, scoped to the daemon's active
+  // workspace. Prints the workspace it describes so an embedding agent can
+  // tell WHOSE billing it just read rather than assuming the account's.
+  if (area === 'billing') {
+    const data = await workspaceContextRequest('/api/workspace/billing');
+    if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+    const summary = data?.summary ?? null;
+    if (!summary) {
+      console.log('No billing summary (no vela session or CLI unavailable).');
+      return;
+    }
+    console.log(`Workspace:\t${summary.workspaceId ?? '-'}`);
+    console.log(`Plan:\t${summary.membershipTier || 'free'}`);
+    console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
+    console.log(`Credits:\t${summary.totalAvailableCredits}`);
+    console.log(`  Plan credits:\t${summary.subscriptionCredits}`);
+    console.log(`  Top-up credits:\t${summary.rechargeCredits}`);
+    console.log(`Balance (USD):\t${summary.balanceUsd}`);
     return;
   }
 

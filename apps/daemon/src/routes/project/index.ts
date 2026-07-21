@@ -1370,6 +1370,8 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     stageProjectDirsForDelete,
     ensureWorkspaceProject,
     getWorkspaceProject,
+    getWorkspaceProjectByProjectId,
+    listWorkspaceProjectBindings,
     listWorkspaceProjects,
     updateWorkspaceProject,
     deleteWorkspaceProject,
@@ -1439,6 +1441,9 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       customInstructions: row.customInstructions ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      // Carried on the nested project too, so a client that unwraps the summary
+      // into a plain Project keeps the binding instead of dropping it.
+      workspaceId: row.workspaceId ?? null,
     };
     const resourceState = isWorkspaceLocked(ctx) && row.workspaceVisibility === 'team'
       ? 'frozen'
@@ -1601,8 +1606,17 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       })
       .map((project) => remoteTeamProjectSummary(project, ctx));
   }
+  /**
+   * Bind a project to this workspace, or hand back the binding it already has.
+   *
+   * The lookup is by PROJECT, not by `(workspace, project)`. A project belongs
+   * to exactly one workspace (collab/workspace-project-home.ts), so "no row in
+   * the workspace I am currently looking at" does not mean "unbound" — reading
+   * it that way is what made an older build write one ownerless row per
+   * workspace visited and put the same 草稿 list in front of every workspace.
+   */
   function ensureWorkspaceProjection(project: any, ctx: WorkspaceProjectContext, visibility = 'personal') {
-    const existing = getWorkspaceProject(db, ctx.workspaceId, project.id);
+    const existing = getWorkspaceProjectByProjectId(db, project.id);
     return existing ?? ensureWorkspaceProject(db, {
       projectId: project.id,
       workspaceId: ctx.workspaceId,
@@ -1664,12 +1678,36 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     );
   }
 
-  function seedPersonalWorkspaceProjects(
+  /**
+   * Bind projects that belong to NO workspace to this personal workspace.
+   *
+   * The rule is adoption of orphans, not a back-fill of everything. A project
+   * that already has a binding is left exactly where it is; only a project with
+   * no row anywhere is claimed. Those are the pre-workspace ("legacy") projects
+   * — created before workspaces existed, or left unbound by the repair in
+   * collab/workspace-project-home.ts — and losing them across the upgrade would
+   * be data loss, which the red-line test in tests/routes/workspace-projects.ts
+   * guards.
+   *
+   * The target is the user's PERSONAL workspace, per product: it always exists,
+   * so there is always somewhere to put an orphan, and it is the honest home for
+   * a project that predates any team. Team workspaces are excluded on purpose —
+   * adopting a user's private pre-workspace drafts into a team would expose them
+   * to people who never had them.
+   *
+   * Which personal workspace, when the user has several? The one they opened
+   * first after upgrading. There is no better evidence available: the projects
+   * carry no workspace of their own, and a workspace is only knowable as
+   * personal from the request that names it. Doing this on a read rather than in
+   * the migration is what buys that knowledge.
+   */
+  function bindUnboundProjectsToPersonalWorkspace(
     ctx: WorkspaceProjectContext,
     locations: Array<{ id: string; path: string; builtIn?: boolean }>,
   ) {
     if (ctx.workspaceType !== 'personal') return;
     for (const project of listProjects(db).filter((item: any) => projectVisibleForLocations(item, locations))) {
+      if (getWorkspaceProjectByProjectId(db, project.id)) continue;
       ensureWorkspaceProjection(project, ctx, 'personal');
     }
   }
@@ -1933,12 +1971,19 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           }
         }
       }
+      // The one workspace each project belongs to, so an unscoped reader can
+      // still tell whose draft it is holding. Read in bulk: this is the home
+      // page's list endpoint, and a per-project lookup would be N+1. A project
+      // missing here is awaiting adoption — never a claim that it belongs
+      // nowhere. See collab/workspace-project-home.ts.
+      const workspaceBindings = listWorkspaceProjectBindings(db);
       /** @type {import('@open-design/contracts').ProjectsResponse} */
       const body = {
         projects: listProjects(db)
           .filter((project: any) => projectVisibleForLocations(project, locations))
           .map((project: any) => ({
             ...project,
+            workspaceId: workspaceBindings.get(project.id) ?? null,
             status: brandAwareProjectStatus(
               project,
               composeProjectDisplayStatus(
@@ -1966,7 +2011,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         return res.json(body);
       }
       const locations = await configuredProjectLocations();
-      seedPersonalWorkspaceProjects(ctx, locations);
+      bindUnboundProjectsToPersonalWorkspace(ctx, locations);
       const view = typeof req.query.view === 'string' ? req.query.view : 'all';
       if (view !== 'all' && view !== 'recent' && view !== 'drafts' && view !== 'team') {
         return sendApiError(res, 400, 'BAD_REQUEST', 'view must be all, recent, drafts, or team');

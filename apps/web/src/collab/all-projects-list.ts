@@ -37,6 +37,34 @@ export function createSharedProjectPredicate(input: {
 }
 
 /**
+ * Answers "does this project belong to the workspace we are looking at?".
+ *
+ * The invariant: **a project belongs to exactly one workspace, and a grid may
+ * only show the projects belonging to the workspace the user is in.** That is
+ * the 2026-07-21 product ruling — 「草稿和分享的方案都是和 workspace 绑定的」 —
+ * so switching workspaces has to change which drafts you see.
+ *
+ * Evidence-gated, deliberately. A project is excluded ONLY on positive evidence
+ * that it belongs somewhere else: `workspaceId` present AND different. Absent
+ * means the daemon has not bound it yet (a pre-workspace project awaiting
+ * adoption) or the row came from a reader that does not carry the binding — in
+ * both cases hiding it would be worse than showing it, because a project the
+ * user can see in no workspace at all is indistinguishable from a lost one.
+ *
+ * A null `workspaceContext` (signed out, or a purely local client) has no
+ * workspace to compare against, so nothing is excluded.
+ */
+export function belongsToWorkspace(
+  project: Project,
+  workspaceContext: WorkspaceCollabContext | null,
+): boolean {
+  if (!workspaceContext) return true;
+  const projectWorkspaceId = project.workspaceId;
+  if (typeof projectWorkspaceId !== 'string' || projectWorkspaceId.length === 0) return true;
+  return projectWorkspaceId === workspaceContext.workspaceId;
+}
+
+/**
  * The card list behind the 全部项目 grid.
  *
  * The invariant: **only SHARED projects appear here.** A project becomes shared
@@ -90,7 +118,10 @@ export function buildAllProjectsList(input: {
   if (!workspaceContext) return projects;
 
   const isShared = input.isShared ?? createSharedProjectPredicate({ teamProjects });
-  const localProjectIds = new Set(projects.map((project) => project.id));
+  // Only this workspace's projects, so the grid cannot render another
+  // workspace's local rows while a switch is still in flight.
+  const scopedProjects = projects.filter((project) => belongsToWorkspace(project, workspaceContext));
+  const localProjectIds = new Set(scopedProjects.map((project) => project.id));
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
 
   const catalogNameOverride = new Map(
@@ -99,7 +130,7 @@ export function buildAllProjectsList(input: {
       .map((teamProject) => [teamProject.projectId, teamProject.name?.trim() || '']),
   );
 
-  const localCards = projects
+  const localCards = scopedProjects
     .filter((project) => isShared(project.id))
     .map((project) => {
       const catalogName = catalogNameOverride.get(project.id);
@@ -140,6 +171,13 @@ export function buildAllProjectsList(input: {
  * Both halves must therefore read the SAME shared-state answer as the card's
  * 共享 badge; see {@link createSharedProjectPredicate}. And, like 全部项目, the
  * split applies to a personal workspace too — its projects can be shared.
+ *
+ * The two grids partition **the local projects belonging to the current
+ * workspace** — see {@link belongsToWorkspace}. They never partitioned the whole
+ * local list in a meaningful sense: before the workspace filter, a draft created
+ * in workspace A sat in workspace B's 草稿 too, which is the bug the 2026-07-21
+ * ruling ended. A project bound elsewhere now belongs to neither grid here, and
+ * appears in exactly one grid in the workspace that owns it.
  */
 export function buildDraftsList(input: {
   projects: Project[];
@@ -154,5 +192,7 @@ export function buildDraftsList(input: {
   // below computes the same list once `teamProjects` is empty.
   if (!workspaceContext) return projects;
   const isShared = input.isShared ?? createSharedProjectPredicate({ teamProjects });
-  return projects.filter((project) => !isShared(project.id));
+  return projects.filter(
+    (project) => belongsToWorkspace(project, workspaceContext) && !isShared(project.id),
+  );
 }

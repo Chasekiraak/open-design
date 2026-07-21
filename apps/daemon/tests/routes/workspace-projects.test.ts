@@ -152,7 +152,13 @@ describe('workspace project routes', () => {
     }
   });
 
-  it('projects the same legacy project independently per workspace', async () => {
+  // Product ruling (2026-07-21): 「草稿和分享的方案都是和 workspace 绑定的」. A
+  // project belongs to exactly ONE workspace. This test used to assert the
+  // opposite — that the same legacy project is projected independently into
+  // every workspace that reads it — which is precisely the back-fill bug: with
+  // a row everywhere, every workspace rendered the same 草稿 grid and switching
+  // workspaces changed nothing.
+  it('binds a legacy project to the first workspace that adopts it, and only that one', async () => {
     const projectId = `workspace-multi-${Date.now()}`;
     const workspaceA = `${workspaceId}-a`;
     const workspaceB = `${workspaceId}-b`;
@@ -166,11 +172,59 @@ describe('workspace project routes', () => {
       workspaceId: workspaceA,
       createdByWorkspaceMemberId: null,
     });
-    expect(bodyB.projects.find((item) => item.id === projectId)).toMatchObject({
-      id: projectId,
-      workspaceId: workspaceB,
-      createdByWorkspaceMemberId: null,
+    // Workspace B reading the same daemon does NOT get a copy.
+    expect(bodyB.projects.find((item) => item.id === projectId)).toBeUndefined();
+
+    // …and adoption is stable: re-reading B does not steal it from A.
+    const againA = await listInWorkspace(workspaceA, 'member-a', '?view=all');
+    expect(againA.projects.some((item) => item.id === projectId)).toBe(true);
+  });
+
+  // THE BUG, at the draft grid. A draft created inside workspace A must not
+  // appear in workspace B's 草稿 — that is the whole product ruling.
+  it('keeps a draft created in one workspace out of another workspace’s drafts', async () => {
+    const suffix = Date.now();
+    const projectId = `workspace-draft-scope-${suffix}`;
+    const workspaceA = `${workspaceId}-draft-a-${suffix}`;
+    const workspaceB = `${workspaceId}-draft-b-${suffix}`;
+
+    // Created THROUGH workspace A's context, so the row records the act.
+    const createResp = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: workspaceHeaders(workspaceA, 'member-draft-a'),
+      body: JSON.stringify({ id: projectId, name: 'Draft in A', skillId: null, designSystemId: null }),
     });
+    expect(createResp.status).toBe(200);
+
+    const draftsA = await listInWorkspace(workspaceA, 'member-draft-a', '?view=drafts');
+    expect(draftsA.projects.map((item) => item.id)).toContain(projectId);
+
+    const draftsB = await listInWorkspace(workspaceB, 'member-draft-b', '?view=drafts');
+    expect(draftsB.projects.map((item) => item.id)).not.toContain(projectId);
+    const allB = await listInWorkspace(workspaceB, 'member-draft-b', '?view=all');
+    expect(allB.projects.map((item) => item.id)).not.toContain(projectId);
+  });
+
+  // Adoption must never mint a second row for a project that already has one.
+  // The narrowed primary key would reject it, so a regression here surfaces as a
+  // 500 rather than a silent duplicate — but the read path must not get there.
+  it('does not re-bind a project that already belongs to a workspace', async () => {
+    const suffix = Date.now();
+    const projectId = `workspace-rebind-${suffix}`;
+    const workspaceA = `${workspaceId}-rebind-a-${suffix}`;
+    const workspaceB = `${workspaceId}-rebind-b-${suffix}`;
+    await createProject(projectId, 'Rebind fixture');
+
+    await listInWorkspace(workspaceA, 'member-rebind-a', '?view=all');
+    for (let i = 0; i < 3; i += 1) {
+      const resp = await fetch(`${baseUrl}/api/workspaces/${workspaceB}/projects?view=all`, {
+        headers: workspaceHeaders(workspaceB, 'member-rebind-b'),
+      });
+      expect(resp.status).toBe(200);
+    }
+
+    const stillInA = await listInWorkspace(workspaceA, 'member-rebind-a', '?view=all');
+    expect(stillInA.projects.filter((item) => item.id === projectId)).toHaveLength(1);
   });
 
   it('does not let the first workspace reader become the legacy project owner', async () => {
@@ -705,17 +759,21 @@ describe('workspace project routes', () => {
     expect(adminGone.status).toBe(404);
   });
 
-  it('keeps a project available in other workspaces when batch-delete removes one workspace projection', async () => {
+  // A project has ONE workspace, so deleting it from that workspace deletes it
+  // outright — there is no second projection left holding it alive. This used to
+  // assert the opposite (that workspace B still listed it), which only held
+  // because the back-fill had put a copy of every project in every workspace.
+  it('deletes the project outright when its one workspace deletes it', async () => {
     const suffix = Date.now();
     const projectId = `workspace-delete-shared-${suffix}`;
-    const workspaceA = `${workspaceId}-delete-a`;
-    const workspaceB = `${workspaceId}-delete-b`;
+    const workspaceA = `${workspaceId}-delete-a-${suffix}`;
+    const workspaceB = `${workspaceId}-delete-b-${suffix}`;
     await createProject(projectId, 'Shared delete fixture');
 
     const bodyA = await listInWorkspace(workspaceA, 'member-delete-a', '?view=all');
-    const bodyB = await listInWorkspace(workspaceB, 'member-delete-b', '?view=all');
     expect(bodyA.projects.some((item) => item.id === projectId)).toBe(true);
-    expect(bodyB.projects.some((item) => item.id === projectId)).toBe(true);
+    const bodyB = await listInWorkspace(workspaceB, 'member-delete-b', '?view=all');
+    expect(bodyB.projects.some((item) => item.id === projectId)).toBe(false);
 
     const deleteResp = await fetch(`${baseUrl}/api/workspaces/${workspaceA}/projects/batch-delete`, {
       method: 'POST',
@@ -725,10 +783,7 @@ describe('workspace project routes', () => {
     expect(deleteResp.status).toBe(200);
 
     const baseProject = await fetch(`${baseUrl}/api/projects/${projectId}`);
-    expect(baseProject.status).toBe(200);
-
-    const afterB = await listInWorkspace(workspaceB, 'member-delete-b', '?view=all');
-    expect(afterB.projects.some((item) => item.id === projectId)).toBe(true);
+    expect(baseProject.status).toBe(404);
   });
 
   it('blocks deleting team-visible projects until the unshare seam exists', async () => {
@@ -1542,6 +1597,10 @@ function workspaceProjectRouteDeps({
       countWorkspaceProjectRefs: countWorkspaceProjectRefs ?? vi.fn(() => 1),
       ensureWorkspaceProject: () => workspaceRow,
       getWorkspaceProject: () => workspaceRow,
+      // A project belongs to one workspace, so the routes look its binding up by
+      // project id alone (see collab/workspace-project-home.ts).
+      getWorkspaceProjectByProjectId: () => workspaceRow,
+      listWorkspaceProjectBindings: () => new Map([[projectId, workspaceId]]),
       listWorkspaceProjects: () => [workspaceRow],
       updateWorkspaceProject: updateWorkspaceProject ?? noop,
     },

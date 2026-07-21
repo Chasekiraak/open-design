@@ -232,6 +232,18 @@ export interface Project {
   // pick a plugin they already selected.
   appliedPluginSnapshotId?: string;
   customInstructions?: string;
+  /**
+   * The workspace this project belongs to — exactly one, per the 2026-07-21
+   * ruling that 草稿 and shared projects are both bound to a workspace.
+   *
+   * A read model, not storage: the daemon resolves it from the project's single
+   * `workspace_projects` row. Absent means the daemon has not bound the project
+   * to a workspace yet (a pre-workspace project awaiting adoption on the next
+   * personal-workspace read), NOT "belongs to no workspace" — so a client must
+   * treat absence as "no opinion" and never hide a project on the strength of a
+   * missing value.
+   */
+  workspaceId?: string | null;
 }
 
 export interface ProjectTemplate {
