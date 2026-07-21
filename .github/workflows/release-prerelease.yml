@@ -329,6 +329,10 @@ jobs:
           fi
       - name: Retry prerelease mac_arm64 without restored cache
         if: ${{ steps.mac_arm64_tools_pack_build.outcome == 'failure' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tools-pack-cache"
@@ -684,6 +688,10 @@ jobs:
 
       - name: Retry prerelease mac_x64 without restored cache
         if: ${{ steps.mac_x64_tools_pack_build.outcome == 'failure' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tools-pack-cache"

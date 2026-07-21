@@ -272,6 +272,20 @@ describe("release workflows", () => {
     expect(prereleaseMac).toContain("exec tools-pack mac build");
     expect(prereleaseMac).toContain("--cache-dir \"$RUNNER_TEMP/tools-pack-cache\"");
     expect(countOccurrences(prereleaseMac, "--notarize")).toBe(2);
+    // Both the primary build and the cache-miss retry must carry Apple notary
+    // env, or notarization fails closed on the retry path.
+    expect(
+      countOccurrences(prereleaseMac, "APPLE_ID: ${{ secrets.APPLE_ID }}"),
+    ).toBe(2);
+    expect(
+      countOccurrences(
+        prereleaseMac,
+        "APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
+      ),
+    ).toBe(2);
+    expect(
+      countOccurrences(prereleaseMac, "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}"),
+    ).toBe(2);
     expect(prereleaseMac).toContain("tools-release write-report");
     expect(prereleaseMacX64).toContain("uses: actions/cache/restore@v5");
     expect(prereleaseMacX64).toContain("uses: actions/cache/save@v5");
@@ -280,6 +294,18 @@ describe("release workflows", () => {
     expect(prereleaseMacX64).toContain("exec tools-pack mac build");
     expect(prereleaseMacX64).toContain("--cache-dir \"$RUNNER_TEMP/tools-pack-cache\"");
     expect(countOccurrences(prereleaseMacX64, "--notarize")).toBe(2);
+    expect(
+      countOccurrences(prereleaseMacX64, "APPLE_ID: ${{ secrets.APPLE_ID }}"),
+    ).toBe(2);
+    expect(
+      countOccurrences(
+        prereleaseMacX64,
+        "APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
+      ),
+    ).toBe(2);
+    expect(
+      countOccurrences(prereleaseMacX64, "APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}"),
+    ).toBe(2);
     expect(prereleaseMacX64).toContain("tools-release write-report");
     for (const [prereleaseMacJob, nextStep] of [
       [prereleaseMac, "Smoke prerelease mac"],
