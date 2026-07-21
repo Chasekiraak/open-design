@@ -125,7 +125,7 @@ import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import { useWorkspaceContext, useWorkspaceBilling, useTeamProjects } from '../collab/useWorkspaceContext';
-import { buildAllProjectsList } from '../collab/all-projects-list';
+import { buildAllProjectsList, buildDraftsList } from '../collab/all-projects-list';
 import {
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
@@ -554,6 +554,13 @@ export function EntryShell({
   const teamSharedProjectIds = new Set(
     teamProjects.projects.map((teamProject) => teamProject.projectId),
   );
+  // 草稿 is the complement of 全部项目: sharing moves a project from one to the
+  // other, so a shared project must stop appearing here (acceptance #78).
+  const draftProjectsList: Project[] = buildDraftsList({
+    projects,
+    teamProjects: teamProjects.projects,
+    workspaceContext,
+  });
   const allProjectsList: Project[] = buildAllProjectsList({
     projects,
     teamProjects: teamProjects.projects,
@@ -1319,7 +1326,7 @@ export function EntryShell({
                 <div className="entry-section">
                   <CenteredLoader label={t('common.loading')} />
                 </div>
-              ) : projects.length === 0 ? (
+              ) : draftProjectsList.length === 0 ? (
                 <EntryBlankState
                   heading={t('entry.navDrafts')}
                   title={t('entry.blankDraftsTitle')}
@@ -1330,7 +1337,7 @@ export function EntryShell({
               ) : (
                 <div className="entry-section">
                   <RecentProjectsStrip
-                    projects={projects}
+                    projects={draftProjectsList}
                     designSystems={designSystems}
                     limit={1000}
                     heading={t('entry.navDrafts')}

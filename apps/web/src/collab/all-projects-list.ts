@@ -73,3 +73,24 @@ export function buildAllProjectsList(input: {
 
   return [...localCards, ...sharedCards];
 }
+
+
+/**
+ * The card list behind the 草稿 grid: the member's own projects that are NOT
+ * shared yet.
+ *
+ * 草稿 and 全部项目 are complements, not overlapping views — sharing is the
+ * explicit action that moves a project from one to the other. A shared project
+ * lingering in 草稿 reads as "it did not move".
+ */
+export function buildDraftsList(input: {
+  projects: Project[];
+  teamProjects: TeamProject[];
+  workspaceContext: WorkspaceCollabContext | null;
+}): Project[] {
+  const { projects, teamProjects, workspaceContext } = input;
+  // A personal workspace has no team side, so nothing is ever shared away.
+  if (workspaceContext?.workspaceType === 'personal') return projects;
+  const shared = new Set(teamProjects.map((teamProject) => teamProject.projectId));
+  return projects.filter((project) => !shared.has(project.id));
+}

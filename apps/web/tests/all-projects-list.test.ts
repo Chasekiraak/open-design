@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TeamProject, WorkspaceCollabContext } from '@open-design/contracts';
 
-import { buildAllProjectsList } from '../src/collab/all-projects-list';
+import { buildAllProjectsList, buildDraftsList } from '../src/collab/all-projects-list';
 import type { Project } from '../src/types';
 
 const SELF = 'member-self';
@@ -133,6 +133,50 @@ describe('buildAllProjectsList', () => {
       workspaceContext: teamContext({ workspaceType: 'personal' }),
     });
 
+    expect(list).toBe(projects);
+  });
+});
+
+// Acceptance #78: a project that had been shared kept showing in 草稿, so the
+// share read as "it did not move". 草稿 and 全部项目 are complements.
+describe('buildDraftsList', () => {
+  const drafts = (projects: Project[], teamProjects: TeamProject[], ctx = teamContext()) =>
+    buildDraftsList({ projects, teamProjects, workspaceContext: ctx });
+
+  it('drops a project once it is shared', () => {
+    const list = drafts(
+      [localProject('p-shared', 'Shared'), localProject('p-draft', 'Draft')],
+      [sharedProject({ projectId: 'p-shared', ownerMemberId: SELF })],
+    );
+    expect(list.map((p) => p.id)).toEqual(['p-draft']);
+  });
+
+  it('keeps everything while nothing is shared', () => {
+    const list = drafts([localProject('p-a', 'A'), localProject('p-b', 'B')], []);
+    expect(list.map((p) => p.id)).toEqual(['p-a', 'p-b']);
+  });
+
+  // The two grids must partition the local list, never double-count.
+  it('complements 全部项目 — no project appears in both', () => {
+    const projects = [localProject('p-shared', 'Shared'), localProject('p-draft', 'Draft')];
+    const teamProjects = [sharedProject({ projectId: 'p-shared', ownerMemberId: SELF })];
+    const inDrafts = new Set(drafts(projects, teamProjects).map((p) => p.id));
+    const inAll = new Set(
+      buildAllProjectsList({
+        projects,
+        teamProjects,
+        workspaceContext: teamContext(),
+        sharedFallbackName: '共享项目',
+        now: () => 1_700_000_000_000,
+      }).map((p) => p.id),
+    );
+    for (const id of inDrafts) expect(inAll.has(id)).toBe(false);
+    expect([...inDrafts, ...inAll].sort()).toEqual(['p-draft', 'p-shared']);
+  });
+
+  it('leaves a personal workspace untouched — nothing is ever shared away', () => {
+    const projects = [localProject('p-a', 'A')];
+    const list = drafts(projects, [sharedProject({ projectId: 'p-a' })], teamContext({ workspaceType: 'personal' }));
     expect(list).toBe(projects);
   });
 });
