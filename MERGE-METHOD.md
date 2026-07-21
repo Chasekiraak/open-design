@@ -125,17 +125,31 @@ git log --oneline $B..origin/main -- <f>
 - 三个 agent 正在并行修剩余的 12 个新失败文件
 - daemon 测试运行中
 
+### 已完成
+
+1. ✅ 冲突全解,`pnpm typecheck` + `pnpm guard`(71/71)全绿
+2. ✅ 合并提交 `278058425`(手工写 MERGE_HEAD,两个父提交都在),已推 `feat/workspace-team`
+3. ✅ 主 worktree 已快进(注意:`bun.lock` 挡路,已挪到 /tmp)
+4. ✅ 端到端验证(owner 17590/17591 + member 17592/17593,vela feature-test):
+   - 两端同一 team workspace,角色 owner/member 正确
+   - 团队项目列表两端一致(6 个)、成员 5 人
+   - **完整链路通**:owner 建项目 → `POST /collab/sync-intent` 分享(`syncState=synced`,版本 3)
+     → member 团队列表立刻可见 → `POST /collab/pull` 拉到同版本 3
+   - presence 跨端可见(owner 心跳 → member 端看到)——这正是之前 403 的那条链路
+   - 团队资源中枢三类(design-systems / plugins / skills)均可查
+
+### ⚠️ 记忆里的 dogfood 配方有一处是错的
+
+`reference_workspace_team_two_client_dogfood` 记的是
+`OD_VELA_BIN=VELA_BIN=/path/vela` 和 `OD_VELA_WEB_URL=VELA_LINK_URL=...`。
+**daemon 实际读的是裸 `VELA_BIN` / `VELA_LINK_URL`**
+(`apps/daemon/src/runtimes/executables.ts:17` 的 `AGENT_BIN_ENV_KEYS`)。
+按记忆的写法启动,daemon 会回退到 PATH 上的全局 `~/.local/bin/vela`,
+那个版本**没有 collab/resource 子命令**,症状是日志里
+`unknown command "collab" for "vela"`,而 UI 上只表现为协作面静默失效。
+
 ### 还没做
 
-1. 等 agent + daemon 测试回来,确认无新增失败
-2. **建合并提交** —— 注意 `.git/MERGE_HEAD` 已不在(之前被 reset 过),
-   要手工 `git rev-parse origin/main > .git/MERGE_HEAD` 再 commit,
-   否则 git 不认为 main 已合并,下次还要重解一遍
-3. 推 `feat/workspace-team`
-4. 端到端验证 workspace 功能
-5. 打包 mac + win(`publish=false`,`amr_profile=feature-test`)→ R2
-
-### 别忘了
-
-- `tools/pack/package.json` 的 `@powerformer/vela-cli` 保持 `0.0.22-test.1`(实测过 `vela resource`)
-- vela CLI test 包 `0.0.27-test.0` 若要采用,**必须重新实测 `vela resource --help`**
+5. 剩余 P0/P1(飞书表)
+6. 更新飞书任务状态
+7. 打包 mac + win(`publish=false`,`amr_profile=feature-test`)→ R2 → 发链接
