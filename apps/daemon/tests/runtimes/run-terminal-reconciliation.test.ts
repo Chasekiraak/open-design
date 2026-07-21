@@ -100,6 +100,11 @@ describe('durable run terminal reconciliation', () => {
       properties: expect.objectContaining({
         result: 'failed',
         error_code: 'DAEMON_RESTARTED',
+        failure_category: 'process_exit',
+        failure_detail: 'interrupted',
+        failure_stage: 'finalize',
+        retryable: true,
+        user_action: 'retry',
         terminal_reconciled: true,
         terminal_recovery_reason: 'daemon_restart',
       }),
@@ -146,6 +151,68 @@ describe('durable run terminal reconciliation', () => {
     expect(result.messagesReconciled).toBe(1);
     expect(db.prepare(`SELECT run_status AS status FROM messages WHERE id = 'legacy-message'`).get())
       .toEqual({ status: 'failed' });
+  });
+
+  it('preserves the real failure taxonomy when replaying incomplete analytics', async () => {
+    const runId = 'run-analytics-incomplete';
+    const runDir = path.join(tmpDir, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'state.json'), JSON.stringify({
+      schemaVersion: 1,
+      id: runId,
+      projectId: 'p1',
+      conversationId: 'c1',
+      assistantMessageId: 'm1',
+      agentId: 'claude',
+      status: 'failed',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      exitCode: 1,
+      error: 'Authentication required before starting the session.',
+      errorCode: 'AGENT_AUTH_REQUIRED',
+      analyticsRecovery: {
+        context: {
+          deviceId: 'device-1',
+          sessionId: 'session-1',
+          clientType: 'desktop',
+          locale: 'en',
+        },
+        properties: {
+          page_name: 'chat_panel',
+          area: 'chat_panel',
+          project_id: 'p1',
+          conversation_id: 'c1',
+          run_id: runId,
+        },
+        insertId: 'run-created-analytics-incomplete',
+      },
+      langfuseCompletedAt: 2_000,
+    }));
+    const capture = vi.fn(async () => undefined);
+
+    const result = await reconcileDurableRunTerminals({
+      analytics: { capture },
+      appVersion: '0.15.1',
+      db,
+      reportLangfuse: vi.fn(),
+      runsLogDir: tmpDir,
+    });
+
+    expect(result).toMatchObject({ interrupted: 0, analyticsReplayed: 1 });
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({
+      eventName: 'run_finished',
+      properties: expect.objectContaining({
+        result: 'failed',
+        error_code: 'AGENT_AUTH_REQUIRED',
+        failure_category: 'auth',
+        failure_detail: 'auth_required',
+        failure_stage: 'session_init',
+        retryable: false,
+        user_action: 'login',
+        terminal_reconciled: true,
+        terminal_recovery_reason: 'analytics_incomplete',
+      }),
+    }));
   });
 
   it('leaves failed Langfuse delivery uncheckpointed for the next boot', async () => {

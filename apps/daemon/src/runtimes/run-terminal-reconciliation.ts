@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import { appendMessageStatusEvent } from '../db.js';
-import { runResultFromStatus } from '../run-result.js';
+import { classifyRunFailure } from '../run-failure-classification.js';
+import { deriveRunErrorCode, runResultFromStatus } from '../run-result.js';
 import { runAskedUserQuestion } from './run-artifacts.js';
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
@@ -232,6 +233,29 @@ export async function reconcileDurableRunTerminals(
     const events = readEvents(options.runsLogDir, state.id);
     if (state.analyticsRecovery && !state.analyticsRecovery.completedAt) {
       const failed = state.status === 'failed';
+      const runResult = runResultFromStatus(state.status);
+      const errorCode = failed
+        ? recoveryReason === 'daemon_restart'
+          ? state.errorCode ?? RESTART_ERROR_CODE
+          : deriveRunErrorCode(state)
+        : undefined;
+      const failure = failed
+        ? recoveryReason === 'daemon_restart'
+          ? {
+              failure_category: 'process_exit' as const,
+              failure_detail: 'interrupted' as const,
+              failure_stage: 'finalize' as const,
+              retryable: true,
+              user_action: 'retry' as const,
+            }
+          : classifyRunFailure({
+              result: runResult,
+              status: state,
+              ...(errorCode ? { errorCode } : {}),
+              agentId: state.agentId,
+              events,
+            })
+        : undefined;
       await Promise.resolve(options.analytics.capture({
         eventName: 'run_finished',
         context: state.analyticsRecovery.context,
@@ -241,21 +265,15 @@ export async function reconcileDurableRunTerminals(
           area: state.analyticsRecovery.properties.area === 'design_system_generation'
             ? 'design_system_generation'
             : 'chat_panel',
-          result: runResultFromStatus(state.status),
+          result: runResult,
           artifact_count: state.artifactCount ?? 0,
           asked_user_question: runAskedUserQuestion(events),
           total_duration_ms: Math.max(0, state.updatedAt - state.createdAt),
           langfuse_trace_id: state.id,
           terminal_reconciled: true,
           terminal_recovery_reason: recoveryReason,
-          ...(failed ? {
-            error_code: state.errorCode ?? RESTART_ERROR_CODE,
-            failure_category: 'process_exit',
-            failure_detail: 'interrupted',
-            failure_stage: 'finalize',
-            retryable: true,
-            user_action: 'retry',
-          } : {}),
+          ...(errorCode ? { error_code: errorCode } : {}),
+          ...(failure ?? {}),
         },
         insertId: `${state.analyticsRecovery.insertId}-finish`,
       }));
