@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AvatarMenu } from '../../src/components/AvatarMenu';
@@ -126,14 +126,20 @@ describe('AvatarMenu', () => {
 
     openMenu();
 
+    // The execution console itself is gone from this popover per #5517: no mode
+    // switch, no CLI list, no PATH rescan.
     expect(screen.queryByRole('button', { name: /avatar.useLocal/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /avatar.useApi/i })).toBeNull();
     expect(screen.queryByRole('button', { name: 'avatar.rescan' })).toBeNull();
-    expect(
-      screen.queryByRole('button', { name: 'inlineSwitcher.openFullSettings' }),
-    ).toBeNull();
-    expect(onOpenSettings).not.toHaveBeenCalled();
     expect(onRefreshAgents).not.toHaveBeenCalled();
+
+    // …but the link OUT to it must stay. #5517 has no such entry, and it also
+    // never moved CLI switching out of this popover — we did, so without this
+    // the place switching moved TO is unreachable from where it used to be.
+    const openSettings = screen.getByTestId('avatar-open-execution-settings');
+    expect(openSettings).toBeTruthy();
+    fireEvent.click(openSettings);
+    expect(onOpenSettings).toHaveBeenCalledWith('execution');
   });
 
   it('lists only the Open Design account row, not every installed CLI', async () => {
@@ -161,7 +167,10 @@ describe('AvatarMenu', () => {
       return new Response('{}', { status: 200 });
     }));
 
-    renderMenu({ agents: [codexAgent, claudeAgent, amrAgent] });
+    renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      agents: [codexAgent, claudeAgent, amrAgent],
+    });
     const menu = openMenu();
 
     await waitFor(() => {
@@ -173,7 +182,61 @@ describe('AvatarMenu', () => {
     ).toEqual(['avatar-agent-option-amr']);
   });
 
-  it('switches to Open Design from the account row', async () => {
+  // The account card is scoped to the active agent. Before #5517 the popover
+  // listed every installed CLI, so an AMR row alongside them was just one entry;
+  // once that list went away it became a lone header card, and a user on Codex
+  // was shown Open Design's plan and balance. Keep it out entirely — including
+  // the plan badge and balance — even with a fully signed-in AMR status.
+  it('hides the Open Design account row while another agent is active', async () => {
+    const amrAgent: AgentInfo = {
+      id: 'amr',
+      name: 'Open Design AMR',
+      bin: 'vela',
+      available: true,
+      models: [{ id: 'default', label: 'Default (CLI config)' }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            loginInFlight: false,
+            profile: 'test',
+            user: { id: 'u1', email: 'a@b.c' },
+            account: { plan: 'plus', balanceUsd: '247.5087' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('{}', { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // baseConfig runs Codex, with AMR installed and available.
+    renderMenu({ agents: [codexAgent, claudeAgent, amrAgent] });
+    const menu = openMenu();
+
+    // Let the status fetch land so a late render cannot sneak the row back in.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId('avatar-agent-option-amr')).toBeNull();
+    expect(menu.querySelectorAll('[data-testid^="avatar-agent-option-"]')).toHaveLength(0);
+    expect(within(menu).queryByText('Plus')).toBeNull();
+    expect(menu.textContent).not.toContain('$247.51');
+    expect(screen.queryByRole('link', { name: 'settings.amrUpgrade' })).toBeNull();
+  });
+
+  // Cross-agent switching moved to Settings → Execution with #5517, so this row
+  // can only ever be shown for the already-active Open Design agent. What still
+  // has to hold is that the card is a real agent-selection control wired to
+  // `amr`, not a decorative header.
+  it('selects Open Design from the account row', async () => {
     const amrAgent: AgentInfo = {
       id: 'amr',
       name: 'Open Design AMR',
@@ -183,11 +246,16 @@ describe('AvatarMenu', () => {
     };
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
 
-    const { onAgentChange } = renderMenu({ agents: [codexAgent, amrAgent] });
+    const { onAgentChange } = renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      agents: [codexAgent, amrAgent],
+    });
     openMenu();
 
     const row = await screen.findByTestId('avatar-agent-option-amr');
-    fireEvent.click(row.querySelector('.avatar-amr-row__select') as HTMLElement);
+    const select = row.querySelector('.avatar-amr-row__select') as HTMLElement;
+    expect(select.getAttribute('aria-current')).toBe('true');
+    fireEvent.click(select);
 
     expect(onAgentChange).toHaveBeenCalledWith('amr');
   });
