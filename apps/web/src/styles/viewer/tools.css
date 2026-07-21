@@ -32,7 +32,6 @@
 .op-status-category {
   border-color: transparent;
   background: var(--bg-panel);
-  color: var(--text-muted);
 }
 .op-toggle {
   font-size: 10.5px;

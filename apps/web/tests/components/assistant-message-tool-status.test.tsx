@@ -277,7 +277,87 @@ describe('AssistantMessage tool status', () => {
     expect(container.querySelector('.op-status-done')).toBeNull();
   });
 
-  it('replaces the single live progress row and collapses the history when prose starts', () => {
+  it('keeps a streaming task disclosure open for live code and collapses it when settled', () => {
+    const streamingEvents = [
+      {
+        kind: 'tool_use' as const,
+        id: 'tool-1',
+        name: 'Write',
+        input: { file_path: '/repo/result.ts', content: 'export const value = 1;' },
+      },
+      { kind: 'text' as const, text: 'Writing the result now.' },
+    ];
+    const { container, rerender } = render(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={{
+          ...messageWithEvents(streamingEvents),
+          endedAt: undefined,
+          runStatus: 'running',
+        }}
+        streaming
+        liveToolInput={{
+          'live-write': {
+            name: 'Write',
+            text: '{"file_path":"/repo/result.ts","content":"export const value = 1;"}',
+          },
+        }}
+        projectId="project-1"
+      />,
+    );
+
+    const liveActivity = screen.getByTestId('task-activity-toggle');
+    expect(liveActivity.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.live-code-box')?.textContent).toContain('export const value = 1;');
+
+    rerender(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={{
+          ...messageWithEvents([
+            ...streamingEvents,
+            { kind: 'tool_result', toolUseId: 'tool-1', content: 'ok', isError: false },
+          ]),
+          runStatus: 'succeeded',
+        }}
+        streaming={false}
+        projectId="project-1"
+      />,
+    );
+
+    expect(screen.getByTestId('task-activity-toggle').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps the stream cursor on prose after task activity is split out', () => {
+    const { container } = render(
+      <AssistantMessage
+        projectKind="prototype"
+        conversationId="conv-1"
+        message={{
+          ...messageWithEvents([
+            {
+              kind: 'tool_use',
+              id: 'tool-1',
+              name: 'Bash',
+              input: { command: 'pnpm guard', description: 'Run guard' },
+            },
+            { kind: 'text', text: 'The answer is still streaming.' },
+          ]),
+          endedAt: undefined,
+          runStatus: 'running',
+        }}
+        streaming
+        projectId="project-1"
+      />,
+    );
+
+    const prose = container.querySelector('.prose-block[data-stream-cursor="true"]');
+    expect(prose?.textContent).toContain('The answer is still streaming.');
+  });
+
+  it('replaces the single live progress row and expands the history when prose starts', () => {
     const renderMessage = (
       events: AgentEvent[],
       options: { streaming: boolean; runStatus: ChatMessage['runStatus']; endedAt?: number },
@@ -324,7 +404,7 @@ describe('AssistantMessage tool status', () => {
     ));
     expect(screen.queryByTestId('task-activity-current')).toBeNull();
     const concludingActivity = screen.getByTestId('task-activity-toggle');
-    expect(concludingActivity.getAttribute('aria-expanded')).toBe('false');
+    expect(concludingActivity.getAttribute('aria-expanded')).toBe('true');
     expect(concludingActivity.textContent).toContain('Working');
 
     rerender(renderMessage(

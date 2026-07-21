@@ -840,8 +840,8 @@ function AssistantMessageImpl({
   // Index of the trailing text block — the streaming caret rides the end of
   // the last prose block so it tracks the final character as tokens arrive.
   let lastTextBlockIndex = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i]?.kind === "text") {
+  for (let i = contentBlocks.length - 1; i >= 0; i--) {
+    if (contentBlocks[i]?.kind === "text") {
       lastTextBlockIndex = i;
       break;
     }
@@ -915,7 +915,7 @@ function AssistantMessageImpl({
               <ThinkingBlock
                 key={i}
                 text={b.text}
-                streaming={streaming && i === blocks.length - 1}
+                streaming={streaming && i === contentBlocks.length - 1}
                 onLinkClick={thinkingLinkClick}
               />
             );
@@ -1507,8 +1507,8 @@ interface AssistantFooterProps {
   forking?: boolean;
   feedbackControls?: ReactNode;
   forceVisible?: boolean;
-  // The most recent assistant reply keeps its footer permanently visible
-  // (not hover-gated), matching Lobe Chat's persistent last-message footer.
+  // Identifies the latest reply for UI/analytics hooks. Completed controls are
+  // hover/focus-gated on pointer devices and remain visible without hover.
   isLast?: boolean;
   // When the turn has an execution disclosure, its run state lives at the top
   // of the answer. The footer keeps only actions so run state is not repeated.
@@ -3591,11 +3591,11 @@ function TaskActivityCard({
   onThinkingLinkClick?: MarkdownLinkClickHandler;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const shouldCollapse = hasConclusion || !runStreaming;
+  const [open, setOpen] = useState(runStreaming);
+  const [userToggled, setUserToggled] = useState(false);
   useEffect(() => {
-    if (shouldCollapse) setOpen(false);
-  }, [shouldCollapse]);
+    if (!userToggled) setOpen(runStreaming);
+  }, [runStreaming, userToggled]);
   const toolItems = entries
     .filter((entry): entry is Extract<TaskActivityEntry, { kind: "tool" }> => entry.kind === "tool")
     .map((entry) => entry.item);
@@ -3649,7 +3649,10 @@ function TaskActivityCard({
       <button
         type="button"
         className={`action-card-toggle task-state-${runState}${running ? " running" : ""}`}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setUserToggled(true);
+          setOpen((value) => !value);
+        }}
         aria-expanded={open}
         data-run-state={runState}
         data-testid="task-activity-toggle"

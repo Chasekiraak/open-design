@@ -3490,6 +3490,9 @@ body.entry-resizing { cursor: col-resize; user-select: none; }
 .msg.assistant:hover .assistant-footer,
 .msg.assistant:focus-within .assistant-footer,
 .assistant-footer[data-streaming="true"] { opacity: 1; }
+@media (hover: none) {
+  .assistant-footer { opacity: 1; }
+}
 .assistant-footer .dot {
   width: 5px;
   height: 5px;

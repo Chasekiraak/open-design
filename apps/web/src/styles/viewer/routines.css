@@ -1280,6 +1280,9 @@
 .app .msg.assistant:hover .assistant-footer,
 .app .msg.assistant:focus-within .assistant-footer,
 .app .assistant-footer[data-streaming="true"] { opacity: 1; }
+@media (hover: none) {
+  .app .assistant-footer { opacity: 1; }
+}
 .app .assistant-footer .dot {
   width: 5px;
   height: 5px;
