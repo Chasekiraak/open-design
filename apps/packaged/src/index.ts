@@ -26,7 +26,11 @@ import {
 } from "./download-attribution.js";
 import { writePackagedDesktopIdentity } from "./identity.js";
 import { PackagedPathAccessError } from "./errors.js";
-import { inspectExistingDesktopForLauncher, waitForLauncherAfterQuit } from "./launcher-after-quit.js";
+import {
+  exitPackagedLauncherForExistingDesktop,
+  inspectExistingDesktopForLauncher,
+  waitForLauncherAfterQuit,
+} from "./launcher-after-quit.js";
 import { confirmPackagedLauncherRuntime, resolvePackagedLauncherRuntime } from "./launcher-runtime.js";
 import {
   applyPackagedElectronPathOverrides,
@@ -123,7 +127,7 @@ async function main(): Promise<void> {
     logger: console,
     paths: initialPaths,
   });
-  if (existingDesktop.action === "exit") {
+  if (exitPackagedLauncherForExistingDesktop(existingDesktop, (code) => app.exit(code))) {
     return;
   }
   const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);

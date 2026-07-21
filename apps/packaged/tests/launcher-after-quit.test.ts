@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from "vitest";
 import { SIDECAR_MESSAGES } from "@open-design/sidecar-proto";
 import type { StopProcessesResult, stopProcesses, waitForProcessExit } from "@open-design/platform";
 
-import { inspectExistingDesktopForLauncher, waitForLauncherAfterQuit } from "../src/launcher-after-quit.js";
+import {
+  exitPackagedLauncherForExistingDesktop,
+  inspectExistingDesktopForLauncher,
+  waitForLauncherAfterQuit,
+} from "../src/launcher-after-quit.js";
 import type { PackagedNamespacePaths } from "../src/paths.js";
 
 /** Build a `stopProcesses` result without signalling any real PID. */
@@ -106,6 +110,28 @@ describe("waitForLauncherAfterQuit", () => {
     } finally {
       await rm(root, { force: true, recursive: true });
     }
+  });
+});
+
+describe("exitPackagedLauncherForExistingDesktop", () => {
+  it.each(["existing-focused", "existing-focus-failed"] as const)(
+    "terminates the duplicate outer after %s",
+    (reason) => {
+      const exit = vi.fn();
+
+      expect(exitPackagedLauncherForExistingDesktop({ action: "exit", reason }, exit)).toBe(true);
+      expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+    },
+  );
+
+  it("keeps the outer alive when startup must continue", () => {
+    const exit = vi.fn();
+
+    expect(exitPackagedLauncherForExistingDesktop(
+      { action: "continue", reason: "superseded-version" },
+      exit,
+    )).toBe(false);
+    expect(exit).not.toHaveBeenCalled();
   });
 });
 

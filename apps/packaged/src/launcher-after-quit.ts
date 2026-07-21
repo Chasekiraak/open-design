@@ -20,6 +20,22 @@ export type LauncherExistingDesktopGateResult =
   | { action: "continue"; reason: "inspect-failed" | "not-running" | "stale-sidecar" | "superseded-version" }
   | { action: "exit"; reason: "existing-focused" | "existing-focus-failed" };
 
+/**
+ * Finish a duplicate packaged entry after the healthy namespace desktop has
+ * accepted focus (or after focus failed without making a duplicate safe).
+ *
+ * Returning from `main()` alone does not terminate Electron's event loop: the
+ * unused outer can keep a main process and Chromium helpers alive indefinitely.
+ */
+export function exitPackagedLauncherForExistingDesktop(
+  result: LauncherExistingDesktopGateResult,
+  exit: (code: number) => void,
+): boolean {
+  if (result.action !== "exit") return false;
+  exit(0);
+  return true;
+}
+
 async function writeLauncherAfterQuitLog(paths: PackagedNamespacePaths, message: string): Promise<void> {
   const logDir = join(paths.logsRoot, "launcher");
   await mkdir(logDir, { recursive: true });
