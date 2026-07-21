@@ -369,22 +369,23 @@ function enrichVelaModelsFromOpenCodeCatalog(
   models: RuntimeModelOption[],
   env: NodeJS.ProcessEnv,
 ): RuntimeModelOption[] {
-  if (models.every((model) => model.inputPriceUsdPerMillion !== undefined)) {
-    return models;
-  }
   const catalog = readOpenCodeModelCatalog(env);
   if (!catalog) return models;
   return models.map((model) => {
-    if (model.inputPriceUsdPerMillion !== undefined) return model;
     const price = lookupOpenCodeModelPrice(catalog, model.id);
     if (!price) return model;
     const metadata = {
       ...(price.metadata ?? {}),
       ...(model.metadata ?? {}),
     };
+    const inputPriceUsdPerMillion =
+      model.inputPriceUsdPerMillion ?? price.inputPriceUsdPerMillion;
+    const outputPriceUsdPerMillion =
+      model.outputPriceUsdPerMillion ?? price.outputPriceUsdPerMillion;
     return {
       ...model,
-      ...price,
+      ...(inputPriceUsdPerMillion === undefined ? {} : { inputPriceUsdPerMillion }),
+      ...(outputPriceUsdPerMillion === undefined ? {} : { outputPriceUsdPerMillion }),
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     };
   });

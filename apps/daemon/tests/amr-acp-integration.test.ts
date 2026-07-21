@@ -271,6 +271,10 @@ describe('AMR runtime def', () => {
         JSON.stringify({
           opencode: {
             models: {
+              'deepseek-v4-flash': {
+                id: 'deepseek-v4-flash',
+                limit: { context: 204800, output: 32768 },
+              },
               'claude-fable-5': {
                 id: 'claude-fable-5',
                 cost: { input: 10, output: 50 },
@@ -306,6 +310,10 @@ describe('AMR runtime def', () => {
         FAKE_VELA_MODEL_LIST_JSON: JSON.stringify({
           source: 'remote',
           data: [
+            {
+              id: 'deepseek-v4-flash',
+              cost: { input: 0.14, output: 0.28 },
+            },
             { id: 'claude-fable-5', metadata: { cost: 'medium', capability: 'best_quality' } },
             { id: 'claude-opus-4.6' },
             { id: 'mimo-v2.5-pro' },
@@ -315,6 +323,17 @@ describe('AMR runtime def', () => {
       });
 
       expect(models).toEqual([
+        {
+          id: 'deepseek-v4-flash',
+          label: 'deepseek-v4-flash',
+          inputPriceUsdPerMillion: 0.14,
+          outputPriceUsdPerMillion: 0.28,
+          metadata: {
+            cost: 'low',
+            contextWindowTokens: 204800,
+            maxOutputTokens: 32768,
+          },
+        },
         {
           id: 'claude-fable-5',
           label: 'claude-fable-5',
