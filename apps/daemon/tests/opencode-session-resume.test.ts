@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startServer } from '../src/server.js';
+import { getAgentDef } from '../src/runtimes/registry.js';
 
 // End-to-end coverage for OpenCode native (capture-style) session resume.
 //
@@ -175,7 +176,7 @@ describe('opencode native session resume', () => {
     expect(turn2.argv).not.toContain('-s');
   });
 
-  it('rolls over and compacts before a resumed session reaches its model context limit', async () => {
+  it('rolls over and reseeds before a resumed session reaches its model context limit', async () => {
     binDir = await mkdtemp(path.join(os.tmpdir(), 'od-opencode-context-rollover-bin-'));
     const { bin, logPath } = await writeHighContextOpencode(binDir, 'opencode-context-rollover');
 
@@ -210,8 +211,8 @@ describe('opencode native session resume', () => {
     expect(runs).toHaveLength(2);
     const [, rollover] = runs as [RunInvocation, RunInvocation];
     expect(rollover.argv).not.toContain('-s');
-    expect(rollover.stdin).toContain('Open Design compacted');
-    expect(rollover.stdin).not.toContain('rollover-turn-0');
+    expect(rollover.stdin).not.toContain('Open Design compacted');
+    expect(rollover.stdin).toContain('rollover-turn-0');
     expect(rollover.stdin).toContain('rollover-turn-39');
 
     const events = await readRunEvents(turn2.eventsLogPath);
@@ -279,6 +280,73 @@ describe('opencode native session resume', () => {
       type: 'model_context_budget',
       action: 'rollover',
     })).toBe(true);
+  });
+
+  it('compacts to the remaining launch headroom for a low-context model', async () => {
+    binDir = await mkdtemp(path.join(os.tmpdir(), 'od-opencode-low-context-rollover-bin-'));
+    const { bin, logPath } = await writeHighContextOpencode(
+      binDir,
+      'opencode-low-context-rollover',
+      10_000,
+    );
+
+    clearTelemetryEnv();
+    started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
+    await putConfig(started.url, {
+      agentId: 'opencode',
+      agentCliEnv: { opencode: { OPENCODE_BIN: bin } },
+      telemetry: { metrics: true, content: false, artifactManifest: false },
+      privacyDecisionAt: Date.now(),
+    });
+    const model = 'provider/low-context-live';
+    const opencodeDef = getAgentDef('opencode');
+    if (!opencodeDef) throw new Error('OpenCode runtime definition is missing');
+    const previousFallbackModels = opencodeDef.fallbackModels;
+    opencodeDef.fallbackModels = [
+      ...previousFallbackModels,
+      {
+        id: model,
+        label: model,
+        metadata: {
+          contextWindowTokens: 16_384,
+          maxOutputTokens: 4_096,
+        },
+      },
+    ];
+    try {
+      const conversationId = await createConversation(started.url);
+      expect((await sendRunAndWait(started.url, conversationId, 'first request', model)).status)
+        .toBe('succeeded');
+
+      const transcript = Array.from({ length: 8 }, (_, index) => [
+        `## ${index % 2 === 0 ? 'user' : 'assistant'}`,
+        `${'x'.repeat(5_000)} low-context-turn-${index}`,
+      ].join('\n')).join('\n\n');
+      const turn2 = await sendRunAndWait(
+        started.url,
+        conversationId,
+        transcript,
+        model,
+        'latest low-context request',
+      );
+      expect(turn2).toMatchObject({ status: 'succeeded', errorCode: null });
+
+      const runs = await readChatTurnRuns(logPath, conversationId);
+      expect(runs).toHaveLength(2);
+      const [, rollover] = runs as [RunInvocation, RunInvocation];
+      expect(rollover.argv).not.toContain('-s');
+      expect(rollover.stdin).toContain('Open Design compacted');
+      expect(rollover.stdin).toContain('low-context-turn-7');
+
+      const events = await readRunEvents(turn2.eventsLogPath);
+      expect(hasDiagnostic(events, {
+        type: 'model_context_budget',
+        action: 'rollover',
+        source: 'model_metadata',
+      })).toBe(true);
+    } finally {
+      opencodeDef.fallbackModels = previousFallbackModels;
+    }
   });
 });
 

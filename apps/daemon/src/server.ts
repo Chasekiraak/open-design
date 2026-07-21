@@ -201,6 +201,7 @@ import {
 } from './runtimes/models.js';
 import {
   compactTranscriptForSessionRollover,
+  estimatePromptTokens,
   evaluateModelContextBudget,
 } from './runtimes/model-context-budget.js';
 import { loadMmdRouteLaunchEnv } from './runtimes/mmd-routes.js';
@@ -5112,17 +5113,6 @@ export async function startServer({
         storedStablePromptHash: null,
         invalidationReason: 'context_budget',
       };
-      rolloverCompaction = sessionContextBudget.inputBudgetTokens
-        ? compactTranscriptForSessionRollover(
-            typeof message === 'string' ? message : String(message ?? ''),
-            Math.max(4_096, Math.floor(sessionContextBudget.inputBudgetTokens * 0.6)),
-          )
-        : null;
-      userRequestPrompt = composeChatUserRequestForAgent(
-        rolloverCompaction?.prompt ?? message,
-        currentPrompt,
-        { skipTranscript: false },
-      );
       includeStableInstructions = computeIncludeStable(
         agentResumeCtx.isResuming,
         agentResumeCtx.storedStablePromptHash,
@@ -5144,6 +5134,33 @@ export async function startServer({
         includeStableInstructions,
         titleGenerationPrompt,
       ));
+      // A fresh session must carry the stable instructions and all other
+      // per-turn framing again. Budget those fixed parts first, then give the
+      // transcript compactor only the headroom that remains. The empty-body
+      // composer inserts a small placeholder, making this deliberately
+      // conservative while preserving form-answer transition framing.
+      const rolloverFixedPromptTokens = estimatePromptTokens(
+        composeTurnPrompt(
+          instructionPrompt,
+          composeChatUserRequestForAgent('', currentPrompt, {
+            skipTranscript: false,
+          }),
+        ),
+      );
+      rolloverCompaction = sessionContextBudget.inputBudgetTokens
+        ? compactTranscriptForSessionRollover(
+            typeof message === 'string' ? message : String(message ?? ''),
+            Math.max(
+              1,
+              sessionContextBudget.inputBudgetTokens - rolloverFixedPromptTokens,
+            ),
+          )
+        : null;
+      userRequestPrompt = composeChatUserRequestForAgent(
+        rolloverCompaction?.prompt ?? message,
+        currentPrompt,
+        { skipTranscript: false },
+      );
       composed = composeTurnPrompt(instructionPrompt, userRequestPrompt);
     }
     run.nativeSessionRecovery = initialNativeSessionRecoveryMetadata({
