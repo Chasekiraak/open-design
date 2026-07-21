@@ -18,7 +18,7 @@ import https from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type http from 'node:http';
+import http from 'node:http';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
@@ -1498,6 +1498,39 @@ describe('ALL /api/integrations/vela/message-center/*', () => {
     );
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'vela_control_key_required' });
+  });
+
+  it('guards upstream response-stream errors after headers without crashing the daemon', async () => {
+    const requestSpy = vi.spyOn(http, 'request').mockImplementation(((target, options, callback) => {
+      const req = new PassThrough() as any;
+      req.on('finish', () => {
+        const upstreamRes = new PassThrough() as any;
+        upstreamRes.statusCode = 200;
+        upstreamRes.headers = { 'content-type': 'application/json' };
+        callback?.(upstreamRes);
+        upstreamRes.write('{"messages":[');
+        setImmediate(() => upstreamRes.emit('error', new Error('mid-stream reset')));
+      });
+      req.setTimeout = () => req;
+      return req;
+    }) as typeof http.request);
+
+    seedLogin('local', { apiUrl: 'http://127.0.0.1:18080' });
+
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/integrations/vela/message-center/messages?locale=en-US`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('{"messages":[');
+
+      const status = await getJson<{ loggedIn: boolean }>(`${baseUrl}/api/integrations/vela/status`);
+      expect(status.status).toBe(200);
+      expect(status.body.loggedIn).toBe(true);
+    } finally {
+      requestSpy.mockRestore();
+    }
   });
 });
 

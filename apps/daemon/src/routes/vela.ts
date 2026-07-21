@@ -214,7 +214,13 @@ function proxyVelaMessageCenterRequest(
       for (const [key, value] of Object.entries(upstreamRes.headers)) {
         if (value !== undefined) res.setHeader(key, value);
       }
-      upstreamRes.pipe(res);
+      pipeProxyStreamWithGuard(upstreamRes, res, (err) => {
+        if (!res.headersSent) {
+          res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+        } else {
+          res.end();
+        }
+      });
     },
   );
   upstream.setTimeout(30_000, () => upstream.destroy(new Error('Vela Message Center timed out')));
