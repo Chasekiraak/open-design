@@ -37,7 +37,13 @@ const PITCH_DECK = plugin({
       mode: 'deck',
       category: 'fundraising-pitch',
       preview: { type: 'html', entry: './example.html' },
-      bakedPreview: { poster: 'https://assets.test/fundraising/poster.jpg', video: 'https://assets.test/fundraising/preview.mp4' },
+      // Shape the daemon actually attaches (plugin-preview-bakes.ts): poster +
+      // clip + the leading in-place span the tile loops while idle.
+      bakedPreview: {
+        poster: 'https://assets.test/fundraising/poster.jpg',
+        video: 'https://assets.test/fundraising/preview.mp4',
+        holdMs: 2500,
+      },
     },
   },
 });
@@ -101,11 +107,20 @@ beforeEach(() => {
     throw new Error(`unexpected fetch ${String(url)}`);
   });
   vi.stubGlobal('fetch', fetchMock);
+  // jsdom implements no media playback, and MediaSurface starts a baked clip as
+  // soon as the tile is visible. Stub the transport so the virtual console stays
+  // clean; the assertions below are about what gets mounted, not about decoding.
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(async () => {});
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  // Unmount first: the media stubs must outlive teardown, otherwise a clip that
+  // is still settling when the tree unmounts reaches jsdom's unimplemented
+  // transport and noises up the run.
   cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Read every type tab as { label, badge } plus the cards currently gridded. */
@@ -178,7 +193,7 @@ describe('CommunityView previews', () => {
     await renderCommunity();
 
     // Card thumbnail: the daemon-baked poster for that plugin.
-    const thumb = renderedCards()[0]!.querySelector('img.community-template-thumb__image');
+    const thumb = renderedCards()[0]!.querySelector('img.plugins-home__media-img');
     expect(thumb?.getAttribute('src')).toBe('https://assets.test/fundraising/poster.jpg');
 
     // Detail modal: the plugin's real preview endpoint, not a synthesized page.
@@ -186,6 +201,49 @@ describe('CommunityView previews', () => {
     const frame = document.querySelector('iframe.community-template-preview__frame');
     expect(frame?.getAttribute('src')).toBe('/api/plugins/example-fundraising-deck/preview');
     expect(frame?.getAttribute('srcdoc')).toBeNull();
+  });
+
+  it('plays the daemon-baked clip on the card instead of freezing it into a poster', async () => {
+    // Regression: the card kept only `poster` out of the baked media spec and
+    // rendered a bare <img>, so the gallery every tile went static — the short
+    // looping screen recording the shipped gallery plays was dropped on the
+    // floor even though the daemon still attached it and the classifier still
+    // resolved it.
+    await renderCommunity();
+
+    const card = renderedCards()[0]!;
+    expect(card.querySelector('img.community-template-thumb__image')).toBeNull();
+
+    const video = card.querySelector('video.plugins-home__media-video');
+    expect(video).not.toBeNull();
+    expect(video!.getAttribute('src')).toBe('https://assets.test/fundraising/preview.mp4');
+    // The poster stays the first paint, so the tile never flashes empty.
+    expect(video!.getAttribute('poster')).toBe('https://assets.test/fundraising/poster.jpg');
+    // A baked clip carries `holdMs`, which is what makes the tile loop its
+    // in-place span while idle rather than waiting for hover.
+    expect(video!.getAttribute('loop')).not.toBeNull();
+  });
+
+  it('leaves a still-image template on its poster, with no clip to play', async () => {
+    // Only baked previews ship a clip; an image-template plugin must not grow a
+    // <video> just because the tile now routes through the shared surface.
+    await renderCommunity();
+
+    fireEvent.click(readFacets().find((facet) => facet.label === 'Image')!.tab);
+    const card = renderedCards()[0]!;
+    expect(card.querySelector('img.plugins-home__media-img')?.getAttribute('src'))
+      .toBe('https://assets.test/poster.jpg');
+    expect(card.querySelector('video')).toBeNull();
+  });
+
+  it('keeps the typographic paper thumb for records with no poster at all', async () => {
+    // The B2B deck ships an html preview and no bake, so there is no media spec
+    // to mount — that card must still fall back to the stylized paper tile.
+    await renderCommunity();
+
+    const card = renderedCards()[1]!;
+    expect(card.querySelector('.community-template-thumb__paper')).not.toBeNull();
+    expect(card.querySelector('.community-template-thumb__media')).toBeNull();
   });
 
   it('carries a media template\'s poster into the modal frame', async () => {

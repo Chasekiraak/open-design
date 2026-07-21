@@ -1,9 +1,10 @@
 import { Icon } from './Icon';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { InstalledPluginRecord } from '@open-design/contracts';
 import { useI18n, useT } from '../i18n';
 import type { Dict, Locale } from '../i18n/types';
 import { listPlugins } from '../state/projects';
+import { MediaSurface } from './plugins-home/cards/MediaSurface';
 import {
   buildCategoryCatalog,
   buildSubcategoryCatalog,
@@ -12,8 +13,9 @@ import {
 } from './plugins-home/facets';
 import { localizePluginTitle } from './plugins-home/localization';
 import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
-import { inferPluginPreview } from './plugins-home/preview';
+import { inferPluginPreview, type MediaPreviewSpec } from './plugins-home/preview';
 import { pluginSubfacetLabel } from './plugins-home/subfacetLabel';
+import { useInView } from './plugins-home/useInView';
 
 type TemplateType = 'Prototype' | 'Live Artifact' | 'Slides' | 'Image' | 'Video' | 'HyperFrames' | 'Audio';
 
@@ -25,6 +27,13 @@ type TemplateDemo = {
   meta: string;
   type: TemplateType;
   subtype: string;
+  /** The WHOLE media spec the gallery tile renders — poster plus, for plugins
+   *  the daemon has baked, the looping clip (`videoUrl`) and the in-place span
+   *  it loops while idle (`loopHoldMs`). Flattening this to a poster string is
+   *  what turned every tile into a still image. Null when the plugin resolves
+   *  to no media at all (html/design/text), in which case the stylized paper
+   *  thumb renders instead. */
+  cardMedia: MediaPreviewSpec | null;
   /** Card thumbnail. Null when the plugin ships no poster at all, in which case
    *  the stylized paper thumb renders instead. */
   posterSrc: string | null;
@@ -155,6 +164,10 @@ function buildCommunityTemplates(
     // `od.preview` so opening a card shows the live page, not the baked frame.
     const card = inferPluginPreview(record, { preferBaked: true });
     const detail = inferPluginPreview(record);
+    // Carry the whole spec, not just its poster: a baked preview's `videoUrl`
+    // and `loopHoldMs` are what let the tile play its short screen recording
+    // instead of sitting on the first frame.
+    const cardMedia = card.kind === 'media' ? card : null;
     return {
       id: record.id,
       title,
@@ -163,7 +176,8 @@ function buildCommunityTemplates(
       meta: subtype ? `${typeLabel} · ${subtype}` : typeLabel,
       type,
       subtype,
-      posterSrc: card.kind === 'media' ? card.poster : detail.kind === 'media' ? detail.poster : null,
+      cardMedia,
+      posterSrc: cardMedia ? cardMedia.poster : detail.kind === 'media' ? detail.poster : null,
       previewSrc: detail.kind === 'html' ? detail.src : null,
       previewVideo: detail.kind === 'media' ? detail.videoUrl : null,
       prompt: examplePresetSeedPrompt(record, locale, () => title).text,
@@ -373,17 +387,40 @@ async function copyTemplatePrompt(template: TemplateDemo): Promise<void> {
 }
 
 function TemplateThumb({ template }: { template: TemplateDemo }) {
-  const previewSrc = template.posterSrc;
+  // Same visibility contract the plugins-home gallery hands MediaSurface (see
+  // PreviewSurface.tsx): the wide margin MOUNTS the clip so its first frame is
+  // ready before the tile scrolls in and scrolling back never remounts it,
+  // while the zero-margin observer gates decode/playback so an idle gallery
+  // does not spin up every clip at once.
+  const { ref: keepRef, inView: keep } = useInView<HTMLDivElement>({
+    rootMargin: '1500px',
+    once: false,
+  });
+  const { ref: visibleRef, inView: visible } = useInView<HTMLDivElement>({
+    rootMargin: '0px',
+    once: false,
+  });
+  const setRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      keepRef.current = node;
+      visibleRef.current = node;
+    },
+    [keepRef, visibleRef],
+  );
 
-  if (previewSrc) {
+  const media = template.cardMedia;
+  if (media?.poster) {
+    // MediaSurface positions itself against its container, so the thumb owns
+    // the positioned box; it also handles poster-load failure on its own.
     return (
-      <img
-        className="community-template-thumb__image"
-        src={previewSrc}
-        alt=""
-        loading="lazy"
-        draggable={false}
-      />
+      <div className="community-template-thumb__media" ref={setRef}>
+        <MediaSurface
+          preview={media}
+          pluginTitle={template.title}
+          inView={keep}
+          visible={visible}
+        />
+      </div>
     );
   }
 

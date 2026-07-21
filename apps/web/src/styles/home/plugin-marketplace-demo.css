@@ -1443,6 +1443,30 @@
   transform: scale(1.04);
 }
 
+/* Media surface slot. The shared MediaSurface (the same one the plugins-home
+   gallery uses) renders the poster and, for plugins the daemon has baked, the
+   looping preview clip; it lays itself out against its container, so the thumb
+   owns the positioned box that fills the preview plate. The two rules below
+   only re-establish the crop anchor and hover zoom the sibling
+   `.community-template-thumb__image` rules give a plain poster — the card's
+   framing, plate, and footer are unchanged. */
+.community-template-thumb__media {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.community-template-thumb__media .plugins-home__media-img,
+.community-template-thumb__media .plugins-home__media-video {
+  object-position: top center;
+  user-select: none;
+}
+
+.community-template-card.is-clickable:hover .community-template-thumb__media .plugins-home__media-img,
+.community-template-card.is-clickable:hover .community-template-thumb__media .plugins-home__media-video {
+  transform: scale(1.04);
+}
+
 .community-template-card__foot {
   display: flex;
   align-items: center;
