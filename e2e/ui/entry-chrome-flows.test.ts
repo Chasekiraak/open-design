@@ -221,7 +221,7 @@ test('[P0] @critical home hero submit creates a project and lands on a usable wo
   await expect(page.getByTestId('file-workspace')).toBeVisible();
 });
 
-test('[P1] onboarding recommendation creates a project with prefilled first prompt context', async ({ page }) => {
+test('[P1] onboarding lands on the home composer without a recommended-start strip', async ({ page }) => {
   const createdBodies: Array<Record<string, unknown>> = [];
   const runBodies: Array<Record<string, unknown>> = [];
   const projectId = `onboarding-recommendation-${Date.now()}`;
@@ -309,29 +309,18 @@ test('[P1] onboarding recommendation creates a project with prefilled first prom
   await page.getByRole('button', { name: /^Continue$/i }).click();
   await page.getByRole('button', { name: 'Go to home' }).click();
 
-  await expect(page.getByTestId('home-recommendation')).toBeVisible();
-  await page.getByTestId('home-recommendation-start').click();
+  // Finishing the About-you survey lands the user on Home with the composer
+  // ready — and NOT on the old recommended-start strip. That strip (sparkle +
+  // 「Start with your first project」 + 全部类型 / 开始创作) sat between the
+  // composer and the template line, offering a third way to say what the two
+  // around it already said, and has been removed. Nothing may create a project
+  // or start a run on the user's behalf on the way here.
+  await expect(page.getByTestId('home-hero-input')).toBeVisible();
+  await expect(page.getByTestId('home-recommendation')).toHaveCount(0);
+  await expect(page.getByTestId('home-recommendation-start')).toHaveCount(0);
 
-  await expect.poll(() => createdBodies.length).toBe(1);
-  const body = createdBodies[0] as {
-    pendingPrompt?: string;
-    metadata?: { kind?: string };
-  };
-  expect(body.pendingPrompt ?? '').toContain('product');
-  expect(typeof body.metadata?.kind).toBe('string');
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}`));
-  await expect
-    .poll(() => page.evaluate((id) => window.sessionStorage.getItem(`open-design:first-loop-entry:${id}`), projectId))
-    .toContain('product_ui_prototype');
-  const firstLoopEntry = await page.evaluate((id) => {
-    const raw = window.sessionStorage.getItem(`open-design:first-loop-entry:${id}`);
-    return raw ? JSON.parse(raw) as { recommendationId?: string; productType?: string } : null;
-  }, projectId);
-  expect(firstLoopEntry).toMatchObject({
-    productType: 'product_ui',
-    recommendationId: 'product_ui_prototype',
-  });
   await page.waitForTimeout(500);
+  expect(createdBodies).toHaveLength(0);
   expect(runBodies).toHaveLength(0);
 });
 

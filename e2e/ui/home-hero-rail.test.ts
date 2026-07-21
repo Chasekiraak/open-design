@@ -569,7 +569,9 @@ test('[P1] home composer plus menu opens project, local code, Figma help, and de
   await expect(page.getByTestId('composer-plus-reference-project')).toBeVisible();
   await expect(page.getByTestId('composer-plus-local-code')).toBeVisible();
   await expect(page.getByTestId('composer-plus-figma')).toBeVisible();
-  await expect(page.getByTestId('composer-plus-figma-help')).toBeVisible();
+  // …and it does NOT carry the "查看方法" (.fig download guide) row: the menu
+  // lists things to ATTACH to the message, and a help article is not one.
+  await expect(page.getByTestId('composer-plus-figma-help')).toHaveCount(0);
   await page.getByTestId('composer-plus-reference-project').click();
   const referenceDialog = page.getByRole('dialog', { name: 'Reference another project' });
   await expect(referenceDialog).toBeVisible();
@@ -592,14 +594,6 @@ test('[P1] home composer plus menu opens project, local code, Figma help, and de
   await expect(figmaImport.getByRole('tab', { name: 'Figma URL' })).toBeVisible();
   await figmaImport.getByRole('button', { name: 'Close' }).click();
   await expect(figmaImport).toHaveCount(0);
-
-  await page.getByTestId('home-hero-plus-trigger').click();
-  await page.getByTestId('composer-plus-figma-help').click();
-  const figmaHelp = page.getByRole('dialog', { name: 'How to download a .fig file' });
-  await expect(figmaHelp).toBeVisible();
-  await expect(figmaHelp).toContainText('Save local copy');
-  await figmaHelp.getByRole('button', { name: 'Close' }).click();
-  await expect(figmaHelp).toHaveCount(0);
 
   await page.getByTestId('home-hero-design-system-trigger').click();
   await expect(page.getByTestId('project-ds-picker-popover')).toBeVisible();

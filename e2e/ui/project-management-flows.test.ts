@@ -699,15 +699,12 @@ test('[P1] project detail composer plus menu opens project, local code, Figma he
   await expect(input).toContainText('local-code-project');
   await expect(composer.locator('.staged-context--workspace', { hasText: 'local-code-project' })).toBeVisible();
 
+  // The "查看方法" (.fig download guide) row was removed from the "+" menu: the
+  // menu lists things to ATTACH to the message, and a help article is not one.
   await composer.getByTestId('chat-plus-trigger').click();
-  await page.getByTestId('composer-plus-figma-help').click();
-  const figmaHelp = page.getByRole('dialog', { name: 'How to download a .fig file' });
-  await expect(figmaHelp).toBeVisible();
-  await expect(figmaHelp).toContainText('Save local copy');
-  await figmaHelp.getByRole('button', { name: 'Close' }).click();
-  await expect(figmaHelp).toHaveCount(0);
+  await expect(page.getByTestId('composer-plus-figma-help')).toHaveCount(0);
 
-  await composer.getByTestId('chat-plus-trigger').click();
+  await page.getByTestId('composer-plus-design-system').click();
   await page.getByTestId('composer-plus-design-system').click();
   await expect(page.getByTestId('project-ds-picker-popover')).toBeVisible();
 });
