@@ -6,7 +6,7 @@ import type { TrackingRuntimeType } from '../public-params.js';
 import type { ReleaseChannel } from '@open-design/release';
 import type { TrackingDesignSystemEditSurface, TrackingDesignSystemKind, TrackingDesignSystemLengthBucket, TrackingDesignSystemOrigin, TrackingDesignSystemRunEntryFrom } from './design-systems.js';
 import type { TrackingSettingsPage } from './event-names.js';
-import type { TrackingArtifactKind, TrackingArtifactWriteSource, TrackingArtifactWriteStatus, TrackingByokProviderId, TrackingCliProviderId, TrackingContextBudgetAction, TrackingContextBudgetSource, TrackingDesignSystemSource, TrackingExportFormat, TrackingExportResult, TrackingFeedbackAction, TrackingFeedbackProviderId, TrackingFeedbackRating, TrackingFeedbackRatingWithNone, TrackingFeedbackReasonCode, TrackingFidelity, TrackingFileSizeBucket, TrackingFileType, TrackingFirstModelEventType, TrackingLangfuseDeliveryStatus, TrackingLangfuseDropReason, TrackingLangfuseReportResult, TrackingLangfuseReportSkipReason, TrackingProjectKind, TrackingProjectSource, TrackingResult, TrackingRunCloseReason, TrackingRunDiagnosticSource, TrackingRunFailureCategory, TrackingRunFailureDetail, TrackingRunFailureStage, TrackingRunFailureUserAction, TrackingRunLifecyclePhase, TrackingRunPhaseTimingStatus, TrackingRunResult, TrackingRunRetryFinalResult, TrackingRunRetryStrategy, TrackingRunRetrySuppressedReason, TrackingStderrLineCountBucket, TrackingTestResult, TrackingTokenCountSource } from './shared-enums.js';
+import type { TrackingArtifactKind, TrackingArtifactWriteSource, TrackingArtifactWriteStatus, TrackingByokPreflightBlockReason, TrackingByokProviderId, TrackingCliProviderId, TrackingContextBudgetAction, TrackingContextBudgetSource, TrackingDesignSystemSource, TrackingExecutionMode, TrackingExportFormat, TrackingExportResult, TrackingFeedbackAction, TrackingFeedbackProviderId, TrackingFeedbackRating, TrackingFeedbackRatingWithNone, TrackingFeedbackReasonCode, TrackingFidelity, TrackingFileSizeBucket, TrackingFileType, TrackingFirstModelEventType, TrackingLangfuseDeliveryStatus, TrackingLangfuseDropReason, TrackingLangfuseReportResult, TrackingLangfuseReportSkipReason, TrackingProjectKind, TrackingProjectSource, TrackingResult, TrackingRunCloseReason, TrackingRunDiagnosticSource, TrackingRunFailureCategory, TrackingRunFailureDetail, TrackingRunFailureStage, TrackingRunFailureUserAction, TrackingRunLifecyclePhase, TrackingRunPhaseTimingStatus, TrackingRunResult, TrackingRunRetryFinalResult, TrackingRunRetryStrategy, TrackingRunRetrySuppressedReason, TrackingStderrLineCountBucket, TrackingTestResult, TrackingTokenCountSource } from './shared-enums.js';
 import type { TrackingFileVersionSource, TrackingPluginImportSource, TrackingSessionMode, TrackingSettingsArea } from './ui-click.js';
 // ---- Result events -------------------------------------------------------
 
@@ -100,9 +100,18 @@ export interface PluginImportResultProps {
 }
 
 export interface UpdateInstallResultProps {
-  page_name: 'home';
-  area: 'update_prompt';
+  page_name: 'home' | 'app';
+  area: 'update_prompt' | 'update_dialog';
   result: TrackingResult;
+  app_version_before?: string;
+  app_version_after?: string;
+  error_code?: string;
+}
+
+export interface UpdateCheckResultProps {
+  page_name: 'app';
+  area: 'update_dialog';
+  result: 'available' | 'up_to_date' | 'failed';
   app_version_before?: string;
   app_version_after?: string;
   error_code?: string;
@@ -319,6 +328,25 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   bottleneck_phase?: TrackingRunLifecyclePhase;
   last_observed_phase?: TrackingRunLifecyclePhase;
   phase_timing_status?: TrackingRunPhaseTimingStatus;
+  // E-lite root-cause discriminators. `last_observed_phase` tells us WHICH phase
+  // a stalled run died in (e.g. `tool_execution`); these four tell us WHY, which
+  // the phase alone cannot separate:
+  // - `approval_requested`: an approval/permission gate fired. Only the ACP path
+  //   is daemon-observable — stream/CLI runtimes pass a skip-permissions flag so
+  //   no gate fires, and `false` there means "not observed", not "no approval".
+  // - `stdin_backpressure`: writing the prompt to the child's stdin was queued
+  //   because the OS pipe buffer was full (the child was not draining stdin).
+  // - `tool_result_sent`: every committed tool_use received a matching
+  //   tool_result (paired by id, or by count for degraded events that carry a
+  //   null id on both sides). A stall with `tool_call_seen &&
+  //   !tool_result_sent` means a tool result was never delivered (our bug) vs a
+  //   provider that stalled after every tool result was delivered.
+  // - `last_progress_age_ms`: age of the last agent activity at finish. Near the
+  //   inactivity ceiling on a stall; near zero on a clean finish.
+  approval_requested?: boolean;
+  stdin_backpressure?: boolean;
+  tool_result_sent?: boolean;
+  last_progress_age_ms?: number;
   attempt_index?: number;
   attempt_duration_ms?: number;
   attempt_time_to_first_token_ms?: number;
@@ -419,7 +447,7 @@ export interface UpdateApplyObservedProps {
   namespace: string;
   platform: string;
   arch: string;
-  artifact_type: 'dmg' | 'installer';
+  artifact_type: 'dmg' | 'installer' | 'payload';
   from_version: string;
   to_version: string;
   result: TrackingUpdateApplyResult;
@@ -714,6 +742,13 @@ export interface SettingsByokModelsFetchResultProps {
   field_missing?: 'api_key' | 'base_url' | 'model' | 'multiple' | 'none';
   model_count?: number;
   duration_ms: number;
+}
+
+export interface ByokPreflightBlockedProps {
+  source: 'settings' | 'run';
+  reason: TrackingByokPreflightBlockReason;
+  provider_id: TrackingByokProviderId | 'unknown';
+  active_execution_mode: TrackingExecutionMode;
 }
 
 export interface SettingsConnectorAuthResultProps {

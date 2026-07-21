@@ -31,6 +31,7 @@ import type {
   RunTimingAnalytics,
 } from './run-analytics-observability.js';
 import type { RunFailureClassification } from './run-failure-classification.js';
+import { redactSecrets } from './redact.js';
 import { readTelemetryEnvironment } from './telemetry-environment.js';
 
 // Langfuse US region: confirmed by an end-to-end smoke on 2026-05-07 — the
@@ -1275,6 +1276,8 @@ function shouldCreateGenerationObservation(ctx: ReportContext): boolean {
 export function buildTracePayload(ctx: ReportContext): unknown[] {
   const wantsContent = ctx.prefs.metrics === true && ctx.prefs.content === true;
   const wantsArtifacts = wantsContent;
+  const safeRunError =
+    ctx.run.error === undefined ? undefined : redactSecrets(ctx.run.error);
 
   const sessionId =
     ctx.conversationId.length <= SESSION_ID_MAX ? ctx.conversationId : undefined;
@@ -1378,7 +1381,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
     success,
     env: readTelemetryEnvironment(),
     status: ctx.run.status,
-    error: ctx.run.error ?? undefined,
+    error: safeRunError,
     error_code: ctx.run.errorCode,
     langfuse_trace_id: traceId,
     ...langfuseDelivery,
@@ -1488,7 +1491,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         input: inputText,
         output: outputText,
         level: success ? 'DEFAULT' : 'ERROR',
-        statusMessage: ctx.run.error ?? undefined,
+        statusMessage: safeRunError,
         metadata: {
           status: ctx.run.status,
           messageId: ctx.message.messageId || undefined,
@@ -1523,7 +1526,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         input: generationInput,
         output: outputText,
         level: success ? 'DEFAULT' : 'ERROR',
-        statusMessage: ctx.run.error ?? undefined,
+        statusMessage: safeRunError,
         usage,
         metadata: {
           durationMs: ctx.eventsSummary.durationMs,
@@ -1553,7 +1556,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         input: generationInput,
         output: outputText,
         level: 'ERROR',
-        statusMessage: ctx.run.error ?? undefined,
+        statusMessage: safeRunError,
         metadata: {
           durationMs: ctx.eventsSummary.durationMs,
           cost_usd: costBreakdown.cost_usd,
@@ -1693,7 +1696,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         name: success ? 'error-summary' : 'run-error',
         startTime: endTimeIso,
         level: 'ERROR',
-        statusMessage: ctx.run.error ?? undefined,
+        statusMessage: safeRunError,
         metadata: {
           status: ctx.run.status,
           errors: ctx.eventsSummary.errors,
