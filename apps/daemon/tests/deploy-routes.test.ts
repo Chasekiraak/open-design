@@ -1247,6 +1247,39 @@ describe('deploy provider routes', () => {
     });
   }
 
+  // Every deploy failure used to flatten to the envelope's BAD_REQUEST, so a
+  // missing token, a non-HTML file, an unresolved asset reference and an
+  // oversized asset were indistinguishable once the client mirrored the code
+  // into `artifact_deploy_result.error_code` — in production that collapsed
+  // into one opaque HTTP_400 bucket we could not act on. Distinct causes must
+  // carry distinct codes.
+  it('surfaces a specific error code for a non-HTML deploy instead of a generic BAD_REQUEST', async () => {
+    const dataDir = process.env.OD_DATA_DIR;
+    if (!dataDir) throw new Error('OD_DATA_DIR is required for daemon route tests');
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'od-deploy-route-error-code-'));
+    const priorStateRoot = process.env.OD_USER_STATE_DIR;
+    process.env.OD_USER_STATE_DIR = stateRoot;
+    try {
+      const projectId = await setupProjectAndVercelConfig('deploy-error-code', 'Deploy error code test');
+      await writeFile(path.join(dataDir, 'projects', projectId, 'notes.txt'), 'not html');
+
+      const resp = await fetch(`${baseUrl}/api/projects/${projectId}/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: 'notes.txt', providerId: VERCEL_PROVIDER_ID }),
+      });
+      const text = await resp.text();
+      expect(resp.status, text).toBe(400);
+      const body = JSON.parse(text) as { error?: { code?: string; message?: string } };
+      expect(body.error?.code).toBe('NOT_HTML');
+      expect(body.error?.message).toMatch(/HTML/i);
+    } finally {
+      if (priorStateRoot === undefined) delete process.env.OD_USER_STATE_DIR;
+      else process.env.OD_USER_STATE_DIR = priorStateRoot;
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects vercel-self target=production with 400 BAD_REQUEST before attempting a deploy', async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'od-deploy-route-vercel-prod-reject-'));
     const priorStateRoot = process.env.OD_USER_STATE_DIR;
