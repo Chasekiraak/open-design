@@ -39,7 +39,6 @@ import {
 import { setPendingDesignSystemCreateEntry } from '../analytics/ds-create-entry';
 import { requestInspirationBrowse } from '../runtime/inspiration-browse-intent';
 import { navigate } from '../router';
-import { DesignSystemKitPreview } from './DesignSystemKitPreview';
 import { Icon } from './Icon';
 
 /**
@@ -76,15 +75,33 @@ const ALL_SOURCES: readonly InspirationSource[] = [
 // shares one fetch per surface instead of refetching on each mount.
 let templatesCache: Promise<SkillSummary[]> | null = null;
 let designSystemsCache: Promise<DesignSystemSummary[]> | null = null;
-// Availability of per-template preview documents, probed lazily with HEAD
-// so cards without a seed keep the wireframe instead of a 404 body.
+// Availability of per-template preview documents. Templates without a real
+// HTML document are not useful references, so the catalogue does not resolve
+// until these probes complete and unavailable entries can be removed.
 const templatePreviewAvailability = new Map<string, Promise<boolean>>();
 
+function isVisualTemplate(skill: SkillSummary): boolean {
+  return skill.mode !== 'design-system' && skill.mode !== 'audio';
+}
+
 function loadTemplates(): Promise<SkillSummary[]> {
-  templatesCache ??= fetchDesignTemplates().catch(() => {
-    templatesCache = null;
-    return [];
-  });
+  templatesCache ??= fetchDesignTemplates()
+    .then(async (list) => {
+      const candidates = list.filter(isVisualTemplate);
+      const availability = await Promise.all(
+        candidates.map(async (skill) => ({
+          skill,
+          available: await probeTemplatePreview(skill.id),
+        })),
+      );
+      return availability
+        .filter((entry) => entry.available)
+        .map((entry) => entry.skill);
+    })
+    .catch(() => {
+      templatesCache = null;
+      return [];
+    });
   return templatesCache;
 }
 
@@ -236,7 +253,6 @@ export function InspirationPicker({
   const gallerySearchRef = useRef<HTMLInputElement | null>(null);
   const [dsMulti, setDsMulti] = useState(false);
   const [dsPreviewId, setDsPreviewId] = useState<string | null>(null);
-  const [previewReady, setPreviewReady] = useState<Record<string, boolean>>({});
   const [browseTipSite, setBrowseTipSite] = useState<string | null>(null);
   const [detail, setDetail] = useState<
     | { kind: 'template' | 'ds'; id: string; title: string }
@@ -288,14 +304,11 @@ export function InspirationPicker({
     [selection],
   );
 
-  // Visual grounding surfaces only — a design-system template is picked
-  // through the design-systems section, and audio has no visual reference
-  // value here.
+  // `loadTemplates` has already removed non-visual entries and templates
+  // whose HTML preview cannot be resolved. Keep this defensive mode filter so
+  // a future caller cannot accidentally surface audio or design-system cards.
   const visualTemplates = useMemo(
-    () =>
-      (templates ?? []).filter(
-        (skill) => skill.mode !== 'design-system' && skill.mode !== 'audio',
-      ),
+    () => (templates ?? []).filter(isVisualTemplate),
     [templates],
   );
 
@@ -331,25 +344,14 @@ export function InspirationPicker({
   // that actually fit this request".
   const queryTokens = useMemo(() => tokenizeQuery(query ?? ''), [query]);
 
-  // Visual appeal, secondary to relevance. A template with a real preview
-  // document renders as an actual colourful thumbnail; one without falls back
-  // to the grey wireframe, so "has a preview" IS the good-looking signal here
-  // (`fidelity` and `featured` are unpopulated across nearly the whole
-  // catalogue and cannot carry it).
-  const templateAppeal = useMemo(
-    () => (skill: SkillSummary) => (previewReady[skill.id] === true ? 1 : 0),
-    [previewReady],
-  );
-
   const rankedTemplates = useMemo(
     () =>
       rankByRelevance(
         visualTemplates,
         queryTokens,
         (skill) => templateDocs.get(skill.id),
-        templateAppeal,
       ),
-    [visualTemplates, queryTokens, templateDocs, templateAppeal],
+    [visualTemplates, queryTokens, templateDocs],
   );
 
   // Categories are ordered by how relevant they are to the request (summed
@@ -394,9 +396,8 @@ export function InspirationPicker({
         searchTokens,
         searchRankTokens,
         (skill) => templateDocs.get(skill.id),
-        templateAppeal,
       ),
-    [filteredTemplates, searchTokens, searchRankTokens, templateDocs, templateAppeal],
+    [filteredTemplates, searchTokens, searchRankTokens, templateDocs],
   );
 
   // --- Design systems: the same pipeline, so both tabs behave identically ---
@@ -460,21 +461,6 @@ export function InspirationPicker({
         : rankedDesignSystems.filter((system) => system.category === dsCategory),
     [dsCategory, rankedDesignSystems],
   );
-
-  // Probe preview availability for the templates currently on screen; the
-  // module-level cache makes repeat mounts free.
-  useEffect(() => {
-    let alive = true;
-    for (const skill of visualTemplates) {
-      void probeTemplatePreview(skill.id).then((ok) => {
-        if (!alive || !ok) return;
-        setPreviewReady((prev) => (prev[skill.id] ? prev : { ...prev, [skill.id]: true }));
-      });
-    }
-    return () => {
-      alive = false;
-    };
-  }, [visualTemplates]);
 
   /**
    * Seed the top-ranked template and design system as the default answer,
@@ -732,7 +718,7 @@ export function InspirationPicker({
         />
         <LiveDocThumb
           src={templatePreviewUrl(skill.id)}
-          available={previewReady[skill.id] === true}
+          available
           fallback={wireframeThumb(skill.mode)}
           className="qf-insp-thumb"
         />
@@ -910,7 +896,7 @@ export function InspirationPicker({
               <div key={`tpl-${entry.id}`} className="qf-insp-card qf-insp-card-picked" title={label}>
                 <LiveDocThumb
                   src={templatePreviewUrl(entry.id)}
-                  available={previewReady[entry.id] === true}
+                  available={skill !== null}
                   fallback={wireframeThumb(skill?.mode ?? 'prototype')}
                   className="qf-insp-thumb"
                 />
@@ -1233,11 +1219,11 @@ export function InspirationPicker({
         </div>
         <div className="qf-dsx-preview">
           {previewSystem ? (
-            <DesignSystemKitPreview
+            <iframe
               key={previewSystem.id}
-              system={previewSystem}
-              variant="compact"
-              showCover={false}
+              className="qf-dsx-preview-frame"
+              src={designSystemCardUrl(previewSystem.id)}
+              title={previewSystem.title}
             />
           ) : null}
         </div>

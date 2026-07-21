@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesignSystemSummary, SkillSummary } from '@open-design/contracts';
 
@@ -64,13 +64,6 @@ vi.mock('../../src/providers/registry', () => ({
       .join('/')}`,
 }));
 
-// The gallery's right-hand pane mounts the shared kit preview, which fetches
-// design-system detail + fonts; stub it — this suite tests the picker's
-// selection wiring, not the preview renderer.
-vi.mock('../../src/components/DesignSystemKitPreview', () => ({
-  DesignSystemKitPreview: () => <div data-testid="kit-preview" />,
-}));
-
 import { QuestionFormView } from '../../src/components/QuestionForm';
 import {
   InspirationPicker,
@@ -94,6 +87,9 @@ const inspirationForm: QuestionForm = {
 
 beforeEach(() => {
   resetInspirationCatalogCacheForTests();
+  const fetchMock = vi.fn<typeof fetch>();
+  fetchMock.mockResolvedValue({ ok: true } as Response);
+  vi.stubGlobal('fetch', fetchMock);
   Object.defineProperty(URL, 'createObjectURL', {
     configurable: true,
     value: vi.fn(() => 'blob:mock'),
@@ -107,6 +103,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -142,6 +139,22 @@ describe('InspirationPicker inside QuestionFormView', () => {
     expect(inspiration).toEqual({
       templates: [{ id: 'deck-fundraising', label: 'Fundraising Pitch' }],
       designSystems: [{ id: 'user:editorial', label: 'Editorial' }],
+    });
+  });
+
+  it('filters templates whose preview HTML cannot be found', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => ({
+      ok: !String(input).includes('/deck-fundraising/preview'),
+    }) as Response);
+
+    render(<QuestionFormView form={inspirationForm} interactive onSubmit={vi.fn()} />);
+
+    expect(await screen.findByLabelText('Analytics Dashboard')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Fundraising Pitch')).toBeNull();
+      expect(screen.getByTestId('inspiration-picked').textContent).toContain(
+        'Analytics Dashboard',
+      );
     });
   });
 
@@ -387,6 +400,29 @@ describe('InspirationPicker inside QuestionFormView', () => {
     expect(img).not.toBeNull();
     // De-dup path wins over the raw name, encoded per segment.
     expect(img!.getAttribute('src')).toBe('/api/projects/proj-1/raw/uploads/image-2.png');
+  });
+
+  it('uses the card document for both design-system detail and gallery previews', async () => {
+    render(<QuestionFormView form={inspirationForm} interactive onSubmit={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: /Design systems/ }));
+    await screen.findByLabelText('Editorial');
+
+    const previewButtons = screen.getAllByRole('button', { name: 'Preview: Editorial' });
+    fireEvent.click(previewButtons[0]!);
+    const detailFrame = document.querySelector<HTMLIFrameElement>('.qf-insp-detail-frame');
+    expect(detailFrame?.getAttribute('src')).toBe('/api/design-systems/user%3Aeditorial/card');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Browse all' }));
+
+    await waitFor(() => {
+      const galleryFrame = document.querySelector<HTMLIFrameElement>('.qf-dsx-preview-frame');
+      expect(galleryFrame?.getAttribute('src')).toBe(
+        '/api/design-systems/user%3Aeditorial/card',
+      );
+    });
+    expect(screen.queryByText('Loading preview…')).toBeNull();
   });
 
   it('locks the picker when the form is not interactive', async () => {

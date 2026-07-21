@@ -125,7 +125,17 @@ describe('resolveFormAnsweredOverride', () => {
     expect(resolveFormAnsweredOverride({ formId: 'inspiration', pendingFlowStep: null })).toBe(
       FORM_ANSWERED_INSPIRATION_OVERRIDE,
     );
-    expect(FORM_ANSWERED_INSPIRATION_OVERRIDE).toContain('uploaded references');
+    expect(
+      resolveFormAnsweredOverride({ formId: 'inspiration', pendingFlowStep: INSPIRATION_FLOW_STEP }),
+    ).toBe(FORM_ANSWERED_INSPIRATION_OVERRIDE);
+    const imagePriority = FORM_ANSWERED_INSPIRATION_OVERRIDE.indexOf('image references');
+    const templatePriority = FORM_ANSWERED_INSPIRATION_OVERRIDE.indexOf('selected Design template');
+    const designSystemPriority = FORM_ANSWERED_INSPIRATION_OVERRIDE.indexOf(
+      'selected Style / design system',
+    );
+    expect(imagePriority).toBeGreaterThan(-1);
+    expect(templatePriority).toBeGreaterThan(imagePriority);
+    expect(designSystemPriority).toBeGreaterThan(templatePriority);
     expect(FORM_ANSWERED_INSPIRATION_OVERRIDE).toContain('selected Design');
     expect(FORM_ANSWERED_INSPIRATION_OVERRIDE).toContain('selected Style');
     expect(FORM_ANSWERED_INSPIRATION_OVERRIDE).toContain('never override');
@@ -146,10 +156,7 @@ describe('resolveFormAnsweredOverride', () => {
     );
   });
 
-  it('keeps the generic override for non-brief form ids, pending step or not', () => {
-    expect(
-      resolveFormAnsweredOverride({ formId: 'inspiration', pendingFlowStep: INSPIRATION_FLOW_STEP }),
-    ).toBe(FORM_ANSWERED_GENERIC_OVERRIDE);
+  it('keeps the generic override for other non-brief form ids', () => {
     expect(resolveFormAnsweredOverride({ formId: 'preferences', pendingFlowStep: null })).toBe(
       FORM_ANSWERED_GENERIC_OVERRIDE,
     );

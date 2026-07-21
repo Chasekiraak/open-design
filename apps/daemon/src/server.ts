@@ -1414,6 +1414,30 @@ user instruction and respond accordingly.
 
 `;
 
+export const FORM_ANSWERED_INSPIRATION_OVERRIDE = `## OVERRIDE \u2014 inspiration sources already selected
+
+The user already submitted the inspiration picker. Do not ask the inspiration
+form again. Use the submitted sources as a layered reference contract for the
+deliverable you build now.
+
+Resolve each dimension independently in this strict order:
+1. selected or uploaded image references (highest priority)
+2. selected Design template
+3. selected Style / design system (fallback)
+
+Evaluate information hierarchy, layout and composition, component patterns,
+typography, color, spacing, radii, imagery treatment, and motion separately.
+For each dimension, use the highest-priority source that visibly or explicitly
+defines it. If that source does not define a dimension, let the next source
+fill only that gap. A lower-priority source must never override a dimension
+already established by a higher-priority source.
+
+Extract the references' structural and visual language, not their incidental
+copy, product names, or factual claims. The user's requested subject matter and
+content remain authoritative.
+
+`;
+
 const BRIEF_FORM_IDS = new Set(['discovery', 'task-type']);
 
 /**
@@ -1428,7 +1452,9 @@ const BRIEF_FORM_IDS = new Set(['discovery', 'task-type']);
  */
 export function resolveFormAnsweredOverride({ formId, pendingFlowStep }) {
   if (typeof formId !== 'string' || formId.length === 0) return '';
-  if (!BRIEF_FORM_IDS.has(formId.toLowerCase())) return FORM_ANSWERED_GENERIC_OVERRIDE;
+  const normalizedFormId = formId.toLowerCase();
+  if (normalizedFormId === 'inspiration') return FORM_ANSWERED_INSPIRATION_OVERRIDE;
+  if (!BRIEF_FORM_IDS.has(normalizedFormId)) return FORM_ANSWERED_GENERIC_OVERRIDE;
   if (pendingFlowStep) return pendingFlowStep.formAnsweredOverride;
   return FORM_ANSWERED_SYSTEM_OVERRIDE;
 }

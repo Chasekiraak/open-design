@@ -3949,10 +3949,19 @@ body.entry-resizing { cursor: col-resize; user-select: none; }
   white-space: nowrap;
 }
 .qf-dsx-preview {
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
   border-inline-start: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
   padding-inline-start: 16px;
+}
+.qf-dsx-preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
+  border-radius: 10px;
+  background: #fff;
 }
 @media (max-width: 760px) {
   .qf-dsx-body {

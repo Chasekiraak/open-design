@@ -27,7 +27,7 @@
   "tokens": [
     {
       "name": "--bg",
-      "value": "#0b1020",
+      "value": "#ffffff",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -39,7 +39,7 @@
     },
     {
       "name": "--surface",
-      "value": "#131b2f",
+      "value": "#f6f6f1",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -51,7 +51,7 @@
     },
     {
       "name": "--surface-warm",
-      "value": "#182343",
+      "value": "#fff4ec",
       "type": "color",
       "layer": "B-slot",
       "confidence": "high",
@@ -63,7 +63,7 @@
     },
     {
       "name": "--fg",
-      "value": "#f8fafc",
+      "value": "#111827",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -75,7 +75,7 @@
     },
     {
       "name": "--fg-2",
-      "value": "#cbd5e1",
+      "value": "#374151",
       "type": "color",
       "layer": "B-slot",
       "confidence": "high",
@@ -87,7 +87,7 @@
     },
     {
       "name": "--muted",
-      "value": "#8ea0b8",
+      "value": "#6b7280",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -99,7 +99,7 @@
     },
     {
       "name": "--meta",
-      "value": "#60a5fa",
+      "value": "#ff5701",
       "type": "color",
       "layer": "B-slot",
       "confidence": "high",
@@ -111,7 +111,7 @@
     },
     {
       "name": "--border",
-      "value": "#293653",
+      "value": "#d1d5db",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -123,7 +123,7 @@
     },
     {
       "name": "--border-soft",
-      "value": "#1e2a43",
+      "value": "#e5e7eb",
       "type": "color",
       "layer": "B-slot",
       "confidence": "high",
@@ -135,7 +135,7 @@
     },
     {
       "name": "--accent",
-      "value": "#60a5fa",
+      "value": "#ff5701",
       "type": "color",
       "layer": "A1-identity",
       "confidence": "high",
@@ -147,7 +147,7 @@
     },
     {
       "name": "--accent-on",
-      "value": "#06111f",
+      "value": "#ffffff",
       "type": "color",
       "layer": "A2",
       "confidence": "high",
@@ -183,7 +183,7 @@
     },
     {
       "name": "--success",
-      "value": "#22c55e",
+      "value": "#16a34a",
       "type": "color",
       "layer": "A2",
       "confidence": "high",
@@ -195,7 +195,7 @@
     },
     {
       "name": "--warn",
-      "value": "#fbbf24",
+      "value": "#d97706",
       "type": "color",
       "layer": "A2",
       "confidence": "high",
@@ -207,7 +207,7 @@
     },
     {
       "name": "--danger",
-      "value": "#fb7185",
+      "value": "#dc2626",
       "type": "color",
       "layer": "A2",
       "confidence": "high",
@@ -219,7 +219,7 @@
     },
     {
       "name": "--font-display",
-      "value": "Inter, system-ui, sans-serif",
+      "value": "Playfair Display, Georgia, serif",
       "type": "fontFamily",
       "layer": "A1-identity",
       "confidence": "high",
@@ -231,7 +231,7 @@
     },
     {
       "name": "--font-body",
-      "value": "Inter, system-ui, sans-serif",
+      "value": "Playfair Display, Georgia, serif",
       "type": "fontFamily",
       "layer": "A1-identity",
       "confidence": "high",
@@ -603,7 +603,7 @@
     },
     {
       "name": "--focus-ring",
-      "value": "0 0 0 4px rgba(96, 165, 250, 0.28)",
+      "value": "0 0 0 4px rgba(255, 87, 1, 0.28)",
       "type": "shadow",
       "layer": "A2",
       "confidence": "high",
