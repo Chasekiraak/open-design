@@ -107,6 +107,7 @@ import { localizePluginTitle } from './plugins-home/localization';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { examplePresetSeedPrompt } from './plugins-home/presetSeedPrompt';
 import { localizePluginDescription } from './plugins-home/localization';
+import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { RecentProjectsStrip } from './RecentProjectsStrip';
 import { RecommendedStartRegion } from './RecommendedStartRegion';
 import type { Recommendation } from '../onboarding/recommendation';
@@ -237,6 +238,12 @@ interface Props {
   onOpenNewProject?: (tab: 'template') => void;
   onStartBlankProject?: () => Promise<void> | void;
   promptHandoff?: HomePromptHandoff | null;
+  /** The one shared-state answer for the home strip's cards. Owned by EntryShell
+   *  because the SAME answer partitions its 全部项目 / 草稿 grids — a home share
+   *  must move the project between those grids too, without a refetch. */
+  isSharedProject?: SharedProjectPredicate;
+  onProjectShared?: (projectId: string) => void;
+  onProjectUnshared?: (projectId: string) => void;
   skills?: SkillSummary[];
   skillsLoading?: boolean;
   connectors?: ConnectorDetail[];
@@ -329,6 +336,9 @@ export function HomeView({
   onOpenNewProject,
   onStartBlankProject,
   promptHandoff,
+  isSharedProject,
+  onProjectShared,
+  onProjectUnshared,
   skills = EMPTY_SKILLS,
   skillsLoading = false,
   connectors = EMPTY_CONNECTORS,
@@ -341,14 +351,11 @@ export function HomeView({
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
-  // Persistent team-shared ids so the home strip's "已在团队空间" badge survives a
-  // refresh (the strip's own optimistic set is session-only). Team-wide, from the
-  // resource hub via the daemon; empty off-team / when the hub is unconfigured.
+  // Team-wide catalog from the resource hub via the daemon; empty off-team / when
+  // the hub is unconfigured. Only the creator attribution is derived here — the
+  // shared/not-shared answer arrives as `isSharedProject` from EntryShell, which
+  // owns the optimistic layer the 全部项目 / 草稿 grids read from too.
   const homeTeamProjects = useTeamProjects();
-  const homeSharedProjectIds = useMemo(
-    () => new Set(homeTeamProjects.projects.map((teamProject) => teamProject.projectId)),
-    [homeTeamProjects.projects],
-  );
   // projectId → sharing member id, so the strip can resolve "{creator}创建" for a
   // teammate's shared project (a project absent here is the member's own local
   // project → "我创建").
@@ -2239,7 +2246,9 @@ export function HomeView({
         projects={projects}
         designSystems={designSystems}
         heading={t('recentProjects.title')}
-        sharedProjectIds={homeSharedProjectIds}
+        {...(isSharedProject ? { isSharedProject } : {})}
+        {...(onProjectShared ? { onProjectShared } : {})}
+        {...(onProjectUnshared ? { onProjectUnshared } : {})}
         projectOwnerMemberIds={homeProjectOwnerMemberIds}
         limit={1000}
         {...(projectsLoading !== undefined ? { loading: projectsLoading } : {})}

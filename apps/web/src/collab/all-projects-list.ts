@@ -1,6 +1,41 @@
 import type { TeamProject, WorkspaceCollabContext } from '@open-design/contracts';
 import type { Project } from '../types';
 
+/** Answers "is this project shared to the workspace?" for one project id. */
+export type SharedProjectPredicate = (projectId: string) => boolean;
+
+/**
+ * The ONE answer to "is this project shared?".
+ *
+ * The invariant: **a project is shared if the team hub already lists it OR we
+ * shared it in this session, and it is not shared if we unshared it in this
+ * session.** The hub layer is persistent (it survives a reload); the session
+ * layer is optimistic and exists so the state flips the instant the user acts,
+ * instead of waiting for the next team-projects poll.
+ *
+ * Every reader of that answer must call this predicate — the card's 共享 badge
+ * AND the 全部项目 / 草稿 partition below. They used to compute it separately:
+ * the badge unioned the hub with the session layer, the partition read the hub
+ * alone. That is why a just-shared project instantly grew its badge but stayed
+ * sitting in 草稿 until a tab switch forced a refetch. Do not re-derive this
+ * union at a call site; pass the predicate down instead.
+ */
+export function createSharedProjectPredicate(input: {
+  /** Rows the team hub lists as shared. Persistent, survives a reload. */
+  teamProjects: readonly TeamProject[];
+  /** Ids shared in this session, before the hub poll caught up. */
+  sharedThisSession?: ReadonlySet<string>;
+  /** Ids unshared in this session, before the hub poll caught up. */
+  unsharedThisSession?: ReadonlySet<string>;
+}): SharedProjectPredicate {
+  const { sharedThisSession, unsharedThisSession } = input;
+  const hubShared = new Set(input.teamProjects.map((teamProject) => teamProject.projectId));
+  return (projectId: string) => {
+    if (unsharedThisSession?.has(projectId) === true) return false;
+    return hubShared.has(projectId) || sharedThisSession?.has(projectId) === true;
+  };
+}
+
 /**
  * The card list behind the 全部项目 grid.
  *
@@ -11,8 +46,14 @@ import type { Project } from '../types';
  * change read the grid's name literally and let every local project in — do not
  * redo that without checking with product first.
  *
- * So the list is: the member's own local projects that the hub already lists as
- * shared, plus the shared projects they have not pulled yet, deduped by id.
+ * So the list is: the member's own local projects that count as shared, plus the
+ * shared projects they have not pulled yet, deduped by id.
+ *
+ * Workspace type does NOT change this rule. A personal workspace is still a
+ * workspace — it can be invited into and shared from — so its projects split
+ * across the two grids exactly like a team workspace's do. An earlier
+ * `workspaceType === 'personal'` bail returned every local project here AND in
+ * 草稿, which collapsed the partition into two identical grids.
  *
  * A shared project the member has not pulled yet has no local record, so it is
  * synthesized into a normal card: placeholder name until the pull registers it
@@ -31,13 +72,24 @@ export function buildAllProjectsList(input: {
   /** Display name for a shared project that has no catalog name yet. */
   sharedFallbackName: string;
   now?: () => number;
+  /**
+   * The shared-state answer, so this grid and the card badge cannot disagree.
+   * Defaults to the hub catalog alone; callers that own an optimistic session
+   * layer pass {@link createSharedProjectPredicate}'s result instead.
+   */
+  isShared?: SharedProjectPredicate;
 }): Project[] {
   const { projects, teamProjects, workspaceContext, sharedFallbackName } = input;
   const now = input.now ?? Date.now;
 
-  // A personal workspace has no hub side: the local list already IS everything.
-  if (workspaceContext?.workspaceType === 'personal') return projects;
+  // No workspace context at all (signed out, or a purely local client): there is
+  // no sharing concept to partition by, so fall back to the local list rather
+  // than render an empty grid. This state is not reachable from the UI — the
+  // entry shell routes away from 全部项目 / 草稿 while the context is absent — it
+  // only guards a context that resolves to null under a mounted grid.
+  if (!workspaceContext) return projects;
 
+  const isShared = input.isShared ?? createSharedProjectPredicate({ teamProjects });
   const localProjectIds = new Set(projects.map((project) => project.id));
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
 
@@ -47,16 +99,18 @@ export function buildAllProjectsList(input: {
       .map((teamProject) => [teamProject.projectId, teamProject.name?.trim() || '']),
   );
 
-  const teamSharedProjectIds = new Set(teamProjects.map((teamProject) => teamProject.projectId));
   const localCards = projects
-    .filter((project) => teamSharedProjectIds.has(project.id))
+    .filter((project) => isShared(project.id))
     .map((project) => {
       const catalogName = catalogNameOverride.get(project.id);
       return catalogName && catalogName !== project.name ? { ...project, name: catalogName } : project;
     });
 
   const sharedCards: Project[] = teamProjects
-    .filter((teamProject) => !localProjectIds.has(teamProject.projectId))
+    .filter(
+      (teamProject) =>
+        !localProjectIds.has(teamProject.projectId) && isShared(teamProject.projectId),
+    )
     .map((teamProject) => {
       const sharedAtMs = Date.parse(teamProject.sharedAt);
       const fallbackTimestamp = Number.isFinite(sharedAtMs) ? sharedAtMs : now();
@@ -82,15 +136,23 @@ export function buildAllProjectsList(input: {
  * 草稿 and 全部项目 are complements, not overlapping views — sharing is the
  * explicit action that moves a project from one to the other. A shared project
  * lingering in 草稿 reads as "it did not move".
+ *
+ * Both halves must therefore read the SAME shared-state answer as the card's
+ * 共享 badge; see {@link createSharedProjectPredicate}. And, like 全部项目, the
+ * split applies to a personal workspace too — its projects can be shared.
  */
 export function buildDraftsList(input: {
   projects: Project[];
   teamProjects: TeamProject[];
   workspaceContext: WorkspaceCollabContext | null;
+  /** See {@link buildAllProjectsList}'s `isShared`; pass the same predicate. */
+  isShared?: SharedProjectPredicate;
 }): Project[] {
   const { projects, teamProjects, workspaceContext } = input;
-  // A personal workspace has no team side, so nothing is ever shared away.
-  if (workspaceContext?.workspaceType === 'personal') return projects;
-  const shared = new Set(teamProjects.map((teamProject) => teamProject.projectId));
-  return projects.filter((project) => !shared.has(project.id));
+  // No workspace context: nothing can be shared, so every project is a draft.
+  // Stated as an early return to mirror 全部项目's fallback — the general path
+  // below computes the same list once `teamProjects` is empty.
+  if (!workspaceContext) return projects;
+  const isShared = input.isShared ?? createSharedProjectPredicate({ teamProjects });
+  return projects.filter((project) => !isShared(project.id));
 }

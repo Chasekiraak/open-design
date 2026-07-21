@@ -18,6 +18,7 @@ import { Icon } from './Icon';
 import { InviteDialog } from './InviteDialog';
 import { STATUS_LABEL_KEYS } from './DesignsTab';
 import { isDesignSystemProject, isPublishedDesignSystemProject } from './design-system-project';
+import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { useTeamMembers } from '../collab/useTeamMembers';
 import { notifyTeamProjectsChanged, useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { moveWorkspaceProject } from '../state/projects';
@@ -46,10 +47,17 @@ interface Props {
   onDuplicate?: (id: string) => Promise<void> | void;
   onRename?: (id: string, name: string) => void;
   limit?: number;
-  /** Ids of projects already shared to the team (persistent, from the hub). A
-   *  project in this set shows the 共享 badge + "已在团队空间" and cannot be
-   *  re-shared — so the state survives a refresh, not just the in-session share. */
-  sharedProjectIds?: ReadonlySet<string>;
+  /** The one shared-state answer for a card: true → 共享 badge + "已在团队空间",
+   *  and the card cannot be re-shared. Owned by the caller, because the SAME
+   *  answer decides which of the 全部项目 / 草稿 grids the project belongs to —
+   *  see {@link createSharedProjectPredicate}. This strip must not re-derive it;
+   *  a strip-local optimistic set is exactly how the badge and the grids drifted
+   *  apart. Defaults to "nothing is shared" when a caller has no sharing surface. */
+  isSharedProject?: SharedProjectPredicate;
+  /** Reported after a successful share/unshare so the caller can fold the change
+   *  into its optimistic layer before the team-projects poll catches up. */
+  onProjectShared?: (projectId: string) => void;
+  onProjectUnshared?: (projectId: string) => void;
   /** Which space this strip renders (see {@link SpaceKind}). Defaults to
    *  'recent' (home). 'team' hides the per-card 共享 badge since every card
    *  there is already a team-shared project. */
@@ -70,6 +78,8 @@ interface Props {
 }
 
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
+/** Fallback for a caller with no sharing surface (no workspace, no grids). */
+const NOTHING_SHARED: SharedProjectPredicate = () => false;
 
 type OwnerFilter = 'all' | 'mine' | 'others';
 type ProjectKindFilter = 'all' | 'prototype' | 'deck' | 'media' | 'other';
@@ -119,7 +129,9 @@ export function RecentProjectsStrip({
   onDuplicate,
   onRename,
   limit,
-  sharedProjectIds,
+  isSharedProject,
+  onProjectShared,
+  onProjectUnshared,
   space = 'recent',
   projectOwnerMemberIds,
   openingProjectId = null,
@@ -207,15 +219,12 @@ export function RecentProjectsStrip({
   // `canShareProjects` (403 off-team / no rights), so we only badge on success.
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [unsharingId, setUnsharingId] = useState<string | null>(null);
-  const [sharedIds, setSharedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [unsharedIds, setUnsharedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [shareErrorProjectId, setShareErrorProjectId] = useState<string | null>(null);
   const [shareErrorKind, setShareErrorKind] = useState<'share' | 'unshare'>('share');
-  // A project counts as team-shared if the hub already lists it (persistent —
-  // survives refresh) OR we shared it in this session (optimistic, before the
-  // team-projects poll catches up). The union is what makes the badge stick.
-  const isShared = (id: string) =>
-    !unsharedIds.has(id) && (sharedProjectIds?.has(id) === true || sharedIds.has(id));
+  // Whether a card is team-shared is decided upstream, not here — the grids'
+  // 全部项目 / 草稿 partition reads the very same predicate, so the badge and the
+  // card's grid can no longer disagree.
+  const isShared = isSharedProject ?? NOTHING_SHARED;
   // The card's "{creator}创建" line. A project the team hub attributes to another
   // member resolves through the directory to that member's display name; my own
   // shares and every local (non-shared) project read "我创建". Falls back to a
@@ -436,12 +445,7 @@ export function RecentProjectsStrip({
         visibility: 'team',
         workspaceContext,
       });
-      setSharedIds((prev) => new Set(prev).add(project.id));
-      setUnsharedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(project.id);
-        return next;
-      });
+      onProjectShared?.(project.id);
       notifyTeamProjectsChanged();
       setMenuOpenId(null);
     } catch (err) {
@@ -464,12 +468,7 @@ export function RecentProjectsStrip({
         visibility: 'personal',
         workspaceContext,
       });
-      setUnsharedIds((prev) => new Set(prev).add(project.id));
-      setSharedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(project.id);
-        return next;
-      });
+      onProjectUnshared?.(project.id);
       notifyTeamProjectsChanged();
       setMenuOpenId(null);
     } catch (err) {

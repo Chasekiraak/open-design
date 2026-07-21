@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { TeamProject, WorkspaceCollabContext } from '@open-design/contracts';
 
-import { buildAllProjectsList, buildDraftsList } from '../src/collab/all-projects-list';
+import {
+  buildAllProjectsList,
+  buildDraftsList,
+  createSharedProjectPredicate,
+} from '../src/collab/all-projects-list';
 import type { Project } from '../src/types';
 
 const SELF = 'member-self';
@@ -46,7 +50,8 @@ const build = (input: {
   buildAllProjectsList({
     projects: input.projects,
     teamProjects: input.teamProjects,
-    workspaceContext: input.workspaceContext ?? teamContext(),
+    // `in` rather than `??` so an explicit `null` context reaches the builder.
+    workspaceContext: 'workspaceContext' in input ? input.workspaceContext ?? null : teamContext(),
     sharedFallbackName: '共享项目',
     now: () => 1_700_000_000_000,
   });
@@ -125,13 +130,26 @@ describe('buildAllProjectsList', () => {
     expect(list[0]?.name).toBe('共享项目');
   });
 
-  it('returns the local list untouched in a personal workspace', () => {
-    const projects = [localProject('p-a', 'A'), localProject('p-b', 'B')];
+  // A personal workspace is still a workspace: it can be shared into and it can
+  // invite members, so 全部项目 must hold the SAME "shared only" rule there.
+  // Regression: an early `workspaceType === 'personal'` bail made this grid list
+  // every local project, unshared ones included — the reporter's screenshots
+  // showed 全部项目 cards still offering 「转入团队空间」 in "My Workspace2".
+  it('still lists shared-only in a personal workspace', () => {
     const list = build({
-      projects,
-      teamProjects: [sharedProject({ projectId: 'p-hub' })],
+      projects: [localProject('p-shared', 'Shared'), localProject('p-draft', 'Draft')],
+      teamProjects: [sharedProject({ projectId: 'p-shared', ownerMemberId: SELF })],
       workspaceContext: teamContext({ workspaceType: 'personal' }),
     });
+
+    expect(list.map((project) => project.id)).toEqual(['p-shared']);
+  });
+
+  // With no workspace context at all there is no sharing concept to partition
+  // by, so the grid falls back to the local list instead of rendering empty.
+  it('falls back to the local list when there is no workspace context', () => {
+    const projects = [localProject('p-a', 'A'), localProject('p-b', 'B')];
+    const list = build({ projects, teamProjects: [], workspaceContext: null });
 
     expect(list).toBe(projects);
   });
@@ -140,8 +158,11 @@ describe('buildAllProjectsList', () => {
 // Acceptance #78: a project that had been shared kept showing in 草稿, so the
 // share read as "it did not move". 草稿 and 全部项目 are complements.
 describe('buildDraftsList', () => {
-  const drafts = (projects: Project[], teamProjects: TeamProject[], ctx = teamContext()) =>
-    buildDraftsList({ projects, teamProjects, workspaceContext: ctx });
+  const drafts = (
+    projects: Project[],
+    teamProjects: TeamProject[],
+    ctx: WorkspaceCollabContext | null = teamContext(),
+  ) => buildDraftsList({ projects, teamProjects, workspaceContext: ctx });
 
   it('drops a project once it is shared', () => {
     const list = drafts(
@@ -174,9 +195,96 @@ describe('buildDraftsList', () => {
     expect([...inDrafts, ...inAll].sort()).toEqual(['p-draft', 'p-shared']);
   });
 
-  it('leaves a personal workspace untouched — nothing is ever shared away', () => {
+  // Same regression as 全部项目's personal-workspace case, seen from the other
+  // side: the reporter's 草稿 grid in "My Workspace2" still listed an already
+  // shared project, green 共享 badge and all.
+  it('drops a shared project in a personal workspace too', () => {
+    const projects = [localProject('p-shared', 'Shared'), localProject('p-draft', 'Draft')];
+    const list = drafts(
+      projects,
+      [sharedProject({ projectId: 'p-shared', ownerMemberId: SELF })],
+      teamContext({ workspaceType: 'personal' }),
+    );
+    expect(list.map((p) => p.id)).toEqual(['p-draft']);
+  });
+
+  it('keeps everything when there is no workspace context — nothing can be shared', () => {
     const projects = [localProject('p-a', 'A')];
-    const list = drafts(projects, [sharedProject({ projectId: 'p-a' })], teamContext({ workspaceType: 'personal' }));
-    expect(list).toBe(projects);
+    const list = drafts(projects, [], null);
+    expect(list.map((p) => p.id)).toEqual(['p-a']);
+  });
+});
+
+// Acceptance: 「草稿里的项目, 转入团队空间, 怎么还显示在草稿里…切到全部项目再切回
+// 草稿它才消失」. The 共享 badge unioned the hub catalog with an optimistic
+// in-session set, while the two grids read the hub alone — so the badge flipped
+// on click and the grids waited for the poll. Both now read one predicate.
+describe('createSharedProjectPredicate', () => {
+  const drafts = (projects: Project[], isShared: (id: string) => boolean) =>
+    buildDraftsList({ projects, teamProjects: [], workspaceContext: teamContext(), isShared });
+  const all = (projects: Project[], teamProjects: TeamProject[], isShared: (id: string) => boolean) =>
+    buildAllProjectsList({
+      projects,
+      teamProjects,
+      workspaceContext: teamContext(),
+      sharedFallbackName: '共享项目',
+      now: () => 1_700_000_000_000,
+      isShared,
+    });
+
+  it('counts a project the hub lists as shared', () => {
+    const isShared = createSharedProjectPredicate({
+      teamProjects: [sharedProject({ projectId: 'p-hub' })],
+    });
+    expect(isShared('p-hub')).toBe(true);
+    expect(isShared('p-other')).toBe(false);
+  });
+
+  it('counts a project shared this session, before the hub poll catches up', () => {
+    const isShared = createSharedProjectPredicate({
+      teamProjects: [],
+      sharedThisSession: new Set(['p-fresh']),
+    });
+    expect(isShared('p-fresh')).toBe(true);
+  });
+
+  it('drops a project unshared this session even while the hub still lists it', () => {
+    const isShared = createSharedProjectPredicate({
+      teamProjects: [sharedProject({ projectId: 'p-stale' })],
+      unsharedThisSession: new Set(['p-stale']),
+    });
+    expect(isShared('p-stale')).toBe(false);
+  });
+
+  // The reported symptom, at the grid level: sharing must move the card between
+  // the two grids on the spot, with no team-projects refetch in between.
+  it('moves a just-shared project out of 草稿 and into 全部项目 with no refetch', () => {
+    const projects = [localProject('p-mine', 'Mine'), localProject('p-draft', 'Draft')];
+    // The hub has NOT caught up yet — this is the window the user sees.
+    const teamProjects: TeamProject[] = [];
+    const isShared = createSharedProjectPredicate({
+      teamProjects,
+      sharedThisSession: new Set(['p-mine']),
+    });
+
+    expect(drafts(projects, isShared).map((p) => p.id)).toEqual(['p-draft']);
+    expect(all(projects, teamProjects, isShared).map((p) => p.id)).toEqual(['p-mine']);
+  });
+
+  it('moves a just-unshared project back into 草稿 with no refetch', () => {
+    const projects = [localProject('p-mine', 'Mine')];
+    // The hub still lists it; only the session layer knows it was unshared.
+    const teamProjects = [sharedProject({ projectId: 'p-mine', ownerMemberId: SELF })];
+    const isShared = createSharedProjectPredicate({
+      teamProjects,
+      unsharedThisSession: new Set(['p-mine']),
+    });
+
+    expect(
+      buildDraftsList({ projects, teamProjects, workspaceContext: teamContext(), isShared }).map(
+        (p) => p.id,
+      ),
+    ).toEqual(['p-mine']);
+    expect(all(projects, teamProjects, isShared)).toEqual([]);
   });
 });

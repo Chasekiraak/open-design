@@ -12,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -125,7 +126,11 @@ import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import { useWorkspaceContext, useWorkspaceBilling, useTeamProjects } from '../collab/useWorkspaceContext';
-import { buildAllProjectsList, buildDraftsList } from '../collab/all-projects-list';
+import {
+  buildAllProjectsList,
+  buildDraftsList,
+  createSharedProjectPredicate,
+} from '../collab/all-projects-list';
 import {
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
@@ -551,8 +556,42 @@ export function EntryShell({
   // membership rule lives in `buildAllProjectsList`. Rows flow through
   // `RecentProjectsStrip` like any other card — no custom section.
   const localProjectIds = new Set(projects.map((project) => project.id));
-  const teamSharedProjectIds = new Set(
-    teamProjects.projects.map((teamProject) => teamProject.projectId),
+  // The optimistic share layer lives HERE, above every project strip, because a
+  // share has to move TWO things at once: the card's 共享 badge and which grid
+  // the card sits in. It used to live inside `RecentProjectsStrip`, so the badge
+  // flipped on click while 草稿 kept the card until the next team-projects poll
+  // (acceptance: 「转入团队空间, 怎么还显示在草稿里…切到全部项目再切回草稿它才消失」).
+  const [sharedThisSession, setSharedThisSession] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [unsharedThisSession, setUnsharedThisSession] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const markProjectShared = useCallback((projectId: string) => {
+    setSharedThisSession((prev) => new Set(prev).add(projectId));
+    setUnsharedThisSession((prev) => {
+      const next = new Set(prev);
+      next.delete(projectId);
+      return next;
+    });
+  }, []);
+  const markProjectUnshared = useCallback((projectId: string) => {
+    setUnsharedThisSession((prev) => new Set(prev).add(projectId));
+    setSharedThisSession((prev) => {
+      const next = new Set(prev);
+      next.delete(projectId);
+      return next;
+    });
+  }, []);
+  // The single shared-state answer, handed to the grids AND to every strip.
+  const isSharedProject = useMemo(
+    () =>
+      createSharedProjectPredicate({
+        teamProjects: teamProjects.projects,
+        sharedThisSession,
+        unsharedThisSession,
+      }),
+    [teamProjects.projects, sharedThisSession, unsharedThisSession],
   );
   // 草稿 is the complement of 全部项目: sharing moves a project from one to the
   // other, so a shared project must stop appearing here (acceptance #78).
@@ -560,17 +599,15 @@ export function EntryShell({
     projects,
     teamProjects: teamProjects.projects,
     workspaceContext,
+    isShared: isSharedProject,
   });
   const allProjectsList: Project[] = buildAllProjectsList({
     projects,
     teamProjects: teamProjects.projects,
     workspaceContext,
     sharedFallbackName: t('recentProjects.sharedProjectFallbackName'),
+    isShared: isSharedProject,
   });
-  // Persistent set of project ids the team hub already lists as shared. Passed to
-  // every project strip so a card that has been moved into the team space keeps
-  // its "已在团队空间" badge after a refresh — the strip's own optimistic set only
-  // covers the current session, and would otherwise reset on reload.
   // projectId → sharing member id, so a card in the 全部项目 / 草稿 grids can
   // resolve "{creator}创建" against the member directory. A project absent here
   // is the member's own local project → "我创建".
@@ -1199,6 +1236,9 @@ export function EntryShell({
                 }}
                 onStartBlankProject={startBlankProjectFromRail}
                 promptHandoff={homePromptHandoff}
+                isSharedProject={isSharedProject}
+                onProjectShared={markProjectShared}
+                onProjectUnshared={markProjectUnshared}
                 skills={skills}
                 skillsLoading={skillsLoading}
                 connectors={connectors}
@@ -1342,7 +1382,9 @@ export function EntryShell({
                     limit={1000}
                     heading={t('entry.navDrafts')}
                     space="drafts"
-                    sharedProjectIds={teamSharedProjectIds}
+                    isSharedProject={isSharedProject}
+                    onProjectShared={markProjectShared}
+                    onProjectUnshared={markProjectUnshared}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     onOpen={(id) => onOpenProject(id)}
                     onViewAll={() => {}}
@@ -1378,7 +1420,9 @@ export function EntryShell({
                     limit={1000}
                     heading={t('entry.navAllProjects')}
                     space="team"
-                    sharedProjectIds={teamSharedProjectIds}
+                    isSharedProject={isSharedProject}
+                    onProjectShared={markProjectShared}
+                    onProjectUnshared={markProjectUnshared}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     openingProjectId={pullingProjectId}
                     onOpen={(id) => void handleOpenAllProjects(id)}

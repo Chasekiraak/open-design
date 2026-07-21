@@ -224,7 +224,7 @@ describe('RecentProjectsStrip', () => {
             updatedAt: 4,
           }),
         ]}
-        sharedProjectIds={new Set(['project-shared'])}
+        isSharedProject={(id) => id === 'project-shared'}
         onOpen={() => {}}
         onViewAll={() => {}}
       />,
