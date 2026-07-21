@@ -28,11 +28,14 @@ describe('UserActionCard', () => {
     const toggle = screen.getByRole('button', { name: 'View details' });
     expect(toggle.lastElementChild?.tagName.toLowerCase()).toBe('svg');
     const disclosure = container.querySelector('.accordion-collapsible');
+    const details = container.querySelector('.accordion-collapsible-inner');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(disclosure?.classList.contains('open')).toBe(false);
+    expect(details?.hasAttribute('inert')).toBe(true);
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(disclosure?.classList.contains('open')).toBe(true);
+    expect(details?.hasAttribute('inert')).toBe(false);
   });
 });

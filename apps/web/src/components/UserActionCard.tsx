@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Icon, type IconName } from './Icon';
 import styles from './UserActionCard.module.css';
@@ -49,6 +49,19 @@ export function UserActionCard({
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const isOpen = open ?? internalOpen;
   const hasDetails = details != null;
+  // Keep collapsed diagnostics out of keyboard and pointer navigation. Set
+  // `inert` imperatively because React 18 does not serialize its boolean JSX
+  // prop into the DOM attribute.
+  const detailsInnerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = detailsInnerRef.current;
+    if (!node) return;
+    if (isOpen) {
+      node.removeAttribute('inert');
+    } else {
+      node.setAttribute('inert', '');
+    }
+  }, [isOpen]);
 
   const setOpen = (next: boolean) => {
     if (open === undefined) setInternalOpen(next);
@@ -96,9 +109,9 @@ export function UserActionCard({
           {hasDetails ? (
             <div className={`accordion-collapsible${isOpen ? ' open' : ''}`}>
               <div
+                ref={detailsInnerRef}
                 className="accordion-collapsible-inner"
                 aria-hidden={!isOpen}
-                inert={!isOpen ? true : undefined}
               >
                 <div className={styles.details}>{details}</div>
               </div>
