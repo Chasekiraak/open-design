@@ -7063,6 +7063,10 @@ export async function startServer({
 
     const sendAgentEvent = (ev) => {
       if (ev?.type === 'error') {
+        // Cancellation is the terminal user intent. Some CLIs flush a final
+        // error record while reacting to SIGTERM; treating that late frame as
+        // a run failure races the cancel route and can make it return failed.
+        if (run.cancelRequested) return;
         if (agentStreamError) return;
         flushVisibleAgentStderr();
         const failureText = [
@@ -7166,6 +7170,10 @@ export async function startServer({
         // init/system line arrives well before the model's first token.
         noteCliReadyAt();
         if (ev?.type === 'error') {
+          // Claude commonly reports its SIGTERM shutdown as an assistant or
+          // result error frame. Once cancellation has been requested, that
+          // frame is shutdown noise rather than a new user-visible failure.
+          if (run.cancelRequested) return;
           if (agentStreamError) return;
           // Hold back a resume-failure error so the close handler's transparent
           // reseed stays invisible. An is_error result frame on a dead --resume
@@ -7480,12 +7488,25 @@ export async function startServer({
       emitVisibleAgentStderr(chunk);
     });
 
+    const finishCanceledIfRequested = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): boolean => {
+      if (!run.cancelRequested) return false;
+      if (!design.runs.isTerminal(run.status)) {
+        markRpcCloseReason('cancel_requested');
+        finishWithRetryDecision('canceled', code, signal);
+      }
+      return true;
+    };
+
     child.on('error', (err) => {
       clearInactivityWatchdog();
       cleanupPromptFile();
       flushVisibleAgentStderr();
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
+      if (finishCanceledIfRequested(1, null)) return;
       send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', err.message));
       finishWithRetryDecision('failed', 1, null);
     });
@@ -7564,13 +7585,13 @@ export async function startServer({
         ));
         return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
       }
-      if (acpSession?.hasFatalError()) {
+      if (!run.cancelRequested && acpSession?.hasFatalError()) {
         markRpcCloseReason('fatal_rpc_error');
         return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       parseBufferedAntigravityGeminiJsonEventStream();
       flushAgentTitleMarkerBuffer();
-      if (agentStreamError) {
+      if (!run.cancelRequested && agentStreamError) {
         markRpcCloseReason('stream_error');
         return finishWithRetryDecision('failed', code === 0 ? 1 : (code ?? 1), signal ?? null);
       }
