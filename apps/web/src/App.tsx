@@ -126,6 +126,11 @@ import type {
   SkillSummary,
 } from './types';
 
+function velaLoginIdentity(status: VelaLoginStatus | null): string | null {
+  if (status?.loggedIn !== true) return null;
+  return `${status.profile}\u0000${status.user?.id ?? ''}`;
+}
+
 type AppCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   metadata?: CreateInput['metadata'];
   pendingPrompt?: string;
@@ -627,6 +632,7 @@ function AppInner() {
   // globals effect below reads it; the sync effects live next to the
   // other AMR plumbing further down.
   const [amrLoginStatus, setAmrLoginStatus] = useState<VelaLoginStatus | null>(null);
+  const amrLoginIdentityRef = useRef<string | null>(null);
 
   // v2 analytics requires every event to carry the configure-state
   // triplet (has_available_configure_cli / configure_type /
@@ -770,7 +776,10 @@ function AppInner() {
     let cancelled = false;
     const sync = async () => {
       const status = await fetchVelaLoginStatus();
-      if (!cancelled && status) setAmrLoginStatus(status);
+      if (!cancelled && status) {
+        amrLoginIdentityRef.current = velaLoginIdentity(status);
+        setAmrLoginStatus(status);
+      }
     };
     void sync();
     const onStatusEvent = () => {
@@ -790,9 +799,13 @@ function AppInner() {
   }, [analytics.setUserId, amrLoginStatus]);
 
   const handleAmrLoginStatusChange = useCallback((status: VelaLoginStatus | null) => {
-    if (status) setAmrLoginStatus(status);
-    if (status?.loggedIn !== true) return;
-    restartAmrPolling();
+    if (!status) return;
+    const nextIdentity = velaLoginIdentity(status);
+    const shouldRestartPolling =
+      nextIdentity !== null && nextIdentity !== amrLoginIdentityRef.current;
+    amrLoginIdentityRef.current = nextIdentity;
+    setAmrLoginStatus(status);
+    if (shouldRestartPolling) restartAmrPolling();
   }, [restartAmrPolling]);
 
   // Bootstrap — detect daemon, then fan out independent fetches so each

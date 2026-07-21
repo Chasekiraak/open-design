@@ -64,11 +64,13 @@ afterEach(() => {
 });
 
 describe('MessageCenterDemo', () => {
-  it('starts a durable anonymous window and renders API messages', async () => {
+  it('renders API messages for anonymous clients without a local window', async () => {
     renderMessageCenter();
     const dialog = await openCenter();
     expect(within(dialog).getByText('Open Design 0.14 is available')).toBeTruthy();
-    expect(localStorage.getItem('open-design.message-center.anonymous-started-at.v1')).toBeTruthy();
+    expect(localStorage.getItem('open-design.message-center.anonymous-started-at.v1')).toBeNull();
+    const anonymousPull = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/api-proxy/') && String(url).includes('/messages?'));
+    expect(String(anonymousPull?.[0])).not.toContain('startedAt=');
   });
 
   it('keeps anonymous read state locally and restores it', async () => {

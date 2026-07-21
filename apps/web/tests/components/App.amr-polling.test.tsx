@@ -427,6 +427,40 @@ describe('App AMR polling', () => {
     }, { timeout: 4_000 });
   });
 
+  it('does not restart AMR polling repeatedly for the same signed-in identity', async () => {
+    mockedFetchAmrModels.mockReset();
+    mockedFetchAmrModels.mockResolvedValue({
+      source: 'remote',
+      refreshing: false,
+      models: [{ id: 'remote-a', label: 'remote-a' }],
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockedFetchAmrModels).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByText('open settings'));
+    await waitFor(() => {
+      expect(screen.getByText('mark amr signed in')).toBeTruthy();
+    });
+
+    mockedFetchVelaLoginStatus.mockResolvedValue({
+      loggedIn: true,
+      profile: 'default',
+      user: null,
+      configPath: '/tmp/amr-config.json',
+    });
+    fireEvent.click(screen.getByText('mark amr signed in'));
+    await waitFor(() => {
+      expect(mockedFetchAmrModels).toHaveBeenCalledTimes(2);
+    });
+
+    fireEvent.click(screen.getByText('mark amr signed in'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(mockedFetchAmrModels).toHaveBeenCalledTimes(2);
+  });
+
   it('stops polling after the preset retry budget is exhausted when remote never arrives', {
     timeout: 20_000,
   }, async () => {
