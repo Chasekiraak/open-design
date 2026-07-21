@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -199,6 +199,20 @@ describe('project-watchers (real chokidar)', () => {
     expect(ignored(path.join(projectRoot, 'src', 'App.swift'))).toBe(false);
 
     await rm(root, { recursive: true, force: true });
+  });
+
+  it('never ignores the watch root when it is a directory symlink', async () => {
+    const dataRoot = await mkdtemp(path.join(tmpdir(), 'od-symlink-root-'));
+    const targetRoot = path.join(dataRoot, 'target');
+    const symlinkRoot = path.join(dataRoot, 'root');
+    await mkdir(targetRoot);
+
+    try {
+      await symlink(targetRoot, symlinkRoot, 'dir');
+      expect(makeIgnored(symlinkRoot)(symlinkRoot, await lstat(symlinkRoot))).toBe(false);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
   });
 
   it('emits file-changed events on add / change / unlink', async () => {

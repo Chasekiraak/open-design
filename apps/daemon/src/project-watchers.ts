@@ -40,12 +40,12 @@ type WatcherFactory = (dir: string, opts: Required<Pick<ProjectWatcherOptions, '
 
 export function makeIgnored(rootDir: string): ProjectWatchIgnored {
   return (absPath: string, stats?: Stats): boolean => {
+    const rel = path.relative(rootDir, absPath);
+    if (!rel || rel === '' || rel.startsWith('..')) return false; // never ignore root itself
     // chokidar 3's macOS FSEvents backend can traverse directory symlinks even
     // with followSymlinks disabled. Reject them in the shared predicate too so
     // a project watcher never observes files outside its selected root.
     if (stats?.isSymbolicLink()) return true;
-    const rel = path.relative(rootDir, absPath);
-    if (!rel || rel === '' || rel.startsWith('..')) return false; // never ignore root itself
     return rel.split(/[\\/]/).some((seg) => {
       const normalized = seg.toLowerCase();
       return WATCHER_ONLY_IGNORE_NAMES.has(normalized) || isIgnoredProjectDirName(normalized);
