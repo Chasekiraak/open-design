@@ -498,16 +498,27 @@ function isProcessCrashText(text: string): boolean {
 // The child binary executed an instruction this CPU does not implement — in
 // practice a Bun-compiled agent (bundled opencode) built for AVX2 running on a
 // CPU without it (Intel Atom/Celeron/Pentium N-series through 2021, and
-// AVX-but-not-AVX2 Sandy/Ivy Bridge cores). Matched only on precise signals:
-// the `no_avx2` CPU-feature line Bun's crash banner always prints on such
-// machines, or Windows STATUS_ILLEGAL_INSTRUCTION as either the hex
-// 0xC000001D or Go/Node's decimal exit-status rendering 3221225501. A bare
-// "Illegal instruction" line is deliberately NOT matched: any unrelated
-// SIGILL (a runtime bug on an AVX2-capable machine) would then be mislabeled
-// as a processor limitation and lose its retry. The same binary on the same
-// CPU fails deterministically, so cpu_unsupported must never be auto-retried.
+// AVX-but-not-AVX2 Sandy/Ivy Bridge cores). Matched only on signals that
+// prove the unsupported-CPU case:
+// - `no_avx2`: the CPU-feature line Bun's crash banner prints on such
+//   machines. Unconditional — the feature line itself is the proof.
+// - Windows STATUS_ILLEGAL_INSTRUCTION (hex 0xC000001D or Go/Node's decimal
+//   exit-status rendering 3221225501), but ONLY inside vela's bundled-opencode
+//   startup wrapper text ("start opencode server" / "opencode exited before
+//   readiness"). The raw status code is a generic Windows SIGILL that any
+//   agent binary could die with for unrelated reasons; every bannerless
+//   production trace carries the vela wrapper, so the gate costs no recall.
+// A bare "Illegal instruction" line is deliberately NOT matched: any
+// unrelated SIGILL (a runtime bug on an AVX2-capable machine) would then be
+// mislabeled as a processor limitation and lose its retry. The same binary on
+// the same CPU fails deterministically, so cpu_unsupported must never be
+// auto-retried.
 function isCpuUnsupportedCrashText(text: string): boolean {
-  return /\bno_avx2\b|0xc000001d|\b3221225501\b/i.test(text);
+  if (/\bno_avx2\b/i.test(text)) return true;
+  return (
+    /0xc000001d|\b3221225501\b/i.test(text) &&
+    /\bstart opencode server\b|\bopencode exited before readiness\b/i.test(text)
+  );
 }
 
 // The daemon emits a `runtime_close` diagnostic into the run's event stream at

@@ -1244,14 +1244,32 @@ describe('cpu_unsupported (AVX2) crash classification', () => {
   });
 
   it('classifies the hex STATUS_ILLEGAL_INSTRUCTION form as cpu_unsupported', () => {
+    const message = 'start opencode server: opencode exited before readiness: exit status 0xC000001D';
     expect(
-      classify('AGENT_EXECUTION_FAILED', 'opencode exited with 0xC000001D', [
-        errorEvent('AGENT_EXECUTION_FAILED', 'opencode exited with 0xC000001D'),
+      classify('AGENT_EXECUTION_FAILED', message, [
+        errorEvent('AGENT_EXECUTION_FAILED', message),
         runtimeCloseEvent('fatal_rpc_error'),
       ]),
     ).toMatchObject({
       failure_detail: 'cpu_unsupported',
       retryable: false,
+    });
+  });
+
+  it('keeps a STATUS_ILLEGAL_INSTRUCTION exit outside the opencode startup context retryable', () => {
+    // The raw status code is generic Windows SIGILL — any agent binary can die
+    // with it for reasons that have nothing to do with AVX2. Without vela's
+    // bundled-opencode startup wrapper text it must stay on the existing
+    // fatal_rpc_error path instead of surfacing the processor-support card.
+    const message = 'codex acp bridge exited: exit status 3221225501';
+    expect(
+      classify('AGENT_EXECUTION_FAILED', message, [
+        errorEvent('AGENT_EXECUTION_FAILED', message),
+        runtimeCloseEvent('fatal_rpc_error'),
+      ]),
+    ).toMatchObject({
+      failure_detail: 'fatal_rpc_error',
+      retryable: true,
     });
   });
 
