@@ -40,6 +40,21 @@ describe('model context budget', () => {
     });
   });
 
+  it('blocks an oversized prompt selected through the built-in Sonnet alias', () => {
+    const decision = evaluateModelContextBudget({
+      prompt: 'x'.repeat(650_000),
+      modelId: 'sonnet',
+    });
+
+    expect(decision).toMatchObject({
+      action: 'blocked',
+      source: 'known_model_family',
+      modelId: 'sonnet',
+      contextWindowTokens: 204_800,
+      error: { code: 'AGENT_PROMPT_TOO_LARGE' },
+    });
+  });
+
   it('uses provider metadata and preserves output plus safety headroom', () => {
     const decision = evaluateModelContextBudget({
       prompt: 'short prompt',

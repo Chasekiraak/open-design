@@ -28,6 +28,8 @@ export interface ModelContextBudgetDecision {
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 8_192;
 const MIN_SAFETY_MARGIN_TOKENS = 1_024;
 const SAFETY_MARGIN_RATIO = 0.05;
+const CLAUDE_CONTEXT_WINDOW_TOKENS = 204_800;
+const CLAUDE_MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
 
 export function estimatePromptTokens(prompt: string): number {
   // UTF-8 bytes / 3 deliberately overestimates normal English/code (usually
@@ -49,7 +51,12 @@ function knownModelFamilyContextWindow(modelId: string | null): number | null {
   // OpenCode/provider errors in the 0.15.0 incident report a 204,800-token
   // ceiling for Claude-family routes. Keep this fallback narrow; every other
   // model remains observation-only until its live catalog supplies metadata.
-  if (/(?:^|[/.])claude[-_]/u.test(normalized)) return 204_800;
+  if (
+    CLAUDE_MODEL_ALIASES.has(normalized) ||
+    /(?:^|[/.])claude[-_]/u.test(normalized)
+  ) {
+    return CLAUDE_CONTEXT_WINDOW_TOKENS;
+  }
   return null;
 }
 
