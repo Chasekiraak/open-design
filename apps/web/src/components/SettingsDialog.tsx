@@ -177,7 +177,6 @@ import {
   useCritiqueTheaterEnabled,
 } from './Theater';
 import {
-  ACCENT_SWATCHES,
   DEFAULT_ACCENT_COLOR,
   applyAppearanceToDocument,
   normalizeAccentColor,
@@ -223,14 +222,17 @@ export type SettingsSection =
 
 // Maps a requested section token onto the section that actually owns a nav
 // item. Only tokens whose content is *folded into* another section belong
-// here: language / appearance / notifications / projectLocations /
+// here: language / appearance / notifications / pet / projectLocations /
 // critiqueTheater all render inside General, so a deep link to any of them
-// must land on General and highlight the General nav item.
+// must land on General and highlight the General nav item. `pet` joined that
+// list when #5517's General page absorbed the pet picker — the composer's
+// "pet settings" entry point (App.openPetSettings) has no other destination,
+// so leaving it unmapped would deep-link into a section that renders nothing.
 //
 // Sections that keep their own render block but no longer have a nav item
-// (workspace, mcpClient, composio, designSystems, pet) must NOT be listed:
-// they stay individually addressable through `initialSection`, and folding
-// them here would silently swallow a deep link into the wrong section.
+// (workspace, mcpClient, composio, designSystems) must NOT be listed: they
+// stay individually addressable through `initialSection`, and folding them
+// here would silently swallow a deep link into the wrong section.
 // `privacy` and `about` must not be listed either — they own nav items, and
 // mapping them to General used to send deep links to the wrong section with
 // the wrong nav item highlighted.
@@ -239,6 +241,7 @@ function normalizeSettingsSection(section: SettingsSection): SettingsSection {
     case 'language':
     case 'appearance':
     case 'notifications':
+    case 'pet':
     case 'projectLocations':
     case 'critiqueTheater':
       return 'general';
@@ -1526,6 +1529,11 @@ export function SettingsDialog({
       t('settings.general'), t('settings.generalHint'), t('settings.language'),
       t('settings.languageHint'), t('settings.appearance'), t('settings.appearanceHint'),
       t('settings.themeLight'), t('settings.themeDark'), t('settings.themeSystem'),
+      // General also owns the System preferences, pet and project-location
+      // blocks, so searching for any of them must surface the General item.
+      t('settings.systemPrefsTitle'), t('settings.systemPrefsHint'),
+      t('settings.notifyCompletionSound'), t('settings.notifyDesktop'),
+      t('pet.navTitle'), t('settings.projectLocations'),
     ],
     instructions: [t('settings.instructionsTitle'), t('settings.instructionsNavSub')],
     memory: [t('settings.memory'), t('settings.memoryHint')],
@@ -4254,13 +4262,23 @@ export function SettingsDialog({
                     <strong>{t('settings.cloudCalloutTitle')}</strong>
                     <p>{t('settings.cloudCalloutBody')}</p>
                   </div>
-                  <button
-                    type="button"
+                  {/* Same device-auth flow as the 授权 button on the Open Design
+                      agent card below — the AMR/vela session IS the cloud
+                      identity, so signing in here is that one flow. This used to
+                      navigate to onboarding, which walked the user through the
+                      whole first-run tour to reach the same authorization. */}
+                  <AmrLoginPill
                     className="settings-cloud-signin-callout__button"
-                    onClick={() => navigateRoute({ kind: 'home', view: 'onboarding' })}
-                  >
-                    {t('settings.cloudCalloutButton')}
-                  </button>
+                    hideSignedOutStatus
+                    hideSignedInStatus
+                    initialStatus={amrCardStatus}
+                    skipInitialRefresh
+                    signInLabel={t('settings.cloudCalloutButton')}
+                    amrEntrySourceDetail="settings_cloud_callout"
+                    metricsConsent={cfg.telemetry?.metrics === true}
+                    installationId={cfg.installationId}
+                    onStatusChange={setAmrCardStatus}
+                  />
                 </div>
               ) : null}
               {cfg.mode === 'api' ? (
@@ -5546,64 +5564,75 @@ export function SettingsDialog({
             />
           ) : null}
 
-          {activeSection === 'general' || activeSection === 'language' ? (
-          <section className="settings-section settings-general-block">
-            {activeSection === 'general' ? (
-              <div className="settings-general-block-head">
-                <div>
-                  <h3>{t('settings.language')}</h3>
-                  <p className="hint">{t('settings.languageHint')}</p>
+          {/* General is one scrollable page of `settings-general-block`
+              sections, per #5517. Every token that used to address a piece of
+              it (language / appearance / notifications / pet /
+              projectLocations / critiqueTheater) is folded into 'general' by
+              normalizeSettingsSection, so this single guard covers them all —
+              there is no longer a standalone render block for any of them. */}
+          {activeSection === 'general' ? (
+            <section className="settings-section settings-general-section">
+              <div className="settings-general-block settings-general-block--appearance">
+                <div className="settings-general-field">
+                  <span className="settings-general-label">{t('settings.language')}</span>
+                  <label className="settings-general-select">
+                    <select
+                      value={locale}
+                      aria-label={t('settings.language')}
+                      onChange={(event) => {
+                        const next = event.target.value as Locale;
+                        // P1 ui_click area=language — record the locale id
+                        // that was picked, regardless of whether it differs
+                        // from the current one (user clicked = signal).
+                        trackSettingsLanguageClick(analytics.track, {
+                          page_name: 'settings',
+                          area: 'language',
+                          element: next,
+                        });
+                        setLocale(next);
+                      }}
+                    >
+                      {LOCALES.map((code) => (
+                        <option key={code} value={code}>
+                          {LOCALE_LABEL[code]} · {code}
+                        </option>
+                      ))}
+                    </select>
+                    <Icon name="chevron-down" size={14} />
+                  </label>
+                </div>
+                <div className="settings-general-field">
+                  <span className="settings-general-label">{t('settings.appearance')}</span>
+                  <AppearanceSection cfg={cfg} setCfg={setCfg} />
                 </div>
               </div>
-            ) : null}
-            <div className="settings-language-grid" role="radiogroup" aria-label={t('settings.language')}>
-              {LOCALES.map((code) => {
-                const active = locale === code;
-                return (
-                  <button
-                    key={code}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    className={`settings-language-tile${active ? ' active' : ''}`}
-                    onClick={() => {
-                      // P1 ui_click area=language — record the locale id
-                      // that was picked, regardless of whether it differs
-                      // from the current one (user clicked = signal).
-                      trackSettingsLanguageClick(analytics.track, {
-                        page_name: 'settings',
-                        area: 'language',
-                        element: code,
-                      });
-                      setLocale(code as Locale);
-                    }}
-                  >
-                    <span className="settings-language-tile-text">
-                      <span className="settings-language-tile-title">
-                        {LOCALE_LABEL[code]}
-                      </span>
-                      <span className="settings-language-tile-code">
-                        {code}
-                      </span>
-                    </span>
-                    {active ? <Icon name="check" size={16} /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-          ) : null}
 
-          {activeSection === 'general' || activeSection === 'appearance' ? (
-            <AppearanceSection cfg={cfg} setCfg={setCfg} />
-          ) : null}
+              <div className="settings-general-block">
+                <div className="settings-general-block-head">
+                  <h3>{t('settings.systemPrefsTitle')}</h3>
+                  <p className="hint">{t('settings.systemPrefsHint')}</p>
+                </div>
+                <NotificationsSection cfg={cfg} setCfg={setCfg} />
+              </div>
 
-          {activeSection === 'general' || activeSection === 'notifications' ? (
-            <NotificationsSection cfg={cfg} setCfg={setCfg} />
-          ) : null}
+              <div className="settings-general-block">
+                <div className="settings-general-block-head">
+                  <h3>{t('pet.navTitle')}</h3>
+                </div>
+                <PetSettings cfg={cfg} setCfg={setCfg} />
+              </div>
 
-          {activeSection === 'pet' ? (
-            <PetSettings cfg={cfg} setCfg={setCfg} />
+              <div className="settings-general-block">
+                <div className="settings-general-block-head">
+                  <h3>{t('settings.projectLocations')}</h3>
+                </div>
+                <ProjectLocationsSection cfg={cfg} setCfg={setCfg} onProjectsRefresh={onProjectsRefresh} />
+              </div>
+
+              <div className="settings-general-block">
+                <CritiqueTheaterSection />
+              </div>
+            </section>
           ) : null}
 
           {activeSection === 'designSystems' ? (
@@ -5613,14 +5642,6 @@ export function SettingsDialog({
               onDesignSystemsChanged={onDesignSystemsChanged}
               onDesignSystemImportRebuildJob={onDesignSystemImportRebuildJob}
             />
-          ) : null}
-
-          {activeSection === 'general' || activeSection === 'projectLocations' ? (
-            <ProjectLocationsSection cfg={cfg} setCfg={setCfg} onProjectsRefresh={onProjectsRefresh} />
-          ) : null}
-
-          {activeSection === 'general' || activeSection === 'critiqueTheater' ? (
-            <CritiqueTheaterSection />
           ) : null}
 
           {activeSection === 'instructions' ? (
@@ -8306,6 +8327,16 @@ function IntegrationsSection() {
   );
 }
 
+const THEMES: Array<{
+  value: AppTheme;
+  labelKey: 'settings.themeSystem' | 'settings.themeLight' | 'settings.themeDark';
+  icon?: 'sun' | 'moon';
+}> = [
+  { value: 'system', labelKey: 'settings.themeSystem' },
+  { value: 'light', labelKey: 'settings.themeLight', icon: 'sun' },
+  { value: 'dark', labelKey: 'settings.themeDark', icon: 'moon' },
+];
+
 function AppearanceSection({
   cfg,
   setCfg,
@@ -8316,10 +8347,10 @@ function AppearanceSection({
   const { t } = useI18n();
   const analytics = useAnalytics();
   const current = cfg.theme ?? 'system';
+  // #5517 dropped the accent-colour picker from Settings, so there is no UI
+  // that writes `accentColor` any more. Keep applying the stored (or default)
+  // accent so the live theme preview below still renders a stable accent.
   const currentAccent = normalizeAccentColor(cfg.accentColor) ?? DEFAULT_ACCENT_COLOR;
-  const accentLabel = t('pet.fieldAccent');
-  const defaultAccentLabel = t('pet.fieldAccentDefault');
-  const customAccentLabel = t('pet.fieldAccentCustom');
 
   // Apply the draft theme immediately so the user sees a live preview
   // before hitting Save. SettingsDialog's cleanup reverts this on cancel.
@@ -8330,49 +8361,40 @@ function AppearanceSection({
     });
   }, [current, currentAccent]);
 
-  const setAccentColor = (color: string) => {
-    setCfg((c) => ({ ...c, accentColor: normalizeAccentColor(color) ?? c.accentColor ?? DEFAULT_ACCENT_COLOR }));
-  };
-
+  // The 系统/浅色/深色 segmented control is deliberately kept even though
+  // #5517 comments it out as *temporarily* hidden: the account menu no longer
+  // carries a 切换主题 row (see EntryNavRail), so this is the product's only
+  // remaining way to pick "follow system". Recorded as NON-ALIGNMENT #9.
   return (
     <section className="settings-section">
-      {/* The 系统/浅色/深色 segmented control is removed per #5517 (product
-          confirmed 2026-07-20). Theme now changes only through the account
-          menu's 切换主题 row; the accent swatches stay here. */}
-      <div className="field">
-        <span className="field-label">{accentLabel}</span>
-        <div className="pet-swatches" role="radiogroup" aria-label={accentLabel}>
-          {ACCENT_SWATCHES.map((color) => {
-            const active = currentAccent === color;
-            return (
-              <button
-                key={color}
-                type="button"
-                className={`pet-swatch${active ? ' active' : ''}`}
-                style={{ background: color }}
-                aria-label={color === DEFAULT_ACCENT_COLOR ? defaultAccentLabel : color}
-                aria-checked={active}
-                role="radio"
-                onClick={() => {
-                  trackSettingsAppearanceClick(analytics.track, {
-                    page_name: 'settings',
-                    area: 'appearance',
-                    element: 'accent_color',
-                    color,
-                  });
-                  setAccentColor(color);
-                }}
-              />
-            );
-          })}
-          <input
-            type="color"
-            aria-label={customAccentLabel}
-            className="pet-swatch-picker"
-            value={currentAccent}
-            onChange={(e) => setAccentColor(e.target.value)}
-          />
-        </div>
+      <div
+        className="seg-control"
+        role="group"
+        aria-label={t('settings.appearance')}
+        style={{ '--seg-cols': THEMES.length } as React.CSSProperties}
+      >
+        {THEMES.map(({ value, labelKey, icon }) => (
+          <button
+            key={value}
+            type="button"
+            className={'seg-btn' + (current === value ? ' active' : '')}
+            aria-pressed={current === value}
+            onClick={() => {
+              // P1 ui_click area=appearance — `system|light|dark`.
+              if (value === 'system' || value === 'light' || value === 'dark') {
+                trackSettingsAppearanceClick(analytics.track, {
+                  page_name: 'settings',
+                  area: 'appearance',
+                  element: value,
+                });
+              }
+              setCfg((c) => ({ ...c, theme: value }));
+            }}
+          >
+            {icon ? <Icon name={icon} size={14} aria-hidden="true" /> : null}
+            <span className="seg-title">{t(labelKey)}</span>
+          </button>
+        ))}
       </div>
     </section>
   );
@@ -8598,7 +8620,6 @@ function NotificationsSection({
               </div>
             </div>
           </div>
-          <p className="hint settings-notify-card-hint">{t('settings.notifyCompletionSoundHint')}</p>
         </div>
 
         {notif.soundEnabled ? (
@@ -8678,7 +8699,6 @@ function NotificationsSection({
               </div>
             </div>
           </div>
-          <p className="hint settings-notify-card-hint">{t('settings.notifyDesktopHint')}</p>
         </div>
         {permission === 'unsupported' ? (
           <p className="hint">{t('settings.notifyDesktopUnsupported')}</p>
