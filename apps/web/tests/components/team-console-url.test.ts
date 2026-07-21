@@ -18,6 +18,15 @@ describe('teamConsoleUrl', () => {
     expect(teamConsoleUrl(base, 'billing')).toBe('https://web.example/wallet?workspaceId=ws-1');
   });
 
+  // "Upgrade" must land ON the plan-change dialog, not on a billing page where
+  // the user has to hunt for it. B opens that dialog from `billing=checkout`
+  // (vela routes/workspace-settings.tsx and routes/team-dashboard.tsx).
+  it('deep-links upgrade straight into the plan-change dialog', () => {
+    expect(teamConsoleUrl(base, 'upgrade')).toBe(
+      'https://web.example/settings?workspaceId=ws-1&billing=checkout',
+    );
+  });
+
   it('falls back to the raw URL when it cannot be parsed', () => {
     expect(teamConsoleUrl('not-a-url', 'members')).toBe('not-a-url');
   });

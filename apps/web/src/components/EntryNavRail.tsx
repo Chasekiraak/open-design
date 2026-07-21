@@ -120,13 +120,26 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
 // not the local client. We link out to it, deriving the section path from the one
 // workspace-settings URL the context carries. Best-effort: swap/append the section
 // segment, falling back to the raw settings URL when the path can't be rewritten.
-export function teamConsoleUrl(base: string, section: 'members' | 'dashboard' | 'settings' | 'billing'): string {
+export function teamConsoleUrl(
+  base: string,
+  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade',
+): string {
   // B's console routes: members live at /team, the (global) wallet backs the
   // billing entry. The settings URL the context carries includes the
   // ?workspaceId deep-link param; URL parsing preserves it, so the target page
   // opens on the SAME workspace this client is pinned to (B asks the user to
   // confirm if their account-level selection differs).
-  const path = section === 'members' ? 'team' : section === 'billing' ? 'wallet' : section;
+  //
+  // `upgrade` lands on workspace settings AND opens the plan-change dialog,
+  // because sending someone to a billing page to hunt for the upgrade control
+  // is a worse answer to "I want to upgrade". B already honors the deep link:
+  // both `routes/workspace-settings.tsx` and `routes/team-dashboard.tsx` open
+  // their checkout dialog when `billing=checkout` is present.
+  const path =
+    section === 'members' ? 'team'
+    : section === 'billing' ? 'wallet'
+    : section === 'upgrade' ? 'settings'
+    : section;
   try {
     const url = new URL(base);
     const segments = url.pathname.split('/').filter(Boolean);
@@ -136,6 +149,7 @@ export function teamConsoleUrl(base: string, section: 'members' | 'dashboard' | 
       segments.push(path);
     }
     url.pathname = `/${segments.join('/')}`;
+    if (section === 'upgrade') url.searchParams.set('billing', 'checkout');
     return url.toString();
   } catch {
     return base;
@@ -302,7 +316,7 @@ export function EntryNavRail({
   const [creditsOpen, setCreditsOpen] = useState(false);
   const billingUpgradeUrl =
     context?.billingRecovery?.recoveryUrl?.trim() ||
-    (workspaceSettingsUrl ? teamConsoleUrl(workspaceSettingsUrl, 'billing') : null);
+    (workspaceSettingsUrl ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade') : null);
   // Product decision: plan selection / payment lives in Vela Web. The local
   // client opens that billing surface, then refreshes billing + context when
   // focus returns so direct web upgrades sync plan, credits, seats and gates.
