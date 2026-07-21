@@ -327,10 +327,10 @@ export function TaskDeliverableCard({
             </span>
           </div>
         </div>
-        <button type="button" className={styles.viewAll} onClick={onOpenAllFiles}>
+        <Button variant="ghost" className={styles.viewAll} onClick={onOpenAllFiles}>
           <Icon name="folder" size={14} />
           <span>{t('deliverable.viewAllFiles', { count: changedCount })}</span>
-        </button>
+        </Button>
       </div>
     );
   }
