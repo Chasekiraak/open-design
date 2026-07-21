@@ -6363,6 +6363,8 @@ Common options:
   --daemon-url <url>   Open Design daemon HTTP base.
   --member <id>        Workspace member id for route-level authorization.
   --role <role>        Workspace role: owner, admin, or member.
+  --workspace-type <t> personal or team. A team share is refused in a personal
+                       workspace, which has no team plane to share into.
   --json               Emit raw JSON.`);
     process.exit(args.length === 0 ? 2 : 0);
   }
@@ -6459,9 +6461,15 @@ Common options:
   }
   const workspaceHeaders = {
     'x-od-workspace-id': workspaceId,
-    'x-od-workspace-type': typeof flags['workspace-type'] === 'string' && flags['workspace-type'].trim()
-      ? flags['workspace-type'].trim()
-      : 'personal',
+    // Only sent when the caller actually says which kind of workspace this is.
+    // The daemon reads an explicit `personal` as the caller ASSERTING there is
+    // no team plane here and refuses a team share on the strength of it (see
+    // collab/team-share-scope.ts), so defaulting the header to 'personal' would
+    // have made `--visibility team` impossible from the CLI. Absent still reads
+    // as personal everywhere it only affects view filtering.
+    ...(typeof flags['workspace-type'] === 'string' && flags['workspace-type'].trim()
+      ? { 'x-od-workspace-type': flags['workspace-type'].trim() }
+      : {}),
     'x-od-workspace-member-id': workspaceMemberId,
     ...(typeof flags.role === 'string' && flags.role.trim() ? { 'x-od-workspace-role': flags.role.trim() } : {}),
     ...(typeof flags['app-user'] === 'string' && flags['app-user'].trim() ? { 'x-od-app-user-id': flags['app-user'].trim() } : {}),

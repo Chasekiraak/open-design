@@ -635,8 +635,15 @@ import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
 import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
-import { resolveWorkspaceScope } from './collab/workspace-scope.js';
-import { createWorkspaceContextProviderFromEnv } from './collab/vela-workspace-context.js';
+import {
+  createWorkspaceTypeRegistry,
+  impossibleTeamShareRows,
+  projectCollabScope,
+} from './collab/team-share-scope.js';
+import {
+  createWorkspaceContextProviderFromEnv,
+  listVelaWorkspaceDirectory,
+} from './collab/vela-workspace-context.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
 import { createSyncDigestReader } from './collab/sync-digest.js';
 import {
@@ -2538,6 +2545,18 @@ export async function startServer({
     };
   };
   const activeWorkspace = createActiveWorkspaceSelectionStore(RUNTIME_DATA_DIR);
+  // What this daemon has learned about each workspace's type, memoized off reads
+  // it already performs (the workspace directory the web fetches on every load,
+  // the workspace context the invalidation poller reads every 15s). It is the
+  // second witness behind the team-share invariant: a team share may only be
+  // recorded in — and a project-scoped collab call may only be pinned to — a
+  // workspace that can actually host a team plane. See collab/team-share-scope.ts.
+  const workspaceTypes = createWorkspaceTypeRegistry();
+  const listWorkspaceDirectory = async () => {
+    const items = await listVelaWorkspaceDirectory();
+    workspaceTypes.learn(items);
+    return items;
+  };
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
   const getActiveWorkspaceId = () => activeWorkspace.get();
   // Persistent half of the sync design: a cheap digest GET decides whether the
@@ -2711,6 +2730,47 @@ export async function startServer({
         : 'pending_upload',
     );
   }
+  /**
+   * Heal `workspace_projects` rows that already violate the team-share
+   * invariant: `visibility: 'team'` pinned to a PERSONAL workspace (see
+   * collab/team-share-scope.ts). Older builds let a share taken while the client
+   * sat on its personal workspace persist such a row, and the code guards alone
+   * leave an affected user permanently stuck — the row 403s every collab call it
+   * scopes and nothing ever rewrites it.
+   *
+   * Reconciliation at startup rather than a schema migration: the contradiction
+   * is only decidable against the workspace DIRECTORY (which ids are teams),
+   * which is a signed-in network fact a migration cannot see. Demotion is
+   * therefore evidence-gated — a workspace the directory does not name is left
+   * exactly as-is, and `visibility: 'personal'` rows are never candidates.
+   *
+   * A demoted row goes back to a local draft rather than being re-pointed at
+   * some team: which team was intended is not recoverable, and the user can
+   * simply re-share from the team workspace, which now writes a valid row. This
+   * touches local state only — no hub resource is deleted — and deliberately
+   * leaves `cloudTombstonedAt` null, so a copy that genuinely exists in the team
+   * catalog keeps showing up instead of being suppressed as "unshared here".
+   */
+  const reconcileImpossibleTeamShares = async (): Promise<number> => {
+    await listWorkspaceDirectory();
+    const broken = impossibleTeamShareRows(listTeamWorkspaceProjectShares(db), workspaceTypes);
+    for (const row of broken) {
+      console.warn(
+        `[od] healing project ${row.projectId}: its team share pointed at personal workspace ` +
+          `${row.workspaceId}, which has no team plane. Re-share it from a team workspace.`,
+      );
+      updateWorkspaceProject(db, row.workspaceId, row.projectId, {
+        visibility: 'personal',
+        resourceHubResourceId: null,
+        cloudTombstonedAt: null,
+        syncState: 'local_only',
+      });
+    }
+    return broken.length;
+  };
+  void reconcileImpossibleTeamShares().catch((error) => {
+    console.warn('[od] team-share scope reconciliation failed:', error);
+  });
   const collabCloudClient = velaCliCollabClient ?? createCollabCloudClientFromEnv();
 
   // Collab cloud (C-lane §D2.5/§D4): cross-daemon comment sync + member
@@ -2929,10 +2989,26 @@ export async function startServer({
   // every relay pins the PROJECT's team workspace (its team projection row)
   // ahead of the account-level selection — a workspace switch on another
   // device/surface must never re-aim an open project's heartbeats.
+  //
+  // …with one subtraction: a pinned workspace that provably cannot host a team
+  // share is not a scope (see collab/team-share-scope.ts) and must not outrank
+  // the local selection, which in exactly that case still holds the real team
+  // workspace. Refusals are logged once per workspace rather than swallowed.
+  const refusedPresenceScopes = new Set<string>();
   const presenceScopeFor = (projectId: string): string | undefined =>
-    resolveWorkspaceScope({
+    projectCollabScope({
+      projectId,
       projectWorkspaceId: findTeamWorkspaceIdForProject(db, projectId),
       localSelection: activeWorkspace.get(),
+      registry: workspaceTypes,
+      onRefused: ({ workspaceId, reason }) => {
+        if (refusedPresenceScopes.has(workspaceId)) return;
+        refusedPresenceScopes.add(workspaceId);
+        console.warn(
+          `[od] ignoring project-pinned collab scope ${workspaceId} (${reason}): ` +
+            'a personal workspace has no team plane; falling back to the active workspace.',
+        );
+      },
     }).workspaceId;
   registerCollabPresenceRoutes(app, {
     collab,
@@ -3070,6 +3146,9 @@ export async function startServer({
   registerCollabContextRoutes(app, {
     workspaceContext: collab.workspaceContext,
     activeWorkspace,
+    // Same directory read the route would have made on its own, wrapped so every
+    // workspace type it carries is memoized for the team-share invariant.
+    listWorkspaceDirectory,
     // Reuse the shared team-projects lister (which holds the shared vela-cli
     // catalog adapter). Without this the endpoint built a fresh adapter per
     // request and re-ran the one-off `vela team-projects --help` capability
@@ -3089,7 +3168,11 @@ export async function startServer({
   // emits a thin signal only on an actual change. Runs IN ADDITION to the web
   // polls (poll-as-floor), so a client whose SSE never connects is unaffected.
   const workspaceInvalidationPoller = createWorkspaceInvalidationPoller({
-    getWorkspaceContext: () => collab.workspaceContext.current({}),
+    getWorkspaceContext: async () => {
+      const context = await collab.workspaceContext.current({});
+      workspaceTypes.learn(context);
+      return context;
+    },
     listTeamProjects: teamProjectsForDisplay,
     listMembers: teamMembersCache ? () => teamMembersCache() : async () => [],
     emit: (payload) => emitWorkspaceEvent(payload),
@@ -4082,6 +4165,10 @@ export async function startServer({
       invalidateTeamProjectCatalog: () => teamProjectsDisplayCache.invalidate(),
     },
     ...(workspaceTeamProjectCatalog ? { teamProjectCatalog: workspaceTeamProjectCatalog } : {}),
+    // Second witness for the team-share invariant: refuse a team share aimed at
+    // a workspace the directory says is personal, even if the caller's headers
+    // claim otherwise. See collab/team-share-scope.ts.
+    workspaceTypes,
     // Collab-cloud comment seams (no-op off-team / when unconfigured): stamp the
     // server-authoritative author, gate status/delete on the caller vs the
     // comment author / project owner, and push the comment lifecycle (create/edit,

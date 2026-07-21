@@ -313,6 +313,59 @@ describe('workspace project routes', () => {
     expect(invalid.status).toBe(400);
   });
 
+  // A team share recorded against a PERSONAL workspace is self-contradictory:
+  // B has no standalone team id, so the workspace id IS the team identity and a
+  // personal workspace has no team plane to act on. Every project-scoped collab
+  // call the resulting row pins (presence, comments, publish) is answered
+  // `403 missing_principal` — forever, and silently. The share must fail loudly
+  // at the moment it is requested instead of persisting an impossible row.
+  it('refuses a team share requested from a personal workspace', async () => {
+    const suffix = Date.now();
+    const projectId = `workspace-personal-share-${suffix}`;
+    const personalWorkspaceId = `${workspaceId}-personal-${suffix}`;
+    await createProject(projectId, 'Personal workspace share fixture');
+
+    const personalHeaders = workspaceHeaders(personalWorkspaceId, 'member-personal-sharer', {
+      'x-od-workspace-type': 'personal',
+      'x-od-workspace-role': 'admin',
+    });
+
+    const moveResp = await fetch(
+      `${baseUrl}/api/workspaces/${personalWorkspaceId}/projects/${projectId}/move`,
+      {
+        method: 'POST',
+        headers: personalHeaders,
+        body: JSON.stringify({ visibility: 'team' }),
+      },
+    );
+    expect(moveResp.status).toBe(409);
+    expect(await moveResp.json()).toMatchObject({
+      error: { code: 'WORKSPACE_TEAM_SHARE_REQUIRES_TEAM_WORKSPACE' },
+    });
+
+    const batchResp = await fetch(
+      `${baseUrl}/api/workspaces/${personalWorkspaceId}/projects/batch-move`,
+      {
+        method: 'POST',
+        headers: personalHeaders,
+        body: JSON.stringify({ projectIds: [projectId], visibility: 'team' }),
+      },
+    );
+    expect(batchResp.status).toBe(409);
+
+    // The row must still be personal — a refused share leaves nothing behind.
+    const listResp = await fetch(
+      `${baseUrl}/api/workspaces/${personalWorkspaceId}/projects?view=all`,
+      { headers: personalHeaders },
+    );
+    expect(listResp.status).toBe(200);
+    const body = (await listResp.json()) as { projects: Array<any> };
+    const row = body.projects.find((item) => item.id === projectId);
+    expect(row).toMatchObject({ id: projectId, visibility: 'personal' });
+    // …and the UI affordance that offers the impossible action is gone.
+    expect(row.currentUserAccess.canMoveToTeam).toBe(false);
+  });
+
   it('projects legacy rows for batch operations without requiring a prior list request', async () => {
     const suffix = Date.now();
     const moveProjectId = `workspace-batch-move-${suffix}`;

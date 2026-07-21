@@ -68,6 +68,11 @@ import {
   type VelaTeamProjectRecord,
 } from '../../integrations/vela-team-projects.js';
 import type { ResourceHubPrincipal } from '../../collab/resource-principal.js';
+import {
+  refuseTeamShareScope,
+  type TeamShareScopeRefusal,
+  type WorkspaceTypeRegistry,
+} from '../../collab/team-share-scope.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
@@ -86,11 +91,25 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
   onCommentCreated?: (comment: PreviewComment) => void;
   onCommentUpdated?: (comment: PreviewComment) => void;
   onCommentDeleted?: (comment: PreviewComment) => void;
+  /**
+   * What the daemon has learned about each workspace's type, used to refuse a
+   * team share aimed at a personal workspace even when the caller's headers say
+   * otherwise. See `collab/team-share-scope.ts`.
+   */
+  workspaceTypes?: Pick<WorkspaceTypeRegistry, 'isKnownPersonal'>;
 }
 
 type WorkspaceProjectContext = {
   workspaceId: string;
   workspaceType: 'personal' | 'team';
+  /**
+   * The caller's RAW `x-od-workspace-type` claim, before it is collapsed into
+   * `workspaceType` above. `workspaceType` defaults an absent header to
+   * 'personal', which is the right default for view filtering but must never be
+   * read as the caller ASSERTING "personal" — only an explicit header is
+   * evidence. Null means the caller made no claim.
+   */
+  workspaceTypeAsserted: 'personal' | 'team' | null;
   appUserId: string;
   workspaceMemberId: string;
   role: 'owner' | 'admin' | 'member';
@@ -135,6 +154,8 @@ function workspaceProjectContext(req: any, workspaceId: string): WorkspaceProjec
   return {
     workspaceId,
     workspaceType: workspaceTypeHeader === 'team' ? 'team' : 'personal',
+    workspaceTypeAsserted:
+      workspaceTypeHeader === 'team' || workspaceTypeHeader === 'personal' ? workspaceTypeHeader : null,
     appUserId: headerValue(req, 'x-od-app-user-id') ?? 'local-user',
     workspaceMemberId,
     role: role === 'owner' || role === 'admin' ? role : 'member',
@@ -159,7 +180,34 @@ function isWorkspaceLocked(ctx: WorkspaceProjectContext): boolean {
   return ctx.lifecycleState === 'locked' || ctx.lifecycleState === 'deleted';
 }
 
-function projectAccess(wp: WorkspaceProjectAccessInput, ctx: WorkspaceProjectContext) {
+/**
+ * Can a team share be RECORDED in the workspace this request is acting in?
+ *
+ * A team share must live in a team workspace — see `collab/team-share-scope.ts`
+ * for why a `visibility: 'team'` row pinned to a personal workspace is a
+ * permanently-broken address rather than a scope. Two independent witnesses can
+ * refuse it, and either alone is enough: the caller's own `x-od-workspace-type`
+ * claim (a client that says "personal" and asks for a team share has stated the
+ * contradiction itself), and the workspace directory the daemon has already read
+ * (which catches a caller whose headers are simply wrong). With neither, the
+ * request is allowed — this guard fires on positive evidence only, so it can
+ * never block a legitimate share in a workspace it has not learned about.
+ */
+function teamShareRefusalFor(
+  ctx: WorkspaceProjectContext,
+  workspaceTypes?: Pick<WorkspaceTypeRegistry, 'isKnownPersonal'> | null,
+): TeamShareScopeRefusal | null {
+  return refuseTeamShareScope(ctx.workspaceId, {
+    assertedType: ctx.workspaceTypeAsserted,
+    ...(workspaceTypes ? { registry: workspaceTypes } : {}),
+  });
+}
+
+function projectAccess(
+  wp: WorkspaceProjectAccessInput,
+  ctx: WorkspaceProjectContext,
+  workspaceTypes?: Pick<WorkspaceTypeRegistry, 'isKnownPersonal'> | null,
+) {
   const frozen = wp.resourceState === 'frozen' || wp.resourceState === 'deleted' || isWorkspaceLocked(ctx);
   const selfCreated = wp.createdByWorkspaceMemberId != null && wp.createdByWorkspaceMemberId === ctx.workspaceMemberId;
   const privileged = ctx.role === 'owner' || ctx.role === 'admin';
@@ -186,7 +234,13 @@ function projectAccess(wp: WorkspaceProjectAccessInput, ctx: WorkspaceProjectCon
     canRename: canMutate,
     canDelete: canMutate,
     canDuplicate: canMutate,
-    canMoveToTeam: canShareLocal && ctx.canShareProjects && wp.visibility === 'personal',
+    // Never offer a share the workspace cannot host: the affordance is the
+    // entry point that produced the impossible rows in the first place.
+    canMoveToTeam:
+      canShareLocal &&
+      ctx.canShareProjects &&
+      wp.visibility === 'personal' &&
+      teamShareRefusalFor(ctx, workspaceTypes) === null,
     canMoveToPersonal: canMutate && ctx.canShareProjects && wp.visibility === 'team',
     canExport: !frozen && ctx.memberStatus === 'active',
     canSendTo: !frozen && ctx.memberStatus === 'active',
@@ -1328,9 +1382,31 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   const { subscribeFileEvents, activeProjectEventSinks } = ctx.events;
   const { randomId } = ctx.ids;
   const { validateProjectDesignSystemId, validateProjectSkillId } = ctx.validation;
-  const { collabSync, teamProjectCatalog } = ctx;
+  const { collabSync, teamProjectCatalog, workspaceTypes } = ctx;
   function sendMissingWorkspaceContext(res: Response) {
     return sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
+  }
+  /**
+   * Refuse — loudly — to record a team share in a workspace that cannot host
+   * one. Loudly is the point: the impossible rows this prevents are invisible
+   * locally and only surface as `403 missing_principal` on every later collab
+   * call, which is how one shipped and survived in a dogfood user's daemon.
+   */
+  function sendTeamShareScopeRefused(
+    res: Response,
+    ctx: WorkspaceProjectContext,
+    reason: TeamShareScopeRefusal,
+  ) {
+    console.warn(
+      `[od] refused a team share into workspace ${ctx.workspaceId} (${reason}): ` +
+        'a team share requires a team workspace; a personal workspace has no team plane.',
+    );
+    return sendApiError(
+      res,
+      409,
+      'WORKSPACE_TEAM_SHARE_REQUIRES_TEAM_WORKSPACE',
+      'a project can only be shared to a team from a team workspace',
+    );
   }
   function pendingSyncIntent(projectId: string, workspaceId: string, visibility: 'personal' | 'team') {
     return {
@@ -1382,7 +1458,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       updatedByWorkspaceMemberId: row.updatedByWorkspaceMemberId ?? null,
       resourceHubResourceId: row.resourceHubResourceId ?? null,
       cloudTombstonedAt: row.cloudTombstonedAt ?? null,
-      currentUserAccess: projectAccess(wp, ctx),
+      currentUserAccess: projectAccess(wp, ctx, workspaceTypes),
       syncState: row.syncState ?? 'local_only',
       ...(row.syncState === 'pending_upload'
         ? { pendingSyncIntent: pendingSyncIntent(project.id, row.workspaceId, row.workspaceVisibility) }
@@ -2016,6 +2092,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       if (!validVisibility(visibility)) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'visibility must be personal or team');
       }
+      if (visibility === 'team') {
+        const refusal = teamShareRefusalFor(ctx, workspaceTypes);
+        if (refusal) return sendTeamShareScopeRefused(res, ctx, refusal);
+      }
       const wp = ensureWorkspaceProjection(project, ctx, 'personal');
       const row = listWorkspaceProjects(db, ctx.workspaceId).find((item: any) => item.id === project.id);
       if (!row || !wp) return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
@@ -2045,6 +2125,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       const projectIds = parseProjectIds(req.body?.projectIds);
       if (!validVisibility(visibility) || !projectIds) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'projectIds and visibility are required');
+      }
+      if (visibility === 'team') {
+        const refusal = teamShareRefusalFor(ctx, workspaceTypes);
+        if (refusal) return sendTeamShareScopeRefused(res, ctx, refusal);
       }
       const locations = await configuredProjectLocations();
       const rows = workspaceProjectRowsForIds(projectIds, ctx, locations);

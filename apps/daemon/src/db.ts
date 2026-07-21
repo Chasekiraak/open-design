@@ -833,6 +833,7 @@ export function listTeamWorkspaceProjectShares(db: SqliteDb) {
     .prepare(
       `SELECT project_id AS projectId,
               workspace_id AS workspaceId,
+              visibility,
               created_by_workspace_member_id AS createdByWorkspaceMemberId,
               updated_by_workspace_member_id AS updatedByWorkspaceMemberId,
               sync_state AS syncState
