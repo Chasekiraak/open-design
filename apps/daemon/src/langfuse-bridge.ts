@@ -105,6 +105,11 @@ interface DaemonRunRecord {
     reservedOutputTokens?: number;
     inputBudgetTokens?: number;
     budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
   };
 }
 

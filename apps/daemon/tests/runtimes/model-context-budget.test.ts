@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compactTranscriptForSessionRollover,
   estimatePromptTokens,
   evaluateModelContextBudget,
 } from '../../src/runtimes/model-context-budget.js';
@@ -86,5 +87,40 @@ describe('model context budget', () => {
       source: 'unknown',
       estimatedPromptTokens: 2,
     });
+  });
+
+  it('rolls over a resumed session before its projected input reaches the hard limit', () => {
+    const decision = evaluateModelContextBudget({
+      prompt: 'x'.repeat(9_000),
+      modelId: 'provider/model',
+      metadata: {
+        contextWindowTokens: 32_768,
+        maxOutputTokens: 4_096,
+      },
+      priorSessionInputTokens: 22_000,
+    });
+
+    expect(decision).toMatchObject({
+      action: 'rollover',
+      priorSessionInputTokens: 22_000,
+      projectedInputTokens: 25_000,
+      rolloverThresholdTokens: 22_978,
+    });
+    expect(decision.error).toBeUndefined();
+  });
+
+  it('compacts oldest transcript blocks while preserving the latest user turn', () => {
+    const transcript = Array.from({ length: 8 }, (_, index) => [
+      `## ${index % 2 === 0 ? 'user' : 'assistant'}`,
+      `turn-${index} ${'x'.repeat(6_000)}`,
+    ].join('\n')).join('\n\n');
+
+    const compacted = compactTranscriptForSessionRollover(transcript, 5_000);
+
+    expect(compacted.omittedMessageBlocks).toBeGreaterThan(0);
+    expect(compacted.prompt).toContain('Open Design compacted');
+    expect(compacted.prompt).not.toContain('turn-0');
+    expect(compacted.prompt).toContain('turn-7');
+    expect(compacted.compactedTokens).toBeLessThanOrEqual(5_000);
   });
 });

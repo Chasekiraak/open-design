@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { PersistedAgentEvent } from '@open-design/contracts';
+import { scanRunEventsForUsageAnalytics } from '../run-analytics-observability.js';
 import {
   appendMessageAgentEvent,
   upsertMessage,
@@ -224,9 +225,17 @@ export function daemonAgentPayloadToPersistedAgentEvent(data: unknown): Persiste
   }
   if (type === 'usage') {
     const usage = isRecord(data.usage) ? data.usage : {};
+    const usageAnalytics = scanRunEventsForUsageAnalytics(
+      [{ event: 'agent', data }],
+      null,
+      0,
+    );
     return {
       kind: 'usage',
       ...(typeof usage.input_tokens === 'number' ? { inputTokens: usage.input_tokens } : {}),
+      ...(typeof usageAnalytics.input_tokens_effective === 'number'
+        ? { inputTokensEffective: usageAnalytics.input_tokens_effective }
+        : {}),
       ...(typeof usage.output_tokens === 'number' ? { outputTokens: usage.output_tokens } : {}),
       ...(typeof data.costUsd === 'number' ? { costUsd: data.costUsd } : {}),
       ...(typeof data.durationMs === 'number' ? { durationMs: data.durationMs } : {}),

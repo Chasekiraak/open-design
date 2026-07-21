@@ -164,4 +164,23 @@ describe('native session recovery metadata', () => {
     expect(JSON.stringify(reseeded)).not.toContain('new-thread-id');
     expect(JSON.stringify(skipped)).not.toContain('stored-thread-id');
   });
+
+  it('reports context-budget rollover as a redacted resume guard', () => {
+    const rollover = initialNativeSessionRecoveryMetadata({
+      agent: { id: 'claude', resumesSessionViaCli: true },
+      supportsSessionResume: true,
+      isResuming: false,
+      resumeSessionId: null,
+      storedSessionId: 'stored-secret-session',
+      invalidationReason: 'context_budget',
+      updatedAt: 800,
+    });
+
+    expect(rollover).toMatchObject({
+      state: 'resume_skipped',
+      guardReason: 'context_budget',
+      handle: { present: true, redacted: true },
+    });
+    expect(JSON.stringify(rollover)).not.toContain('stored-secret-session');
+  });
 });

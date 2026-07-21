@@ -914,6 +914,42 @@ describe('buildTracePayload', () => {
     expect(m.agent).toBe('claude');
   });
 
+  it('mirrors session rollover and compaction evidence into trace metadata', () => {
+    const batch = buildTracePayload(
+      makeCtx({
+        run: {
+          runId: 'run-1',
+          status: 'succeeded',
+          startedAt: 1,
+          endedAt: 2,
+          contextBudget: {
+            action: 'rollover',
+            source: 'known_model_family',
+            estimatedPromptTokens: 80_000,
+            contextWindowTokens: 204_800,
+            reservedOutputTokens: 8_192,
+            inputBudgetTokens: 186_368,
+            budgetRatio: 80_000 / 186_368,
+            priorSessionInputTokens: 170_000,
+            projectedInputTokens: 184_000,
+            rolloverThresholdTokens: 158_412,
+            compactedPromptTokens: 80_000,
+            omittedTranscriptMessageBlocks: 12,
+          },
+        },
+      }),
+    );
+    const metadata = (batch[0] as any).body.metadata;
+    expect(metadata).toMatchObject({
+      contextBudgetAction: 'rollover',
+      priorSessionInputTokens: 170_000,
+      projectedSessionInputTokens: 184_000,
+      rolloverThresholdTokens: 158_412,
+      compactedPromptTokens: 80_000,
+      omittedTranscriptMessageBlocks: 12,
+    });
+  });
+
   it('marks generation.level=ERROR when run failed', () => {
     const batch = buildTracePayload(
       makeCtx({

@@ -22,12 +22,25 @@ export interface ModelContextBudgetDecision {
   safetyMarginTokens?: number;
   inputBudgetTokens?: number;
   budgetRatio?: number;
+  priorSessionInputTokens?: number;
+  projectedInputTokens?: number;
+  rolloverThresholdTokens?: number;
+  compactedPromptTokens?: number;
+  omittedTranscriptMessageBlocks?: number;
   error?: RuntimePromptBudgetError;
+}
+
+export interface TranscriptCompactionResult {
+  prompt: string;
+  originalTokens: number;
+  compactedTokens: number;
+  omittedMessageBlocks: number;
 }
 
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 8_192;
 const MIN_SAFETY_MARGIN_TOKENS = 1_024;
 const SAFETY_MARGIN_RATIO = 0.05;
+const SESSION_ROLLOVER_RATIO = 0.85;
 const CLAUDE_CONTEXT_WINDOW_TOKENS = 204_800;
 const CLAUDE_MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
 
@@ -60,14 +73,76 @@ function knownModelFamilyContextWindow(modelId: string | null): number | null {
   return null;
 }
 
+function compactionMarker(omittedMessageBlocks: number): string {
+  return [
+    `[Open Design compacted ${omittedMessageBlocks} older transcript message block${omittedMessageBlocks === 1 ? '' : 's'} while rolling over the upstream agent session.`,
+    'The complete history remains persisted; continue from the retained recent turns.]',
+  ].join(' ');
+}
+
+export function compactTranscriptForSessionRollover(
+  transcript: string,
+  maxTokens: number,
+): TranscriptCompactionResult {
+  const originalTokens = estimatePromptTokens(transcript);
+  const safeMaxTokens = Math.max(1, Math.floor(maxTokens));
+  if (originalTokens <= safeMaxTokens) {
+    return {
+      prompt: transcript,
+      originalTokens,
+      compactedTokens: originalTokens,
+      omittedMessageBlocks: 0,
+    };
+  }
+
+  const starts = [...transcript.matchAll(/^## (?:user|assistant)[ \t]*\r?$/gmu)]
+    .map((match) => match.index ?? -1)
+    .filter((index) => index >= 0);
+  if (starts.length === 0) {
+    const marker = compactionMarker(1);
+    const maxBytes = Math.max(1, safeMaxTokens * 3 - Buffer.byteLength(`${marker}\n\n`, 'utf8'));
+    const tail = Buffer.from(transcript, 'utf8').subarray(-maxBytes).toString('utf8');
+    const prompt = `${marker}\n\n${tail}`;
+    return {
+      prompt,
+      originalTokens,
+      compactedTokens: estimatePromptTokens(prompt),
+      omittedMessageBlocks: 1,
+    };
+  }
+
+  const blocks = starts.map((start, index) =>
+    transcript.slice(start, starts[index + 1] ?? transcript.length).trim(),
+  );
+  let firstRetained = blocks.length - 1;
+  let prompt = `${compactionMarker(firstRetained)}\n\n${blocks[firstRetained]}`;
+  for (let index = blocks.length - 2; index >= 0; index -= 1) {
+    const candidate = index === 0
+      ? blocks.slice(index).join('\n\n')
+      : `${compactionMarker(index)}\n\n${blocks.slice(index).join('\n\n')}`;
+    if (estimatePromptTokens(candidate) > safeMaxTokens) break;
+    firstRetained = index;
+    prompt = candidate;
+  }
+  const omittedMessageBlocks = firstRetained;
+  return {
+    prompt,
+    originalTokens,
+    compactedTokens: estimatePromptTokens(prompt),
+    omittedMessageBlocks,
+  };
+}
+
 export function evaluateModelContextBudget({
   prompt,
   modelId,
   metadata,
+  priorSessionInputTokens,
 }: {
   prompt: string;
   modelId: string | null | undefined;
   metadata?: ModelMetadata | null;
+  priorSessionInputTokens?: number | null;
 }): ModelContextBudgetDecision {
   const normalizedModel = typeof modelId === 'string' && modelId.trim()
     ? modelId.trim()
@@ -106,9 +181,20 @@ export function evaluateModelContextBudget({
   );
   const budgetRatio = estimatedPromptTokens / inputBudgetTokens;
   const blocked = estimatedPromptTokens > inputBudgetTokens;
+  const priorInput = positiveInteger(priorSessionInputTokens);
+  const projectedInputTokens = priorInput == null
+    ? null
+    : priorInput + estimatedPromptTokens;
+  const rolloverThresholdTokens = Math.floor(
+    inputBudgetTokens * SESSION_ROLLOVER_RATIO,
+  );
+  const rollover =
+    !blocked &&
+    projectedInputTokens != null &&
+    projectedInputTokens >= rolloverThresholdTokens;
 
   return {
-    action: blocked ? 'blocked' : 'within_budget',
+    action: blocked ? 'blocked' : rollover ? 'rollover' : 'within_budget',
     source,
     modelId: normalizedModel,
     estimatedPromptTokens,
@@ -117,6 +203,9 @@ export function evaluateModelContextBudget({
     safetyMarginTokens,
     inputBudgetTokens,
     budgetRatio,
+    ...(priorInput == null ? {} : { priorSessionInputTokens: priorInput }),
+    ...(projectedInputTokens == null ? {} : { projectedInputTokens }),
+    ...(priorInput == null ? {} : { rolloverThresholdTokens }),
     ...(blocked
       ? {
           error: {

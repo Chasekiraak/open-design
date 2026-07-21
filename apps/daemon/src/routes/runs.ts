@@ -178,6 +178,11 @@ interface ChatRun {
     safetyMarginTokens?: number;
     inputBudgetTokens?: number;
     budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
   };
   artifactOutcome?: {
     artifactCount: number;
@@ -1281,6 +1286,21 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
               : {}),
             ...(run.contextBudget?.budgetRatio !== undefined
               ? { context_budget_ratio: run.contextBudget.budgetRatio }
+              : {}),
+            ...(run.contextBudget?.priorSessionInputTokens !== undefined
+              ? { prior_session_input_tokens: run.contextBudget.priorSessionInputTokens }
+              : {}),
+            ...(run.contextBudget?.projectedInputTokens !== undefined
+              ? { projected_session_input_tokens: run.contextBudget.projectedInputTokens }
+              : {}),
+            ...(run.contextBudget?.rolloverThresholdTokens !== undefined
+              ? { rollover_threshold_tokens: run.contextBudget.rolloverThresholdTokens }
+              : {}),
+            ...(run.contextBudget?.compactedPromptTokens !== undefined
+              ? { compacted_prompt_tokens: run.contextBudget.compactedPromptTokens }
+              : {}),
+            ...(run.contextBudget?.omittedTranscriptMessageBlocks !== undefined
+              ? { omitted_transcript_message_blocks: run.contextBudget.omittedTranscriptMessageBlocks }
               : {}),
             ...(run.retrySuppressedReason
               ? { retry_suppressed_reason: run.retrySuppressedReason }

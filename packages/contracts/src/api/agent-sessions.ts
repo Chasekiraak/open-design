@@ -48,6 +48,7 @@ export const AGENT_SESSION_INVALIDATION_REASONS = [
   'cwd_changed',
   'conversation_advanced',
   'missing_cursor',
+  'context_budget',
 ] as const;
 
 export type AgentSessionInvalidationReason =
