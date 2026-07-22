@@ -140,6 +140,17 @@ describe("shared release metadata publisher", () => {
           STATE_SOURCE: "local-tools-serve",
           WIN_X64_RESULT: "success",
           ...(channel === "beta" ? { RELEASE_LATEST_CAS_REQUIRED: "true" } : {}),
+          // The launcher version floor rides through publish + verify on one
+          // channel; the others must publish without a control block.
+          ...(channel === "beta"
+            ? {
+                RELEASE_LAUNCHER_VERSION_MIN: "1.2.3-beta.4",
+                RELEASE_LAUNCHER_VERSION_MIN_URL: "https://example.test/reinstall-help",
+              }
+            : {
+                RELEASE_LAUNCHER_VERSION_MIN: "",
+                RELEASE_LAUNCHER_VERSION_MIN_URL: "",
+              }),
         };
         await runNode(["--experimental-strip-types", "tools/release/src/release-note/prepare.ts"], {
           cwd: repoRoot,
@@ -164,6 +175,7 @@ describe("shared release metadata publisher", () => {
 
         const metadata = JSON.parse(await readFile(join(metadataDir, "metadata.json"), "utf8")) as {
           channel?: string;
+          control?: { launcher?: { version?: { min?: string; url?: string } } };
           releaseState?: string;
           releaseTargets?: {
             mac_arm64?: { artifacts?: { payload?: { url?: string } } };
@@ -198,6 +210,14 @@ describe("shared release metadata publisher", () => {
         if (channel === "stable") {
           expect(metadata.stableVersion).toBe("1.2.3");
         }
+        if (channel === "beta") {
+          expect(metadata.control?.launcher?.version).toEqual({
+            min: "1.2.3-beta.4",
+            url: "https://example.test/reinstall-help",
+          });
+        } else {
+          expect(metadata.control).toBeUndefined();
+        }
         expect(server.getObject(`${channel}/latest/metadata.json`)).not.toBeNull();
         expect(server.getObject(`${channel}/versions/${version}/release-notes/en.md`)?.toString("utf8")).toContain(
           `title: Open Design ${version}`,
@@ -222,6 +242,28 @@ describe("shared release metadata publisher", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("rejects a launcher version floor above the release version", async () => {
+    // A floor the published release cannot satisfy would make the updater's
+    // same-version reinstall offer nag forever; publication must refuse it.
+    const repoRoot = resolve(import.meta.dirname, "../../..");
+    const root = await mkdtemp(join(tmpdir(), "od-release-metadata-floor-"));
+    await expect(runNode(["--experimental-strip-types", "tools/release/src/storage/publish-metadata.ts"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        RELEASE_CHANNEL: "beta",
+        RELEASE_LAUNCHER_VERSION_MIN: "9.9.9",
+        RELEASE_MANIFEST_DIR: root,
+        RELEASE_METADATA_DIR: root,
+        RELEASE_OUTPUTS_PATH: join(root, "outputs.json"),
+        RELEASE_PUBLIC_ORIGIN: "https://releases.example.test",
+        RELEASE_PUBLISH_SIDE_EFFECTS: "false",
+        RELEASE_VERSION: "1.2.3-beta.4",
+        STATE_SOURCE: "local-tools-serve",
+      },
+    })).rejects.toThrow(/exceeds release version/);
   });
 
   it("builds planned release-note and metadata artifacts without storage access in dry-run mode", async () => {

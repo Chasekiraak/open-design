@@ -16,6 +16,7 @@ describe("desktop updater host boundary", () => {
     const runtime = source("src/main/runtime.ts");
     expect(runtime).toContain("od:update:status");
     expect(runtime).toContain("od:update:check");
+    expect(runtime).toContain("od:update:clear-cache");
     expect(runtime).toContain("od:update:download");
     expect(runtime).toContain("od:update:install");
     expect(runtime).toContain("od:update:quit");

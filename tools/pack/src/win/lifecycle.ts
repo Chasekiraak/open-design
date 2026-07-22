@@ -7,10 +7,12 @@ import {
   SIDECAR_MESSAGES,
   SIDECAR_MODES,
   SIDECAR_SOURCES,
+  isDesktopUpdateAction,
   type DaemonStatusSnapshot,
   type DesktopEvalResult,
   type DesktopScreenshotResult,
   type DesktopStatusSnapshot,
+  type DesktopUpdateAction,
   type DesktopUpdateResult,
   type SidecarStamp,
   type WebStatusSnapshot,
@@ -475,10 +477,10 @@ export async function resetPackedWinNamespaces(config: ToolPackConfig): Promise<
   return { namespaces, results };
 }
 
-function resolveUpdateAction(value: string | undefined): "status" | "check" | "download" | "install" | null {
+function resolveUpdateAction(value: string | undefined): DesktopUpdateAction | null {
   if (value == null) return null;
-  if (value === "status" || value === "check" || value === "download" || value === "install") return value;
-  throw new Error("--update-action must be status, check, download, or install");
+  if (isDesktopUpdateAction(value)) return value;
+  throw new Error("--update-action must be status, check, clear-cache, download, or install");
 }
 
 async function requestDesktopEval(

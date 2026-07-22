@@ -11,6 +11,7 @@ import {
 } from "./common.ts";
 import { assertCurrentVersionReservation, versionLockObjectKey } from "./beta-version-reservation.ts";
 import { getStorageObject, putStorageObject, putStorageObjectWithStatus } from "./s3-upload.ts";
+import { compareLauncherVersions } from "@open-design/launcher-proto";
 import {
   parseCountedReleaseVersion,
   parseReleaseBaseVersion,
@@ -75,6 +76,48 @@ const versionLockKey = optional(
 );
 const latestCasRequired = process.env.RELEASE_LATEST_CAS_REQUIRED === "true";
 const storage = publishSideEffectsEnabled || versionLockRequired ? storageConfigFromEnv() : null;
+
+// Operator-supplied installer-reinstall floor (repo vars per channel, falling
+// back to the stable value at the workflow layer). Published as
+// control.launcher.version.{min,url}; the desktop updater compares min against
+// the physically installed outer package version and forces the installer
+// route — including a same-version reinstall — when the outer is below it.
+const launcherVersionMin = optional("RELEASE_LAUNCHER_VERSION_MIN");
+const launcherVersionUrl = optional("RELEASE_LAUNCHER_VERSION_MIN_URL");
+if (launcherVersionUrl.length > 0 && launcherVersionMin.length === 0) {
+  throw new Error("RELEASE_LAUNCHER_VERSION_MIN_URL requires RELEASE_LAUNCHER_VERSION_MIN");
+}
+if (launcherVersionMin.length > 0) {
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(launcherVersionMin)) {
+    throw new Error(`RELEASE_LAUNCHER_VERSION_MIN is not a valid version: ${launcherVersionMin}`);
+  }
+  // A floor above the version being published could never be cleared by
+  // installing this release, so the updater's same-version reinstall offer
+  // would nag forever. Publication is the guard that keeps the gate sane.
+  if (compareLauncherVersions(launcherVersionMin, releaseVersion) > 0) {
+    throw new Error(
+      `RELEASE_LAUNCHER_VERSION_MIN ${launcherVersionMin} exceeds release version ${releaseVersion}`,
+    );
+  }
+}
+if (launcherVersionUrl.length > 0) {
+  const parsedUrl = new URL(launcherVersionUrl);
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    throw new Error(`RELEASE_LAUNCHER_VERSION_MIN_URL must be an http(s) URL: ${launcherVersionUrl}`);
+  }
+}
+const controlBlock = launcherVersionMin.length > 0
+  ? {
+      control: {
+        launcher: {
+          version: {
+            min: launcherVersionMin,
+            ...(launcherVersionUrl.length > 0 ? { url: launcherVersionUrl } : {}),
+          },
+        },
+      },
+    }
+  : {};
 
 function readReleaseNoteMetadata(): ReturnType<typeof releaseNoteMetadataFromPublication> {
   if (releaseNoteManifestPath.length === 0) {
@@ -327,6 +370,7 @@ const releaseFields = releaseMetadataFields();
 const metadata = {
   ...releaseFields,
   channel: releaseChannel,
+  ...controlBlock,
   expectedPlatforms: expectedTargets,
   expectedTargets,
   failedPlatforms: failedTargets,

@@ -983,6 +983,11 @@ export interface Dict {
   'updater.ready': string;
   'updater.readyGeneric': string;
   'updater.readyVersion': string;
+  // Forced installer reinstall (feed control.launcher.version.min gate).
+  // Copy priority: operator jump link (reinstall.url) > these defaults.
+  'updater.reinstallLearnMore': string;
+  'updater.reinstallReadyGeneric': string;
+  'updater.reinstallReadyVersion': string;
   'updater.restartAnyway': string;
   'updater.upToDate': string;
   'updater.viewVersionFeatures': string;
@@ -4276,6 +4281,13 @@ export interface Dict {
   'settings.resetOnboarding': string;
   'settings.resetOnboardingDesc': string;
   'settings.resetOnboardingButton': string;
+  // Manual updater/launcher cache clear (disaster recovery, About pane).
+  'settings.clearUpdaterCacheTitle': string;
+  'settings.clearUpdaterCacheHint': string;
+  'settings.clearUpdaterCacheButton': string;
+  'settings.clearUpdaterCacheConfirmButton': string;
+  'settings.clearUpdaterCacheSuccess': string;
+  'settings.clearUpdaterCacheFailed': string;
   'onboarding.brandTitle': string;
   'onboarding.brandSubtitle': string;
   'onboarding.brandSkip': string;

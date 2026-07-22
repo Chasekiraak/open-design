@@ -23,6 +23,7 @@ const metadata = (metadataPath.length > 0
       return response.json();
     })()) as {
   channel?: string;
+  control?: { launcher?: { version?: { min?: string; url?: string } } };
   releaseState?: string;
   releaseTargets?: Record<string, { artifacts?: Record<string, { url?: string }>; status?: string }>;
   [key: string]: unknown;
@@ -35,6 +36,29 @@ if (metadata.channel !== releaseChannel) {
 const versionField = releaseDescriptor.releaseVersionField;
 if (metadata[versionField] !== releaseVersion) {
   throw new Error(`metadata ${versionField} mismatch: expected ${releaseVersion}, got ${String(metadata[versionField])}`);
+}
+
+// The published control.launcher.version block must match the operator input
+// exactly; unknown fields would otherwise pass silently.
+const expectedLauncherVersionMin = optional("RELEASE_LAUNCHER_VERSION_MIN");
+const expectedLauncherVersionUrl = optional("RELEASE_LAUNCHER_VERSION_MIN_URL");
+const publishedControlVersion = metadata.control?.launcher?.version;
+if (expectedLauncherVersionMin.length === 0) {
+  if (publishedControlVersion != null) {
+    throw new Error("metadata unexpectedly contains a control.launcher.version block");
+  }
+} else {
+  if (publishedControlVersion?.min !== expectedLauncherVersionMin) {
+    throw new Error(
+      `metadata control.launcher.version.min mismatch: expected ${expectedLauncherVersionMin}, got ${String(publishedControlVersion?.min)}`,
+    );
+  }
+  const expectedUrl = expectedLauncherVersionUrl.length > 0 ? expectedLauncherVersionUrl : undefined;
+  if (publishedControlVersion.url !== expectedUrl) {
+    throw new Error(
+      `metadata control.launcher.version.url mismatch: expected ${String(expectedUrl)}, got ${String(publishedControlVersion.url)}`,
+    );
+  }
 }
 
 if (releaseNoteManifestPath.length === 0) {
