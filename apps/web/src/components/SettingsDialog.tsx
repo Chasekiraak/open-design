@@ -8353,15 +8353,14 @@ function IntegrationsSection() {
             style={{
               background: 'var(--surface-2, #11141a)',
               color: 'var(--fg-1, #e6e6e6)',
-              // Reserve top clearance for the absolutely-positioned
-              // Copy button so the first line of the snippet does not
-              // sit underneath it, and reserve right clearance so a
-              // wrapped bash one-liner stops short of the button rather
-              // than scrolling behind it. The right padding is sized
-              // for the wider "Copied" post-click state (icon + text +
-              // button padding + the 8px right offset) with a few px
-              // of buffer for elevated font sizes / zoom. Issue #632.
-              padding: '40px 104px 12px 14px',
+              // Top-align the snippet (first line sits at the top, level with
+              // the Copy button) — the right padding already reserves the
+              // button's horizontal lane so the first line never runs under it.
+              // The right padding is sized for the wider "Copied" post-click
+              // state (icon + text + button padding + the 8px right offset)
+              // with a few px of buffer for elevated font sizes / zoom.
+              // Issue #632.
+              padding: '12px 104px 12px 14px',
               borderRadius: 8,
               overflowX: 'auto',
               fontFamily:
@@ -8387,9 +8386,11 @@ function IntegrationsSection() {
                 background: 'transparent',
                 padding: 0,
                 borderRadius: 0,
-                color: 'inherit',
                 fontFamily: 'inherit',
                 fontSize: 'inherit',
+                // Terminal-green text on the bare dark surface (#3BBF7D = the
+                // dark theme --green; the block stays dark in both themes).
+                color: '#3BBF7D',
               }}
             >
               {snippet ||
@@ -8409,11 +8410,12 @@ function IntegrationsSection() {
               right: 8,
               padding: '4px 10px',
               fontSize: 12,
+              borderRadius: 999,
             }}
             aria-label={t('settings.mcpCopyAria')}
           >
             <Icon name={copied ? 'check' : 'copy'} size={14} />
-            <span style={{ marginLeft: 6 }}>{copied ? t('settings.mcpCopied') : t('settings.mcpCopy')}</span>
+            <span style={{ marginLeft: 4 }}>{copied ? t('settings.mcpCopied') : t('settings.mcpCopy')}</span>
           </button>
         </div>
 
