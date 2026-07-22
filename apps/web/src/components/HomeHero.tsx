@@ -53,6 +53,7 @@ import {
   type HomeHeroChip,
 } from './home-hero/chips';
 import { homeHeroChipLabel } from './home-hero/chip-labels';
+import { PixelScanLogo } from './home-hero/PixelScanLogo';
 import { ScenarioArt } from './home-hero/ScenarioArt';
 import { useEdgeAutoScroll, EdgeScrollZones } from './home-hero/EdgeAutoScroll';
 import {
@@ -1254,11 +1255,13 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   return (
     <section ref={homeHeroRef} className="home-hero" data-testid="home-hero">
       {/* #5517 hero header: the OpenDesign logotype replaces the small
-          brand-mark + name pair, and the tagline subtitle is dropped. */}
+          brand-mark + name pair, and the tagline subtitle is dropped. The
+          static wordmark is now a WebGL pixel-scan effect (round 7) — the
+          title heading below it is dropped too, since the animated wordmark
+          alone carries the brand moment. */}
       <span className="home-hero__logo-wrap">
-        <img className="home-hero__logo" src="/logo-03.svg" alt="Open Design" />
+        <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
       </span>
-      <h1 className="home-hero__title">{t('homeHero.title')}</h1>
 
       {/* #5517 wraps the input card + workdir row into one visible composer
           card so they read as a single surface. */}
