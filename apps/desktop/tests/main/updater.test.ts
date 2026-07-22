@@ -1575,6 +1575,7 @@ describe("desktop updater", () => {
     const launcherRuntimePath = join(root, "launcher", "runtime.json");
     const launcherRoot = root;
     const launcherLaunchPath = join(root, "installed", "Open Design.exe");
+    const runtimeBase = join(root, "runtime");
     const spawned: Array<{ args: string[]; command: string; options: unknown }> = [];
     const unref = vi.fn();
     const child = {
@@ -1612,6 +1613,7 @@ describe("desktop updater", () => {
         launcherLaunchPath,
         launcherRuntimePath,
         namespace: "release-beta-win",
+        runtimeBase,
         source: SIDECAR_SOURCES.PACKAGED,
       }, {
         extractLauncherPayloadArchive: async ({ destinationRoot }) => {
@@ -1663,7 +1665,7 @@ describe("desktop updater", () => {
       expect(spawned).toHaveLength(1);
       expect(unref).toHaveBeenCalledTimes(1);
       expect(spawned[0]?.command).toBe(payloadLaunchPath);
-      expect(spawned[0]?.options).toEqual({ detached: true, stdio: "ignore", windowsHide: true });
+      expect(spawned[0]?.options).toEqual({ cwd: runtimeBase, detached: true, stdio: "ignore", windowsHide: true });
       const args = spawned[0]?.args ?? [];
       expect(args).toEqual(expect.arrayContaining([
         LAUNCHER_AFTER_QUIT_FLAG,

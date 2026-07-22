@@ -155,6 +155,7 @@ export type DesktopUpdaterConfig = {
   namespace?: string;
   openDryRun: boolean;
   platform: string;
+  runtimeBase: string;
   source: SidecarSource;
 };
 
@@ -189,7 +190,7 @@ type LauncherPayloadCleanupFailure = {
 type SpawnInstallerHelper = (
   command: string,
   args: string[],
-  options: { detached?: true; stdio: "ignore"; windowsHide: true },
+  options: { cwd?: string; detached?: true; stdio: "ignore"; windowsHide: true },
 ) => DetachedProcess;
 
 export type DeferredInstallerLaunchInput = {
@@ -201,6 +202,8 @@ export type DeferredInstallerLaunchInput = {
 
 export type DeferredAppLaunchInput = {
   appPid: number;
+  /** Stable namespace root inherited by the next payload process. */
+  cwd: string;
   launchPath: string;
   root: string;
   timeoutMs: number;
@@ -416,7 +419,7 @@ export function resolveDesktopUpdaterConfig(input: DesktopUpdaterConfigInput): D
   const mode = normalizeMode(env[DESKTOP_UPDATE_ENV.MODE], input.mode ?? DESKTOP_UPDATE_MODES.PACKAGE_LAUNCHER);
   const defaultEnabled = input.source === SIDECAR_SOURCES.PACKAGED;
   const enabled = isTruthyEnv(env[DESKTOP_UPDATE_ENV.ENABLED]) ?? defaultEnabled;
-  const runtimeBase = input.runtimeBase == null ? process.cwd() : input.runtimeBase;
+  const runtimeBase = resolve(input.runtimeBase == null ? process.cwd() : input.runtimeBase);
   const downloadRoot = normalizeDownloadRoot(
     env[DESKTOP_UPDATE_ENV.DOWNLOAD_ROOT] ??
       input.downloadRoot ??
@@ -474,6 +477,7 @@ export function resolveDesktopUpdaterConfig(input: DesktopUpdaterConfigInput): D
     ...(namespace == null ? {} : { namespace }),
     openDryRun: isTruthyEnv(env[DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]) ?? false,
     platform: env[DESKTOP_UPDATE_ENV.PLATFORM] ?? input.platform ?? process.platform,
+    runtimeBase,
     source: input.source,
   };
 }
@@ -1864,7 +1868,7 @@ async function launchPayloadAppAfterQuit(
     const child = deps.spawnDetached(
       input.launchPath,
       buildLauncherAfterQuitArgs({ targetPid: input.appPid, timeoutMs: input.timeoutMs }),
-      { detached: true, stdio: "ignore", windowsHide: true },
+      { cwd: input.cwd, detached: true, stdio: "ignore", windowsHide: true },
     );
     await new Promise<void>((resolveSpawn, rejectSpawn) => {
       child.once("spawn", () => resolveSpawn());
@@ -3245,6 +3249,7 @@ export function createDesktopUpdater(
     }
     const result = await launchAppAfterQuit({
       appPid: processPid,
+      cwd: config.runtimeBase,
       launchPath,
       root: updateRoot,
       timeoutMs: config.platform === "win32" ? WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS : MAC_DEFERRED_INSTALLER_TIMEOUT_MS,
