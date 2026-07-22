@@ -1334,6 +1334,11 @@ export function HomeView({
         name: t('common.untitled'),
         skillId: null,
         designSystemId: null,
+        // Tag it `generated` like every other blank/no-name create path so
+        // `canAutoRenameProjectFromPrompt` stays eligible once a prompt or
+        // agent title arrives — see the matching note in
+        // EntryShell.startBlankProjectFromRail.
+        metadata: { kind: 'other', nameSource: 'generated' },
       });
       onOpenProject(project.id);
     } catch {

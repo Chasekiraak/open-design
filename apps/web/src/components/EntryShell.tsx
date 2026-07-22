@@ -845,6 +845,16 @@ export function EntryShell({
         name: t('common.untitled'),
         skillId: null,
         designSystemId: null,
+        // No user-typed name exists yet — mark it `generated` (the same tag
+        // `handleCreateProjectFromDesignSystem` and the New Project panel's
+        // blank/no-name path use) so `canAutoRenameProjectFromPrompt` stays
+        // eligible once the user's first in-project prompt or the agent's
+        // own generated title arrives. Without this the project is stuck at
+        // "未命名" forever: this rail (the Drafts / All-projects empty-state
+        // "创建" button) is the only reachable way to open a truly metadata-
+        // less blank project, and every other create path already tags its
+        // fallback name with a `nameSource` the rename gate recognizes.
+        metadata: { kind: 'other', nameSource: 'generated' },
       }),
     ).catch((err) => {
       console.warn('Failed to create blank project from entry rail', err);

@@ -7,6 +7,37 @@ import {
 } from './useWorkspaceContext';
 import { useCollab } from './useCollab';
 
+// Project ids the current viewer created in THIS browser session, tracked at
+// module scope like `lastResolvedWorkspaceContext` / `lastResolvedTeamProjects`
+// above. `createProject()` (`state/projects.ts`) calls `markProjectCreatedByViewer`
+// the instant its create request resolves — before the team catalog or this
+// project's own `/collab/status` have had any chance to answer. A project the
+// viewer just created cannot possibly be shared yet (sharing is a separate,
+// later, explicit action; ownership never transfers), so the very first mount
+// of `useProjectCollab` for that id can skip the project-level fail-closed
+// window below entirely instead of waiting out `knownUnshared`.
+//
+// This is the residual case #99's `knownOwnedByViewer` fix did not cover
+// (recvpZzWYQrhZQ): #99 relaxes the window once the project is already IN the
+// team catalog as owned-by-viewer, but a brand-new project is never in that
+// catalog (it was only just created, not shared), so `knownUnshared` stayed
+// false — and therefore fail-closed — until the catalog happened to load.
+const projectIdsCreatedByViewerThisSession = new Set<string>();
+
+/**
+ * Mark `projectId` as created by the current viewer in this browser session.
+ * Call this the moment a create request resolves. Idempotent; safe to call
+ * more than once for the same id.
+ */
+export function markProjectCreatedByViewer(projectId: string): void {
+  projectIdsCreatedByViewerThisSession.add(projectId);
+}
+
+/** Test seam: clear the module-level creation cache between tests. */
+export function resetProjectsCreatedByViewerCache(): void {
+  projectIdsCreatedByViewerThisSession.clear();
+}
+
 export interface UseProjectCollabOptions {
   /** Injectable for tests. */
   fetch?: typeof fetch;
@@ -203,12 +234,19 @@ export function useProjectCollab(
     && knownCatalog.some(
       (entry) => entry.projectId === projectId && entry.ownerMemberId === context.workspaceMemberId,
     );
+  // A project this browser tab created moments ago cannot possibly be shared
+  // yet — see `projectIdsCreatedByViewerThisSession` above. This covers the
+  // window `knownUnshared` cannot: right after creation the project is not
+  // (and cannot yet be) in the team catalog at all, so `knownCatalog` loading
+  // or not loading is irrelevant here.
+  const createdByViewerThisSession =
+    Boolean(projectId) && projectIdsCreatedByViewerThisSession.has(projectId as string);
   // The project-level (single-writer) gate. It defaults to "unknown" rather than
-  // "read-only": a viewer the catalog already knows to be the owner is never
-  // frozen by it, which removes the on-open flash. Everyone else still fails
-  // closed through the unknown window and whenever a confirmed status names a
-  // different owner.
-  const sharedReadOnly = knownOwnedByViewer
+  // "read-only": a viewer the catalog already knows to be the owner, or who
+  // created this project in the current session, is never frozen by it, which
+  // removes the on-open flash. Everyone else still fails closed through the
+  // unknown window and whenever a confirmed status names a different owner.
+  const sharedReadOnly = knownOwnedByViewer || createdByViewerThisSession
     ? false
     : (statusUnknown && !knownUnshared) || (shared && !isOwner);
   const viewerOnly = workspaceContextReadOnly || workspaceReadOnly || sharedReadOnly;

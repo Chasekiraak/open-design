@@ -6,6 +6,7 @@
 // the UI can stay rendered when the daemon is briefly unreachable.
 
 import { coalescedGet } from '../lib/coalesced-get';
+import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
 import type {
   AppliedPluginSnapshot,
   ApplyResult,
@@ -204,11 +205,17 @@ export async function createProject(input: {
       }
       throw new Error(message);
     }
-    return (await resp.json()) as {
+    const created = (await resp.json()) as {
       project: Project;
       conversationId: string;
       appliedPluginSnapshotId?: string;
     };
+    // The project this request just made cannot possibly be shared yet —
+    // mark it so `useProjectCollab` skips the project-level fail-closed
+    // read-only window on the very first open, instead of waiting out the
+    // team catalog / `/collab/status` (recvpZzWYQrhZQ).
+    markProjectCreatedByViewer(created.project.id);
+    return created;
   } catch (err) {
     throw err instanceof Error ? err : new Error('Could not create project');
   }
