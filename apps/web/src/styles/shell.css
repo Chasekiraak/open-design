@@ -1686,8 +1686,14 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
 }
 /* Pinned to the bottom of the popover's scroll port so a long model list
    cannot scroll the one link out to 设置 → 执行 away. Opaque, because the
-   popover itself is translucent glass and rows would otherwise read through. */
-.avatar-item--pinned {
+   popover itself is translucent glass and rows would otherwise read through.
+
+   Qualified with `.avatar-item` (like `.avatar-item.avatar-amr-row` below) for
+   the same reason: that class is declared further down this file and resets
+   `background` to transparent — a bare `.avatar-item--pinned` loses that
+   property on source order alone, which let the model row underneath the
+   sticky footer show/bleed through instead of being covered by it. */
+.avatar-item.avatar-item--pinned {
   position: sticky;
   bottom: -6px;
   z-index: 1;
