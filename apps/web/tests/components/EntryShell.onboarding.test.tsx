@@ -854,6 +854,69 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     });
   });
 
+  it('refreshes workspace context, billing, and team projects as soon as onboarding sign-in completes', async () => {
+    // Onboarding's embedded AMR sign-in step (pollAmrLoginCompletion) used to
+    // fire only notifyAmrLoginStatusChanged() on success — unlike
+    // CloudSignInTip's finishSignedIn() and refreshWorkspaceSurfacesAfterOnboarding()
+    // (the two other places a sign-in completes), which fire all three
+    // workspace-refresh notifications. That gap left workspaceContext stale
+    // until finishOnboarding fired it later, so Home's rail briefly rendered
+    // in its signed-out shape (still showing "Sign in to use Open Design
+    // Cloud") right after a successful onboarding sign-in.
+    const { WORKSPACE_CONTEXT_REFRESH_EVENT, WORKSPACE_BILLING_REFRESH_EVENT, TEAM_PROJECTS_CHANGED_EVENT } =
+      await import('../../src/collab/useWorkspaceContext');
+    const contextRefresh = vi.fn();
+    const billingRefresh = vi.fn();
+    const teamProjectsChanged = vi.fn();
+    window.addEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, contextRefresh);
+    window.addEventListener(WORKSPACE_BILLING_REFRESH_EVENT, billingRefresh);
+    window.addEventListener(TEAM_PROJECTS_CHANGED_EVENT, teamProjectsChanged);
+    try {
+      let statusCalls = 0;
+      const fetchMock = vi.fn(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith('/api/integrations/vela/status')) {
+          statusCalls += 1;
+          return jsonResponse(
+            statusCalls >= 3
+              ? {
+                  loggedIn: true,
+                  profile: 'prod',
+                  user: { id: 'u', email: 'user@example.com' },
+                  configPath: '/x',
+                }
+              : { loggedIn: false, profile: 'prod', user: null, configPath: '/x' },
+          );
+        }
+        if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+          return jsonResponse({ pid: 123 }, 202);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      renderOnboarding();
+
+      const signIn = await findCloudSignInButton();
+      vi.useFakeTimers();
+      fireEvent.click(signIn);
+      await act(async () => {});
+      expect(contextRefresh).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'About you' })).toBeTruthy();
+      });
+
+      expect(contextRefresh).toHaveBeenCalled();
+      expect(billingRefresh).toHaveBeenCalled();
+      expect(teamProjectsChanged).toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, contextRefresh);
+      window.removeEventListener(WORKSPACE_BILLING_REFRESH_EVENT, billingRefresh);
+      window.removeEventListener(TEAM_PROJECTS_CHANGED_EVENT, teamProjectsChanged);
+    }
+  });
+
   it('recovers from a transient status failure during login polling and still continues after authorization completes', async () => {
     let statusCalls = 0;
     const fetchMock = vi.fn(async (input, init) => {

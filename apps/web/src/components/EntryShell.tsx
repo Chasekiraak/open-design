@@ -2466,6 +2466,15 @@ function OnboardingView({
           signedInUserId: nextStatus?.user?.id ?? null,
         });
         notifyAmrLoginStatusChanged();
+        // Onboarding may sit on this step for a while before finishOnboarding
+        // fires refreshWorkspaceSurfacesAfterOnboarding() — without firing
+        // these here too, Home's rail can render in its stale signed-out
+        // shape (still showing the "sign in to Open Design Cloud" callout)
+        // for however long that gap lasts. Mirrors CloudSignInTip's own
+        // finishSignedIn().
+        notifyWorkspaceContextRefresh();
+        notifyWorkspaceBillingRefresh();
+        notifyTeamProjectsChanged();
         return true;
       }
       if (outcome === 'stopped' || outcome === 'timed-out') {
