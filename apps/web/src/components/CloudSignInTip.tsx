@@ -84,6 +84,12 @@ export function CloudSignInTip() {
         return;
       }
       if (outcome === 'stopped' || outcome === 'timed-out') {
+        // A timed-out attempt's `vela login` child is often still alive (the
+        // daemon never self-reported loginInFlight: false) — release it, or
+        // the daemon still sees a login in flight and a retry click 409s as
+        // alreadyRunning instead of spawning a fresh one, so no new browser
+        // tab ever opens. Mirrors AmrLoginPill / InlineModelSwitcher / EntryShell.
+        if (outcome === 'timed-out') void cancelVelaLogin();
         setState('error');
         return;
       }

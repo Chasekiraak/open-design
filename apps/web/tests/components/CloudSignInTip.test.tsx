@@ -1,0 +1,130 @@
+// @vitest-environment jsdom
+
+/**
+ * The signed-out rail's bottom "Open Design Cloud" callout is the ONLY entry
+ * point for this card — unlike its siblings (AmrLoginPill, InlineModelSwitcher,
+ * EntryShell's onboarding flow), it must release the daemon's login lock on a
+ * timed-out attempt, or a retry click can never spawn a fresh `vela login`
+ * (the daemon still sees the abandoned attempt as in flight and 409s with
+ * alreadyRunning, which this component's poll loop treats as "keep waiting"
+ * instead of "start over") — so a second click after a failure can never open
+ * a new browser tab.
+ */
+
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { CloudSignInTip } from '../../src/components/CloudSignInTip';
+import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
+import { I18nProvider } from '../../src/i18n';
+
+interface StubbedResponse {
+  status?: number;
+  body: unknown;
+}
+
+function jsonResponse({ status = 200, body }: StubbedResponse): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  globalThis.fetch = originalFetch;
+  vi.useRealTimers();
+});
+
+beforeEach(() => {
+  globalThis.fetch = originalFetch;
+  try {
+    window.localStorage.clear();
+  } catch {
+    // ignore
+  }
+});
+
+function renderTip() {
+  return render(
+    <I18nProvider initial="en">
+      <CloudSignInTip />
+    </I18nProvider>,
+  );
+}
+
+describe('CloudSignInTip', () => {
+  it('cancels a timed-out login so a retry click can start a fresh vela login', async () => {
+    let loginStarted = false;
+    let spawnCount = 0;
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({
+          body: {
+            loggedIn: false,
+            loginInFlight: loginStarted,
+            profile: 'prod',
+            user: null,
+            configPath: '/x',
+          },
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        spawnCount += 1;
+        loginStarted = true;
+        return jsonResponse({ status: 202, body: { pid: 4242 } });
+      }
+      if (url.endsWith('/api/integrations/vela/login/cancel') && init?.method === 'POST') {
+        loginStarted = false;
+        return jsonResponse({ body: { canceled: true, pids: [4242] } });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderTip();
+    const card = await screen.findByTestId('entry-cloud-signin-tip');
+    vi.useFakeTimers();
+    fireEvent.click(card);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(spawnCount).toBe(1);
+
+    // Give up after the 5-minute UI timeout, exactly like a real
+    // register+email-OTP+CLI-approve flow that runs long. The first
+    // `vela login` process is still alive from the daemon's point of view
+    // (it never reported loginInFlight: false on its own).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AMR_LOGIN_TIMEOUT_MS);
+    });
+
+    // Giving up must release the daemon's lock, or a retry can never spawn
+    // a fresh login / open a new browser tab.
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, reqInit]) =>
+          String(url).endsWith('/api/integrations/vela/login/cancel') &&
+          (reqInit as RequestInit | undefined)?.method === 'POST',
+      ),
+    ).toBe(true);
+
+    vi.useRealTimers();
+    const retryCard = await screen.findByTestId('entry-cloud-signin-tip');
+    fireEvent.click(retryCard);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(spawnCount).toBe(2);
+  });
+});
