@@ -75,6 +75,65 @@
   white-space: nowrap;
 }
 
+.viewer-toolbar-more {
+  position: relative;
+  display: none;
+  align-items: center;
+}
+.viewer-toolbar-more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  width: min(260px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-lg);
+}
+.viewer-toolbar-more-item {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+}
+.viewer-toolbar-more-item svg:first-child {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+.viewer-toolbar-more-item span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viewer-toolbar-more-item:hover:not(:disabled),
+.viewer-toolbar-more-item.active {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: var(--bg-subtle);
+}
+.viewer-toolbar-more-item:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.viewer-toolbar-more-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border);
+}
+
 @container (max-width: 860px) {
   .viewer-toolbar {
     padding-inline: 10px;
@@ -85,9 +144,9 @@
   }
 }
 
-/* Narrow pane: the mode switch drops to icon-only and the inline deck counter
-   steps aside. Everything stays on the bar — nothing moves into a hidden
-   overflow menu, so no tool is ever two clicks away from where it started. */
+/* Narrow pane: the mode switch drops to icon-only, the inline deck counter
+   steps aside, and the ⋮ overflow menu (hidden on wide panes) comes in as the
+   fallback home for anything the narrower breakpoints below take off the bar. */
 @container (max-width: 720px) {
   .viewer-mode-tabs .viewer-tab {
     width: 30px;
@@ -104,6 +163,22 @@
   .viewer-deck-nav-inline {
     display: none;
   }
+  .viewer-toolbar-more {
+    display: inline-flex;
+  }
+}
+
+@container (max-width: 600px) {
+  .viewer-toolbar-inline-actions {
+    display: none;
+  }
+}
+
+@container (max-width: 500px) {
+  .viewer-preview-toolbar-inline,
+  .viewer-toolbar-left > .file-version-trigger {
+    display: none;
+  }
 }
 
 @container (max-width: 390px) {
@@ -112,12 +187,6 @@
     gap: 4px;
   }
 }
-
-/* Deliberately no rule that hides the viewport switcher or the mode tabs at
-   narrow widths. They used to be dropped below 500px / 390px on the assumption
-   that an overflow menu would carry them — that menu is gone, and a control
-   that disappears with no alternative strands anyone who had switched to a
-   tablet/mobile viewport. Icon-only (above) is the whole compaction budget. */
 
 /* Shown when a .jsx/.tsx module (loaded by a sibling HTML entry) is opened on
    its own — it has no standalone preview, so we point at the page(s) that
