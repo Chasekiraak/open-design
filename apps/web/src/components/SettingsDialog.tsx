@@ -158,7 +158,7 @@ import { PrivacySection } from './PrivacySection';
 import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
 import { SettingsWorkspaceSection } from './SettingsWorkspaceSection';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { resolvePlanTier } from '../collab/team-plan';
 import { planBadgeTierForLabel } from './PlanWordmark';
 import { canShowWorkspaceSettings } from '../collab/settings-access';
@@ -1615,6 +1615,16 @@ export function SettingsDialog({
   // stay, otherwise a deep link would hand workspace settings to a viewer the
   // permission bits exclude.
   const { context: workspaceContext } = useWorkspaceContext();
+  // recvpZPzGJL7o7: the local-CLI card's balance came ONLY from vela's
+  // account-scoped sources (`amrCardStatus.account.balanceUsd`, then the
+  // `/api/integrations/vela/wallet` snapshot) — the same account-scoped
+  // projection `resolvePlanTier` exists to correct for the plan-tier badge
+  // right next to it, via the SAME card's `amrCardResolvedPlan` below. A team
+  // member reads their PERSONAL wallet there even while the card's own badge
+  // correctly names the team's paid plan, because nothing fed the workspace's
+  // real balance into the number. `useWorkspaceBilling` is the workspace-scoped
+  // source of truth (same one EntryNavRail's credits chip reads).
+  const workspaceBilling = useWorkspaceBilling();
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(true);
@@ -4494,9 +4504,21 @@ export function SettingsDialog({
                             amrWalletVisible && amrWalletSnapshot?.status === 'available'
                               ? formatAmrWalletBalance(amrWalletSnapshot.balanceUsd)
                               : null;
+                          // recvpZPzGJL7o7: `amrStatusBalance` and `amrWalletBalance`
+                          // are both vela ACCOUNT-scoped reads — the same
+                          // scope `resolvePlanTier` exists to override for the
+                          // plan badge right next to this number. Workspace
+                          // billing (when it has loaded) is the workspace-scoped
+                          // source of truth and wins here for the same reason;
+                          // the account-scoped pair stays as the fallback for
+                          // local/BYOK use with no workspace billing at all.
+                          const amrWorkspaceBalance =
+                            amrWalletVisible && workspaceBilling
+                              ? formatVelaBalanceUsd(String(workspaceBilling.totalAvailableCredits))
+                              : null;
                           const amrCardBalanceLabel =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? amrStatusBalance ?? amrWalletBalance
+                              ? amrWorkspaceBalance ?? amrStatusBalance ?? amrWalletBalance
                               : null;
                           // vela's `account.plan` is ACCOUNT-scoped, so a member
                           // whose plan is held by the team workspace reads
@@ -4508,6 +4530,7 @@ export function SettingsDialog({
                           const amrCardResolvedPlan =
                             isAmrAgent && active && amrCardStatus?.loggedIn
                               ? resolvePlanTier({
+                                  billing: workspaceBilling,
                                   context: workspaceContext,
                                   accountPlan: amrCardStatus.account?.plan,
                                 })
