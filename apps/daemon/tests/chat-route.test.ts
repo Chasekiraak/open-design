@@ -3590,6 +3590,7 @@ describe('chat prompt helpers', () => {
       stablePromptHash: 'hash-a',
       hit: false,
       missReason: 'new-session',
+      changedSections: null,
     });
 
     expect(describeStablePromptCache({
@@ -3600,6 +3601,7 @@ describe('chat prompt helpers', () => {
       stablePromptHash: 'hash-a',
       hit: true,
       missReason: null,
+      changedSections: null,
     });
 
     expect(describeStablePromptCache({
@@ -3610,6 +3612,55 @@ describe('chat prompt helpers', () => {
       stablePromptHash: 'hash-b',
       hit: false,
       missReason: 'stable-prompt-changed',
+      // No section map supplied: report no attribution rather than invent one.
+      changedSections: null,
+    });
+  });
+
+  it('names the drifted sections when a section map is supplied', () => {
+    expect(describeStablePromptCache({
+      isResuming: true,
+      storedStablePromptHash: 'hash-a',
+      currentStableHash: 'hash-b',
+      storedStableSections: { memory: 'm1', skill: 's1' },
+      currentStableSections: { memory: 'm2', skill: 's1' },
+    })).toEqual({
+      stablePromptHash: 'hash-b',
+      hit: false,
+      missReason: 'stable-prompt-changed',
+      changedSections: ['memory'],
+    });
+  });
+
+  it('reports unattributed drift when the prefix moved but no tracked section did', () => {
+    // The hash is the source of truth, so this is a real miss; an empty list
+    // would read as a drift with no cause instead of the coverage gap it is.
+    expect(describeStablePromptCache({
+      isResuming: true,
+      storedStablePromptHash: 'hash-a',
+      currentStableHash: 'hash-b',
+      storedStableSections: { memory: 'm1' },
+      currentStableSections: { memory: 'm1' },
+    })).toMatchObject({
+      missReason: 'stable-prompt-changed',
+      changedSections: ['unattributed'],
+    });
+  });
+
+  it('does not attribute sections for a missing stored hash', () => {
+    // A legacy/reseeded row has no baseline to diff, so every section would
+    // read as "changed" and drown the signal real drift carries.
+    expect(describeStablePromptCache({
+      isResuming: true,
+      storedStablePromptHash: null,
+      currentStableHash: 'hash-b',
+      storedStableSections: null,
+      currentStableSections: { memory: 'm1' },
+    })).toEqual({
+      stablePromptHash: 'hash-b',
+      hit: false,
+      missReason: 'missing-stored-hash',
+      changedSections: null,
     });
   });
 

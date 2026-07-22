@@ -32,6 +32,7 @@ import {
 } from '../codex-rollout-usage.js';
 import type { ConnectorService } from '../connectors/service.js';
 import {
+  conversationTurnIndexForRun,
   getConversation,
   getProject,
   listConversations,
@@ -207,6 +208,7 @@ interface ChatRun {
     stablePromptHash?: string;
     hit?: boolean;
     missReason?: string | null;
+    changedSections?: string[] | null;
   };
 }
 
@@ -239,6 +241,12 @@ interface ChatRunService {
   cancel(run: ChatRun): Promise<ChatRunStatusResponse>;
   isTerminal(status: ChatRunStatus): boolean;
   emit?(run: ChatRun, event: string, data: unknown): RunEventRecord;
+  setAnalyticsRecovery?(run: ChatRun, recovery: {
+    context: AnalyticsContext;
+    properties: Record<string, unknown>;
+    insertId: string;
+  }): void;
+  markAnalyticsCompleted?(run: ChatRun): void;
 }
 
 interface AnalyticsService {
@@ -248,7 +256,7 @@ interface AnalyticsService {
     appVersion: string;
     properties: Record<string, unknown>;
     insertId: string;
-  }): void;
+  }): void | Promise<void>;
 }
 
 interface RunRoutesDesignService {
@@ -892,11 +900,17 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       const hintProjectTurnIndex = typeof analyticsHints.projectTurnIndex === 'number'
         ? analyticsHints.projectTurnIndex
         : undefined;
+      const conversationTurnIndex = run.conversationId
+        ? conversationTurnIndexForRun(db, run.conversationId, run.id)
+        : null;
       const sessionDimensionProps = {
         ...(hintTurnIndex !== undefined ? { turn_index: hintTurnIndex } : {}),
         ...(hintIsFirstRun !== undefined ? { is_first_run: hintIsFirstRun } : {}),
         ...(hintProjectTurnIndex !== undefined
           ? { project_turn_index: hintProjectTurnIndex }
+          : {}),
+        ...(conversationTurnIndex !== null
+          ? { conversation_turn_index: conversationTurnIndex }
           : {}),
         ...(hintHasExistingArtifact !== undefined
           ? { has_existing_artifact: hintHasExistingArtifact }
@@ -1062,6 +1076,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         skill_ids: runSkillIds,
         token_count_source: userQueryTokens > 0 ? 'estimated' : 'unknown',
       };
+      design.runs.setAnalyticsRecovery?.(run, {
+        context: analyticsContext,
+        properties: baseProps,
+        insertId: runInsertId,
+      });
       design.analytics.capture({
         eventName: 'run_created',
         context: analyticsContext,
@@ -1257,7 +1276,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             insertId: `${runInsertId}-${retryEvent.event}-${index}`,
           });
         }
-        design.analytics.capture({
+        await Promise.resolve(design.analytics.capture({
           eventName: 'run_finished',
           context: analyticsContext,
           appVersion: design.getAppVersion(),
@@ -1269,6 +1288,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             stable_prompt_hash: run.promptCache?.stablePromptHash,
             stable_prompt_cache_hit: run.promptCache?.hit,
             stable_prompt_cache_miss_reason: run.promptCache?.missReason,
+            // Which stable-prefix input drifted, for miss_reason
+            // 'stable-prompt-changed' only. `unattributed` means the prefix
+            // moved but no tracked section did — a coverage gap in
+            // prompts/stable-sections.ts, not a cause.
+            stable_prompt_changed_sections: run.promptCache?.changedSections ?? undefined,
             area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
             result,
             ...(activationMilestones ? { $set_once: activationMilestones } : {}),
@@ -1401,7 +1425,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             token_count_source: usageAnalytics.token_count_source,
           },
           insertId: `${runInsertId}-finish`,
-        });
+        }));
+        design.runs.markAnalyticsCompleted?.(run);
       }).catch(() => {});
     }
   });

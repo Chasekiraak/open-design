@@ -9,6 +9,10 @@ import {
   latestCompletedAssistantMessageId,
   upsertAgentSession,
 } from './db.js';
+import {
+  parseStableSections,
+  type StableSectionHashes,
+} from './prompts/stable-sections.js';
 
 type SqliteDb = Database.Database;
 
@@ -27,6 +31,12 @@ export interface AgentResumeContext {
   storedStablePromptHash: string | null;
   /** Effective provider input size recorded on the session's last turn. */
   storedInputTokens: number | null;
+  /**
+   * Per-section digests behind `storedStablePromptHash`, for naming which input
+   * drifted when the hash no longer matches. Diagnostic only — never an input
+   * to the resume decision.
+   */
+  storedStableSections: StableSectionHashes | null;
   /** Set when a stored session existed but was rejected; see the type. */
   invalidationReason: ResumeInvalidationReason | null;
 }
@@ -152,6 +162,7 @@ export function resolveAgentResumeContext(
     storedInputTokens: resumable
       ? readStoredSessionInputTokens(db, record?.lastMessageId)
       : null,
+    storedStableSections: resumable ? parseStableSections(record?.stablePromptSections) : null,
     invalidationReason,
   };
 }
@@ -171,6 +182,7 @@ export function persistCapturedAgentSession(
     agentId: string;
     sessionId: string | null;
     stablePromptHash?: string | null;
+    stablePromptSections?: string | null;
     // Resume identity (see resolveAgentResumeContext). Must be stored alongside
     // the captured session so the next turn can verify the session is still
     // safe to resume; omitting them leaves a null cursor that the guard treats
@@ -187,6 +199,7 @@ export function persistCapturedAgentSession(
       agentId: input.agentId,
       sessionId: input.sessionId,
       stablePromptHash: input.stablePromptHash ?? null,
+      stablePromptSections: input.stablePromptSections ?? null,
       model: input.model ?? null,
       cwd: input.cwd ?? null,
       lastMessageId: input.lastMessageId ?? null,

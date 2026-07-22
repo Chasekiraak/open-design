@@ -1327,7 +1327,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(screen.getByText('Model discovery is not available for this protocol.')).toBeTruthy();
 
     fetchProviderModelsMock.mockClear();
-    fireEvent.click(screen.getByRole('tab', { name: '小米 MiMo' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Xiaomi MiMo' }));
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
     expect(fetchProviderModelsMock).not.toHaveBeenCalled();
@@ -1773,7 +1773,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       apiProviderBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: '智谱' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Zhipu AI' }));
 
     expect(await screen.findByText('✓ Loaded 8 models from your account.')).toBeTruthy();
     fireEvent.click(screen.getByRole('combobox', { name: 'Model' }));
