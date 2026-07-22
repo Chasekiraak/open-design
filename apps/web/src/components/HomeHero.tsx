@@ -44,6 +44,7 @@ import {
   type HomeHeroChip,
 } from './home-hero/chips';
 import { homeHeroChipLabel } from './home-hero/chip-labels';
+import { PixelScanLogo } from './home-hero/PixelScanLogo';
 import { ScenarioArt } from './home-hero/ScenarioArt';
 import { useEdgeAutoScroll, EdgeScrollZones } from './home-hero/EdgeAutoScroll';
 import {
@@ -1103,9 +1104,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   return (
     <section className="home-hero" data-testid="home-hero">
       <span className="home-hero__logo-wrap">
-        <img className="home-hero__logo" src="/logo-03.svg" alt="Open Design" />
+        <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
       </span>
-      <h1 className="home-hero__title">{t('homeHero.title')}</h1>
 
       <div className="home-hero__composer-card">
       <div

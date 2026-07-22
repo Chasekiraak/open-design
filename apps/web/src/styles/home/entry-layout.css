@@ -98,10 +98,10 @@
   position: relative;
   /* Craft-style milky frost (material.css thin tier): soft white surface over
      the wash/wallpaper with a saturated blur, instead of fully clear glass. */
-  /* White frost: pure-white base at the Thin tier's 60% alpha, so the card
-     reads white but keeps the frosted-glass translucency (the panel's
-     material-thin backdrop blur below does the frosting). */
-  --rail-surface: rgba(255, 255, 255, 0.6);
+  /* White frost: pure-white base at 65% alpha, so the card reads white but
+     keeps the frosted-glass translucency (the panel's material-thin backdrop
+     blur below does the frosting). */
+  --rail-surface: rgba(255, 255, 255, 0.65);
   background: var(--rail-surface);
   -webkit-backdrop-filter: var(--material-thin-backdrop);
   backdrop-filter: var(--material-thin-backdrop);
@@ -979,8 +979,9 @@
   border-radius: 8px;
   background: transparent;
   /* Unselected: label matches the icon's muted tone (one uniform color); hover
-     steps up to --text-strong, selection goes near-black on light gray. */
-  color: color-mix(in srgb, var(--text) 52%, transparent);
+     steps up to --text-strong, selection goes near-black on light gray.
+     68% lands the blend on the --text-soft step (52% read too faint). */
+  color: color-mix(in srgb, var(--text) 68%, transparent);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -995,8 +996,8 @@
   align-items: center;
   justify-content: center;
   flex: 0 0 18px;
-  /* One step lighter than before, tracking the lighter unselected label. */
-  color: color-mix(in srgb, var(--text) 52%, transparent);
+  /* Tracks the unselected label tone above. */
+  color: color-mix(in srgb, var(--text) 68%, transparent);
 }
 .entry-nav-rail__btn-icon > svg {
   width: 18px;
@@ -2021,6 +2022,24 @@
   border: none;
   background: transparent;
   padding: 6px 10px;
+  /* Logo + name read as one left-aligned run instead of centering. */
+  justify-content: flex-start;
+}
+/* Provider brand mark leading each compact model row. */
+.inline-switcher__agent-logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.inline-switcher__agent-logo img,
+.inline-switcher__agent-logo svg {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
 }
 .inline-switcher--compact .inline-switcher__agent:hover:not(:disabled) {
   border: none;
@@ -2030,16 +2049,8 @@
   background: var(--bg-subtle);
   color: var(--text-strong);
 }
-/* Selected model gets a leading dot in the same ink as its label; the button
-   is inline-flex with an 8px gap, so the ::before dot sits before the name. */
-.inline-switcher--compact .inline-switcher__agent.is-active::before {
-  content: '';
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
+/* Each row now leads with the provider logo, so the old leading selection dot
+   is dropped — the active row reads from its tinted background alone. */
 /* Hovering an unselected model slides its label forward as a "reach". */
 .inline-switcher--compact .inline-switcher__agent-name {
   transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -5547,6 +5558,28 @@
   padding: 6px;
   border-radius: var(--radius-lg);
 }
+/* Sequential top-to-bottom entrance: each row fades + rises in with a small
+   stagger, so the menu content "loads in" instead of appearing all at once.
+   The menu mounts on open, so this replays every time it opens. */
+@keyframes entry-account-row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.entry-nav-rail__account-menu > * {
+  animation: entry-account-row-in 150ms var(--ease-out) both;
+}
+.entry-nav-rail__account-menu > *:nth-child(1) { animation-delay: 0ms; }
+.entry-nav-rail__account-menu > *:nth-child(2) { animation-delay: 15ms; }
+.entry-nav-rail__account-menu > *:nth-child(3) { animation-delay: 30ms; }
+.entry-nav-rail__account-menu > *:nth-child(4) { animation-delay: 45ms; }
+.entry-nav-rail__account-menu > *:nth-child(5) { animation-delay: 60ms; }
+.entry-nav-rail__account-menu > *:nth-child(6) { animation-delay: 75ms; }
+.entry-nav-rail__account-menu > *:nth-child(7) { animation-delay: 90ms; }
+.entry-nav-rail__account-menu > *:nth-child(8) { animation-delay: 105ms; }
+.entry-nav-rail__account-menu > *:nth-child(n+9) { animation-delay: 120ms; }
+@media (prefers-reduced-motion: reduce) {
+  .entry-nav-rail__account-menu > * { animation: none; }
+}
 /* Same width as the avatar trigger row: span the account container. */
 .entry-nav-rail__account .entry-nav-rail__account-menu {
   left: 0;
@@ -5757,6 +5790,8 @@
   color: var(--text);
   text-align: left;
   text-decoration: none;
+  /* Ease the hover fill in/out so it doesn't snap on/off. */
+  transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out);
 }
 .entry-nav-rail__menu-item:hover { background: var(--vibrancy-fill-secondary); }
 .entry-nav-rail__menu-item svg,

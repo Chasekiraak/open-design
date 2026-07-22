@@ -83,29 +83,11 @@
 .home-hero__logo-wrap {
   position: relative;
   display: block;
-  /* Brand block scaled up 20% (logo + title together). */
-  width: min(201.6px, 50.4vw);
-  margin-bottom: var(--spacing-4);
-  overflow: hidden;
-}
-.home-hero__logo-wrap::after {
-  content: '';
-  position: absolute;
-  top: -40%;
-  bottom: -40%;
-  left: -72%;
-  width: 56%;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    rgba(250, 250, 250, 0.08) 18%,
-    rgba(255, 255, 255, 0.86) 48%,
-    rgba(250, 250, 250, 0.12) 72%,
-    transparent 100%
-  );
-  transform: translateX(0) skewX(-18deg);
-  animation: home-hero-logo-sheen var(--duration-ultra-slow) var(--curve-decelerate-mid) 260ms 1 both;
-  pointer-events: none;
+  /* Sized against the pixel-scan wordmark (was 314px for the tile build —
+     read as oversized once the full mark+wordmark artwork landed). */
+  width: min(260px, 65vw);
+  /* Logo → composer gap = 24px total: this 18px + the hero's 6px flex gap. */
+  margin-bottom: var(--spacing-18);
 }
 .home-hero__logo {
   display: block;
@@ -114,18 +96,22 @@
   user-select: none;
   -webkit-user-drag: none;
 }
-@keyframes home-hero-logo-sheen {
-  from {
-    transform: translateX(0) skewX(-18deg);
-    opacity: 0;
-  }
-  18% {
-    opacity: 0.92;
-  }
-  to {
-    transform: translateX(320%) skewX(-18deg);
-    opacity: 0;
-  }
+/* Tile-field wordmark: a sized, relative host the canvas engine measures and
+   overlays. Keeps the original logo's footprint (same 1705:291 aspect as
+   logo-03.svg) so the title below doesn't shift. */
+.home-hero__logo--tiles {
+  position: relative;
+  aspect-ratio: 1705 / 291;
+}
+.home-hero__logo--tiles > canvas {
+  position: absolute;
+  inset: 0;
+  /* Canvas is a replaced element: inset alone does NOT stretch it (it keeps
+     its intrinsic drawing-buffer size), so pin the CSS box explicitly. */
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }
 .home-hero__title {
   /* Extra bottom margin widens just the title → input-card gap (adds to the
@@ -734,10 +720,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .home-hero__logo-wrap::after {
-    animation: none;
-    opacity: 0;
-  }
   .home-hero__carousel-caret {
     animation: none;
     opacity: 1;

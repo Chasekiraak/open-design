@@ -48,6 +48,7 @@ import type { AgentInfo, ApiProtocol, AppConfig, ExecMode } from '../types';
 import { apiProtocolLabel } from '../utils/apiProtocol';
 import { AgentIcon } from './AgentIcon';
 import { Icon } from './Icon';
+import { modelProviderIconSrc } from './modelProviderIcon';
 import {
   AMR_LOGIN_STATUS_EVENT,
   AMR_LOGIN_POLL_INTERVAL_MS,
@@ -102,6 +103,7 @@ const API_PROTOCOL_TABS: Array<{ id: ApiProtocol; title: string }> = [
   { id: 'google', title: 'Google' },
   { id: 'aihubmix', title: 'AIHubMix' },
 ];
+
 
 const AMR_REMINDER_SEEN_KEY = 'open-design:inline-amr-cli-reminder-seen:v2';
 let amrReminderSeenFallback = false;
@@ -781,6 +783,24 @@ export function InlineModelSwitcher({
                             setOpen(false);
                           }}
                         >
+                          <span
+                            className="inline-switcher__agent-logo"
+                            aria-hidden="true"
+                          >
+                            {(() => {
+                              const src = modelProviderIconSrc(m.id);
+                              return src ? (
+                                <img
+                                  src={src}
+                                  alt=""
+                                  width={16}
+                                  height={16}
+                                />
+                              ) : (
+                                <AgentIcon id={currentAgent.id} size={16} />
+                              );
+                            })()}
+                          </span>
                           <span className="inline-switcher__agent-name">
                             {m.label}
                           </span>

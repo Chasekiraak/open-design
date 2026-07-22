@@ -521,6 +521,13 @@
   color: inherit;
   text-align: left;
 }
+/* Top-align the leading icon (and the text block) with the title instead of
+   vertically centering them against the taller body; the action buttons keep
+   the row's centered alignment. */
+.plugin-marketplace__row > .plugin-marketplace__icon,
+.plugin-marketplace__row > .plugin-marketplace__row-main {
+  align-self: start;
+}
 
 .plugin-marketplace__item.is-clickable .plugin-marketplace__row {
   grid-template-columns: auto minmax(0, 1fr) auto auto;

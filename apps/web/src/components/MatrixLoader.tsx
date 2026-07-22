@@ -55,16 +55,16 @@ export function MatrixLoader({ size = 26 }: { size?: number }) {
       {CELLS.map((row) =>
         CELLS.map((col) => {
           const pulse = pulseForDistance((col - CENTER) ** 2 + (row - CENTER) ** 2);
+          const key = `${col}-${row}`;
           const shared = {
-            key: `${col}-${row}`,
             cx: cellToCoord(col),
             cy: cellToCoord(row),
             r: 8,
           };
           return typeof pulse === 'number' ? (
-            <circle {...shared} opacity={pulse} />
+            <circle key={key} {...shared} opacity={pulse} />
           ) : (
-            <circle {...shared} className={styles[pulse]} />
+            <circle key={key} {...shared} className={styles[pulse]} />
           );
         }),
       )}

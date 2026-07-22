@@ -4925,19 +4925,6 @@ export function SettingsDialog({
                       Choose the model used when Open Design extracts and rewrites memory.
                     </p>
                   </div>
-                  <span className="settings-memory-summary-value">
-                    {cfg.mode === 'api'
-                      ? cfg.model.trim()
-                        ? t('settings.memoryModelInlineSameAsChatWithModel', {
-                            model: cfg.model.trim(),
-                          })
-                        : t('settings.memoryModelInlineSameAsChat')
-                      : selectedMemoryChatModel
-                        ? t('settings.memoryModelInlineSameAsChatWithModel', {
-                            model: selectedMemoryChatModel,
-                          })
-                        : t('settings.memoryModelInlineSameAsChat')}
-                  </span>
                 </div>
                 <MemoryModelInline
                   mode={cfg.mode}

@@ -5,6 +5,7 @@ import { amrHandoffDeviceId, attributedAmrUrl, recordAmrEntry } from '../analyti
 import { useAnalytics } from '../analytics/provider';
 import { useT } from '../i18n';
 import { RemixIcon } from './RemixIcon';
+import { modelProviderIconSrc } from './modelProviderIcon';
 import type { AgentInfo, AppConfig, ExecMode, ProviderModelOption } from '../types';
 import { isMacPlatform } from '../utils/platform';
 import { amrConsoleUrlForProfile } from '../runtime/amr-guidance';
@@ -195,6 +196,15 @@ export function AvatarMenu({
   // Hidden by default in CSS; composer-row contexts opt it in.
   const triggerModelLabel =
     config.mode === 'api' ? apiModelLabel : config.mode === 'daemon' ? currentModelLabel : null;
+  // Model id backing the readout — used to resolve the provider brand mark that
+  // replaces the model-name text in the composer trigger.
+  const triggerModelId =
+    config.mode === 'api'
+      ? config.model?.trim() || null
+      : config.mode === 'daemon'
+        ? currentModelId
+        : null;
+  const triggerModelIconSrc = modelProviderIconSrc(triggerModelId);
   // Whether the daemon-mode popover can offer a real model radio list. When it
   // can't (agent unavailable, or its model catalog is empty — e.g. the AMR
   // member account before the vela catalog resolves), the popover falls back
@@ -223,7 +233,19 @@ export function AvatarMenu({
       >
         <AvatarAgentMark size={20} />
         {triggerModelLabel ? (
-          <span className="avatar-agent-trigger__model">{triggerModelLabel}</span>
+          <span className="avatar-agent-trigger__model">
+            {triggerModelIconSrc ? (
+              <img
+                className="avatar-agent-trigger__model-logo"
+                src={triggerModelIconSrc}
+                alt={triggerModelLabel}
+                width={18}
+                height={18}
+              />
+            ) : (
+              triggerModelLabel
+            )}
+          </span>
         ) : null}
         <RemixIcon name="arrow-down-s-line" size={14} />
       </button>
@@ -294,6 +316,24 @@ export function AvatarMenu({
                                 setOpen(false);
                               }}
                             >
+                              <span
+                                className="avatar-model-option-logo"
+                                aria-hidden="true"
+                              >
+                                {(() => {
+                                  const src = modelProviderIconSrc(model.id);
+                                  return src ? (
+                                    <img
+                                      src={src}
+                                      alt=""
+                                      width={16}
+                                      height={16}
+                                    />
+                                  ) : (
+                                    <AvatarAgentMark size={16} />
+                                  );
+                                })()}
+                              </span>
                               <span className="avatar-model-option-label">
                                 {model.label}
                               </span>
