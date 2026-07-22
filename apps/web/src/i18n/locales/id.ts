@@ -938,7 +938,7 @@ export const id: Dict = {
   'homeHero.confirmReplaceTitle': 'Ganti prompt saat ini?',
   'homeHero.confirmReplaceBody': 'Menggunakan {title} akan mengganti teks yang ada di input saat ini.',
   'homeHero.confirmReplace': 'Ganti',
-  'homeHero.chip.prototype': 'Prototipe',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': 'Klon situs web',
   'homeHero.chip.liveArtifact': 'Artefak langsung',
   'homeHero.chip.deck': 'Dek slide',

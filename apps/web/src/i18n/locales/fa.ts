@@ -938,7 +938,7 @@ export const fa: Dict = {
   'homeHero.confirmReplaceTitle': 'دستور فعلی جایگزین شود؟',
   'homeHero.confirmReplaceBody': 'استفاده از {title} متنی را که اکنون در ورودی است جایگزین می‌کند.',
   'homeHero.confirmReplace': 'جایگزینی',
-  'homeHero.chip.prototype': 'نمونه اولیه',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': 'همتاسازی وب‌سایت',
   'homeHero.chip.liveArtifact': 'آرتیفکت زنده',
   'homeHero.chip.deck': 'اسلاید',

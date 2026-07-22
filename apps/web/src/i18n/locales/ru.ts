@@ -938,7 +938,7 @@ export const ru: Dict = {
   'homeHero.confirmReplaceTitle': 'Заменить текущий запрос?',
   'homeHero.confirmReplaceBody': 'Использование {title} заменит текст, который сейчас введён в поле.',
   'homeHero.confirmReplace': 'Заменить',
-  'homeHero.chip.prototype': 'Прототип',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': 'Клон сайта',
   'homeHero.chip.liveArtifact': 'Живой артефакт',
   'homeHero.chip.deck': 'Презентация',

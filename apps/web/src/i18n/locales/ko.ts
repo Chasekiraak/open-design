@@ -938,7 +938,7 @@ export const ko: Dict = {
   'homeHero.confirmReplaceTitle': '현재 프롬프트를 바꿀까요?',
   'homeHero.confirmReplaceBody': '{title}을(를) 사용하면 현재 입력란의 텍스트가 대체됩니다.',
   'homeHero.confirmReplace': '바꾸기',
-  'homeHero.chip.prototype': '프로토타입',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': '웹사이트 클론',
   'homeHero.chip.liveArtifact': '라이브 아티팩트',
   'homeHero.chip.deck': '슬라이드 덱',

@@ -952,7 +952,7 @@ export const zhTW: Dict = {
   "homeHero.confirmReplaceTitle": "取代目前的提示詞？",
   "homeHero.confirmReplaceBody": "使用 {title} 將取代目前輸入框中的文字。",
   "homeHero.confirmReplace": "取代",
-  "homeHero.chip.prototype": "原型",
+  "homeHero.chip.prototype": "UI Mockup",
   "homeHero.chip.webClone": "網站復刻",
   "homeHero.chip.liveArtifact": "即時看板",
   "homeHero.chip.deck": "簡報",

@@ -346,7 +346,7 @@ describe('HomeView context picker', () => {
 
     await pickHomeTemplate('prototype');
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('UI Mockup');
     });
 
     screen.getByTestId('home-hero-input');
@@ -429,7 +429,7 @@ describe('HomeView context picker', () => {
 
     await pickHomeTemplate('prototype');
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('UI Mockup');
       expect(screen.queryByTestId('home-hero-active-skill')).toBeNull();
     });
 

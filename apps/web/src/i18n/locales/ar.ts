@@ -938,7 +938,7 @@ export const ar: Dict = {
   'homeHero.confirmReplaceTitle': 'استبدال الموجّه الحالي؟',
   'homeHero.confirmReplaceBody': 'سيؤدي استخدام {title} إلى استبدال النص الموجود حاليًا في حقل الإدخال.',
   'homeHero.confirmReplace': 'استبدال',
-  'homeHero.chip.prototype': 'نموذج أولي',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': 'استنساخ موقع ويب',
   'homeHero.chip.liveArtifact': 'عنصر حيّ',
   'homeHero.chip.deck': 'عرض شرائح',

@@ -938,7 +938,7 @@ export const hu: Dict = {
   'homeHero.confirmReplaceTitle': 'Lecseréled a jelenlegi promptot?',
   'homeHero.confirmReplaceBody': 'A(z) {title} használata lecseréli a beviteli mezőben jelenleg lévő szöveget.',
   'homeHero.confirmReplace': 'Csere',
-  'homeHero.chip.prototype': 'Prototípus',
+  'homeHero.chip.prototype': 'UI Mockup',
   'homeHero.chip.webClone': 'Weboldal-klón',
   'homeHero.chip.liveArtifact': 'Élő artifact',
   'homeHero.chip.deck': 'Diasor',
