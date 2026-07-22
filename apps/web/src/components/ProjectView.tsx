@@ -1178,8 +1178,23 @@ function applySplitChatPanelWidth(
   split: HTMLDivElement | null,
   width: number,
   workspacePanelTrack: string,
+  workspaceFocused: boolean,
 ): void {
   if (!split) return;
+  if (workspaceFocused) {
+    // Workspace-focused mode collapses the chat column through the
+    // `.split-focus` CSS class alone (see `projectSplitStyle`, which
+    // deliberately returns no inline style while focused). A resize firing
+    // while focused still reaches this function via the ResizeObserver
+    // effect below; without this guard it would write a stale three-column
+    // `gridTemplateColumns` back onto the element, which — as an inline
+    // style — outranks `.split-focus` and reintroduces the (hidden, so
+    // blank) chat column as dead space while squeezing the workspace
+    // column into a garbled sliver.
+    split.style.removeProperty('grid-template-columns');
+    split.style.removeProperty('--project-chat-panel-width');
+    return;
+  }
   split.style.setProperty('--project-chat-panel-width', `${width}px`);
   split.style.gridTemplateColumns =
     `${width}px ${SPLIT_RESIZE_HANDLE_WIDTH}px ${workspacePanelTrack}`;
@@ -7749,10 +7764,10 @@ export function ProjectView({
   ): number => {
     const next = clampChatPanelWidth(preferredWidth, maxWidth);
     chatPanelWidthRef.current = next;
-    applySplitChatPanelWidth(splitRef.current, next, workspacePanelTrack);
+    applySplitChatPanelWidth(splitRef.current, next, workspacePanelTrack, workspaceFocused);
     if (options.commitState !== false) setChatPanelWidth(next);
     return next;
-  }, [workspacePanelTrack]);
+  }, [workspacePanelTrack, workspaceFocused]);
 
   const applyChatPanelWidth = useCallback((
     width: number,
@@ -7783,8 +7798,8 @@ export function ProjectView({
 
   useEffect(() => {
     chatPanelWidthRef.current = chatPanelWidth;
-    applySplitChatPanelWidth(splitRef.current, chatPanelWidth, workspacePanelTrack);
-  }, [chatPanelWidth, workspacePanelTrack]);
+    applySplitChatPanelWidth(splitRef.current, chatPanelWidth, workspacePanelTrack, workspaceFocused);
+  }, [chatPanelWidth, workspacePanelTrack, workspaceFocused]);
 
   useEffect(() => {
     chatPanelMaxWidthRef.current = chatPanelMaxWidth;
