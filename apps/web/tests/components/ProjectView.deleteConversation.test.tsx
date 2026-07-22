@@ -157,6 +157,14 @@ function renderProjectView(onProjectsRefresh: () => void) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('ProjectView conversation delete', () => {
   beforeEach(() => {
     listProjectRuns.mockResolvedValue([]);
@@ -340,8 +348,9 @@ describe('ProjectView conversation delete', () => {
       producedFiles: [],
     };
 
+    const pendingMessages = deferred<(typeof assistantMessage)[]>();
     listConversations.mockResolvedValue([{ id: 'conv-1', title: 'Conversation 1' }]);
-    listMessages.mockResolvedValue([assistantMessage]);
+    listMessages.mockReturnValue(pendingMessages.promise);
     fetchPreviewComments.mockResolvedValue([]);
     loadTabs.mockResolvedValue({ tabs: [], activeTabId: null });
     fetchProjectFiles.mockResolvedValue([]);
@@ -355,8 +364,13 @@ describe('ProjectView conversation delete', () => {
 
     renderProjectView(vi.fn());
 
-    await waitFor(() => expect(chatPaneProps.onSubmitQuestionForm).toBeDefined());
-    expect(chatPaneProps.questionFormSubmitDisabled).toBe(false);
+    await waitFor(() => expect(chatPaneProps.activeConversationId).toBe('conv-1'));
+    expect(chatPaneProps.onSubmitQuestionForm).toBeDefined();
+    expect(chatPaneProps.questionFormSubmitDisabled).toBe(true);
+
+    pendingMessages.resolve([assistantMessage]);
+
+    await waitFor(() => expect(chatPaneProps.questionFormSubmitDisabled).toBe(false));
     expect(fileWorkspaceProps.questionForm).toBeUndefined();
   });
 });
