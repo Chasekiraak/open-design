@@ -291,6 +291,16 @@ export function AvatarMenu({
       : config.mode === 'daemon'
         ? currentModelLabel ?? currentModelId
         : null;
+  // Whether the daemon-mode popover can offer a real model radio list. When it
+  // can't (agent unavailable, or its model catalog is empty — e.g. the AMR
+  // member account before the vela catalog resolves), the popover falls back
+  // to a static current-model row so it never opens as an empty shell.
+  const hasSelectableModels = Boolean(
+    currentAgent &&
+      currentAgent.available &&
+      ((currentAgent.models && currentAgent.models.length > 0) ||
+        (currentAgent.reasoningOptions && currentAgent.reasoningOptions.length > 0)),
+  );
 
   return (
     <div className={`avatar-menu avatar-menu--${placement}`} ref={wrapRef}>
@@ -382,11 +392,7 @@ export function AvatarMenu({
 
           {config.mode === 'daemon' ? (
             <>
-              {currentAgent &&
-              currentAgent.available &&
-              ((currentAgent.models && currentAgent.models.length > 0) ||
-                (currentAgent.reasoningOptions &&
-                  currentAgent.reasoningOptions.length > 0)) ? (
+              {hasSelectableModels && currentAgent ? (
                 <div className="avatar-model-section">
                   {currentAgent.models && currentAgent.models.length > 0 ? (
                     <div className="avatar-select-row">
@@ -472,7 +478,33 @@ export function AvatarMenu({
                     </div>
                   ) : null}
                 </div>
-              ) : null}
+              ) : currentModelLabel ? (
+                <div className="avatar-model-section">
+                  <div className="avatar-select-row">
+                    <span className="avatar-select-label">
+                      {t('avatar.modelLabel')}
+                    </span>
+                    <div className="avatar-static-value">{currentModelLabel}</div>
+                  </div>
+                </div>
+              ) : currentAgent ? (
+                <div className="avatar-model-section">
+                  <div className="avatar-select-row">
+                    <span className="avatar-select-label">
+                      {t('avatar.codeAgent')}
+                    </span>
+                    <div className="avatar-static-value">{currentAgent.name}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="avatar-model-section">
+                  <div className="avatar-select-row">
+                    <div className="avatar-static-value">
+                      {t('avatar.noAgentSelected')}
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           ) : null}
 

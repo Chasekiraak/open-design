@@ -80,8 +80,10 @@ export interface ManualEditStyles {
   borderColor: string;
   borderRadius: string;
   /* Free drag-to-reposition writes a translate() here (on top of the element's
-     own layout position), persisted like any other inline style. */
+     own layout position), persisted like any other inline style. `display` is
+     bumped to inline-block for inline elements so the translate takes effect. */
   transform: string;
+  display: string;
 }
 
 export interface ManualEditTarget {
@@ -182,6 +184,9 @@ export interface ManualEditDragCommitMessage {
   type: 'od-edit-drag-commit';
   id: string;
   transform: string;
+  /** Set when an inline element was bumped to inline-block so the translate
+   *  applies; persisted alongside the transform. */
+  display?: string;
 }
 
 export type ManualEditBridgeMessage =
@@ -205,7 +210,7 @@ export const MANUAL_EDIT_STYLE_PROPS: readonly (keyof ManualEditStyles)[] = [
   'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
   'border', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
   'borderStyle', 'borderColor', 'borderRadius',
-  'transform',
+  'transform', 'display',
 ];
 
 export function emptyManualEditStyles(): ManualEditStyles {
