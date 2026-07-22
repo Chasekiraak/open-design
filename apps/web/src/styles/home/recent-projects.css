@@ -389,8 +389,24 @@
   overflow: hidden;
   white-space: nowrap;
 }
+/* The owner name is the only elastic part of the meta row: it ellipsizes so a
+   long name (e.g. "XINYU SHANG创建") never hard-clips mid-character into the
+   type badge — the avatar, "· time" and the badge stay fully visible. */
+.recent-projects__card-owner-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .recent-projects__card-sep {
   color: var(--text-muted);
+  flex: 0 0 auto;
+}
+/* "转入团队空间" confirm button: green label on the dark filled button to read
+   as the positive, forward action (2 classes out-specifies button.primary). */
+.recent-projects__move-confirm.primary {
+  color: var(--brand);
 }
 .recent-projects__card-status {
   display: inline-flex;

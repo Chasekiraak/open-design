@@ -1413,8 +1413,11 @@
   left: 0;
   z-index: 90;
 }
+/* The working-dir menu is an absolute overlay — float it over the content
+   below (lift the card's stacking context) instead of reserving space with a
+   margin, which shoved 最近项目 down and back up (a jitter) on open/close. */
 .home-hero__composer-card:has(.home-hero__working-dir-picker [data-testid='working-dir-panel']) {
-  margin-bottom: calc(var(--spacing-68) + var(--spacing-12));
+  z-index: 40;
 }
 /* Persistent design-system picker — borderless trigger mirroring the
    working-directory picker so the two read as one row of leading accessories

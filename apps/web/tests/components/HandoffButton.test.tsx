@@ -52,9 +52,10 @@ describe('HandoffButton i18n', () => {
     const css = readExpandedIndexCss();
 
     expect(css).toContain('.app .handoff-framework-chip.active');
-    expect(css).toContain('color: var(--accent-strong);');
-    expect(css).toContain('font-weight: 700;');
-    expect(css).toContain('box-shadow:');
+    // Selected chip inverts to a solid fill (matching the app's active-chip
+    // convention) at a constant font weight so selection never resizes rows.
+    expect(css).toContain('background: var(--text);');
+    expect(css).toContain('color: var(--bg-panel);');
   });
 
   it('localizes the primary handoff label', async () => {

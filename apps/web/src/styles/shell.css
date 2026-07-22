@@ -1216,6 +1216,12 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
   gap: 8px;
   min-height: 0;
   overflow: auto;
+  /* Give the scrollbar its own lane in the panel's right padding instead of
+     overlapping the cards: extend the list into the padding and re-inset the
+     cards by the same amount, so the cards keep their width while the bar
+     sits ~10px further right. */
+  margin-right: -10px;
+  padding-right: 10px;
 }
 .artifact-version-card {
   display: grid;

@@ -55,6 +55,7 @@ export const ja: Dict = {
   'common.notInstalled': '未インストール',
   'common.active': 'アクティブ',
   'common.offline': 'オフライン',
+  'common.inactive': '未使用',
   'common.selected': '選択中',
   'common.create': '作成',
   'common.openPreview': 'プレビューを開く',

@@ -615,6 +615,9 @@ export function EntryShell({
   const [integrationTab, setIntegrationTab] = useState<IntegrationTab>(integrationInitialTab);
   const [homePromptHandoff, setHomePromptHandoff] = useState<HomePromptHandoff | null>(null);
   const entryMainScrollRef = useRef<HTMLElement | null>(null);
+  // Guards the async Remix create so a double-click can't spawn two copies of
+  // the same community template project.
+  const communityRemixInFlightRef = useRef(false);
   const analytics = useAnalytics();
   function changeView(next: EntryViewKind) {
     const navElement = navElementForView(next);
@@ -711,19 +714,50 @@ export function EntryShell({
     setNewProjectOpen(true);
   }
 
-  function openCommunityTemplateProject(templateId: string) {
+  async function openCommunityTemplateProject(templateId: string) {
     const preset = resolveCommunityTemplatePreset(templateId);
-    // Remix drops the template's prompt straight into the Home composer input
-    // (instead of silently creating a project), so the user can tweak it and
-    // send it themselves. Reuses the plain prompt-handoff path — no plugin
-    // context — which seeds the composer text and focuses it.
-    setHomePromptHandoff({
-      id: Date.now(),
-      source: 'marketplace-plugin-try',
-      focus: true,
-      prompt: preset.prompt,
-    });
-    changeView('home');
+    // Remix drops the user straight into the project editor with this template
+    // already loaded, so they can keep tweaking it (mirrors the Home demo-preset
+    // open flow): reopen an existing copy if one exists, otherwise create a
+    // project seeded with the template's HTML and navigate into it.
+    if (communityRemixInFlightRef.current) return;
+    const existing = projects.find(
+      (project) =>
+        (project.metadata as { demoPresetId?: unknown } | undefined)?.demoPresetId ===
+        preset.metadata.demoPresetId,
+    );
+    if (existing) {
+      await Promise.resolve(onOpenProject(existing.id));
+      navigate({
+        kind: 'project',
+        projectId: existing.id,
+        conversationId: null,
+        fileName: preset.metadata.entryFile ?? null,
+      });
+      return;
+    }
+    communityRemixInFlightRef.current = true;
+    try {
+      const { project } = await createProject({
+        name: preset.projectName,
+        skillId: null,
+        designSystemId: null,
+        pendingPrompt: preset.prompt,
+        metadata: preset.metadata,
+      });
+      if (preset.metadata.entryFile) {
+        await writeProjectTextFile(project.id, preset.metadata.entryFile, preset.html);
+      }
+      await Promise.resolve(onOpenProject(project.id));
+      navigate({
+        kind: 'project',
+        projectId: project.id,
+        conversationId: null,
+        fileName: preset.metadata.entryFile ?? null,
+      });
+    } finally {
+      communityRemixInFlightRef.current = false;
+    }
   }
 
   // Empty-state CTA for brand-new users: skip the modal, create a blank
@@ -1168,6 +1202,15 @@ export function EntryShell({
               <CommunityView
                 onRemixTemplate={(templateId) => {
                   openCommunityTemplateProject(templateId);
+                }}
+                onUsePrompt={(prompt) => {
+                  setHomePromptHandoff({
+                    id: Date.now(),
+                    source: 'marketplace-plugin-try',
+                    focus: true,
+                    prompt,
+                  });
+                  changeView('home');
                 }}
               />
             </div>

@@ -55,6 +55,7 @@ export const hu: Dict = {
   'common.notInstalled': 'nincs telepítve',
   'common.active': 'aktív',
   'common.offline': 'offline',
+  'common.inactive': 'inaktív',
   'common.selected': 'kiválasztva',
   'common.create': 'Létrehozás',
   'common.openPreview': 'Előnézet megnyitása',

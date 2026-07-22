@@ -7331,15 +7331,14 @@ function IntegrationsSection() {
             style={{
               background: 'var(--surface-2, #11141a)',
               color: 'var(--fg-1, #e6e6e6)',
-              // Reserve top clearance for the absolutely-positioned
-              // Copy button so the first line of the snippet does not
-              // sit underneath it, and reserve right clearance so a
-              // wrapped bash one-liner stops short of the button rather
-              // than scrolling behind it. The right padding is sized
-              // for the wider "Copied" post-click state (icon + text +
-              // button padding + the 8px right offset) with a few px
-              // of buffer for elevated font sizes / zoom. Issue #632.
-              padding: '40px 104px 12px 14px',
+              // Top-align the snippet (first line sits at the top, level with
+              // the Copy button) — the right padding already reserves the
+              // button's horizontal lane so the first line never runs under it.
+              // The right padding is sized for the wider "Copied" post-click
+              // state (icon + text + button padding + the 8px right offset)
+              // with a few px of buffer for elevated font sizes / zoom.
+              // Issue #632.
+              padding: '12px 104px 12px 14px',
               borderRadius: 8,
               overflowX: 'auto',
               fontFamily:
@@ -7354,7 +7353,20 @@ function IntegrationsSection() {
             }}
             data-lang={snippetLang}
           >
-            <code>
+            <code
+              style={{
+                // Neutralize the global `code` chip styling (light --bg-subtle
+                // background + dark text): inside this always-dark <pre> it
+                // rendered as white-highlighted black lines. Terminal-green
+                // text on the bare dark surface instead (#3BBF7D = the dark
+                // theme --green; the block stays dark in both themes).
+                background: 'none',
+                padding: 0,
+                borderRadius: 0,
+                fontSize: 'inherit',
+                color: '#3BBF7D',
+              }}
+            >
               {snippet ||
                 (infoError
                   ? t('settings.mcpResolvingFailed')
@@ -7372,11 +7384,12 @@ function IntegrationsSection() {
               right: 8,
               padding: '4px 10px',
               fontSize: 12,
+              borderRadius: 999,
             }}
             aria-label={t('settings.mcpCopyAria')}
           >
             <Icon name={copied ? 'check' : 'copy'} size={14} />
-            <span style={{ marginLeft: 6 }}>{copied ? t('settings.mcpCopied') : t('settings.mcpCopy')}</span>
+            <span style={{ marginLeft: 4 }}>{copied ? t('settings.mcpCopied') : t('settings.mcpCopy')}</span>
           </button>
         </div>
 
@@ -7684,14 +7697,22 @@ function NotificationsSection({
           <div className="settings-notify-card-header">
             <h4>{t('settings.notifyCompletionSound')}</h4>
             <div className="section-head-actions">
-              <div className="seg-control" role="group" aria-label={t('settings.notifyCompletionSound')} style={{ '--seg-cols': 1 } as React.CSSProperties}>
+              <div className="seg-control" role="group" aria-label={t('settings.notifyCompletionSound')} style={{ '--seg-cols': 2 } as React.CSSProperties}>
                 <button
                   type="button"
-                  className={'seg-btn' + (notif.soundEnabled ? ' active' : '')}
+                  className={'seg-btn seg-btn--on' + (notif.soundEnabled ? ' active' : '')}
                   aria-pressed={notif.soundEnabled}
-                  onClick={toggleSound}
+                  onClick={() => { if (!notif.soundEnabled) toggleSound(); }}
                 >
-                  <span className="seg-title">{notif.soundEnabled ? t('common.active') : t('common.offline')}</span>
+                  <span className="seg-title">{t('common.active')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'seg-btn' + (!notif.soundEnabled ? ' active' : '')}
+                  aria-pressed={!notif.soundEnabled}
+                  onClick={() => { if (notif.soundEnabled) toggleSound(); }}
+                >
+                  <span className="seg-title">{t('common.inactive')}</span>
                 </button>
               </div>
             </div>
@@ -7762,15 +7783,24 @@ function NotificationsSection({
           <div className="settings-notify-card-header">
             <h4>{t('settings.notifyDesktop')}</h4>
             <div className="section-head-actions">
-              <div className="seg-control" role="group" aria-label={t('settings.notifyDesktop')} style={{ '--seg-cols': 1 } as React.CSSProperties}>
+              <div className="seg-control" role="group" aria-label={t('settings.notifyDesktop')} style={{ '--seg-cols': 2 } as React.CSSProperties}>
                 <button
                   type="button"
-                  className={'seg-btn' + (notif.desktopEnabled ? ' active' : '')}
+                  className={'seg-btn seg-btn--on' + (notif.desktopEnabled ? ' active' : '')}
                   aria-pressed={notif.desktopEnabled}
                   disabled={permission === 'unsupported'}
-                  onClick={() => { void toggleDesktop(); }}
+                  onClick={() => { if (!notif.desktopEnabled) void toggleDesktop(); }}
                 >
-                  <span className="seg-title">{notif.desktopEnabled ? t('common.active') : t('common.offline')}</span>
+                  <span className="seg-title">{t('common.active')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'seg-btn' + (!notif.desktopEnabled ? ' active' : '')}
+                  aria-pressed={!notif.desktopEnabled}
+                  disabled={permission === 'unsupported'}
+                  onClick={() => { if (notif.desktopEnabled) void toggleDesktop(); }}
+                >
+                  <span className="seg-title">{t('common.inactive')}</span>
                 </button>
               </div>
             </div>

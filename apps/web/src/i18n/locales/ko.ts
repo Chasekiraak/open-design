@@ -55,6 +55,7 @@ export const ko: Dict = {
   'common.notInstalled': '설치되지 않음',
   'common.active': '활성',
   'common.offline': '오프라인',
+  'common.inactive': '미사용',
   'common.selected': '선택됨',
   'common.create': '생성',
   'common.openPreview': '미리보기 열기',

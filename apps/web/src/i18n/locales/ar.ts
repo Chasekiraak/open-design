@@ -55,6 +55,7 @@ export const ar: Dict = {
   'common.notInstalled': 'غير مثبت',
   'common.active': 'نشط',
   'common.offline': 'غير متصل',
+  'common.inactive': 'غير نشط',
   'common.selected': 'محدد',
   'common.create': 'إنشاء',
   'common.openPreview': 'فتح المعاينة',

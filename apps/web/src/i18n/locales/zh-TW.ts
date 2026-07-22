@@ -55,6 +55,7 @@ export const zhTW: Dict = {
   'common.notInstalled': '未安裝',
   'common.active': '使用中',
   'common.offline': '未執行',
+  'common.inactive': '未使用',
   'common.selected': '已選',
   'common.create': '建立',
   'common.openPreview': '開啟預覽',

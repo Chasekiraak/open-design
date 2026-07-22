@@ -55,6 +55,7 @@ export const esES: Dict = {
   'common.notInstalled': 'no instalado',
   'common.active': 'activo',
   'common.offline': 'sin conexión',
+  'common.inactive': 'inactivo',
   'common.selected': 'seleccionado',
   'common.create': 'Crear',
   'common.openPreview': 'Abrir vista previa',

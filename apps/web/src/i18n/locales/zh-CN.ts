@@ -55,6 +55,7 @@ export const zhCN: Dict = {
   'common.notInstalled': '未安装',
   'common.active': '使用中',
   'common.offline': '未运行',
+  'common.inactive': '未使用',
   'common.selected': '已选',
   'common.create': '创建',
   'common.openPreview': '打开预览',

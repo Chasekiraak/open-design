@@ -601,6 +601,28 @@ export function HandoffButton({
     );
   }
 
+  // Rendered inside the active tab panel: full-width on the editor tab,
+  // paired 50/50 with the AMR website link on the CLI tab.
+  const pathCopyButton = (
+    <button
+      type="button"
+      className={`handoff-path-button${copiedCliId === PROJECT_PATH_COPY_ID ? ' copied' : ''}`}
+      onClick={() => void copyProjectPath()}
+      disabled={copyBusy === PROJECT_PATH_COPY_ID || !projectDir}
+      title={projectDir ?? t('handoff.projectPathUnavailable')}
+      aria-label={copiedCliId === PROJECT_PATH_COPY_ID ? t('handoff.copied') : t('designFiles.copyPath')}
+    >
+      <span className="handoff-path-button-main">
+        <span className="handoff-path-button-icon" aria-hidden>
+          <Icon name={copiedCliId === PROJECT_PATH_COPY_ID ? 'check' : 'copy'} size={14} />
+        </span>
+        <span className="handoff-path-button-label">
+          {copiedCliId === PROJECT_PATH_COPY_ID ? t('handoff.copied') : t('designFiles.copyPath')}
+        </span>
+      </span>
+    </button>
+  );
+
   return (
     <div
       className={`handoff-wrap${open ? ' open' : ''}${embedded ? ' handoff-wrap--embedded' : ''}`}
@@ -702,27 +724,11 @@ export function HandoffButton({
               {t('handoff.cliSection')}
             </button>
           </div>
-          <div className="handoff-path-row" data-testid="handoff-project-path">
-            <button
-              type="button"
-              className={`handoff-path-button${copiedCliId === PROJECT_PATH_COPY_ID ? ' copied' : ''}`}
-              onClick={() => void copyProjectPath()}
-              disabled={copyBusy === PROJECT_PATH_COPY_ID || !projectDir}
-              title={projectDir ?? t('handoff.projectPathUnavailable')}
-              aria-label={copiedCliId === PROJECT_PATH_COPY_ID ? t('handoff.copied') : t('designFiles.copyPath')}
-            >
-              <span className="handoff-path-button-main">
-                <span className="handoff-path-button-icon" aria-hidden>
-                  <Icon name={copiedCliId === PROJECT_PATH_COPY_ID ? 'check' : 'copy'} size={14} />
-                </span>
-                <span className="handoff-path-button-label">
-                  {copiedCliId === PROJECT_PATH_COPY_ID ? t('handoff.copied') : t('designFiles.copyPath')}
-                </span>
-              </span>
-            </button>
-          </div>
           {activeTab === 'editor' ? (
             <section className="handoff-menu-block" role="tabpanel">
+              <div className="handoff-path-row" data-testid="handoff-project-path">
+                {pathCopyButton}
+              </div>
               <div className="handoff-target-group">
                 <div className="handoff-target-group-title">{t('common.installed')}</div>
                 <div className="handoff-target-rail handoff-editor-rail">
@@ -767,30 +773,35 @@ export function HandoffButton({
             </section>
           ) : (
             <section className="handoff-menu-block" role="tabpanel">
-              <a
-                className="handoff-amr-link"
-                href={AMR_WEBSITE_URL}
-                target="_blank"
-                rel="noreferrer"
-                onClick={handleAmrWebsiteClick}
-              >
-                <AgentIcon id="amr" size={18} />
-                <span>{t('handoff.amrWebsite')}</span>
-                <Icon name="external-link" size={14} />
-              </a>
-              <div className="handoff-framework-row" role="group" aria-label={t('handoff.framework')}>
+              <div className="handoff-path-row" data-testid="handoff-project-path">
+                {pathCopyButton}
+                <a
+                  className="handoff-amr-link"
+                  href={AMR_WEBSITE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={handleAmrWebsiteClick}
+                >
+                  <AgentIcon id="amr" size={18} />
+                  <span className="handoff-amr-link-label">{t('handoff.amrWebsite')}</span>
+                  <Icon name="external-link" size={14} />
+                </a>
+              </div>
+              <div className="handoff-framework-block" role="group" aria-label={t('handoff.framework')}>
                 <span className="handoff-framework-label">{t('handoff.framework')}</span>
-                {FRAMEWORKS.map((framework) => (
-                  <button
-                    key={framework.id}
-                    type="button"
-                    className={`handoff-framework-chip${framework.id === selectedFramework.id ? ' active' : ''}`}
-                    aria-pressed={framework.id === selectedFramework.id}
-                    onClick={() => chooseFramework(framework.id)}
-                  >
-                    {frameworkLabel(framework.id, t)}
-                  </button>
-                ))}
+                <div className="handoff-framework-grid">
+                  {FRAMEWORKS.map((framework) => (
+                    <button
+                      key={framework.id}
+                      type="button"
+                      className={`handoff-framework-chip${framework.id === selectedFramework.id ? ' active' : ''}`}
+                      aria-pressed={framework.id === selectedFramework.id}
+                      onClick={() => chooseFramework(framework.id)}
+                    >
+                      {frameworkLabel(framework.id, t)}
+                    </button>
+                  ))}
+                </div>
               </div>
               {availableCliTargets.length > 0 ? (
                 <div className="handoff-target-group">

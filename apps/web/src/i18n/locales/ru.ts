@@ -55,6 +55,7 @@ export const ru: Dict = {
   'common.notInstalled': 'не установлено',
   'common.active': 'активно',
   'common.offline': 'офлайн',
+  'common.inactive': 'неактивно',
   'common.selected': 'выбрано',
   'common.create': 'Создать',
   'common.openPreview': 'Открыть предпросмотр',

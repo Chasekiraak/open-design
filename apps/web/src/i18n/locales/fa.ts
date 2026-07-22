@@ -55,6 +55,7 @@ export const fa: Dict = {
   'common.notInstalled': 'نصب نشده',
   'common.active': 'فعال',
   'common.offline': 'آفلاین',
+  'common.inactive': 'غیرفعال',
   'common.selected': 'انتخاب شده',
   'common.create': 'ایجاد',
   'common.openPreview': 'باز کردن پیش‌نمایش',

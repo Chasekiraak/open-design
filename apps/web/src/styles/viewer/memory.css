@@ -1790,10 +1790,43 @@
   color: var(--text-muted);
 }
 
+/* Settings PrivacySection: the consent body below the heading sits in a gray
+   card. Scoped so the first-run banner / modal keep their own layout. */
+/* Heading matches the 界面语言 field label (14px / 600); margin zeroed so the
+   gap to the card below is controlled solely by the card's margin-top. */
+.privacy-consent-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.privacy-consent-card {
+  margin-top: 24px;
+  padding: 16px 18px;
+  /* Lighter than a full --bg-subtle fill — a faint gray wash over the panel,
+     no border (it read too heavy). */
+  background: color-mix(in srgb, var(--bg-subtle) 45%, var(--bg-panel));
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg, 10px);
+}
+.privacy-consent-card .privacy-consent-lead {
+  margin: 0 0 10px;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
 .privacy-consent-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+/* Buttons: full pill, spaced 20px below the text above them. */
+.privacy-consent-card .privacy-consent-actions {
+  margin-top: 20px;
+}
+.privacy-consent-card .privacy-consent-action {
+  border-radius: var(--radius-pill, 999px);
 }
 
 .privacy-consent-action {

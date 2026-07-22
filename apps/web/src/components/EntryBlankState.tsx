@@ -12,17 +12,14 @@ interface Props {
   onCreate: () => void;
 }
 
-export function EntryBlankState({ heading, title, description, onCreate }: Props) {
+export function EntryBlankState({ heading, description, onCreate }: Props) {
   return (
     <div className="entry-section">
       <header className="entry-section__head">
         <h1 className="entry-section__title">{heading}</h1>
       </header>
       <div className="entry-blank">
-        <div className="entry-blank__icon" aria-hidden>
-          <Icon name="sparkles" size={26} />
-        </div>
-        <h2 className="entry-blank__title">{title}</h2>
+        <img className="entry-blank__mark" src="/drafts-empty-mark.png?v=2" alt="" aria-hidden />
         <p className="entry-blank__desc">{description}</p>
         <button type="button" className="entry-blank__cta" onClick={onCreate}>
           <Icon name="plus" size={15} /> 新建方案

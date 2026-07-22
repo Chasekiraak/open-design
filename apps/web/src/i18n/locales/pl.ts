@@ -55,6 +55,7 @@ export const pl: Dict = {
   'common.notInstalled': 'nie zainstalowano',
   'common.active': 'aktywny',
   'common.offline': 'offline',
+  'common.inactive': 'nieaktywny',
   'common.selected': 'wybrano',
   'common.create': 'Utwórz',
   'common.openPreview': 'Otwórz podgląd',

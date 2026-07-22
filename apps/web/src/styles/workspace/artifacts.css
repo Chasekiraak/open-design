@@ -249,6 +249,19 @@
 .mcp-setup-card .ds-picker {
   margin-bottom: 0;
 }
+/* Client trigger reads as one line — "Claude Code  CLI 命令" side by side
+   instead of the shared picker's stacked title/sub column. */
+.mcp-setup-card .ds-picker-meta {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+.mcp-setup-card .ds-picker-title {
+  flex: none;
+}
+.mcp-setup-card .ds-picker-sub {
+  min-width: 0;
+}
 .mcp-running-note {
   margin: 0;
   font-size: 12px;
@@ -802,7 +815,8 @@
   gap: 12px;
   padding: 12px 14px;
   background: var(--bg-subtle);
-  border: 1px solid var(--border-soft, var(--border));
+  /* Borderless — the gray fill alone reads the callout; the outline was heavy. */
+  border: 1px solid transparent;
   border-radius: var(--radius);
 }
 .media-provider-docs-callout div {
@@ -1104,7 +1118,7 @@
 .settings-general-block .seg-control {
   max-width: 100%;
   min-width: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--bg-subtle) 58%, var(--bg-panel));
 }
 .settings-general-block--appearance .seg-control {
@@ -1680,8 +1694,11 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
 .agent-card:hover:not(.disabled) {
   border-color: transparent;
 }
-.agent-card.active {
-  border-color: transparent;
+.agent-card.active,
+.agent-card.active:hover:not(.disabled) {
+  /* Selected card keeps its hairline stroke — including on hover, where the
+     generic `.agent-card:hover` rule above would otherwise clear it. */
+  border-color: var(--border);
   background: var(--bg-panel);
   box-shadow: none;
 }
@@ -1704,9 +1721,8 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
 }
 .agent-card-installed.active .agent-icon {
   border-radius: var(--radius-md);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 16%, var(--border-soft)),
-    0 8px 18px color-mix(in srgb, var(--accent) 16%, transparent);
+  /* No ring / drop shadow on the selected logo — flat mark. */
+  box-shadow: none;
 }
 .agent-card-installed.active .agent-card-name {
   font-size: 13px;

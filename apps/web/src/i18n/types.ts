@@ -60,6 +60,7 @@ export interface Dict {
   'common.notInstalled': string;
   'common.active': string;
   'common.offline': string;
+  'common.inactive': string;
   'common.selected': string;
   'common.create': string;
   'common.openPreview': string;

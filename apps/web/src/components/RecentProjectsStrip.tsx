@@ -791,7 +791,7 @@ export function RecentProjectsStrip({
                       <span className="recent-projects__card-owner" aria-hidden>
                         {meta.ownerImg ? <img src={meta.ownerImg} alt="" loading="lazy" /> : t(meta.ownerInitialKey)}
                       </span>
-                      <span>{t('demo.RecentProjectsStrip.tsx.createdBy', { name: t(meta.ownerNameKey) })}</span>
+                      <span className="recent-projects__card-owner-name">{t('demo.RecentProjectsStrip.tsx.createdBy', { name: t(meta.ownerNameKey) })}</span>
                       <span className="recent-projects__card-sep" aria-hidden>·</span>
                       {t(meta.timeKey)}
                     </div>
@@ -973,7 +973,7 @@ export function RecentProjectsStrip({
             </button>
             <button
               type="button"
-              className="primary"
+              className={`primary${moveTarget.action === 'to-team' ? ' recent-projects__move-confirm' : ''}`}
               onClick={() => {
                 if (moveTarget.action === 'to-team') {
                   setMovedToTeam((prev) => new Set(prev).add(moveTarget.project.id));

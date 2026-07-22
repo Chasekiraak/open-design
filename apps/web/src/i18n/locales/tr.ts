@@ -55,6 +55,7 @@ export const tr: Dict = {
   'common.notInstalled': 'kurulmadı',
   'common.active': 'aktif',
   'common.offline': 'çevrim dışı',
+  'common.inactive': 'pasif',
   'common.selected': 'seçili',
   'common.create': 'Oluştur',
   'common.openPreview': 'Önizlemeyi aç',

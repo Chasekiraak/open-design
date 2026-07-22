@@ -55,6 +55,7 @@ export const id: Dict = {
   'common.notInstalled': 'belum terpasang',
   'common.active': 'aktif',
   'common.offline': 'offline',
+  'common.inactive': 'nonaktif',
   'common.selected': 'dipilih',
   'common.create': 'Buat',
   'common.openPreview': 'Buka pratinjau',
