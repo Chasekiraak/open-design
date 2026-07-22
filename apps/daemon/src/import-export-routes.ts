@@ -24,6 +24,20 @@ import { authorizeReasoningEgress, sendReasoningEgressDenial } from './reasoning
 import { sandboxImportedProjectRootUnavailableReason } from './sandbox-mode.js';
 import { parseOrchestratorWorkspace } from './workspace-contract.js';
 
+/**
+ * A sidecar contract violation carries a structured `code` (e.g.
+ * SIDECAR_UNKNOWN_MESSAGE, raised when a newer daemon sends a message name an
+ * older desktop binary has no case for). Flattening every failure to
+ * UPSTREAM_UNAVAILABLE forced the web layer to regex-match English prose to
+ * tell a version-skewed mesh from a genuinely dead renderer — 180 events over
+ * 43 devices classified by string matching. Pass the real code through so the
+ * classification is structural.
+ */
+function desktopRendererErrorCode(err: unknown): string {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && code.length > 0 ? code : 'UPSTREAM_UNAVAILABLE';
+}
+
 export interface RegisterImportRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'ids' | 'paths' | 'imports' | 'auth' | 'projectStore' | 'conversations' | 'projectFiles' | 'validation'> {}
 
 export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps) {
@@ -560,7 +574,7 @@ export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectEx
             return sendApiError(
               res,
               502,
-              'UPSTREAM_UNAVAILABLE',
+              desktopRendererErrorCode(err),
               `desktop renderer unavailable: ${err?.message || String(err)}`,
             );
           }
@@ -666,7 +680,7 @@ export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectEx
         return sendApiError(
           res,
           502,
-          'UPSTREAM_UNAVAILABLE',
+          desktopRendererErrorCode(err),
           `desktop renderer unavailable: ${err?.message || String(err)}`,
         );
       }
