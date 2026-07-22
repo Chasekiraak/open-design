@@ -7117,6 +7117,10 @@ function HtmlViewer({
   const [commentComposerHost, setCommentComposerHost] = useState<HTMLDivElement | null>(null);
   const [commentPreviewCanvasNode, setCommentPreviewCanvasNode] = useState<HTMLDivElement | null>(null);
   const [desktopPreviewContentWidth, setDesktopPreviewContentWidth] = useState<number | null>(null);
+  // Last canvas width the desktop auto-fit effect measured against (see the
+  // effect below, rec:recvq6WoJUvRXl) — lets that effect tell "canvas grew"
+  // apart from "canvas shrank" without re-deriving it from React state.
+  const lastAutoFitCanvasWidthRef = useRef<number | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const urlPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const srcDocPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -7510,6 +7514,33 @@ function HtmlViewer({
   });
   useEffect(() => {
     if (previewViewport !== 'desktop' || zoomMode !== 'auto') return;
+    const nextWidth = boardPreviewCanvasSize?.width;
+    const previousWidth = lastAutoFitCanvasWidthRef.current;
+    if (typeof nextWidth === 'number' && Number.isFinite(nextWidth)) {
+      // Growing the canvas (e.g. collapsing the chat rail, per rec:recvq6WoJUvRXl)
+      // can otherwise get stuck at the OLD, narrower-canvas zoom forever: the
+      // in-iframe measurement bridge (srcdoc.ts injectPreviewContentSizeBridge)
+      // reads document.documentElement/body scrollWidth/clientWidth, all of
+      // which are bounded below by the iframe's OWN current rendered viewport
+      // width (html/body fill at least 100% of the viewport by default). That
+      // viewport width is itself `canvasWidth / previewScale` from the
+      // PREVIOUS auto-fit pass, so once the previous scale already implies a
+      // viewport wide enough to contain the real content, the measurement
+      // just reports that residual viewport size right back — self-confirming
+      // the stale scale even after the canvas grows and could fit a larger,
+      // more useful zoom. Dropping the cached content width forces a fresh
+      // measurement this pass at zoom=100% (viewport := canvasWidth exactly),
+      // which cannot be contaminated by a previous scale. Only doing this on
+      // GROW avoids an extra flash-to-100% on every manual drag-resize tick
+      // when the canvas shrinks — that direction already self-corrects,
+      // because the previous scale's implied viewport dips below the
+      // content's real width and the measurement naturally reports the
+      // content's true, uncontaminated extent.
+      if (previousWidth !== null && nextWidth > previousWidth) {
+        setDesktopPreviewContentWidth(null);
+      }
+      lastAutoFitCanvasWidthRef.current = nextWidth;
+    }
     scheduleDesktopPreviewContentMeasure();
   }, [
     boardPreviewCanvasSize?.width,
