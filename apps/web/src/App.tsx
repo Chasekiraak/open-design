@@ -80,7 +80,7 @@ import {
 } from './providers/daemon';
 import { AMR_LOGIN_STATUS_EVENT } from './components/amrLoginPolling';
 import { CollabDemoView } from './collab/CollabDemoView';
-import { useWorkspaceContext } from './collab/useWorkspaceContext';
+import { useWorkspaceBilling, useWorkspaceContext } from './collab/useWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
 import { CommunityView } from './components/CommunityView';
 import { seedHomeComposerPrompt } from './components/HomeView';
@@ -448,6 +448,7 @@ function AppInner() {
   const clientType = useMemo(() => detectClientType(), []);
   useModalWindowDragGuard();
   const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
   const workspaceContextRef = useRef<WorkspaceCollabContext | null>(null);
   workspaceContextRef.current = workspaceContext;
   const listCurrentWorkspaceProjects = useCallback(
@@ -768,6 +769,7 @@ function AppInner() {
   // free-user banner; the workspace context's plan id is authoritative and
   // wins. See resolvePlanTier for the full precedence rule.
   const resolvedAmrPlan = resolvePlanTier({
+    billing: workspaceBilling,
     context: workspaceContext,
     accountPlan:
       amrLoginStatus?.account?.plan?.trim()
