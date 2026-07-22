@@ -727,13 +727,20 @@ const MAC_WINDOW_CHROME =
   process.platform === "darwin"
     ? ({
         titleBarStyle: "hiddenInset" as const,
-        // y centers the 12px traffic-light circles on the tab strip's midline:
-        // the tab chrome is 44px tall (`.workspace-tabs-chrome.app-chrome-header`
-        // in apps/web shell.css) and centers its contents, so the midline is 22
-        // and the circles' top edge is 22 - 6 = 16. #5517 hardcodes 20, but its
-        // own comment derives that from a 52px header it no longer has — copying
-        // the number instead of the derivation reintroduces the misalignment.
-        trafficLightPosition: { x: 12, y: 16 },
+        // y centers the 12px traffic-light circles on the tab strip's midline.
+        // The base `.workspace-tabs-chrome.app-chrome-header` rule in apps/web
+        // shell.css says 44px, but every real window wraps the tab bar in
+        // `.workspace-shell` (see App.tsx), and `.workspace-shell
+        // .workspace-tabs-chrome.app-chrome-header` in viewer/routines.css
+        // overrides it to 52px (10px above the tab + 32px tab + 10px below) —
+        // confirmed via getBoundingClientRect() against a live desktop window,
+        // not by reading the CSS alone, since that 44px rule reads as "the"
+        // rule until you check what actually wins. Midline is 52 / 2 = 26, so
+        // the circles' top edge is 26 - 6 = 20. A prior pass "corrected" this
+        // to y: 16 off the un-overridden 44px rule, which is what actually
+        // reintroduced the misalignment — don't repeat that without first
+        // measuring the live header height.
+        trafficLightPosition: { x: 12, y: 20 },
         // Frosted-glass window: the desktop wallpaper blurs through the whole
         // window (NSVisualEffectView). The web shell keeps html/body
         // transparent in desktop mode (see apps/web app-wash.css) so the
