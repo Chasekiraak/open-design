@@ -1056,6 +1056,11 @@ function SystemRow({ system, active, isDefault, subtitle, statusLabel, onSelect 
   const status = system.status ?? 'draft';
   const isUser = isUserSystem(system);
   return (
+    // The row chrome (padding, hover wash, selected outline) lives on
+    // .itemRow/.itemRowActive in the shared module CSS — the #5517 reference
+    // wraps the button in it, and rendering the bare button leaves every row
+    // flat and the selection invisible (acceptance #97).
+    <div className={`${styles.itemRow} ${active ? styles.itemRowActive : ''}`}>
     <button
       type="button"
       data-testid={`design-system-card-${system.id}`}
@@ -1081,6 +1086,7 @@ function SystemRow({ system, active, isDefault, subtitle, statusLabel, onSelect 
         />
       ) : null}
     </button>
+    </div>
   );
 }
 
