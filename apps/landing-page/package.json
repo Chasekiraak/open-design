@@ -11,7 +11,8 @@
     "preview": "astro preview --host 127.0.0.1 --port 17574",
     "previews": "tsx scripts/generate-previews.ts",
     "test": "node --import tsx --test tests/*.test.ts",
-    "typecheck": "astro check"
+    "typecheck": "astro check",
+    "codex:repo-stats": "tsx scripts/codex-repo-stats.ts"
   },
   "dependencies": {
     "@astrojs/rss": "4.0.18",

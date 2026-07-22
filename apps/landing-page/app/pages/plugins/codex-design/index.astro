@@ -5,7 +5,7 @@
  * A standalone editorial board (NOT bundled-plugin driven) of the best
  * real, external skills for doing design with OpenAI Codex (openai/skills,
  * MengTo/Skills, etc.). Positions Open Design as the home for designing
- * with Codex and drives to the client download + the awesome-codex-design
+ * with Codex and drives to the client download + the codex-design
  * list. Content comes from `_lib/codex-design.ts`; page chrome
  * (breadcrumb, nav) from `getPluginsCopy(locale)`.
  *
@@ -17,30 +17,38 @@
  */
 import Layout from '../../../_components/sub-page-layout.astro';
 import { getPluginsCopy } from '../../../_lib/plugins-i18n';
+import { getCodexCopy, categoryLabel, skillCopy } from '../../../_lib/codex-i18n';
 import { localeFromPath, localizedHref } from '../../../i18n';
+import { getDetailPlugins } from '../../../_lib/bundled-plugins';
+import '../../../_partials/detail-bands.css';
 import {
+  assertNoCodexSlugCollision,
   CODEX_COLLECTION,
   CODEX_SKILLS,
   AWESOME_REPO_URL,
   OD_DOWNLOAD_URL,
-  OD_GUIDE_HREF,
 } from '../../../_lib/codex-design';
+
+// Fails the build if a bundled plugin ever claims one of the flat
+// `/plugins/<slug>/` routes these curated skills occupy.
+assertNoCodexSlugCollision(getDetailPlugins().map((p) => p.detailSlug));
 
 const locale = localeFromPath(Astro.url.pathname);
 const pcopy = getPluginsCopy(locale);
+const cc = getCodexCopy(locale);
 const href = (path: string) => localizedHref(path, locale);
 
 const c = CODEX_COLLECTION;
-const title = `${c.eyebrow} · ${c.heading} · Open Design`;
-const description = c.lede;
+const title = `${c.eyebrow} · ${cc.collectionHeading} · Open Design`;
+const description = cc.collectionLede;
 
 const jsonLd = [
   {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    name: `${c.eyebrow} — ${c.heading}`,
-    description: c.lede,
-    url: new URL('/plugins/codex-design/', Astro.site).toString(),
+    name: `${c.eyebrow} — ${cc.collectionHeading}`,
+    description: cc.collectionLede,
+    url: new URL(href('/plugins/codex-design/'), Astro.site).toString(),
     numberOfItems: CODEX_SKILLS.length,
   },
   {
@@ -49,178 +57,124 @@ const jsonLd = [
     itemListElement: CODEX_SKILLS.map((s, i) => ({
       '@type': 'ListItem',
       position: i + 1,
-      name: s.name,
-      url: new URL(`/plugins/codex-design/${s.slug}/`, Astro.site).toString(),
+      name: skillCopy(cc, s.slug).name,
+      url: new URL(href(`/plugins/${s.slug}/`), Astro.site).toString(),
     })),
   },
 ];
 ---
 
-<Layout title={title} description={description} active="plugins" jsonLd={jsonLd}>
-  <div class="codex-page">
-    <section class="codex-hero">
-      <div class="codex-hero-copy">
-        <nav class="label detail-crumb" aria-label="Breadcrumb">
-          <a href={href('/plugins/')}>{pcopy.hubLabel}</a>
-          <span class="crumb-sep" aria-hidden="true">·</span>
-          <span aria-current="page">{c.eyebrow}</span>
-        </nav>
-        <p class="plugins-eyebrow">Curated collection</p>
-        <h1 class="display">{c.heading}<span class="dot">.</span></h1>
-        <p class="lead">{c.lede}</p>
-        <ul class="plugins-stats">
-          {c.stats.map((s) => (
-            <li><strong>{s.value}</strong> {s.label}</li>
-          ))}
-        </ul>
-        <div class="plugins-hero-cta">
-          <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Download Open Design</a>
-          <a class="btn btn-ghost plugins-star-btn" href={AWESOME_REPO_URL} target="_blank" rel="noopener">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .6l2.02 4.28 4.6.6-3.37 3.18.88 4.68L8 11.5 3.87 13.7l.88-4.68L1.38 5.85l4.6-.6z"/></svg>
-            Star the list
-          </a>
-          <a class="codex-textlink" href={href(OD_GUIDE_HREF)}>Read the Codex design guide →</a>
+<Layout
+  title={title}
+  description={description}
+  active="plugins"
+  jsonLd={jsonLd}
+  mainClassName="sub-main"
+>
+  <div class="db codex-collection">
+    {/* Hero band, same treatment as the plugin detail pages. */}
+    <section class="dbband dbhero">
+      <div class="dbin">
+        <p class="dbeye">{cc.collectionEyebrow}</p>
+        <h1 class="dbh1">{cc.collectionHeading}</h1>
+        <p class="dbdek dbdek-wide">{cc.collectionLede}</p>
+        <div class="dbcta-row">
+          <a class="dbbtn-p" href={href(OD_DOWNLOAD_URL)}>{cc.ctaDownload}</a>
+          <a class="dbbtn-g" href={AWESOME_REPO_URL} target="_blank" rel="noopener">{cc.ctaStarList}</a>
         </div>
       </div>
-      <div class="codex-hero-art" aria-hidden="true">
-        <img src="/plugins/codex-design/hero.webp" alt="" width="960" height="640" loading="eager" />
+    </section>
+
+    {/* The three jobs these plugins do. */}
+    <section class="dbband dbmetaband" aria-label={cc.collectionEyebrow}>
+      <div class="dbin">
+        <ul class="dbjobs">
+          {c.categories.map((cat, i) => (
+            <li>
+              <span class="k">{categoryLabel(cc, cat.key)}</span>
+              <span class="v">{cc.collectionCategoryBlurbs[i]}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
 
-    <section class="codex-why" aria-label="Why these skills">
-      <p class="codex-why-intro">{c.intro}</p>
-      <ul class="codex-cat-strip">
-        {c.categories.map((cat) => (
-          <li>
-            <span class="codex-cat-key">{cat.key}</span>
-            <span class="codex-cat-blurb">{cat.blurb}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
-
-    <section class="codex-skills" aria-label="Codex design skills">
-      <div class="codex-skill-grid">
-        {CODEX_SKILLS.map((s) => (
-          <article class="tpl-card">
-            <a class="tpl-media" href={href(`/plugins/codex-design/${s.slug}/`)}>
-              <img class="tpl-media-poster" src={s.image} alt="" loading="lazy" />
-              <span class="tpl-media-kind">{s.category}</span>
-            </a>
-            <div class="tpl-meta">
-              <span class="tpl-author">{s.badge}</span>
-              <span>Skill</span>
-            </div>
-            <a class="tpl-excerpt" href={href(`/plugins/codex-design/${s.slug}/`)}>
-              <span class="tpl-excerpt-head">What it does</span>
-              <span class="tpl-excerpt-title">{s.name}</span>
-              <span class="tpl-excerpt-body">{s.tagline}</span>
-            </a>
-            <div class="tpl-actions">
-              <a class="tpl-cta" href={href(`/plugins/codex-design/${s.slug}/`)}>View skill</a>
-            </div>
-          </article>
-        ))}
+    {/* The plugins. */}
+    <section class="dbband" aria-label={cc.collectionHeading}>
+      <div class="dbin">
+        <div class="codex-filter" role="tablist" aria-label={cc.collectionHeading}>
+          <button class="codex-chip is-on" data-filter="all" type="button">
+            {cc.filterAll} <span class="codex-chip-n">{CODEX_SKILLS.length}</span>
+          </button>
+          {c.categories.map((cat) => (
+            <button class="codex-chip" data-filter={cat.key} type="button">
+              {categoryLabel(cc, cat.key)}
+              <span class="codex-chip-n">{CODEX_SKILLS.filter((s) => s.category === cat.key).length}</span>
+            </button>
+          ))}
+        </div>
+        <div class="codex-skill-grid">
+          {CODEX_SKILLS.map((s) => (
+            <article class="tpl-card" data-cat={s.category}>
+              <a class="tpl-media" href={href(`/plugins/${s.slug}/`)}>
+                <img class="tpl-media-poster" src={s.image} alt="" loading="lazy" />
+                <span class="tpl-media-kind">{categoryLabel(cc, s.category)}</span>
+              </a>
+              <div class="tpl-meta">
+                <span class="tpl-author">{s.badge}</span>
+                <span>{cc.cardKind}</span>
+              </div>
+              <a class="tpl-excerpt" href={href(`/plugins/${s.slug}/`)}>
+                <span class="tpl-excerpt-head">{cc.cardWhatItDoes}</span>
+                <span class="tpl-excerpt-title">{skillCopy(cc, s.slug).name}</span>
+                <span class="tpl-excerpt-body">{skillCopy(cc, s.slug).tagline}</span>
+              </a>
+              <div class="tpl-actions">
+                <a class="tpl-cta" href={href(`/plugins/${s.slug}/`)}>{cc.cardCta}</a>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
 
-    <section class="codex-closer">
-      <div class="codex-closer-inner">
-        <h2>Skip the setup — design with Codex inside Open Design</h2>
-        <p>
-          Open Design is the open-source, agent-native design workspace that runs around Codex:
-          it keeps your systems, skills, and templates consistent so the agent ships work you own.
-          Bring your own key, own your output.
-        </p>
-        <div class="plugins-hero-cta">
-          <a class="btn btn-primary" href={href(OD_DOWNLOAD_URL)}>Download Open Design</a>
-          <a class="btn btn-ghost" href={href('/plugins/')}>Browse all plugins</a>
+    {/* Closing CTA: the client download. */}
+    <section class="dbband dbfinal">
+      <div class="dbin">
+        <p class="dbeye">{cc.finalEyebrow}</p>
+        <h2 class="dbfinal-h">{cc.collectionCloserHeading}</h2>
+        <p class="dbfinal-p">{cc.collectionCloserBody}</p>
+        <div class="dbcta-row">
+          <a class="dbbtn-p" href={href(OD_DOWNLOAD_URL)}>{cc.ctaDownload} ↗</a>
+          <a class="dbbtn-g" href={href('/plugins/')}>{cc.ctaBrowseAll}</a>
         </div>
       </div>
     </section>
   </div>
 
   <style>
-    /* Center in the shared safe area and neutralize the global
-       `section { padding: 130px 0 }` rule (rhythm comes from margins). */
-    .codex-page { max-width: 1180px; margin-inline: auto; }
-    .codex-page > section { padding-block: 0; }
+    /* Page-level additions on top of the shared band primitives. */
+    .dbdek-wide { max-width: 660px; }
 
-    .detail-crumb a { color: inherit; text-decoration: none; }
-    .detail-crumb a:hover { color: var(--ink); text-decoration: underline; }
-    .detail-crumb .crumb-sep { margin: 0 0.45em; opacity: 0.55; }
-
-    /* Hero — editorial two-column, framed illustration. */
-    .codex-hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-      gap: clamp(28px, 4vw, 64px);
-      align-items: center;
-      margin-bottom: clamp(48px, 6vw, 80px);
-    }
-    .codex-hero .plugins-eyebrow { margin-top: 6px; }
-    .codex-hero .display { margin: 0.05em 0 0.3em; text-wrap: balance; }
-    .codex-hero .lead { max-width: 46ch; }
-    .codex-hero .plugins-stats,
-    .codex-hero .plugins-hero-cta { justify-content: flex-start; }
-    .codex-textlink {
-      font-size: 0.9rem; color: var(--ink-mute); text-decoration: none;
-      align-self: center;
-    }
-    .codex-textlink:hover { color: var(--ink); text-decoration: underline; }
-    .codex-hero-art {
-      border: 1.5px solid var(--ink);
-      box-shadow: 8px 8px 0 var(--ink);
-      background: var(--paper-warm);
-      overflow: hidden;
-    }
-    .codex-hero-art img { width: 100%; height: auto; display: block; }
-
-    /* Why strip — editorial cards. */
-    .codex-why { margin-bottom: clamp(44px, 6vw, 72px); }
-    .codex-why-intro {
-      max-width: 64ch; font-size: 1.05rem; line-height: 1.6;
-      color: var(--ink-soft); margin: 0 0 1.8em;
-    }
-    .codex-cat-strip {
-      list-style: none; padding: 0; margin: 0;
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
-    }
-    .codex-cat-strip li {
-      border: 1.5px solid var(--ink);
-      background: var(--bone);
-      padding: 20px 22px;
-    }
-    .codex-cat-key {
-      display: block; font-family: var(--mono);
-      font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--ink); font-weight: 600; margin-bottom: 0.7em;
-    }
-    .codex-cat-blurb {
-      display: block; font-size: 0.92rem; line-height: 1.5; color: var(--ink-soft);
-    }
-
-    /* Skills grid — `.codex-skill-grid` (tpl-card DNA) is global in sub-pages.css. */
-    .codex-skills { margin-bottom: clamp(56px, 8vw, 96px); }
-
-    /* Closer. */
-    .codex-closer {
-      border-top: 1.5px solid var(--ink);
-      padding-top: clamp(36px, 5vw, 56px) !important;
-    }
-    .codex-closer-inner { max-width: 62ch; }
-    .codex-closer h2 { font-size: clamp(1.4rem, 2.6vw, 2rem); margin: 0 0 0.5em; text-wrap: balance; }
-    .codex-closer p { font-size: 1.02rem; line-height: 1.6; color: var(--ink-soft); margin: 0 0 1.5em; }
-    .codex-closer .plugins-hero-cta { justify-content: flex-start; }
-
-    @media (max-width: 900px) {
-      .codex-hero { grid-template-columns: 1fr; }
-      .codex-hero-art { order: -1; max-width: 480px; }
-      .codex-cat-strip { grid-template-columns: 1fr; }
-      .codex-skill-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 560px) {
-      .codex-skill-grid { grid-template-columns: 1fr; }
-    }
+    /* `.codex-skill-grid` (tpl-card DNA) is global in sub-pages.css. */
   </style>
+
+  <script is:inline>
+    (function () {
+      var bar = document.querySelector('.codex-filter');
+      if (!bar) return;
+      var cards = Array.prototype.slice.call(document.querySelectorAll('.tpl-card[data-cat]'));
+      bar.addEventListener('click', function (e) {
+        var btn = e.target.closest('.codex-chip');
+        if (!btn) return;
+        var f = btn.getAttribute('data-filter');
+        bar.querySelectorAll('.codex-chip').forEach(function (b) {
+          b.classList.toggle('is-on', b === btn);
+        });
+        cards.forEach(function (c) {
+          c.hidden = f !== 'all' && c.getAttribute('data-cat') !== f;
+        });
+      });
+    })();
+  </script>
 </Layout>
