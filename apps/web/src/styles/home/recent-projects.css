@@ -537,6 +537,19 @@
   background: var(--accent);
   color: var(--accent-contrast, #fff);
 }
+/* The global `button:hover:not(:disabled)` primitive (primitives.css) is
+   MORE specific than the bare `[aria-pressed="true"]` rule above (it adds a
+   type selector on top of the same two pseudo/attribute slots), so hovering
+   an already-selected card's check button let that generic rule win and
+   flatten the filled black-with-checkmark badge back to a hollow
+   light-background / gray-border circle. Re-assert the filled state at
+   matching specificity so "selected" stays solid on hover instead of
+   regressing to the unselected/outline look. */
+.recent-projects__select-check[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
 .recent-projects__select-check span {
   font-size: 14px;
   font-weight: 700;

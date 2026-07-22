@@ -25,7 +25,6 @@ import type {
   SocialShareResponse,
   WorkspaceCollabContext,
 } from '@open-design/contracts';
-import { workspaceProjectHeaders } from '../state/projects';
 import type {
   AgentInfo,
   AppVersionInfo,
@@ -79,6 +78,7 @@ import {
   openHostExternalUrl,
 } from '@open-design/host';
 import { coalescedGet } from '../lib/coalesced-get';
+import { workspaceProjectHeaders } from '../state/projects';
 
 export const DEFAULT_DEPLOY_PROVIDER_ID = 'vercel-self';
 export const CLOUDFLARE_PAGES_PROVIDER_ID = 'cloudflare-pages';
@@ -1431,6 +1431,10 @@ export async function publishProjectFilePublic(
   fileName: string,
   workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WebPublicProjectFileResponse> {
+  // Carry the active workspace identity so the daemon's `canShareProjectsForRequest`
+  // gate (apps/daemon/src/routes/collab-sync.ts) reads the real permission bit
+  // instead of falling back to a headerless context read — see
+  // workspaceProjectHeaders' call sites in state/projects.ts for the same pattern.
   const resp = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`,
     {
@@ -1458,11 +1462,10 @@ export async function fetchProjectFilePublicPublication(
   fileName: string,
   workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WebPublicProjectFileResponse | null> {
-  const url =
-    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`;
-  const resp = workspaceContext
-    ? await fetch(url, { headers: workspaceProjectHeaders(workspaceContext) })
-    : await fetch(url);
+  const resp = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`,
+    workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : undefined,
+  );
   if (!resp.ok) {
     const payload = (await resp.json().catch(() => null)) as
       | { error?: { message?: string } | string; message?: string }
@@ -1972,13 +1975,17 @@ export async function restoreProjectFileVersion(
   projectId: string,
   name: string,
   version: Pick<ProjectFileVersion, 'id'>,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<RestoreProjectFileVersionResponse | null> {
   try {
     const resp = await fetch(
       `${projectFileVersionsUrl(projectId, name)}/${encodeURIComponent(version.id)}/restore`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+        },
         body: JSON.stringify({}),
       },
     );
@@ -2322,11 +2329,15 @@ function looksLikeImage(name: string): boolean {
 export async function deleteProjectFile(
   projectId: string,
   name: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<boolean> {
   try {
     const resp = await fetch(
       projectRawUrl(projectId, name),
-      { method: 'DELETE' },
+      {
+        method: 'DELETE',
+        ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
+      },
     );
     return resp.ok;
   } catch {
@@ -2338,10 +2349,14 @@ export async function renameProjectFile(
   projectId: string,
   from: string,
   to: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<RenameProjectFileResponse> {
   const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files/rename`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+    },
     body: JSON.stringify({ from, to }),
   });
   if (!resp.ok) {

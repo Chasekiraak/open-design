@@ -686,7 +686,16 @@
   box-shadow: none;
   background: transparent;
 }
-.settings-page-shell .settings-chrome,
+/* recvq4iEq1Esno: this used to hide `.settings-chrome` itself — the whole
+   corner strip, autosave "Saved" pill included — because the close/fullscreen
+   buttons inside it don't belong on a full page (there's a "返回首页" link
+   instead). That blanket rule took the save confirmation down with them: a
+   media-provider edit (or any settings change) on the full-page presentation
+   saved silently, with nothing telling the user it had. Target the buttons
+   specifically (`.settings-chrome-btn` covers both `.settings-close` and
+   `.settings-fullscreen-toggle`) and leave the sibling `.settings-autosave`
+   pill visible in both presentations. */
+.settings-page-shell .settings-chrome-btn,
 .settings-page-shell .settings-sidebar-toggle {
   display: none;
 }

@@ -190,6 +190,34 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     });
   });
 
+  // recvq5eKj2kdF0: Home's own project fetch (recent/drafts, capped) replaces
+  // the `projects` prop wholesale on every reload — App.tsx's
+  // reconcileFetchedProjects does not preserve entries for projects that are
+  // only open in a background tab. `displayTabFor` looked the tab's project up
+  // in that same list and fell back to the untitled label the instant the
+  // project dropped out, even though it plainly has a real name — switching to
+  // Home and back made an already-named tab regress to "Untitled".
+  it('keeps a project tab\'s real name after Home reloads a projects list that no longer includes it', async () => {
+    const { rerender } = render(
+      <WorkspaceTabsBar route={{ ...projectRoute }} projects={[project]} />,
+    );
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
+    });
+
+    // Switch to Home; Home's own fetch (simulated here by an empty list) does
+    // not include project-alpha at all.
+    rerender(<WorkspaceTabsBar route={{ kind: 'home', view: 'home' }} projects={[]} />);
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
+      expect(labels.some((label) => label.includes('Untitled'))).toBe(false);
+    });
+  });
+
   it('auto-closes the Welcome tab once onboarding completes, even when a project opens', async () => {
     const { rerender } = render(
       <WorkspaceTabsBar

@@ -2322,6 +2322,12 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url === '/api/workspace/billing') {
+        return new Response(JSON.stringify({ summary: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       attempt += 1;
       return new Response(
         JSON.stringify(
@@ -3637,6 +3643,94 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/integrations/vela/wallet', {
       cache: 'no-store',
     });
+  });
+
+  // recvpZPzGJL7o7: "cli 页面的余额数据取的还是 personal 空间的余额". The local-CLI
+  // card read ONLY vela's account-scoped balance (`account.balanceUsd`, then
+  // the `/api/integrations/vela/wallet` snapshot) — the same account-scoped
+  // projection `resolvePlanTier` already exists to override for the plan badge
+  // on this exact card. `useWorkspaceBilling` (the same source EntryNavRail's
+  // credits chip reads) must win once it has loaded.
+  it('prefers the workspace billing balance over the account-scoped wallet snapshot', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/workspace/context') {
+        return new Response(
+          JSON.stringify({
+            context: {
+              workspaceType: 'team',
+              role: 'member',
+              permissions: { canViewWorkspaceSettings: false },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/workspace/billing') {
+        return new Response(
+          JSON.stringify({
+            summary: {
+              workspaceId: 'ws-team',
+              membershipTier: 'team',
+              totalAvailableCredits: 21.01,
+              subscriptionCredits: 21.01,
+              rechargeCredits: 0,
+              balanceUsd: '21.01',
+              subscriptionStatus: 'active',
+              availableActions: [],
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'feature-test',
+            user: { id: 'user-1', email: 'signed-in@example.com', name: 'Signed In User' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/wallet' || url === '/api/integrations/vela/wallet?refresh=1') {
+        // The member's own PERSONAL wallet — deliberately a different number
+        // from the team's billing summary above, so a pass proves the card
+        // read the workspace-scoped source, not this account-scoped one.
+        return new Response(
+          JSON.stringify({
+            status: 'available',
+            profile: 'feature-test',
+            user: { id: 'user-1', email: 'signed-in@example.com' },
+            balanceUsd: '138.63',
+            updatedAt: '2026-07-21T08:00:00.000Z',
+            fetchedAt: '2026-07-21T08:00:01.000Z',
+            stale: false,
+            source: 'vela_api',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    expect(await screen.findByText('$21.01')).toBeTruthy();
+    expect(screen.queryByText('$138.63')).toBeNull();
   });
 
   it('renders env-backed AMR login inside Settings without fabricating account details', async () => {

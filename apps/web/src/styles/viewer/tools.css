@@ -57,10 +57,16 @@
 
 .produced-files {
   margin-top: 6px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 0;
+  /* Give this list the same card chrome as its message-stream neighbors
+     (.plugin-action-panel above, the .next-step-actions module card) —
+     border + radius + panel background — instead of rendering borderless
+     directly against the message bubble. Without it the list read as
+     loose text floating in the conversation rather than a distinct block. */
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
 }
 .produced-files-label {
   font-size: 12px;
@@ -635,6 +641,13 @@
 .present-menu button {
   background: transparent;
   border: none;
+  /* Override the global `button { height: 36px; white-space: nowrap; }`
+     reset (primitives.css) — this menu's first item pairs a label with a
+     wrapped `.present-menu-copy small` hint (deck files only), and the
+     fixed single-line height clipped/overflowed that second line. `auto`
+     lets the row grow to fit the wrapped copy; the plain items (全屏 /
+     新标签页) stay compact since their own padding is the only floor. */
+  height: auto;
   padding: 8px 10px;
   font-size: 12px;
   text-align: left;
@@ -662,6 +675,13 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  /* The button's own global reset sets `white-space: nowrap` (inherited by
+     both the label span and the `small` hint below). At the menu's 168px
+     min-width that kept the deck hint ("演讲者备注会在弹窗中打开") on one
+     unbroken line wide enough to overflow past the menu's right edge, which
+     read as the sentence being cut off mid-way with no ellipsis. Let this
+     column wrap normally so the hint reflows onto a second line instead. */
+  white-space: normal;
 }
 .present-menu-copy small {
   color: var(--text-muted);

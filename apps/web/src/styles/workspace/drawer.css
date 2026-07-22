@@ -1419,6 +1419,14 @@
   position: sticky;
   top: 0;
   z-index: 4;
+  /* This row carries both the file tabs (设计文件/RECO.../…) and the
+     right-aligned 分享/历史版本/演示 action cluster (the former standalone
+     chrome header was merged into it, see .ws-tabs-actions above), but had
+     no edge of its own — it read as fused into the preview content
+     scrolling directly beneath it. Same hairline other sticky toolbar rows
+     in this file use (.page-creator-head, .ds-card-thumb) to read as a
+     distinct strip instead of bleeding into the canvas. */
+  border-bottom: 1px solid var(--border);
 }
 .ws-tabs-shell:has(.entry-settings-menu__popover) {
   z-index: 1900;

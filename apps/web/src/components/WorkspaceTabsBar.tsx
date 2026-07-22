@@ -476,6 +476,18 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
   const dragHapticTargetRef = useRef<string | null>(null);
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<TabDragTarget | null>(null);
+  // recvq5eKj2kdF0: `projects` is the Home view's own fetch (recent/drafts,
+  // capped) — navigating Home refetches and REPLACES it (App.tsx's
+  // reconcileFetchedProjects), which drops any project that is open in a
+  // background tab but falls outside that scope. `displayTabFor` then found
+  // no entry for the tab's projectId and fell back to the untitled label,
+  // even though the project genuinely has a name — the tab just "forgot" it
+  // the moment Home reloaded. This ref remembers the last real name seen for
+  // each project id so a tab never regresses to untitled once it has shown a
+  // real one; it is intentionally a ref (not state) because it must not
+  // itself trigger a render — the incoming `projects`/`state.tabs` change
+  // that recomputes `displayTabs` already will.
+  const knownProjectNamesRef = useRef<Map<string, string>>(new Map());
 
   // Liquid-glass glide indicator: one persistent pill that slides to the
   // active tab (see useGlideIndicator + .workspace-tabs-glide in routines.css).
@@ -584,8 +596,16 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
     [projects],
   );
 
+  // Refresh the fallback cache from whatever this fetch actually returned,
+  // before `displayTabFor` below reads it — same render pass, so a tab
+  // reading a name for the first time never has to wait a tick for it.
+  for (const project of projects) {
+    const name = project.name?.trim();
+    if (name) knownProjectNamesRef.current.set(project.id, name);
+  }
+
   const displayTabs = useMemo(
-    () => state.tabs.map((tab) => displayTabFor(tab, projectById, t)),
+    () => state.tabs.map((tab) => displayTabFor(tab, projectById, t, knownProjectNamesRef.current)),
     [state.tabs, projectById, t],
   );
   const displayTabById = useMemo(
@@ -1164,7 +1184,8 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
           />
         </div>
         {state.tabs.map((tab) => {
-          const display = displayTabById.get(tab.id) ?? displayTabFor(tab, projectById, t);
+          const display =
+            displayTabById.get(tab.id) ?? displayTabFor(tab, projectById, t, knownProjectNamesRef.current);
           const active = tab.id === state.activeTabId;
           // The single entry tab is permanent and pinned leftmost: it cannot be
           // closed or dragged out of the first slot, whatever section it shows.
@@ -1423,12 +1444,19 @@ function displayTabFor(
   tab: WorkspaceChromeTab,
   projectById: Map<string, Project>,
   t: ReturnType<typeof useT>,
+  knownProjectNames?: Map<string, string>,
 ): DisplayTab {
   if (tab.kind === 'project') {
     const project = projectById.get(tab.projectId);
+    // recvq5eKj2kdF0: `projectById` only covers this render's fetched list
+    // (Home's fetch is capped/scoped and does not include every open tab's
+    // project) — fall back to the last real name this tab showed before
+    // falling back further to the untitled label, so a tab with a real name
+    // never regresses to "untitled" just because Home reloaded.
+    const title = project?.name?.trim() || knownProjectNames?.get(tab.projectId) || t('common.untitled');
     return {
       id: tab.id,
-      title: project?.name?.trim() || t('common.untitled'),
+      title,
       meta: t('workspaceTabs.project'),
       icon: 'folder',
       tab,

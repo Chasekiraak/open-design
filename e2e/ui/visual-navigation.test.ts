@@ -105,7 +105,7 @@ test('[P2] captures the plugins page surface', async ({ page }) => {
   const plugins = page.getByTestId('entry-view-plugins');
   // #5517 renamed the surface: the view renders `entry.navExtensions`.
   await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
-  await expect(plugins.getByTestId('plugins-tab-installed')).toBeVisible();
+  await plugins.getByTestId('plugins-tab-installed').click();
   await expect(plugins.getByText('Prototype Starter').first()).toBeVisible();
   await waitForVisualFonts(page);
 
