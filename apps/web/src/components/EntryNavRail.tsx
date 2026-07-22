@@ -39,7 +39,6 @@ import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useG
 import { PlanWordmark, planBadgeTierForLabel } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
-import { CreditsPanel } from './CreditsPanel';
 import { useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import {
@@ -232,10 +231,8 @@ export function EntryNavRail({
 
   const isTeam = Boolean(context) && context!.workspaceType === 'team';
   const permissions = context?.permissions;
-  // Demo `canManageWorkspace` → real `canManageMembers`; demo `canOwnWorkspace` →
-  // real owner-level view of workspace settings. Never re-derive from role — the
-  // permission bits already fold role + lifecycle in.
-  const canManageMembers = Boolean(permissions?.canManageMembers);
+  // Demo `canOwnWorkspace` → real owner-level view of workspace settings. Never
+  // re-derive from role — the permission bits already fold role + lifecycle in.
   const canViewWorkspaceSettings = Boolean(permissions?.canViewWorkspaceSettings);
   const canInviteMembers = Boolean(permissions?.canInviteMembers);
   const workspaceSettingsUrl = context?.workspaceSettingsUrl?.trim() || null;
@@ -353,10 +350,14 @@ export function EntryNavRail({
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [creditsOpen, setCreditsOpen] = useState(false);
   const billingUpgradeUrl =
     context?.billingRecovery?.recoveryUrl?.trim() ||
     (workspaceSettingsUrl ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade') : null);
+  // #62: the 积分 row links straight OUT to B's wallet page (usage detail lives
+  // there) — no intermediate credits popover in the client, matching #5517.
+  const billingWalletUrl = workspaceSettingsUrl
+    ? teamConsoleUrl(workspaceSettingsUrl, 'billing')
+    : null;
   // Product decision: plan selection / payment lives in Vela Web. The local
   // client opens that billing surface, then refreshes billing + context when
   // focus returns so direct web upgrades sync plan, credits, seats and gates.
@@ -432,7 +433,6 @@ export function EntryNavRail({
 
   function openBillingUpgrade() {
     if (!billingUpgradeUrl) return;
-    setCreditsOpen(false);
     window.open(billingUpgradeUrl, '_blank', 'noopener,noreferrer');
     window.setTimeout(() => {
       notifyWorkspaceBillingRefresh();
@@ -493,21 +493,6 @@ export function EntryNavRail({
                   live in the account menu's billing card. */}
               {planTier ? <PlanWordmark tier={planTier} height={17} /> : <Icon name="chevron-down" size={14} />}
             </button>
-            <CreditsPanel
-              open={creditsOpen}
-              onClose={() => setCreditsOpen(false)}
-              info={{
-                planName: tierLabel,
-                tierLabel,
-                showUpgrade: canUpgrade,
-                balance: creditsBalance,
-                grantTip: t('entry.creditsGrantTip'),
-              }}
-              onUpgrade={() => {
-                openBillingUpgrade();
-              }}
-              memberCreditNotice={isTeam && !canManageMembers}
-            />
             {accountOpen ? (
               <>
                 {/* No backdrop here (unlike the team menu): hover-open relies
@@ -524,7 +509,7 @@ export function EntryNavRail({
                   {/* #5517 billing card: plan (+badge) + 升级 CTA + credits and
                       bonus rows. Credits are real billing data; the bonus row
                       mirrors #5517's static 0 (vela reports one combined
-                      total). The credits row opens the full CreditsPanel. */}
+                      total). The credits row links out to B's wallet page. */}
                   {billing ? (
                     <div className="entry-nav-rail__menu-credits">
                       <div className="entry-nav-rail__menu-credits-head">
@@ -545,17 +530,23 @@ export function EntryNavRail({
                           </button>
                         ) : null}
                       </div>
-                      {/* #5517 rows: 积分 (opens the credits panel) + 附加积分.
-                          Both are real B numbers — the wallet arrives split
-                          into a subscription-grant bucket and a top-up bucket,
-                          and 积分 is their total, so 附加积分 is the part of
-                          that total which did not come from the plan. */}
+                      {/* #5517 rows: 积分 + 附加积分. Both are real B numbers —
+                          the wallet arrives split into a subscription-grant
+                          bucket and a top-up bucket, and 积分 is their total,
+                          so 附加积分 is the part of that total which did not
+                          come from the plan.
+                          #62 (product ruling): clicking 积分 jumps straight to
+                          B's web wallet page for the usage detail — there is
+                          NO intermediate credits popover in the client. */}
                       <button
                         type="button"
                         className="entry-nav-rail__menu-credits-row"
+                        data-testid="entry-nav-credits-row"
                         onClick={() => {
                           setAccountOpen(false);
-                          setCreditsOpen(true);
+                          if (billingWalletUrl) {
+                            window.open(billingWalletUrl, '_blank', 'noopener,noreferrer');
+                          }
                         }}
                       >
                         <span className="entry-nav-rail__menu-credits-label">

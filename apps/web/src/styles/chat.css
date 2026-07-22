@@ -2325,11 +2325,15 @@
 
 .chat-queued-send-chips {
   display: flex;
-  flex-wrap: nowrap;
+  /* #90: wrap instead of clip. With nowrap + overflow:hidden the container
+     hard-cut the last visible chip mid-word ("1 workspace cont…") and the
+     crowded single line read as colliding with the row's action buttons.
+     Wrapping keeps every chip legible; each chip still ellipsizes its own
+     long label via max-width below. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 3px;
   min-width: 0;
-  overflow: hidden;
 }
 
 .chat-queued-send-chip {

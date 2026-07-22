@@ -126,6 +126,34 @@ describe('account menu billing card — plan label (#146)', () => {
   });
 });
 
+describe('account menu billing card — 积分 row opens the web wallet (#62)', () => {
+  // Product ruling: clicking 积分 must jump straight to B's wallet page for the
+  // usage detail — there is NO intermediate credits popover in the client
+  // (the reference #5517 has no such panel either).
+  it('opens the wallet console URL in a new tab instead of an in-client panel', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderRail({
+      context: context({
+        workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-new',
+      } as Partial<WorkspaceCollabContext>),
+      billing: billing({ totalAvailableCredits: 100_000 }),
+    });
+
+    const card = billingCard();
+    fireEvent.click(card.getByTestId('entry-nav-credits-row'));
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    const [url, target] = openSpy.mock.calls[0]!;
+    // teamConsoleUrl(base, 'billing') → the console's /wallet page, keeping the
+    // ?workspaceId deep-link param.
+    expect(String(url)).toContain('/console/wallet');
+    expect(String(url)).toContain('workspaceId=ws-new');
+    expect(target).toBe('_blank');
+    // No intermediate panel appears.
+    expect(document.querySelector('.credits-panel')).toBeNull();
+  });
+});
+
 describe('account menu billing card — 附加积分 (#112)', () => {
   it('shows B’s real top-up bucket instead of a hardcoded 0', () => {
     renderRail({
