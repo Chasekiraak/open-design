@@ -487,6 +487,11 @@
   text-align: left;
   cursor: pointer;
   z-index: 2;
+  /* A mousedown→mouseup gesture that selects the label text (any hair of
+     drag, e.g. a real click made while screen-recording) makes the browser
+     suppress the click event entirely — this card would then silently never
+     call begin(), with no spinner, no browser tab, and no visible error. */
+  user-select: none;
   transition: border-color 120ms, background 120ms, transform 120ms;
 }
 .entry-local-mode-tip:hover,
