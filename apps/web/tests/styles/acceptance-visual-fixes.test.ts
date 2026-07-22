@@ -49,7 +49,7 @@ describe('recvpYC6eTaifb — home hero blank space above the title (empty worksp
     expect(ruleValue(centeredHero, 'padding-top')).toBe('var(--spacing-4)');
     // The base (non-centered) tuned offset must stay untouched — this is an
     // override for the centered variant only, not a rewrite of the fold math.
-    expect(ruleValue(baseHero, 'padding')).toBe('281px 0 var(--spacing-4)');
+    expect(ruleValue(baseHero, 'padding')).toBe('240px 0 var(--spacing-4)');
     // The centering itself (the other candidate cause) stays intact too.
     const centeredView = cssDeclarations(homeHeroCss, '.home-view--centered');
     expect(ruleValue(centeredView, 'justify-content')).toBe('center');

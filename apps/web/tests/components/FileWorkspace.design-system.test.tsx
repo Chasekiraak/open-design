@@ -549,7 +549,7 @@ describe('FileWorkspace design-system project surface', () => {
       'brand.json',
       expect.not.stringContaining('imagery/hero.png'),
     ));
-    expect(registryMocks.deleteProjectFile).toHaveBeenCalledWith('ds-acme', 'imagery/hero.png');
+    expect(registryMocks.deleteProjectFile).toHaveBeenCalledWith('ds-acme', 'imagery/hero.png', null);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/brands/brand-acme/finalize',
       expect.objectContaining({
