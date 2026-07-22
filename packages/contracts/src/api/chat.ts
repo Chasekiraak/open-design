@@ -419,6 +419,7 @@ export type NativeSessionRecoveryReason =
   | 'cwd_changed'
   | 'conversation_advanced'
   | 'missing_cursor'
+  | 'context_budget'
   | 'resume_failed'
   | 'unsupported'
   | 'none';
@@ -637,6 +638,8 @@ export type PersistedAgentEvent =
   | {
       kind: 'usage';
       inputTokens?: number;
+      /** Cache-inclusive provider input used for session rollover decisions. */
+      inputTokensEffective?: number;
       outputTokens?: number;
       costUsd?: number;
       durationMs?: number;
