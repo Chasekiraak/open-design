@@ -9,6 +9,7 @@ import {
   executionModeToTracking,
   settingsSectionToTracking,
 } from '@open-design/contracts/analytics';
+import { byokErrorCode } from '../analytics/byok-error-code';
 import { useAnalytics } from '../analytics/provider';
 import {
   amrHandoffDeviceId,
@@ -1217,7 +1218,8 @@ function sameAgentModelChoice(
   right: AgentModelChoice | undefined,
 ): boolean {
   return (left?.model ?? null) === (right?.model ?? null)
-    && (left?.reasoning ?? null) === (right?.reasoning ?? null);
+    && (left?.reasoning ?? null) === (right?.reasoning ?? null)
+    && (left?.serviceTier ?? null) === (right?.serviceTier ?? null);
 }
 
 export function reconcileAmrProfileEnv(
@@ -2514,7 +2516,7 @@ export function SettingsDialog({
           area: 'execution_model',
           provider_id: byokProviderId,
           result: byokTrackingTestResult(result),
-          ...(result.ok ? {} : { error_code: result.kind || 'UNKNOWN' }),
+          ...(result.ok ? {} : { error_code: byokErrorCode(result) }),
           ...(result.ok ? {} : { error_kind: result.kind || 'UNKNOWN' }),
           field_missing: 'none',
           config_key_changed: configKeyChanged,
@@ -3766,9 +3768,18 @@ export function SettingsDialog({
         </div>
       );
     }
-    if (!hasModels && !hasReasoning) return null;
     const choice = cfg.agentModels?.[selected.id] ?? {};
     const effectiveChoice = effectiveAgentModelChoice(selected, choice) ?? choice;
+    const configuredModel =
+      typeof effectiveChoice.model === 'string' && effectiveChoice.model
+        ? effectiveChoice.model
+        : null;
+    const effectiveModelId = configuredModel ?? defaultAgentModelId(selected) ?? '';
+    const currentModelOption =
+      selected.models?.find((m) => m.id === effectiveModelId) ?? null;
+    const serviceTierOptions = currentModelOption?.serviceTierOptions ?? [];
+    const hasServiceTiers = serviceTierOptions.length > 0;
+    if (!hasModels && !hasReasoning && !hasServiceTiers) return null;
     const modelsForSelect =
       selected.id === 'amr' && selected.models
         ? orderModelOptionsByAvailability(selected.models)
@@ -3781,16 +3792,12 @@ export function SettingsDialog({
     // a live catalog). Undefined === allow, matching today's UX.
     const allowCustomModel = selected.supportsCustomModel !== false;
     const explicitCustomMode = agentCustomModelIds.has(selected.id);
-    const configuredModel =
-      typeof effectiveChoice.model === 'string' && effectiveChoice.model
-        ? effectiveChoice.model
-        : null;
     const customModelDraft =
       explicitCustomMode && typeof choice.model === 'string'
         ? choice.model
         : null;
     const setChoice = (
-      next: { model?: string; reasoning?: string },
+      next: { model?: string; reasoning?: string; serviceTier?: string },
     ) => {
       setCfg((c) => {
         const prev = c.agentModels?.[selected.id] ?? {};
@@ -3814,6 +3821,11 @@ export function SettingsDialog({
       effectiveChoice.reasoning ??
       choice.reasoning ??
       selected.reasoningOptions?.[0]?.id ?? '';
+    const serviceTierValue = serviceTierOptions.some(
+      (tier) => tier.id === choice.serviceTier,
+    )
+      ? choice.serviceTier!
+      : 'default';
     const customActive =
       allowCustomModel &&
       hasModels &&
@@ -3868,7 +3880,7 @@ export function SettingsDialog({
                         next.add(selected.id);
                         return next;
                       });
-                      setChoice({ model: '' });
+                      setChoice({ model: '', serviceTier: undefined });
                     } else {
                       setAgentCustomModelIds((prev) => {
                         if (!prev.has(selected.id)) return prev;
@@ -3876,7 +3888,7 @@ export function SettingsDialog({
                         next.delete(selected.id);
                         return next;
                       });
-                      setChoice({ model: nextValue });
+                      setChoice({ model: nextValue, serviceTier: undefined });
                     }
                   }}
                   additionalOptions={
@@ -3926,7 +3938,7 @@ export function SettingsDialog({
               value={modelValue}
               placeholder={t('settings.modelCustomPlaceholder')}
               onChange={(e) =>
-                setChoice({ model: e.target.value.trim() })
+                setChoice({ model: e.target.value.trim(), serviceTier: undefined })
               }
             />
           </label>
@@ -3946,6 +3958,36 @@ export function SettingsDialog({
                 {selected.reasoningOptions!.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.label}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron-down"
+                size={12}
+                className="agent-model-select-chevron"
+              />
+            </div>
+          </label>
+        ) : null}
+        {hasServiceTiers ? (
+          <label className="field">
+            <span className="field-label">
+              {t('settings.serviceTierPicker')}
+            </span>
+            <div className="agent-model-select-wrap">
+              <select
+                value={serviceTierValue}
+                onChange={(e) =>
+                  setChoice({
+                    serviceTier:
+                      e.target.value === 'default' ? undefined : e.target.value,
+                  })
+                }
+              >
+                <option value="default">{t('common.default')}</option>
+                {serviceTierOptions.map((tier) => (
+                  <option key={tier.id} value={tier.id}>
+                    {tier.label}
                   </option>
                 ))}
               </select>

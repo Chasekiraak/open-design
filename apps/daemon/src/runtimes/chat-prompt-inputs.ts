@@ -2,6 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  describeChangedStableSections,
+  type StableChangedSection,
+  type StableSectionHashes,
+} from '../prompts/stable-sections.js';
+import {
   renderCodexImagegenOverride,
   resolveCodexImagegenModelId,
   shouldRenderCodexImagegenOverride,
@@ -390,20 +395,26 @@ export function describeStablePromptCache({
   isResuming,
   storedStablePromptHash,
   currentStableHash,
+  storedStableSections,
+  currentStableSections,
 }: {
   isResuming: boolean;
   storedStablePromptHash: string | null;
   currentStableHash: string;
+  storedStableSections?: StableSectionHashes | null;
+  currentStableSections?: StableSectionHashes | null;
 }): {
   stablePromptHash: string;
   hit: boolean;
   missReason: StablePromptCacheMissReason;
+  changedSections: StableChangedSection[] | null;
 } {
   if (!isResuming) {
     return {
       stablePromptHash: currentStableHash,
       hit: false,
       missReason: 'new-session',
+      changedSections: null,
     };
   }
   if (storedStablePromptHash === currentStableHash) {
@@ -411,14 +422,19 @@ export function describeStablePromptCache({
       stablePromptHash: currentStableHash,
       hit: true,
       missReason: null,
+      changedSections: null,
     };
   }
+  const missReason: StablePromptCacheMissReason = storedStablePromptHash === null
+    ? 'missing-stored-hash'
+    : 'stable-prompt-changed';
   return {
     stablePromptHash: currentStableHash,
     hit: false,
-    missReason: storedStablePromptHash === null
-      ? 'missing-stored-hash'
-      : 'stable-prompt-changed',
+    missReason,
+    changedSections: missReason === 'stable-prompt-changed' && currentStableSections
+      ? describeChangedStableSections(storedStableSections, currentStableSections)
+      : null,
   };
 }
 

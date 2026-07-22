@@ -26,6 +26,7 @@ import {
   parseDaemonLogTail,
   reportStartupFailure,
   resolveStartupDistinctId,
+  readErrnoFields,
   scrubUserPaths,
 } from '../src/startup-telemetry.js';
 
@@ -481,5 +482,154 @@ describe('reportStartupFailure', () => {
     const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> }).properties;
     expect(props.native_module_present).toBe(false);
     expect(props.native_module_size).toBeNull();
+  });
+});
+
+describe('startup-failure attribution', () => {
+  const NON_ERR_CODE_LOG = `[open-design daemon] starting namespace=release-stable-win
+SqliteError: database disk image is malformed
+    at Database.prepare (node:sqlite:214:9)
+[open-design packaged] exited app=daemon pid=8123 code=1 signal=none`;
+
+  it('names the daemon crash when the log tail carries no ERR_ code', () => {
+    const parsed = parseDaemonLogTail(NON_ERR_CODE_LOG);
+    expect(parsed.errorCode).toBeUndefined();
+    expect(parsed.daemonError).toBe('SqliteError: database disk image is malformed');
+  });
+
+  it('still prefers the ERR_ code when the log has one', () => {
+    expect(parseDaemonLogTail(ISSUE_4638_LOG).errorCode).toBe('ERR_MODULE_NOT_FOUND');
+  });
+
+  it('classifies a Windows spawn failure instead of burying it in unknown', () => {
+    expect(classifyStartupFailure(new Error('spawn UNKNOWN'), false).failureKind).toBe(
+      'spawn-failed',
+    );
+  });
+
+  it('sends the Node errno triplet off the error object', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    const spawnError = Object.assign(new Error('spawn UNKNOWN'), {
+      code: 'UNKNOWN',
+      errno: -4094,
+      syscall: 'spawn',
+    });
+    await reportStartupFailure(
+      {
+        error: spawnError,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable-win',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.sys_code).toBe('UNKNOWN');
+    expect(props.sys_errno).toBe(-4094);
+    expect(props.sys_syscall).toBe('spawn');
+    expect(props.failure_kind).toBe('spawn-failed');
+  });
+
+  it('never reports a null error_message for an Error that carries none', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    const empty = new Error('');
+    delete (empty as { stack?: string }).stack;
+    await reportStartupFailure(
+      {
+        error: empty,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable-win',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.error_message).not.toBeNull();
+    expect(String(props.error_message)).toContain('Error');
+  });
+
+  it('surfaces the parsed daemon error on the emitted event', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    await reportStartupFailure(
+      {
+        error: new Error(DAEMON_EXIT_MESSAGE),
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable',
+        source: 'packaged',
+      },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        readLogTail: async () => NON_ERR_CODE_LOG,
+      },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.daemon_error).toBe('SqliteError: database disk image is malformed');
+  });
+});
+
+describe('errno triplet privacy', () => {
+  it('reduces a path-bearing POSIX syscall to the operation token', () => {
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      code: 'ENOENT',
+      errno: -2,
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    expect(readErrnoFields(err).syscall).toBe('spawn');
+  });
+
+  it('reduces a path-bearing Windows syscall to the operation token', () => {
+    const err = Object.assign(new Error('spawn UNKNOWN'), {
+      syscall: 'spawn C:\\Users\\Alice Smith\\AppData\\Open Design\\vela.exe',
+    });
+    expect(readErrnoFields(err).syscall).toBe('spawn');
+  });
+
+  it('emits no username anywhere in the payload for a path-bearing spawn failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      code: 'ENOENT',
+      errno: -2,
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    await reportStartupFailure(
+      {
+        error: err,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(init.body as string).not.toContain('alice');
+  });
+
+  it('classifies a spawn failure whose syscall carries a path', () => {
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    expect(classifyStartupFailure(err, false).failureKind).toBe('spawn-failed');
   });
 });

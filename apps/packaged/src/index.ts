@@ -43,6 +43,7 @@ import {
   type PackagedDesktopLogger,
 } from "./logging.js";
 import { resolvePackagedNamespacePaths } from "./paths.js";
+import { createObsoleteInstalledOuterRetirement } from "./obsolete-installed-outer.js";
 import { launchPackagedPayloadDesktop } from "./payload-desktop-launch.js";
 import { packagedEntryUrl, registerOdProtocol } from "./protocol.js";
 import { startPackagedSidecars } from "./sidecars.js";
@@ -174,6 +175,15 @@ async function main(): Promise<void> {
   });
   packagedLogger = createPackagedDesktopLogger(paths);
   attachPackagedDesktopProcessLogging({ logger: packagedLogger, paths, stamp });
+  const retireObsoleteInstalledOuter = createObsoleteInstalledOuterRetirement({
+    currentExecutablePath: process.execPath,
+    currentPid: process.pid,
+    installedLaunchPath: launcherRuntime.installedLaunchPath,
+    logger: packagedLogger,
+    payloadDesktopProcess: launcherRuntime.payloadDesktopProcess,
+    payloadExecutablePath: launcherRuntime.desktopExecutablePath,
+    platform: process.platform,
+  });
   applyPackagedElectronPathOverrides(paths);
   applyPackagedUpdaterEnv(activeConfig.updateMetadataUrl);
   if (!claimPackagedSingleInstanceLock(app, () => {
@@ -259,9 +269,13 @@ async function main(): Promise<void> {
     splashStartedAt: splash.startedAt,
     async beforeShutdown() {
       try {
-        await sidecars.close();
+        await retireObsoleteInstalledOuter();
       } finally {
-        await identity.close();
+        try {
+          await sidecars.close();
+        } finally {
+          await identity.close();
+        }
       }
     },
     async discoverWebUrl() {
@@ -275,6 +289,9 @@ async function main(): Promise<void> {
       return sidecars.daemon.url;
     },
     windowTitle: resolvePackagedWindowTitle(activeConfig),
+    async onExternalShow() {
+      await retireObsoleteInstalledOuter();
+    },
     onDesktopReady(controls) {
       void confirmPackagedLauncherRuntime(launcherRuntime).catch((error: unknown) => {
         packagedLogger?.warn("failed to confirm packaged launcher runtime", { error });

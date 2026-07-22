@@ -20,6 +20,8 @@ export interface AgentModelOption {
   outputPriceUsdPerMillion?: number;
   /** Provider/catalog-owned model picker metadata. */
   metadata?: ModelMetadata;
+  /** Optional service tiers supported by this model, e.g. GPT-5.5 Fast. */
+  serviceTierOptions?: AgentModelOption[];
 }
 
 /**

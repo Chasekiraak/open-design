@@ -96,6 +96,7 @@ export type StartupFailureKind =
   | "web-start"
   | "path-access"
   | "status-timeout"
+  | "spawn-failed"
   | "unknown";
 
 export interface StartupFailureClassification {
@@ -118,6 +119,8 @@ const EXIT_RE =
 // child. There is no daemon log path in this message, so no log tail is read.
 const STATUS_TIMEOUT_RE = /^timed out waiting for sidecar status at /;
 
+const SPAWN_RE = /^spawn\b/;
+
 export function classifyStartupFailure(
   error: unknown,
   isPathAccess: boolean,
@@ -133,6 +136,9 @@ export function classifyStartupFailure(
     // it is the signal for whether the win32 budget raise drained these.
     if (STATUS_TIMEOUT_RE.test(message)) {
       return { failureKind: "status-timeout", exitCode: null, signal: null, logPath: null };
+    }
+    if (readErrnoFields(error).syscall === "spawn" || SPAWN_RE.test(message)) {
+      return { failureKind: "spawn-failed", exitCode: null, signal: null, logPath: null };
     }
     return { failureKind: "unknown", exitCode: null, signal: null, logPath: null };
   }
@@ -153,19 +159,52 @@ export function classifyStartupFailure(
   return { failureKind, exitCode, signal, logPath };
 }
 
+const DAEMON_ERROR_LINE_RE =
+  /^(?:\s*(?:Uncaught|Unhandled)\s+)?[A-Za-z_$][\w$]*(?:Error|Exception)(?:\s*\[[^\]]+\])?\s*:\s*.+$/;
+
 // Pull the real error code + missing module out of a sidecar log tail. Pure
 // function so it can be fed the #4638 log text verbatim in tests.
 export function parseDaemonLogTail(logText: string): {
   errorCode?: string;
   missingModule?: string;
+  daemonError?: string;
 } {
-  const out: { errorCode?: string; missingModule?: string } = {};
+  const out: { errorCode?: string; missingModule?: string; daemonError?: string } = {};
   const errMatch = /\bERR_[A-Z0-9_]+/.exec(logText);
   if (errMatch) out.errorCode = errMatch[0];
   const modMatch =
     /Cannot find package '([^']+)'|Cannot find module '([^']+)'/.exec(logText);
   if (modMatch) out.missingModule = modMatch[1] ?? modMatch[2];
+  for (const line of logText.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (DAEMON_ERROR_LINE_RE.test(trimmed)) out.daemonError = trimmed;
+  }
   return out;
+}
+
+function normalizeSyscall(syscall: string): string | null {
+  const token = syscall.trim().split(/\s+/, 1)[0] ?? "";
+  if (!token) return null;
+  return scrubUserPaths(token).slice(0, 40);
+}
+
+export function readErrnoFields(error: unknown): {
+  code: string | null;
+  errno: number | null;
+  syscall: string | null;
+} {
+  if (error == null || typeof error !== "object") {
+    return { code: null, errno: null, syscall: null };
+  }
+  const e = error as NodeJS.ErrnoException;
+  return {
+    code: typeof e.code === "string" && e.code.length > 0 ? e.code.slice(0, 40) : null,
+    errno: typeof e.errno === "number" ? e.errno : null,
+    syscall:
+      typeof e.syscall === "string" && e.syscall.length > 0
+        ? normalizeSyscall(e.syscall)
+        : null,
+  };
 }
 
 // apps/web/src/analytics/scrub.ts only rewrites paths containing an
@@ -360,12 +399,14 @@ export async function reportStartupFailure(
     const classification = classifyStartupFailure(args.error, args.isPathAccess);
     let errorCode: string | undefined;
     let missingModule: string | undefined;
+    let daemonError: string | undefined;
     if (classification.logPath) {
       const tail = await (deps.readLogTail ?? defaultReadLogTail)(classification.logPath);
       if (tail) {
         const parsed = parseDaemonLogTail(tail);
         errorCode = parsed.errorCode;
         missingModule = parsed.missingModule;
+        daemonError = parsed.daemonError;
       }
     }
     const rawMessage =
@@ -378,6 +419,16 @@ export async function reportStartupFailure(
       args.error instanceof Error && typeof args.error.stack === "string"
         ? args.error.stack
         : null;
+    const errorName = args.error instanceof Error ? args.error.name : "unknown";
+    const sys = readErrnoFields(args.error);
+    const resolvedMessage =
+      rawMessage.length > 0
+        ? truncateForTelemetry(scrubUserPaths(rawMessage), ERROR_MESSAGE_MAX)
+        : args.error == null
+          ? null
+          : sys.code
+            ? `<${errorName} without message, code=${sys.code}>`
+            : `<${errorName} without message>`;
     // Probe the native module on THIS machine (existence + size). This is the
     // signal the `unknown` bucket (no daemon log to parse) otherwise lacks, and
     // it distinguishes "file missing" from "file present but unloadable".
@@ -394,16 +445,20 @@ export async function reportStartupFailure(
       failure_kind: classification.failureKind,
       exit_code: classification.exitCode,
       signal: classification.signal,
-      error_name: args.error instanceof Error ? args.error.name : "unknown",
+      error_name: errorName,
       error_code: errorCode ?? null,
       missing_module: missingModule ?? null,
+      daemon_error: daemonError
+        ? truncateForTelemetry(scrubUserPaths(daemonError), ERROR_MESSAGE_MAX)
+        : null,
+      sys_code: sys.code,
+      sys_errno: sys.errno,
+      sys_syscall: sys.syscall,
       // Scrub every path we send (message/stack/log/native path) so a user's
       // home dir never reaches PostHog; truncate free-form text to bound the
       // payload. These crash-scene fields are why the mac subset can't resolve
       // the module and what the Windows `unknown` bucket actually threw.
-      error_message: rawMessage
-        ? truncateForTelemetry(scrubUserPaths(rawMessage), ERROR_MESSAGE_MAX)
-        : null,
+      error_message: resolvedMessage,
       error_stack: rawStack
         ? truncateForTelemetry(scrubUserPaths(rawStack), ERROR_STACK_MAX)
         : null,

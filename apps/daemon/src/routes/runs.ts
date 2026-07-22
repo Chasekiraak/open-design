@@ -145,6 +145,7 @@ interface ChatRun {
   assistantMessageId: string | null;
   agentId: string | null;
   model?: string | null;
+  serviceTier?: string | null;
   status: ChatRunStatus;
   createdAt: number;
   updatedAt: number;
@@ -193,6 +194,7 @@ interface ChatRun {
     stablePromptHash?: string;
     hit?: boolean;
     missReason?: string | null;
+    changedSections?: string[] | null;
   };
 }
 
@@ -1272,6 +1274,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             stable_prompt_hash: run.promptCache?.stablePromptHash,
             stable_prompt_cache_hit: run.promptCache?.hit,
             stable_prompt_cache_miss_reason: run.promptCache?.missReason,
+            stable_prompt_changed_sections: run.promptCache?.changedSections ?? undefined,
             area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
             result,
             ...(activationMilestones ? { $set_once: activationMilestones } : {}),
@@ -1611,6 +1614,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       );
     }
     const run = design.runs.create(meta);
+    try {
+      pinAssistantMessageOnRunCreate(db, run);
+    } catch (err) {
+      console.warn('[runs] legacy chat message create pin failed', err);
+    }
     design.runs.stream(run, req, res);
     reconcileAssistantMessageOnRunEnd(db, design.runs, run);
     design.runs.start(run, () => startChatRun(meta, run));

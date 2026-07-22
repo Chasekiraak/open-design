@@ -304,6 +304,7 @@ export interface DaemonStreamOptions {
   // options and falls back to the CLI default when missing.
   model?: string | null;
   reasoning?: string | null;
+  serviceTier?: string | null;
   byokProvider?: ByokChatProviderConfig;
   byokMediaDefaults?: ChatRequest['byokMediaDefaults'];
   research?: ResearchOptions;
@@ -643,6 +644,7 @@ export async function streamViaDaemon({
   commentAttachments,
   model,
   reasoning,
+  serviceTier,
   byokProvider,
   byokMediaDefaults,
   research,
@@ -681,6 +683,7 @@ export async function streamViaDaemon({
     commentAttachments: commentAttachments ?? [],
     model: model ?? null,
     reasoning: reasoning ?? null,
+    serviceTier: serviceTier ?? null,
     ...(byokProvider ? { byokProvider } : {}),
     ...(byokMediaDefaults ? { byokMediaDefaults } : {}),
     locale,

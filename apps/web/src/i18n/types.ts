@@ -467,6 +467,7 @@ export interface Dict {
   'settings.modelSourceLive': string;
   'settings.modelSourceFallback': string;
   'settings.reasoningPicker': string;
+  'settings.serviceTierPicker': string;
   'settings.modelPickerHint': string;
   'settings.modelPickerLiveHint': string;
   'settings.modelPickerLiveCatalogOnlyHint': string;
@@ -2409,6 +2410,7 @@ export interface Dict {
   'avatar.modelSection': string;
   'avatar.modelLabel': string;
   'avatar.reasoningLabel': string;
+  'avatar.serviceTierLabel': string;
   'avatar.customSuffix': string;
   'socialShare.openDesignSection': string;
   'socialShare.openDesignTitle': string;

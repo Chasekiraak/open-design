@@ -5,7 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { readMemoryConfig, writeMemoryConfig } from '../src/memory.js';
+import {
+  deleteMemoryEntry,
+  readMemoryConfig,
+  upsertMemoryEntry,
+  writeMemoryConfig,
+} from '../src/memory.js';
 import { startServer } from '../src/server.js';
 
 // Stable-prompt cache regression for the intent-signal hotfix
@@ -30,7 +35,11 @@ type RunStatus = { id: string; status: string; error: string | null };
 
 type RunWithPromptCache = {
   id: string;
-  promptCache?: { hit: boolean; missReason: string | null };
+  promptCache?: {
+    hit: boolean;
+    missReason: string | null;
+    changedSections?: string[] | null;
+  };
 };
 
 const SESSION = 'ses_intentsignal0001';
@@ -79,6 +88,7 @@ describe('intent signals × stable prompt cache', () => {
   let started: StartedServer | null = null;
   let binDir: string | null = null;
   let originalMemoryConfig: Awaited<ReturnType<typeof readMemoryConfig>> | null = null;
+  const createdMemoryIds: string[] = [];
 
   afterEach(async () => {
     await Promise.resolve(started?.shutdown?.());
@@ -88,6 +98,11 @@ describe('intent signals × stable prompt cache', () => {
     started = null;
     if (binDir) await rm(binDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     binDir = null;
+    if (process.env.OD_DATA_DIR) {
+      for (const id of createdMemoryIds.splice(0)) {
+        await deleteMemoryEntry(process.env.OD_DATA_DIR, id);
+      }
+    }
     if (process.env.OD_DATA_DIR && originalMemoryConfig) {
       await writeMemoryConfig(process.env.OD_DATA_DIR, {
         enabled: originalMemoryConfig.enabled,
@@ -98,7 +113,19 @@ describe('intent signals × stable prompt cache', () => {
     restoreEnv(originalEnv);
   });
 
-  async function bootServer(): Promise<{ url: string }> {
+  async function addMemoryEntry(input: {
+    name: string;
+    description: string;
+    type: string;
+    body: string;
+  }): Promise<void> {
+    const dataDir = process.env.OD_DATA_DIR;
+    if (!dataDir) throw new Error('OD_DATA_DIR must be set for this suite');
+    const entry = await upsertMemoryEntry(dataDir, input, { silent: true, source: 'manual' });
+    createdMemoryIds.push(entry.id);
+  }
+
+  async function bootServer({ memoryEnabled = false }: { memoryEnabled?: boolean } = {}): Promise<{ url: string }> {
     binDir = await mkdtemp(path.join(os.tmpdir(), 'od-intent-cache-bin-'));
     const bin = await writeResumingOpencode(binDir);
     clearTelemetryEnv();
@@ -107,7 +134,10 @@ describe('intent signals × stable prompt cache', () => {
     // disable it so the assertions isolate the intent-signal contribution.
     if (process.env.OD_DATA_DIR) {
       originalMemoryConfig = await readMemoryConfig(process.env.OD_DATA_DIR);
-      await writeMemoryConfig(process.env.OD_DATA_DIR, { enabled: false, extraction: null });
+      await writeMemoryConfig(process.env.OD_DATA_DIR, {
+        enabled: memoryEnabled,
+        extraction: null,
+      });
     }
     started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
     await putConfig(started.url, {
@@ -167,6 +197,7 @@ describe('intent signals × stable prompt cache', () => {
     expect(await runPromptCache(url, conversationId, turn2.id)).toMatchObject({
       hit: false,
       missReason: 'stable-prompt-changed',
+      changedSections: ['intent'],
     });
 
     // t3 has no deck vocabulary of its own; the conversation latch must hold
@@ -178,6 +209,58 @@ describe('intent signals × stable prompt cache', () => {
     });
     expect(turn3.status).toBe('succeeded');
     expect(await runPromptCache(url, conversationId, turn3.id)).toMatchObject({ hit: true });
+  });
+
+  it('attributes a mid-conversation memory change to the memory section alone', async () => {
+    const { url } = await bootServer({ memoryEnabled: true });
+    const { projectId, conversationId } = await createFreeformProject(url);
+
+    const turn1 = await sendRunAndWait(url, projectId, conversationId, {
+      message: `## user\n${TURN1_BRIEF}`,
+      currentPrompt: TURN1_BRIEF,
+    });
+    expect(turn1.status).toBe('succeeded');
+
+    await addMemoryEntry({
+      name: 'Tone preference',
+      description: 'prefers terse copy',
+      type: 'user',
+      body: 'Writes in short declarative sentences.',
+    });
+
+    const followUp = 'make the header a bit bolder';
+    const turn2 = await sendRunAndWait(url, projectId, conversationId, {
+      message: `## user\n${followUp}`,
+      currentPrompt: followUp,
+    });
+    expect(turn2.status).toBe('succeeded');
+    expect(await runPromptCache(url, conversationId, turn2.id)).toMatchObject({
+      hit: false,
+      missReason: 'stable-prompt-changed',
+      changedSections: ['memory'],
+    });
+  });
+
+  it('names no sections on a cache hit', async () => {
+    const { url } = await bootServer();
+    const { projectId, conversationId } = await createFreeformProject(url);
+
+    const turn1 = await sendRunAndWait(url, projectId, conversationId, {
+      message: `## user\n${TURN1_BRIEF}`,
+      currentPrompt: TURN1_BRIEF,
+    });
+    expect(turn1.status).toBe('succeeded');
+
+    const followUp = 'make the header a bit bolder';
+    const turn2 = await sendRunAndWait(url, projectId, conversationId, {
+      message: `## user\n${followUp}`,
+      currentPrompt: followUp,
+    });
+    expect(turn2.status).toBe('succeeded');
+    expect(await runPromptCache(url, conversationId, turn2.id)).toMatchObject({
+      hit: true,
+      changedSections: null,
+    });
   });
 });
 
@@ -268,7 +351,9 @@ async function runPromptCache(
   url: string,
   conversationId: string,
   runId: string,
-): Promise<{ hit: boolean; missReason: string | null } | undefined> {
+): Promise<
+  { hit: boolean; missReason: string | null; changedSections?: string[] | null } | undefined
+> {
   const response = await fetch(
     `${url}/api/runs?conversationId=${encodeURIComponent(conversationId)}`,
   );

@@ -28,6 +28,11 @@ import {
   renderConnectedExternalMcpDirective,
   resolveExclusiveSurface,
 } from './prompts/system.js';
+import {
+  computeStableSectionHashes,
+  serializeStableSections,
+  type StableSectionHashes,
+} from './prompts/stable-sections.js';
 import { emittedRenderableQuestionForm } from './question-form-detect.js';
 import { resolveProjectRoot } from './project-root.js';
 import {
@@ -193,10 +198,12 @@ import {
 } from './agents.js';
 import {
   getRememberedLiveModels,
+  isKnownServiceTier,
   preferFreshLiveModels,
   rememberLiveModels,
   resolveDefaultModelFromOptions,
   resolveModelForAgent,
+  resolveModelForServiceTier,
 } from './runtimes/models.js';
 import { loadMmdRouteLaunchEnv } from './runtimes/mmd-routes.js';
 import { preparePromptFileForAgent } from './runtimes/prompt-file.js';
@@ -4085,7 +4092,7 @@ export async function startServer({
       }
     }
 
-    const prompt = composeSystemPrompt({
+    const systemPromptInputs = {
       agentId,
       includeCodexImagegenOverride: false,
       skillBody,
@@ -4139,7 +4146,8 @@ export async function startServer({
       // restores the classic stack. main keeps classic as the default —
       // do NOT carry this flip into a PR against main.
       promptCoreVariant: process.env.OD_PROMPT_CORE === 'classic' ? undefined : 'slim',
-    });
+    };
+    const prompt = composeSystemPrompt(systemPromptInputs);
     // The chat handler also needs to know where the active skill lives
     // on disk so it can stage a per-project copy of its side files
     // before spawning the agent. Returning that here avoids a second
@@ -4164,6 +4172,7 @@ export async function startServer({
           .filter((part) => typeof part === 'string' && part.trim().length > 0)
           .join('\n\n---\n\n'),
       },
+      stableSectionInputs: systemPromptInputs,
     };
   };
 
@@ -4276,6 +4285,7 @@ export async function startServer({
       commentAttachments = [],
       model,
       reasoning,
+      serviceTier,
       locale,
       research,
       context,
@@ -4300,6 +4310,7 @@ export async function startServer({
     if (typeof telemetryPrompt === 'string') run.userPrompt = telemetryPrompt;
     if (typeof model === 'string' && model) run.model = model;
     if (typeof reasoning === 'string' && reasoning) run.reasoning = reasoning;
+    if (typeof serviceTier === 'string' && serviceTier) run.serviceTier = serviceTier;
     if (typeof skillId === 'string' && skillId) run.skillId = skillId;
     if (typeof designSystemId === 'string' && designSystemId)
       run.designSystemId = designSystemId;
@@ -4648,6 +4659,7 @@ export async function startServer({
       critiqueShouldRun,
       designSystemSelection,
       promptTelemetryParts,
+      stableSectionInputs,
     } =
       await composeDaemonSystemPrompt({
         agentId,
@@ -4906,6 +4918,12 @@ export async function startServer({
       process.env,
       requestedLiveModelScope,
     );
+    safeModel = resolveModelForServiceTier(
+      def,
+      safeModel,
+      typeof serviceTier === 'string' ? serviceTier : null,
+      requestedLiveModelScope,
+    );
     const hasDefaultModelEnvOverride = Boolean(
       def.defaultModelEnvVar &&
       typeof process.env[def.defaultModelEnvVar] === 'string' &&
@@ -4915,7 +4933,20 @@ export async function startServer({
       typeof reasoning === 'string' && Array.isArray(def.reasoningOptions)
         ? (def.reasoningOptions.find((r) => r.id === reasoning)?.id ?? null)
         : null;
-    const agentOptions = { model: safeModel, reasoning: safeReasoning };
+    const safeServiceTier =
+      typeof serviceTier === 'string' && isKnownServiceTier(
+        def,
+        safeModel,
+        serviceTier,
+        requestedLiveModelScope,
+      )
+        ? serviceTier
+        : null;
+    const agentOptions = {
+      model: safeModel,
+      reasoning: safeReasoning,
+      serviceTier: safeServiceTier,
+    };
     const agentLaunch = resolveAgentLaunch(def, configuredAgentEnv);
     const resolvedBin = agentLaunch.selectedPath;
     if (def.id === 'amr' && resolvedBin && agentLaunch.launchPath) {
@@ -4964,7 +4995,15 @@ export async function startServer({
             currentCwd: effectiveCwd,
             currentAssistantMessageId: run.assistantMessageId ?? null,
           })
-        : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, invalidationReason: null };
+        : {
+            storedSessionId: null as string | null,
+            resumeSessionId: null as string | null,
+            newSessionId: undefined as string | undefined,
+            isResuming: false,
+            storedStablePromptHash: null as string | null,
+            storedStableSections: null as StableSectionHashes | null,
+            invalidationReason: null,
+          };
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
       design.runs.emit(run, 'diagnostic', {
@@ -5002,6 +5041,11 @@ export async function startServer({
       .map((part) => (typeof part === 'string' ? part.trim() : ''))
       .join('\n\n---\n\n');
     const currentStableHash = hashStableInstructions(stableInstructionFingerprint);
+    const currentStableSections = computeStableSectionHashes({
+      ...(stableSectionInputs ?? {}),
+      runtimeToolPrompt,
+      clientSystemPrompt: systemPrompt,
+    });
     // `runtimeToolPrompt` is part of the fingerprint and varies only when the
     // tool-token grant's presence flips between turns (rare cwd/projectId edge
     // cases); any such change correctly forces a full re-send that turn.
@@ -5014,7 +5058,10 @@ export async function startServer({
       isResuming: agentResumeCtx.isResuming,
       storedStablePromptHash: agentResumeCtx.storedStablePromptHash,
       currentStableHash,
+      storedStableSections: agentResumeCtx.storedStableSections,
+      currentStableSections,
     });
+    const currentStableSectionsJson = serializeStableSections(currentStableSections);
     const browserUsePromptGuard = renderBrowserUseUnavailablePrompt(run.browserUse ?? null);
     const titleGenerationRequested =
       titleGeneration &&
@@ -5559,6 +5606,7 @@ export async function startServer({
           agentId: def.id,
           sessionId: liveSessionId,
           stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSectionsJson,
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
@@ -6076,6 +6124,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: createTurnSessionId,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -6102,6 +6151,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: agentResumeCtx.resumeSessionId,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -8049,6 +8099,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: sessionPath,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -8078,6 +8129,7 @@ export async function startServer({
           agentId: def.id,
           sessionId: acpSession.getDurableSessionId(),
           stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSectionsJson,
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
@@ -8274,6 +8326,7 @@ export async function startServer({
       designSystemId: orbitDesignSystemId,
       model: modelPrefs.model ?? null,
       reasoning: modelPrefs.reasoning ?? null,
+      serviceTier: modelPrefs.serviceTier ?? null,
       message: prompt,
       systemPrompt: [
         renderOrbitTemplateSystemPrompt(template),
@@ -8590,6 +8643,7 @@ export async function startServer({
         context: routineContext,
         model: modelPrefs.model ?? null,
         reasoning: modelPrefs.reasoning ?? null,
+        serviceTier: modelPrefs.serviceTier ?? null,
         message: routine.prompt,
         systemPrompt: [
           `You are running an unattended scheduled routine named "${routine.name}".`,
