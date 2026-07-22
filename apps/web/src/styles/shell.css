@@ -1657,6 +1657,13 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
 .avatar-agent-trigger__model {
   display: none;
 }
+/* The composer trigger swaps the model-name text for the provider brand mark. */
+.avatar-agent-trigger__model-logo {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
 .avatar-btn {
   width: 32px;
   height: 32px;
@@ -1899,6 +1906,9 @@ body[data-artifact-share-access='private'] .ws-tabs-file-actions-before {
 .avatar-item {
   display: flex;
   align-items: center;
+  /* The global `button` rule centers flex content; menu rows read left-aligned
+     (icon + label flush left) to match the model options above. */
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
@@ -2007,7 +2017,9 @@ a.avatar-item:visited {
   appearance: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* Logo + label read as one left-aligned run; the check is pushed to the
+     right edge via margin-left:auto below. */
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   padding: 5px 8px;
@@ -2039,6 +2051,21 @@ a.avatar-item:visited {
   color: var(--text-muted);
   opacity: 0.6;
 }
+.avatar-model-option-logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.avatar-model-option-logo img,
+.avatar-model-option-logo svg {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
+}
 .avatar-model-option-label {
   min-width: 0;
   overflow: hidden;
@@ -2047,6 +2074,7 @@ a.avatar-item:visited {
 }
 .avatar-model-option-check {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--accent);
 }
 .avatar-model-option.is-locked .avatar-model-option-check {
