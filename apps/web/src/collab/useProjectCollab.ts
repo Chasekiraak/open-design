@@ -186,7 +186,31 @@ export function useProjectCollab(
     knownCatalog !== null
     && Boolean(projectId)
     && !knownCatalog.some((entry) => entry.projectId === projectId);
-  const sharedReadOnly = (statusUnknown && !knownUnshared) || (shared && !isOwner);
+  // The hub catalog records each shared project's `ownerMemberId` — the same id
+  // `/collab/status` later confirms as the single writer. When it already names
+  // the current member as the owner, the viewer IS the owner regardless of
+  // whether the (seconds-long) status poll has answered yet. Trusting it here is
+  // what stops an owner's OWN shared project from flashing the "这是共享项目"
+  // read-only banner for 1-2s on open, before `ownerMemberId` arrives and
+  // `isOwner` flips (issue #99, rec:recvpZwaJNpVai). Same production-only cache
+  // the unshared relaxation reads; an injected-fetch test pointing at its own
+  // daemon gets `null` and keeps failing closed. Ownership never transfers (the
+  // sharer is always the writer), so this catalog fact cannot go stale-wrong.
+  const knownOwnedByViewer =
+    knownCatalog !== null
+    && Boolean(projectId)
+    && context?.workspaceMemberId != null
+    && knownCatalog.some(
+      (entry) => entry.projectId === projectId && entry.ownerMemberId === context.workspaceMemberId,
+    );
+  // The project-level (single-writer) gate. It defaults to "unknown" rather than
+  // "read-only": a viewer the catalog already knows to be the owner is never
+  // frozen by it, which removes the on-open flash. Everyone else still fails
+  // closed through the unknown window and whenever a confirmed status names a
+  // different owner.
+  const sharedReadOnly = knownOwnedByViewer
+    ? false
+    : (statusUnknown && !knownUnshared) || (shared && !isOwner);
   const viewerOnly = workspaceContextReadOnly || workspaceReadOnly || sharedReadOnly;
 
   // Member content auto-sync (the last link): when a read-only member sees the

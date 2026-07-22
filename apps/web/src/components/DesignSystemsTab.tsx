@@ -15,8 +15,8 @@ import type {
   TrackingDesignSystemStatusValue,
 } from '@open-design/contracts/analytics';
 import { useI18n } from '../i18n';
-import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { hasTeamPlan } from '../collab/team-plan';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 import type { Locale } from '../i18n/types';
 import {
   localizeDesignSystemCategory,
@@ -176,12 +176,14 @@ export function DesignSystemsTab({
   // team-only): signed-out / personal-workspace users get no team tab, and a
   // sign-out while on it falls back to 你的体系 (#5517 signed-out form).
   const { context: workspaceContext } = useWorkspaceContext();
-  const workspaceBilling = useWorkspaceBilling();
-  // Gate on the PLAN, not the workspace kind: a personal workspace is still a
-  // workspace and can still have members, so `teamId` hid the tab from people
-  // who genuinely have a team to share into. It hides only when signed out or
-  // on a personal/free plan that was never upgraded to a team one.
-  const hasTeamWorkspace = hasTeamPlan(workspaceContext, workspaceBilling);
+  // Gate on TEAM IDENTITY — the same predicate the daemon uses to accept a hub
+  // share (workspaceContextHasTeamIdentity; see team-resource-share.ts) — NOT on
+  // the billing plan. A team on a free/unpaid tier (trial, lapsed, or billing not
+  // yet resolved) still has a real team resource plane with shared design
+  // systems; gating on the plan hid the collection from those teams even though
+  // the daemon serves and shares their resources. Personal / signed-out sessions
+  // have no team plane and correctly get no team tab.
+  const hasTeamWorkspace = workspaceContextHasTeamIdentity(workspaceContext);
   useEffect(() => {
     if (designSystemCollection === 'team' && !hasTeamWorkspace) setDesignSystemCollection('mine');
   }, [designSystemCollection, hasTeamWorkspace]);

@@ -988,6 +988,29 @@ export function desktopPreviewAutoFitZoomPercent(
   return Math.max(1, Math.min(100, (canvasSize.width / contentWidth) * 100));
 }
 
+/**
+ * The zoom percent a desktop preview opens at. Auto mode fits wide, single-scroll
+ * HTML pages whose content overflows the canvas horizontally. Decks are the
+ * explicit exception: they paginate and fit one slide to the iframe viewport
+ * internally, so their measured document scrollWidth spans the whole slide
+ * filmstrip. Running that filmstrip width through the wide-page fit collapses the
+ * zoom toward the ~1% floor (issue rec:recvq3NXctofXr), so decks keep the manual
+ * zoom (100% by default) and let their in-iframe fit do the work. Non-desktop
+ * viewports and manual mode always use the caller's zoom.
+ */
+export function resolveDesktopPreviewZoomPercent(params: {
+  zoomMode: 'auto' | 'manual';
+  viewport: PreviewViewportId;
+  isDeck: boolean;
+  manualZoomPercent: number;
+  canvasSize: PreviewCanvasSize | undefined;
+  contentWidth?: number | null;
+}): number {
+  const { zoomMode, viewport, isDeck, manualZoomPercent, canvasSize, contentWidth } = params;
+  if (zoomMode !== 'auto' || viewport !== 'desktop' || isDeck) return manualZoomPercent;
+  return desktopPreviewAutoFitZoomPercent(canvasSize, contentWidth);
+}
+
 export function desktopPreviewDocumentContentWidth(doc: Document | null | undefined): number | null {
   if (!doc) return null;
   const root = doc.documentElement;
@@ -7586,23 +7609,6 @@ function HtmlViewer({
   const [speakerNotesStatus, setSpeakerNotesStatus] = useState<'saved' | 'error' | null>(null);
   const speakerNotesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const boardPreviewScaleOptions = localCommentSideDockActive ? { canvasPadding: 0 } : undefined;
-  const previewZoomPercent = zoomMode === 'auto' && previewViewport === 'desktop'
-    ? desktopPreviewAutoFitZoomPercent(boardPreviewCanvasSize, desktopPreviewContentWidth)
-    : zoom;
-  const previewScale = previewZoomPercent / 100;
-  const previewZoomText = zoomPercentLabel(previewZoomPercent);
-  const zoomLevelActive = (level: number) => Math.abs(previewZoomPercent - level) < 0.001;
-  const overlayPreviewScale = effectivePreviewScale(
-    previewViewport,
-    previewScale,
-    boardPreviewCanvasSize,
-    boardPreviewScaleOptions,
-  );
-  const overlayPreviewTransform: PreviewOverlayTransform = {
-    scale: overlayPreviewScale,
-    offsetX: 0,
-    offsetY: 0,
-  };
   const shareRef = useRef<HTMLDivElement | null>(null);
   const [chromeActionsHost, setChromeActionsHost] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -7797,6 +7803,28 @@ function HtmlViewer({
     return sourceLooksLikeDeckPreview(s);
   }, [routingHtmlSource]);
   const effectiveDeck = isDeck || (!passiveLargeHtmlPreview && looksLikeDeck);
+  const previewZoomPercent = resolveDesktopPreviewZoomPercent({
+    zoomMode,
+    viewport: previewViewport,
+    isDeck: effectiveDeck,
+    manualZoomPercent: zoom,
+    canvasSize: boardPreviewCanvasSize,
+    contentWidth: desktopPreviewContentWidth,
+  });
+  const previewScale = previewZoomPercent / 100;
+  const previewZoomText = zoomPercentLabel(previewZoomPercent);
+  const zoomLevelActive = (level: number) => Math.abs(previewZoomPercent - level) < 0.001;
+  const overlayPreviewScale = effectivePreviewScale(
+    previewViewport,
+    previewScale,
+    boardPreviewCanvasSize,
+    boardPreviewScaleOptions,
+  );
+  const overlayPreviewTransform: PreviewOverlayTransform = {
+    scale: overlayPreviewScale,
+    offsetX: 0,
+    offsetY: 0,
+  };
   const showDeckNavigation = effectiveDeck && (slideState === null || slideState.count > 0);
   const activeDeckSlideIndex =
     slideState?.active ??

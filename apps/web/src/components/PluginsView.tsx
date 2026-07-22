@@ -13,6 +13,7 @@ import { Dialog } from '@open-design/components';
 import {
   PLUGIN_SHARE_ACTION_PLUGIN_IDS,
   resolveLocalizedText,
+  workspaceContextHasTeamIdentity,
   type ApplyResult,
   type InstalledPluginRecord,
   type PluginSourceKind,
@@ -74,8 +75,7 @@ import { copyToClipboard } from '../lib/copy-to-clipboard';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { AnimatePresence } from 'motion/react';
 import { navigate } from '../router';
-import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { hasTeamPlan } from '../collab/team-plan';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 
 type PluginsTab = 'installed' | 'available' | 'sources' | 'team';
 
@@ -876,16 +876,17 @@ export function ExtensionsMarketplace({
   const analytics = useAnalytics();
   // My own member id, to keep the Personal tab to resources I actually own.
   const { context: workspaceContext } = useWorkspaceContext();
-  const workspaceBilling = useWorkspaceBilling();
   const myMemberId = workspaceContext?.workspaceMemberId ?? null;
-  // The 团队 scope is a team-workspace surface: B's resource plane is
-  // team-only, so signed-out and personal-workspace users get no team pill
-  // (#5517 hides every team surface in the signed-out form).
-  // Gate on the PLAN, not the workspace kind: a personal workspace is still a
-  // workspace and can still have members, so `teamId` hid the tab from people
-  // who genuinely have a team to share into. It hides only when signed out or
-  // on a personal/free plan that was never upgraded to a team one.
-  const hasTeamWorkspace = hasTeamPlan(workspaceContext, workspaceBilling);
+  // The 团队 scope is a team-workspace surface backed by the resource hub: it
+  // lists the resources shared into the team and offers a share-to-team action.
+  // Gate it on TEAM IDENTITY — the same predicate the daemon uses to accept a
+  // hub share (workspaceContextHasTeamIdentity; see team-resource-share.ts) —
+  // NOT on the billing plan. A team on a free/unpaid tier (trial, lapsed, or
+  // billing not yet resolved) still has a real team resource plane with shared
+  // resources; gating on the plan hid the scope from those teams even though the
+  // daemon happily serves and shares their resources. Personal / signed-out
+  // sessions have no team plane and correctly get no team pill.
+  const hasTeamWorkspace = workspaceContextHasTeamIdentity(workspaceContext);
   const pageViewFiredRef = useRef(false);
   useEffect(() => {
     if (pageViewFiredRef.current) return;

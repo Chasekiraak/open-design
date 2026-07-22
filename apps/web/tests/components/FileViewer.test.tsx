@@ -66,6 +66,7 @@ import {
   fileVersionPreviewOptions,
   parseInspectOverridesFromSource,
   previewOverlayTransform,
+  resolveDesktopPreviewZoomPercent,
   serializeInspectOverrides,
   updateInspectOverride,
 } from '../../src/components/FileViewer';
@@ -435,6 +436,51 @@ describe('FileViewer preview scale', () => {
     expect(desktopPreviewAutoFitZoomPercent({ width: 900, height: 700 }, 1440)).toBeCloseTo(62.5);
     expect(desktopPreviewAutoFitZoomPercent({ width: 900, height: 700 }, 900)).toBe(100);
     expect(desktopPreviewAutoFitZoomPercent({ width: 1600, height: 900 }, 1440)).toBe(100);
+  });
+
+  it('never applies the wide-page desktop auto-fit to decks', () => {
+    // A deck measures its full slide filmstrip as content width; running that
+    // through the wide-page fit would collapse the opening zoom to ~1%. Decks
+    // paginate and fit one slide in-iframe, so they must open at 100%
+    // regardless of the measured filmstrip width (issue rec:recvq3NXctofXr).
+    const filmstripCanvas = { width: 1280, height: 720 };
+    const filmstripWidth = 1280 * 40; // 40 slides laid out horizontally
+    expect(desktopPreviewAutoFitZoomPercent(filmstripCanvas, filmstripWidth)).toBeCloseTo(2.5);
+
+    expect(
+      resolveDesktopPreviewZoomPercent({
+        zoomMode: 'auto',
+        viewport: 'desktop',
+        isDeck: true,
+        manualZoomPercent: 100,
+        canvasSize: filmstripCanvas,
+        contentWidth: filmstripWidth,
+      }),
+    ).toBe(100);
+
+    // A non-deck wide page still gets the auto-fit.
+    expect(
+      resolveDesktopPreviewZoomPercent({
+        zoomMode: 'auto',
+        viewport: 'desktop',
+        isDeck: false,
+        manualZoomPercent: 100,
+        canvasSize: { width: 900, height: 700 },
+        contentWidth: 1440,
+      }),
+    ).toBeCloseTo(62.5);
+
+    // Manual mode always honors the caller's zoom, deck or not.
+    expect(
+      resolveDesktopPreviewZoomPercent({
+        zoomMode: 'manual',
+        viewport: 'desktop',
+        isDeck: false,
+        manualZoomPercent: 150,
+        canvasSize: { width: 900, height: 700 },
+        contentWidth: 1440,
+      }),
+    ).toBe(150);
   });
 
   it('measures desktop preview document content width from real iframe layout', () => {

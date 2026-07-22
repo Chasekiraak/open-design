@@ -156,6 +156,22 @@ describe('useProjectCollab workspace-context seeding', () => {
     expect(project.result.current.viewerOnly).toBe(true);
   });
 
+  // Issue #99 (rec:recvpZwaJNpVai): opening a project the viewer THEMSELVES
+  // shared flashed the "这是共享项目，你不能编辑" read-only banner for 1-2s while
+  // `/collab/status` was still confirming `ownerMemberId`. The hub catalog
+  // already names the current member (`wm-1`, from `teamContext()`) as the
+  // owner, so the on-open state must be writable with no flash even while both
+  // network reads hang.
+  it('does not fail closed for a shared project the viewer owns', async () => {
+    await warmCaches([
+      { projectId: 'p-mine', ownerMemberId: 'wm-1', sharedAt: '2026-07-01T00:00:00.000Z' },
+    ]);
+
+    installFullyHangingFetch();
+    const project = renderHook(() => useProjectCollab('p-mine'));
+    expect(project.result.current.viewerOnly).toBe(false);
+  });
+
   it('still fails closed on the first read of a session, before any context is known', async () => {
     installNeverResolvingContextFetch();
     const project = renderHook(() => useProjectCollab('p-private'));
