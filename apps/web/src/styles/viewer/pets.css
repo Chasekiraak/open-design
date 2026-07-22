@@ -94,6 +94,11 @@
   font-weight: 600;
   color: inherit;
 }
+/* Hide-pet button: drop the dark accent ring in its active state so it reads
+   as a plain grey capsule (no black outline). */
+.pet-wake-controls .seg-btn.small.active {
+  border-color: transparent;
+}
 .pet-source-head {
   margin-top: 14px;
   display: grid;
@@ -217,6 +222,11 @@
 }
 .pet-tabs-top-row .subtab-pill {
   flex: 0 0 auto;
+  /* Full-capsule to match the pill action buttons on the same row. */
+  border-radius: var(--radius-pill);
+}
+.pet-tabs-top-row .subtab-pill button {
+  border-radius: var(--radius-pill);
 }
 .pet-tabs-hint {
   margin: 0;

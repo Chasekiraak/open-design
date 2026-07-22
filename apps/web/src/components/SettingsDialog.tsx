@@ -5459,13 +5459,6 @@ export function SettingsDialog({
                   <span className="agent-cli-env-summary-title">
                     {t('settings.memoryModelInlineLabel')}
                   </span>
-                  <span className="settings-memory-summary-value">
-                    {cfg.model.trim()
-                      ? t('settings.memoryModelInlineSameAsChatWithModel', {
-                          model: cfg.model.trim(),
-                        })
-                      : t('settings.memoryModelInlineSameAsChat')}
-                  </span>
                 </summary>
                 <div className="agent-cli-env-body">
                   <MemoryModelInline

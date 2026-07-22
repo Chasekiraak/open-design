@@ -2617,11 +2617,6 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   font-size: 12px;
   font-weight: 500;
 }
-.settings-memory-summary-value::before {
-  content: '·';
-  margin: 0 6px 0 2px;
-  color: var(--text-muted);
-}
 .agent-card-config .field,
 .agent-model-row .field { gap: 4px; }
 .agent-card-config .field-label,

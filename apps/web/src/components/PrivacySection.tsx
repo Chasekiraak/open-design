@@ -138,7 +138,7 @@ export function PrivacySection({ cfg, setCfg }: Props): JSX.Element {
                 });
                 deleteMyData();
               }}
-              style={{ alignSelf: 'flex-start', marginTop: 12 }}
+              style={{ alignSelf: 'flex-start', marginTop: 12, paddingLeft: 0 }}
             >
               <Icon name="trash" size={14} />
               <span style={{ marginLeft: 6 }}>{t('settings.privacyDataDeletion')}</span>
