@@ -57,16 +57,10 @@
 
 .produced-files {
   margin-top: 6px;
-  /* Give this list the same card chrome as its message-stream neighbors
-     (.plugin-action-panel above, the .next-step-actions module card) —
-     border + radius + panel background — instead of rendering borderless
-     directly against the message bubble. Without it the list read as
-     loose text floating in the conversation rather than a distinct block. */
-  padding: 10px 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-xs);
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
 }
 .produced-files-label {
   font-size: 12px;

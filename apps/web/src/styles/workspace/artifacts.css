@@ -207,35 +207,38 @@
   flex-direction: column;
   gap: 12px;
 }
+.mcp-page-head h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
 
-/* Group 1: what the MCP server does */
 .mcp-capabilities-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  /* Borderless: the panel fill alone separates the card from the page. */
   background: var(--bg-panel);
-  border: 0;
   border-radius: var(--radius-sm);
   line-height: 1.55;
 }
 .mcp-capabilities-label {
   margin: 0;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
   letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .mcp-capabilities-list {
   margin: 0;
   padding-left: 18px;
-  font-size: 13px;
   color: var(--text);
+  font-size: 13px;
 }
 
-/* Group 2: setup flow */
+/* MCP setup flow */
 .mcp-setup-card {
   display: flex;
   flex-direction: column;
