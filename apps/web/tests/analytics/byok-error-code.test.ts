@@ -103,3 +103,41 @@ describe('byokErrorCode against real daemon detail shapes', () => {
     expect(byokErrorCode({ kind: 'unknown', detail: 'fetch failed' })).toBe('UNKNOWN_NO_SIGNAL');
   });
 });
+
+/**
+ * Status-vs-detail precedence (review of PR #5960).
+ *
+ * The daemon returns `{ ok: false, kind: 'unknown', status: <2xx>, detail:
+ * <parse error> }` when a 2xx body fails `JSON.parse`
+ * (apps/daemon/src/connectionTest.ts) — that IS the "base URL points at an HTML
+ * login portal" case. An unconditional status fallback reported it as
+ * `HTTP_200` and made every detail classifier unreachable for it, so the
+ * headline case this helper advertises could never resolve.
+ */
+describe('byokErrorCode status precedence', () => {
+  it('names the HTML-login-portal case instead of reporting HTTP_200', () => {
+    expect(
+      byokErrorCode({
+        kind: 'unknown',
+        status: 200,
+        detail: 'Unexpected token < in JSON at position 0',
+      }),
+    ).toBe('INVALID_JSON_RESPONSE');
+  });
+
+  it('does not let any 2xx claim a failure it cannot explain', () => {
+    expect(byokErrorCode({ kind: 'unknown', status: 204, detail: 'ECONNRESET' })).toBe(
+      'ECONNRESET',
+    );
+    // Nothing to go on beyond a success status — the residue stays measurable
+    // rather than being mislabelled HTTP_200.
+    expect(byokErrorCode({ kind: 'unknown', status: 200, detail: '' })).toBe('UNKNOWN_NO_SIGNAL');
+  });
+
+  it('still lets a real error status win', () => {
+    expect(byokErrorCode({ kind: 'unknown', status: 402, detail: 'insufficient credits' })).toBe(
+      'HTTP_402',
+    );
+    expect(byokErrorCode({ kind: 'unknown', status: 302, detail: 'redirect' })).toBe('HTTP_302');
+  });
+});

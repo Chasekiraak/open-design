@@ -31,8 +31,19 @@ export function byokErrorCode(result: ByokErrorCodeInput): string {
   if (isClassified(kind)) return kind;
 
   // An HTTP-shaped failure the status→kind map has no case for: 402 (out of
-  // credits), 400 without auth-ish text, 409, 413, 422, 3xx redirects, …
-  if (typeof result.status === 'number' && result.status > 0) return `HTTP_${result.status}`;
+  // credits), 400 without auth-ish text, 409, 413, 422, …
+  //
+  // The cut is at 300, not 0: a 2xx that still failed the test failed for a
+  // reason the status cannot express. The daemon returns
+  // `{ status: 200, detail: 'Unexpected token < …' }` when a 2xx body fails
+  // JSON.parse — exactly the "base URL points at an HTML login portal" case
+  // this helper exists to name. Letting any non-zero status win reported that
+  // as `HTTP_200` and made every detail classifier below unreachable for it.
+  // 3xx stays on this side of the cut: the daemon fetches with
+  // `redirect: 'error'`, so a redirect is a real failure the status does name.
+  if (typeof result.status === 'number' && result.status >= 300) {
+    return `HTTP_${result.status}`;
+  }
 
   // No status means the request never got a response. The daemon's network
   // classifier drops `cause.code` when it isn't in its allowlist, but the raw
