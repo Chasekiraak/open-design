@@ -50,6 +50,9 @@ import {
 import { getResolvedDeviceId } from '../analytics/client';
 import {
   beginAmrAuthTracking,
+  confirmAmrAuthTracking,
+  observeAmrAuthTracking,
+  reconcileAmrAuthAttemptId,
   resolveAmrAuthTracking,
 } from '../analytics/amr-auth';
 import { setOnboardingAttributionPersonProperties } from '../analytics/source-attribution';
@@ -1416,6 +1419,7 @@ function OnboardingView({
   } | null>(null);
   const cliRefreshPendingTokenRef = useRef<number | null>(null);
   const amrLoginPollCancelledRef = useRef(false);
+  const amrAuthAttemptIdRef = useRef<string | null>(null);
   const amrAgentRefreshAttemptedRef = useRef(false);
   const providerModelsAutoFetchKeyRef = useRef<string | null>(null);
   const providerAutoTestKeyRef = useRef<string | null>(null);
@@ -2166,17 +2170,39 @@ function OnboardingView({
         return;
       }
       if (amrLoginPollCancelledRef.current) return;
-      beginAmrAuthTracking(attribution);
+      const provisionalAuthAttemptId = beginAmrAuthTracking(
+        attribution,
+        Date.now(),
+      );
+      amrAuthAttemptIdRef.current = provisionalAuthAttemptId;
       const odDeviceId = amrHandoffDeviceId({
         metricsConsent: config.telemetry?.metrics === true,
         resolvedDeviceId: getResolvedDeviceId(),
         installationId: config.installationId,
       });
-      const loginResult = await startVelaLogin(attribution, odDeviceId);
+      const loginResult = await startVelaLogin(
+        attribution,
+        odDeviceId,
+        provisionalAuthAttemptId,
+      );
+      const authAttemptId = reconcileAmrAuthAttemptId(
+        provisionalAuthAttemptId,
+        loginResult.authAttemptId,
+        { joinedExisting: loginResult.alreadyRunning === true },
+      );
+      amrAuthAttemptIdRef.current = authAttemptId;
+      if (loginResult.ok || loginResult.alreadyRunning) {
+        confirmAmrAuthTracking(analytics.track, authAttemptId, {
+          joinedExisting: loginResult.alreadyRunning === true,
+        });
+      }
+      observeAmrAuthTracking(analytics.track, loginResult, authAttemptId);
       if (amrLoginPollCancelledRef.current) {
-        resolveAmrAuthTracking(analytics.track, 'cancelled');
+        resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+          authAttemptId,
+        });
         if (loginResult.ok || loginResult.alreadyRunning) {
-          const cancelResult = await cancelVelaLogin();
+          const cancelResult = await cancelVelaLogin(authAttemptId);
           closeAmrActivationWindowBestEffort();
           if (!cancelResult.ok) {
             setAmrLoginError(t('settings.amrLoginErrorCompact'));
@@ -2187,7 +2213,9 @@ function OnboardingView({
         return;
       }
       if (!loginResult.ok && !loginResult.alreadyRunning) {
-        resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed');
+        resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed', {
+          authAttemptId,
+        });
         setAmrLoginError(loginResult.error || t('settings.amrLoginErrorCompact'));
         return;
       }
@@ -2202,7 +2230,12 @@ function OnboardingView({
   async function handleCancelAmrLogin() {
     if (!amrLoginPending || amrLoginCancelPending) return;
     amrLoginPollCancelledRef.current = true;
-    resolveAmrAuthTracking(analytics.track, 'cancelled');
+    const authAttemptId = amrAuthAttemptIdRef.current;
+    if (authAttemptId) {
+      resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+        authAttemptId,
+      });
+    }
     setAmrLoginError(null);
     setAmrLoginCancelPending(true);
     setAmrStatus((current) => (
@@ -2211,7 +2244,9 @@ function OnboardingView({
         : current
     ));
     setAmrLoginPending(false);
-    const result = await cancelVelaLogin();
+    const result = authAttemptId
+      ? await cancelVelaLogin(authAttemptId)
+      : { ok: false, canceled: false };
     closeAmrActivationWindowBestEffort();
     setAmrLoginCancelPending(false);
     if (!result.ok) {
@@ -2230,20 +2265,35 @@ function OnboardingView({
       if (amrLoginPollCancelledRef.current) return false;
       const nextStatus = await fetchVelaLoginStatus();
       if (nextStatus) setAmrStatus(nextStatus);
+      const authAttemptId = amrAuthAttemptIdRef.current;
+      if (nextStatus && authAttemptId) {
+        observeAmrAuthTracking(analytics.track, nextStatus, authAttemptId);
+      }
       const outcome = amrLoginPollOutcome(nextStatus, startedAt);
       if (outcome === 'signed-in') {
-        resolveAmrAuthTracking(analytics.track, 'success', undefined, {
-          signedInUserId: nextStatus?.user?.id ?? null,
-        });
+        if (authAttemptId) {
+          resolveAmrAuthTracking(analytics.track, 'success', undefined, {
+            authAttemptId,
+            signedInUserId: nextStatus?.user?.id ?? null,
+          });
+        }
         notifyAmrLoginStatusChanged();
         return true;
       }
       if (outcome === 'stopped' || outcome === 'timed-out') {
         if (outcome === 'timed-out') {
-          resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout');
-          void cancelVelaLogin();
+          if (authAttemptId) {
+            resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout', {
+              authAttemptId,
+            });
+            void cancelVelaLogin(authAttemptId);
+          }
         } else {
-          resolveAmrAuthTracking(analytics.track, 'failed', 'login_stopped');
+          if (authAttemptId) {
+            resolveAmrAuthTracking(analytics.track, 'failed', 'login_stopped', {
+              authAttemptId,
+            });
+          }
         }
         setAmrLoginError(t('settings.amrLoginErrorCompact'));
         return false;
