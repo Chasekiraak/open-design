@@ -32,6 +32,7 @@ import {
 } from '../codex-rollout-usage.js';
 import type { ConnectorService } from '../connectors/service.js';
 import {
+  conversationTurnIndexForRun,
   getConversation,
   getProject,
   listConversations,
@@ -40,6 +41,7 @@ import {
   upsertMessage,
 } from '../db.js';
 import { readVelaLoginStatus } from '../integrations/vela.js';
+import { getDetectedRuntimeVersions } from '../runtimes/detection.js';
 import {
   deriveLangfuseDeliveryState,
   readTelemetrySinkConfig,
@@ -169,6 +171,13 @@ interface ChatRun {
   retryAttemptCount?: number;
   retryFinalResult?: string;
   retrySuppressedReason?: string;
+  retryOriginalFailure?: {
+    failure_category?: string;
+    failure_detail?: string;
+    failure_stage?: string;
+    retryable?: boolean;
+    user_action?: string;
+  };
   artifactOutcome?: {
     artifactCount: number;
     artifactsCreated?: number;
@@ -184,6 +193,7 @@ interface ChatRun {
     stablePromptHash?: string;
     hit?: boolean;
     missReason?: string | null;
+    changedSections?: string[] | null;
   };
 }
 
@@ -216,6 +226,12 @@ interface ChatRunService {
   cancel(run: ChatRun): Promise<ChatRunStatusResponse>;
   isTerminal(status: ChatRunStatus): boolean;
   emit?(run: ChatRun, event: string, data: unknown): RunEventRecord;
+  setAnalyticsRecovery?(run: ChatRun, recovery: {
+    context: AnalyticsContext;
+    properties: Record<string, unknown>;
+    insertId: string;
+  }): void;
+  markAnalyticsCompleted?(run: ChatRun): void;
 }
 
 interface AnalyticsService {
@@ -225,7 +241,7 @@ interface AnalyticsService {
     appVersion: string;
     properties: Record<string, unknown>;
     insertId: string;
-  }): void;
+  }): void | Promise<void>;
 }
 
 interface RunRoutesDesignService {
@@ -869,11 +885,17 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       const hintProjectTurnIndex = typeof analyticsHints.projectTurnIndex === 'number'
         ? analyticsHints.projectTurnIndex
         : undefined;
+      const conversationTurnIndex = run.conversationId
+        ? conversationTurnIndexForRun(db, run.conversationId, run.id)
+        : null;
       const sessionDimensionProps = {
         ...(hintTurnIndex !== undefined ? { turn_index: hintTurnIndex } : {}),
         ...(hintIsFirstRun !== undefined ? { is_first_run: hintIsFirstRun } : {}),
         ...(hintProjectTurnIndex !== undefined
           ? { project_turn_index: hintProjectTurnIndex }
+          : {}),
+        ...(conversationTurnIndex !== null
+          ? { conversation_turn_index: conversationTurnIndex }
           : {}),
         ...(hintHasExistingArtifact !== undefined
           ? { has_existing_artifact: hintHasExistingArtifact }
@@ -1039,6 +1061,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         skill_ids: runSkillIds,
         token_count_source: userQueryTokens > 0 ? 'estimated' : 'unknown',
       };
+      design.runs.setAnalyticsRecovery?.(run, {
+        context: analyticsContext,
+        properties: baseProps,
+        insertId: runInsertId,
+      });
       design.analytics.capture({
         eventName: 'run_created',
         context: analyticsContext,
@@ -1224,6 +1251,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
           : modelIdForTracking(usageAnalytics.agent_reported_model);
+        const runtimeVersions = getDetectedRuntimeVersions(run.agentId);
         for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
           design.analytics.capture({
             eventName: retryEvent.event,
@@ -1233,7 +1261,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             insertId: `${runInsertId}-${retryEvent.event}-${index}`,
           });
         }
-        design.analytics.capture({
+        await Promise.resolve(design.analytics.capture({
           eventName: 'run_finished',
           context: analyticsContext,
           appVersion: design.getAppVersion(),
@@ -1245,6 +1273,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             stable_prompt_hash: run.promptCache?.stablePromptHash,
             stable_prompt_cache_hit: run.promptCache?.hit,
             stable_prompt_cache_miss_reason: run.promptCache?.missReason,
+            // Which stable-prefix input drifted, for miss_reason
+            // 'stable-prompt-changed' only. `unattributed` means the prefix
+            // moved but no tracked section did — a coverage gap in
+            // prompts/stable-sections.ts, not a cause.
+            stable_prompt_changed_sections: run.promptCache?.changedSections ?? undefined,
             area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
             result,
             ...(activationMilestones ? { $set_once: activationMilestones } : {}),
@@ -1255,6 +1288,33 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             asked_user_question: runAskedUserQuestion(run.events),
             retry_attempt_count: run.retryAttemptCount ?? 0,
             retry_final_result: run.retryFinalResult ?? 'not_attempted',
+            ...(runtimeVersions?.agentCliVersion
+              ? { agent_cli_version: runtimeVersions.agentCliVersion }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionName
+              ? { runtime_companion_name: runtimeVersions.runtimeCompanionName }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionVersion
+              ? { runtime_companion_version: runtimeVersions.runtimeCompanionVersion }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_category
+              ? {
+                  retry_original_failure_category:
+                    run.retryOriginalFailure.failure_category,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_detail
+              ? {
+                  retry_original_failure_detail:
+                    run.retryOriginalFailure.failure_detail,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_stage
+              ? {
+                  retry_original_failure_stage:
+                    run.retryOriginalFailure.failure_stage,
+                }
+              : {}),
             ...(run.retrySuppressedReason
               ? { retry_suppressed_reason: run.retrySuppressedReason }
               : {}),
@@ -1318,7 +1378,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             token_count_source: usageAnalytics.token_count_source,
           },
           insertId: `${runInsertId}-finish`,
-        });
+        }));
+        design.runs.markAnalyticsCompleted?.(run);
       }).catch(() => {});
     }
   });
@@ -1556,6 +1617,11 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       );
     }
     const run = design.runs.create(meta);
+    try {
+      pinAssistantMessageOnRunCreate(db, run);
+    } catch (err) {
+      console.warn('[chat] message create pin failed', err);
+    }
     design.runs.stream(run, req, res);
     reconcileAssistantMessageOnRunEnd(db, design.runs, run);
     design.runs.start(run, () => startChatRun(meta, run));

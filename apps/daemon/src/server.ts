@@ -29,6 +29,11 @@ import {
   resolveExclusiveSurface,
 } from './prompts/system.js';
 import { pendingPromptFlowStep } from './prompts/flow-steps.js';
+import {
+  computeStableSectionHashes,
+  serializeStableSections,
+  type StableSectionHashes,
+} from './prompts/stable-sections.js';
 import { emittedRenderableQuestionForm } from './question-form-detect.js';
 import { resolveProjectRoot } from './project-root.js';
 import {
@@ -186,6 +191,7 @@ import {
   detectAgents,
   getAgentDef,
   isKnownModel,
+  isKnownServiceTier,
   openDesignAmrTraceEnv,
   applyAgentLaunchEnv,
   resolveAgentLaunch,
@@ -198,6 +204,7 @@ import {
   rememberLiveModels,
   resolveDefaultModelFromOptions,
   resolveModelForAgent,
+  resolveModelForServiceTier,
 } from './runtimes/models.js';
 import { loadMmdRouteLaunchEnv } from './runtimes/mmd-routes.js';
 import { preparePromptFileForAgent } from './runtimes/prompt-file.js';
@@ -397,6 +404,7 @@ import {
   snapshotAiHtmlVersionsForRun,
 } from './run-html-version-snapshots.js';
 import { reportRunCompletedFromDaemon } from './langfuse-bridge.js';
+import { reconcileDurableRunTerminals } from './runtimes/run-terminal-reconciliation.js';
 import { buildPromptStackTelemetry } from './prompt-telemetry.js';
 import { readAnalyticsContext } from './analytics.js';
 import {
@@ -1674,6 +1682,12 @@ export function createFinalizedMessageTelemetryReporter({
         skipReason: state.langfuse_expected === false ? 'not_expected' : undefined,
         status: saved.runStatus,
       });
+      if (
+        state.langfuse_expected === false
+        || state.langfuse_delivery_status === 'accepted'
+      ) {
+        design.runs.markLangfuseCompleted?.(run);
+      }
     })();
   };
 }
@@ -2607,6 +2621,25 @@ export async function startServer({
     readAnalyticsContext,
   };
 
+  // Runs are process-local, but their terminal obligations are durable. On a
+  // fresh daemon boot, repair stale message rows and replay any PostHog or
+  // Langfuse terminal work whose checkpoint was not committed. Network work
+  // stays off the startup critical path.
+  void reconcileDurableRunTerminals({
+    analytics: analyticsService,
+    appVersion: telemetry.getCachedAppVersion()?.version ?? '0.0.0',
+    appVersionInfo: telemetry.getCachedAppVersion(),
+    db,
+    reportLangfuse: reportRunCompletedFromDaemon,
+    runsLogDir: path.join(RUNTIME_DATA_DIR, 'runs'),
+  }).then((reconciled) => {
+    if (reconciled.interrupted > 0 || reconciled.messagesReconciled > 0) {
+      console.warn('[runs] reconciled interrupted run terminals', reconciled);
+    }
+  }).catch((error) => {
+    console.warn('[runs] terminal reconciliation failed', error);
+  });
+
   // Interactive Terminal sessions (node-pty). In-memory, process-local, and
   // killed on daemon shutdown — see shutdownDaemonRuns below.
   const terminalService = createTerminalService();
@@ -2981,6 +3014,7 @@ export async function startServer({
     testAgentConnection,
     getAgentDef,
     isKnownModel,
+    isKnownServiceTier,
     sanitizeCustomModel,
   };
   const critiqueDeps = {
@@ -4145,7 +4179,11 @@ export async function startServer({
       }
     }
 
-    const prompt = composeSystemPrompt({
+    // Hoisted verbatim out of the composeSystemPrompt() call so the exact same
+    // object both composes the prompt and feeds section-level drift
+    // attribution — a second, hand-maintained copy of these inputs would drift
+    // from the real ones and mislabel the telemetry it exists to explain.
+    const systemPromptInputs = {
       agentId,
       includeCodexImagegenOverride: false,
       skillBody,
@@ -4199,7 +4237,8 @@ export async function startServer({
       // restores the classic stack. main keeps classic as the default —
       // do NOT carry this flip into a PR against main.
       promptCoreVariant: process.env.OD_PROMPT_CORE === 'classic' ? undefined : 'slim',
-    });
+    };
+    const prompt = composeSystemPrompt(systemPromptInputs);
     // The chat handler also needs to know where the active skill lives
     // on disk so it can stage a per-project copy of its side files
     // before spawning the agent. Returning that here avoids a second
@@ -4224,6 +4263,10 @@ export async function startServer({
           .filter((part) => typeof part === 'string' && part.trim().length > 0)
           .join('\n\n---\n\n'),
       },
+      // Diagnostic only. The caller merges its own stable inputs
+      // (runtimeToolPrompt, the client system prompt) in before hashing, so the
+      // section map covers the whole fingerprint rather than just this half.
+      stableSectionInputs: systemPromptInputs,
     };
   };
 
@@ -4337,6 +4380,7 @@ export async function startServer({
       commentAttachments = [],
       model,
       reasoning,
+      serviceTier,
       locale,
       research,
       context,
@@ -4361,6 +4405,7 @@ export async function startServer({
     if (typeof telemetryPrompt === 'string') run.userPrompt = telemetryPrompt;
     if (typeof model === 'string' && model) run.model = model;
     if (typeof reasoning === 'string' && reasoning) run.reasoning = reasoning;
+    if (typeof serviceTier === 'string' && serviceTier) run.serviceTier = serviceTier;
     if (typeof skillId === 'string' && skillId) run.skillId = skillId;
     if (typeof designSystemId === 'string' && designSystemId)
       run.designSystemId = designSystemId;
@@ -4709,6 +4754,7 @@ export async function startServer({
       critiqueShouldRun,
       designSystemSelection,
       promptTelemetryParts,
+      stableSectionInputs,
     } =
       await composeDaemonSystemPrompt({
         agentId,
@@ -4945,8 +4991,10 @@ export async function startServer({
     // the upstream session's own configured default; omitted models may still
     // resolve to an available fallback below.
     let configuredAgentEnv = {};
+    let appConfigForRun = null;
     try {
       const appConfig = await readAppConfig(RUNTIME_DATA_DIR);
+      appConfigForRun = appConfig;
       configuredAgentEnv = agentCliEnvForAgent(appConfig.agentCliEnv, def.id);
     } catch {
       configuredAgentEnv = {};
@@ -4958,13 +5006,17 @@ export async function startServer({
           ...configuredAgentEnv,
         })
       : null;
+    const configuredModel =
+      typeof appConfigForRun?.agentModels?.[def.id]?.model === 'string'
+        ? appConfigForRun.agentModels[def.id].model
+        : null;
     let safeModel = resolveModelForAgent(
       def,
       typeof model === 'string'
         ? isKnownModel(def, model, requestedLiveModelScope)
           ? model
           : sanitizeCustomModel(model)
-        : null,
+        : configuredModel,
       process.env,
       requestedLiveModelScope,
     );
@@ -4977,7 +5029,22 @@ export async function startServer({
       typeof reasoning === 'string' && Array.isArray(def.reasoningOptions)
         ? (def.reasoningOptions.find((r) => r.id === reasoning)?.id ?? null)
         : null;
-    const agentOptions = { model: safeModel, reasoning: safeReasoning };
+    safeModel = resolveModelForServiceTier(
+      def,
+      safeModel,
+      typeof serviceTier === 'string' ? serviceTier : null,
+      requestedLiveModelScope,
+    );
+    const safeServiceTier =
+      typeof serviceTier === 'string' &&
+      isKnownServiceTier(def, safeModel, serviceTier, requestedLiveModelScope)
+        ? serviceTier
+        : null;
+    const agentOptions = {
+      model: safeModel,
+      reasoning: safeReasoning,
+      serviceTier: safeServiceTier,
+    };
     const agentLaunch = resolveAgentLaunch(def, configuredAgentEnv);
     const resolvedBin = agentLaunch.selectedPath;
     if (def.id === 'amr' && resolvedBin && agentLaunch.launchPath) {
@@ -5026,7 +5093,7 @@ export async function startServer({
             currentCwd: effectiveCwd,
             currentAssistantMessageId: run.assistantMessageId ?? null,
           })
-        : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, invalidationReason: null };
+        : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, storedStableSections: null as StableSectionHashes | null, invalidationReason: null };
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
       design.runs.emit(run, 'diagnostic', {
@@ -5073,6 +5140,14 @@ export async function startServer({
       .map((part) => (typeof part === 'string' ? part.trim() : ''))
       .join('\n\n---\n\n');
     const currentStableHash = hashStableInstructions(stableInstructionFingerprint);
+    // Per-section digests of the SAME inputs the fingerprint is built from, so a
+    // drift event can name which one moved. `currentStableHash` above stays the
+    // sole re-send decider — these only label a decision already made.
+    const currentStableSections = computeStableSectionHashes({
+      ...(stableSectionInputs ?? {}),
+      runtimeToolPrompt,
+      clientSystemPrompt: systemPrompt,
+    });
     // `runtimeToolPrompt` is part of the fingerprint and varies only when the
     // tool-token grant's presence flips between turns (rare cwd/projectId edge
     // cases); any such change correctly forces a full re-send that turn.
@@ -5085,7 +5160,10 @@ export async function startServer({
       isResuming: agentResumeCtx.isResuming,
       storedStablePromptHash: agentResumeCtx.storedStablePromptHash,
       currentStableHash,
+      storedStableSections: agentResumeCtx.storedStableSections,
+      currentStableSections,
     });
+    const currentStableSectionsJson = serializeStableSections(currentStableSections);
     const browserUsePromptGuard = renderBrowserUseUnavailablePrompt(run.browserUse ?? null);
     const titleGenerationRequested =
       titleGeneration &&
@@ -5553,6 +5631,7 @@ export async function startServer({
         sideEffects,
       });
       if (decision.shouldRetry && !design.runs.isTerminal(run.status)) {
+        run.retryOriginalFailure ??= failure ?? undefined;
         if ((run.retryAttemptCount ?? 0) === 0) {
           run.retryOriginFailure = failure ? { ...failure } : null;
           run.retryOriginErrorCode = errorCode ?? null;
@@ -5627,6 +5706,7 @@ export async function startServer({
           agentId: def.id,
           sessionId: liveSessionId,
           stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSectionsJson,
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
@@ -6144,6 +6224,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: createTurnSessionId,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -6170,6 +6251,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: agentResumeCtx.resumeSessionId,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -6476,6 +6558,7 @@ export async function startServer({
       cwd,
       model: safeModel,
       reasoning: safeReasoning,
+      serviceTier: safeServiceTier,
       toolTokenExpiresAt: toolTokenGrant?.expiresAt ?? null,
     });
     noteAgentActivity();
@@ -8117,6 +8200,7 @@ export async function startServer({
             agentId: def.id,
             sessionId: sessionPath,
             stablePromptHash: currentStableHash,
+            stablePromptSections: currentStableSectionsJson,
             model: safeModel ?? null,
             cwd: effectiveCwd,
             lastMessageId: run.assistantMessageId ?? null,
@@ -8146,6 +8230,7 @@ export async function startServer({
           agentId: def.id,
           sessionId: acpSession.getDurableSessionId(),
           stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSectionsJson,
           model: safeModel ?? null,
           cwd: effectiveCwd,
           lastMessageId: run.assistantMessageId ?? null,
@@ -8342,6 +8427,7 @@ export async function startServer({
       designSystemId: orbitDesignSystemId,
       model: modelPrefs.model ?? null,
       reasoning: modelPrefs.reasoning ?? null,
+      serviceTier: modelPrefs.serviceTier ?? null,
       message: prompt,
       systemPrompt: [
         renderOrbitTemplateSystemPrompt(template),
@@ -8658,6 +8744,7 @@ export async function startServer({
         context: routineContext,
         model: modelPrefs.model ?? null,
         reasoning: modelPrefs.reasoning ?? null,
+        serviceTier: modelPrefs.serviceTier ?? null,
         message: routine.prompt,
         systemPrompt: [
           `You are running an unattended scheduled routine named "${routine.name}".`,
@@ -8851,6 +8938,7 @@ export async function startServer({
     chat: { startChatRun },
     agents: agentDeps,
     critique: critiqueDeps,
+    appConfig: { readAppConfig },
     validation: validationDeps,
     lifecycle: { isDaemonShuttingDown: () => daemonShuttingDown },
     telemetry: { reportFinalizedMessage, reportFeedback },

@@ -217,6 +217,7 @@ import { historyWithApiAttachmentContext } from '../api-attachment-context';
 import { filterImplicitProducedFiles } from '../produced-files';
 import { AvatarMenu } from './AvatarMenu';
 import { EntrySettingsMenu } from './EntrySettingsMenu';
+import { MessageCenter } from './MessageCenter';
 import { HandoffButton } from './HandoffButton';
 import { Icon } from './Icon';
 import { ProjectHeaderMenu } from './ProjectHeaderMenu';
@@ -432,7 +433,7 @@ interface Props {
   onAgentChange: (id: string) => void;
   onAgentModelChange: (
     id: string,
-    choice: { model?: string; reasoning?: string },
+    choice: { model?: string; reasoning?: string; serviceTier?: string },
   ) => void;
   onApiModelChange?: (model: string) => void;
   onRefreshAgents: () => void;
@@ -5943,6 +5944,7 @@ export function ProjectView({
           mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
           model: daemonByokOpenCode ? config.model : choice?.model ?? null,
           reasoning: daemonByokOpenCode ? null : choice?.reasoning ?? null,
+          serviceTier: daemonByokOpenCode ? null : choice?.serviceTier ?? null,
           ...(daemonByokOpenCode && byokOpenCodeProvider
             ? { byokProvider: byokOpenCodeProvider }
             : {}),
@@ -8925,6 +8927,9 @@ export function ProjectView({
                 artifactKind={headerArtifact.artifact_kind}
                 metricsConsent={config.telemetry?.metrics === true}
                 installationId={config.installationId}
+              />
+              <MessageCenter
+                onOpenNotificationSettings={() => onOpenSettings('notifications')}
               />
               <EntrySettingsMenu
                 config={config}
