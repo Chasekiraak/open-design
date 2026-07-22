@@ -10,9 +10,10 @@
 //   #132 — an import always lands in the user's own registry, which only the
 //          个人的 scope lists. The catalog stayed on whatever tab it was on, so
 //          a successful import looked like a no-op.
-//   #109 — installs are serialized daemon-side, but only the installing card's
-//          own button went disabled; every other Install button still looked
-//          live and swallowed the click with zero feedback.
+//   #109 — the daemon-side lockfile write is now serialized per-path
+//          (apps/daemon/src/plugins/lockfile.ts), so distinct plugins can
+//          install at the same time without racing; each card only tracks
+//          its own pending state and no longer blocks its neighbors.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -207,7 +208,7 @@ describe('ExtensionsMarketplace card affordances', () => {
     expect(container).toBeTruthy();
   });
 
-  it('#109 — every other install button reads as blocked while one install runs', async () => {
+  it('#109 — installing one plugin does not block installing another', async () => {
     const { container } = renderMarketplace();
     await waitFor(() => {
       expect(container.querySelectorAll('.plugin-marketplace__item').length).toBe(2);
@@ -225,12 +226,22 @@ describe('ExtensionsMarketplace card affordances', () => {
       const buttons = [
         ...container.querySelectorAll<HTMLButtonElement>('.plugin-marketplace__row-action'),
       ];
-      // Both are unclickable: the one installing, and the one that has to wait.
+      // The card that was clicked is busy (own pending state)...
+      expect(buttons[0]!.disabled).toBe(true);
+      // ...but its neighbor is still live: two distinct plugins install
+      // concurrently now that the daemon-side write is serialized, not raced.
+      expect(buttons[1]!.disabled).toBe(false);
+    });
+
+    // Clicking the still-live second button starts its own install in parallel.
+    fireEvent.click(
+      container.querySelectorAll<HTMLButtonElement>('.plugin-marketplace__row-action')[1]!,
+    );
+    await waitFor(() => {
+      const buttons = [
+        ...container.querySelectorAll<HTMLButtonElement>('.plugin-marketplace__row-action'),
+      ];
       expect(buttons.every((button) => button.disabled)).toBe(true);
-      // …and the waiting one says why rather than looking live and doing nothing.
-      const waiting = buttons[1]!;
-      expect(waiting.textContent).toBeTruthy();
-      expect(waiting.getAttribute('title')).toBeTruthy();
     });
 
     installResolvers.forEach((resolve) => resolve());

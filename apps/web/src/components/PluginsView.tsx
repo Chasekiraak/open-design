@@ -929,7 +929,11 @@ export function ExtensionsMarketplace({
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [unsharingId, setUnsharingId] = useState<string | null>(null);
   const [uninstallingId, setUninstallingId] = useState<string | null>(null);
-  const [installingKey, setInstallingKey] = useState<string | null>(null);
+  // A Set, not a single key: the daemon-side lockfile write is now
+  // serialized per-path (issue #109), so distinct plugins can install at
+  // the same time without racing — each card only tracks its OWN pending
+  // state and no longer blocks its neighbors.
+  const [installingKeys, setInstallingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   // The card the user drilled into. #5517's rows are click-to-inspect; the port
   // shipped them as inert markup, so no card in 扩展 opened anything (issue #129).
@@ -1235,8 +1239,8 @@ export function ExtensionsMarketplace({
   }
 
   async function installAvailable(plugin: AvailableMarketplacePlugin, title: string) {
-    if (installingKey) return;
-    setInstallingKey(plugin.key);
+    if (installingKeys.has(plugin.key)) return;
+    setInstallingKeys((prev) => new Set(prev).add(plugin.key));
     try {
       const outcome = await installPluginSource(plugin.installSource ?? plugin.entry.name);
       if (outcome.ok) {
@@ -1251,7 +1255,11 @@ export function ExtensionsMarketplace({
         setToast({ message: outcome.message || t('pluginsView.installFailed', { title }), tone: 'error' });
       }
     } finally {
-      setInstallingKey(null);
+      setInstallingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(plugin.key);
+        return next;
+      });
     }
   }
 
@@ -1574,7 +1582,7 @@ export function ExtensionsMarketplace({
             {visibleCards.map((card) => {
               const busy =
                 card.action.kind === 'install'
-                  ? installingKey === card.action.plugin.key
+                  ? installingKeys.has(card.action.plugin.key)
                   : sharingId === card.id || unsharingId === card.id;
               const uninstalling = uninstallingId === card.id;
               // The row button carries the first available action; the overflow
@@ -1585,12 +1593,6 @@ export function ExtensionsMarketplace({
                 (card.action.kind === 'try' && Boolean(onUsePlugin)) ||
                 (card.action.kind === 'use-skill' && Boolean(onUseSkill)) ||
                 card.action.kind === 'install';
-              // Installing is serialized daemon-side (the plugin lockfile is a
-              // read-modify-write), so a second install cannot start while one
-              // is in flight. Say so on the button instead of letting the click
-              // land on nothing (issue #109).
-              const blockedByOtherInstall =
-                card.action.kind === 'install' && installingKey !== null && !busy;
               const menuActions = [
                 ...(rowHasRunOrInstall && card.share ? (['share'] as const) : []),
                 ...(rowHasRunOrInstall && card.unshare ? (['unshare'] as const) : []),
@@ -1670,8 +1672,7 @@ export function ExtensionsMarketplace({
                       <button
                         type="button"
                         className="plugin-marketplace__row-action"
-                        disabled={busy || blockedByOtherInstall}
-                        title={blockedByOtherInstall ? t('pluginsView.installQueuedHint') : undefined}
+                        disabled={busy}
                         data-testid={`plugins-card-install-${card.id}`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1681,9 +1682,7 @@ export function ExtensionsMarketplace({
                       >
                         {busy
                           ? t('pluginsView.installing')
-                          : blockedByOtherInstall
-                            ? t('pluginsView.installWaiting')
-                            : t('pluginsView.install')}
+                          : t('pluginsView.install')}
                       </button>
                     ) : card.share ? (
                       <button
@@ -1820,9 +1819,9 @@ export function ExtensionsMarketplace({
         {cardDetail?.kind === 'available' ? (
           <AvailablePluginDetailsModal
             plugin={cardDetail.plugin}
-            pending={installingKey === cardDetail.plugin.key}
+            pending={installingKeys.has(cardDetail.plugin.key)}
             onClose={() => {
-              if (installingKey !== cardDetail.plugin.key) setCardDetail(null);
+              if (!installingKeys.has(cardDetail.plugin.key)) setCardDetail(null);
             }}
             onUseInstalled={(record) => {
               setCardDetail(null);
