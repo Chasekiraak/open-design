@@ -288,12 +288,9 @@ export interface VelaControlApiContext {
   configMtimeMs: number | null;
 }
 
-export interface VelaControlApiContext {
+export interface VelaApiContext {
   profile: string;
   apiUrl: string;
-  controlKey: string;
-  user: VelaUser | null;
-  configMtimeMs: number | null;
 }
 
 interface VelaProfileShape {
@@ -544,16 +541,32 @@ export function readVelaControlApiContext(
       configMtimeMs: null,
     };
   }
+  const apiContext = readVelaApiContext(env, configuredEnv);
   const file = readConfigFile();
-  const stored = file?.profiles?.[profile];
+  const stored = file?.profiles?.[apiContext.profile];
   const controlKey = stored?.controlKey?.trim() ?? '';
   if (!controlKey) return null;
   return {
-    profile,
-    apiUrl: stored?.apiUrl?.trim() || envApiUrl || 'https://amr-api.open-design.ai',
+    ...apiContext,
     controlKey,
     user: stored?.user ?? null,
     configMtimeMs: existsSync(amrConfigPath()) ? statSync(amrConfigPath()).mtimeMs : null,
+  };
+}
+
+export function readVelaApiContext(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): VelaApiContext {
+  const mergedEnv = mergeVelaEnv(env, configuredEnv);
+  const profile = resolveAmrProfile(mergedEnv);
+  const stored = readConfigFile()?.profiles?.[profile];
+  return {
+    profile,
+    apiUrl:
+      stored?.apiUrl?.trim()
+      || mergedEnv.VELA_API_URL?.trim()
+      || 'https://amr-api.open-design.ai',
   };
 }
 
