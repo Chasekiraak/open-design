@@ -391,7 +391,7 @@
   display: none;
 }
 
-/* Bottom-left action cluster (GitHub star / Discord / settings / help).
+/* Bottom-left action cluster (GitHub star / Discord / help).
    Compact toolbar: Star keeps the GitHub icon plus live count; secondary
    actions collapse to icons. */
 .entry-rail-actions {
@@ -409,13 +409,12 @@
 }
 .entry-nav-rail__footer .entry-rail-actions {
   order: 1;
-  /* Settings row rides higher, clear of the credits + account stack. */
+  /* Action row rides higher, clear of the credits + account stack. */
   margin-bottom: 12px;
 }
-/* Signed in with no update in flight, the actions box has no children (the
-   updater host renders nothing until an update exists, and the settings chip
-   only shows without a cloud identity) — collapse it AND the footer's own
-   padding so the rail doesn't end in a blank strip under the account row. */
+/* With no update in flight, the actions box has no children because the
+   updater host renders nothing. Collapse it AND the footer's own padding so
+   the rail doesn't end in a blank strip under the account row. */
 .entry-nav-rail__footer .entry-rail-actions:empty {
   display: none;
 }
@@ -428,37 +427,13 @@
   margin: 0 auto;
   padding-top: 0;
 }
-.entry-rail-actions__settings-group {
-  display: flex;
-  flex: 0 1 100%;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  width: 30px;
-  max-width: 30px;
-  min-width: 30px;
-  overflow: hidden;
-  border-radius: 8px;
-  background: transparent;
-  transition: max-width 180ms var(--ease-out), width 180ms var(--ease-out),
-    background-color 140ms var(--ease-out);
-}
-.entry-rail-actions__settings-group:hover,
-.entry-rail-actions__settings-group:focus-within {
-  width: 100%;
-  max-width: 100%;
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
 .entry-rail-actions > * {
   align-self: center;
 }
 .entry-rail-actions .entry-star-badge,
 .entry-rail-actions .entry-discord-badge,
 .entry-rail-actions .entry-mail-badge,
-.entry-rail-actions .use-everywhere-chip,
-.entry-rail-actions .entry-settings-chip {
+.entry-rail-actions .use-everywhere-chip {
   justify-content: center;
 }
 .entry-rail-actions .entry-help-menu {
@@ -4875,8 +4850,7 @@
 .entry-rail-actions .entry-discord-badge,
 .entry-rail-actions .entry-x-badge,
 .entry-rail-actions .entry-mail-badge,
-.entry-rail-actions .use-everywhere-chip,
-.entry-rail-actions .entry-settings-chip {
+.entry-rail-actions .use-everywhere-chip {
   height: 29px;
   border-color: transparent;
   border-radius: 8px;
@@ -4891,8 +4865,7 @@
 }
 .entry-rail-actions .entry-discord-badge,
 .entry-rail-actions .entry-x-badge,
-.entry-rail-actions .entry-mail-badge,
-.entry-rail-actions .entry-settings-chip {
+.entry-rail-actions .entry-mail-badge {
   flex: 0 0 26px;
   width: 26px;
   padding: 0;
@@ -4904,22 +4877,19 @@
 .entry-rail-actions .entry-mail-badge__label,
 .entry-rail-actions .entry-star-badge__label,
 .entry-rail-actions .entry-star-badge__sep,
-.entry-rail-actions .entry-settings-chip__label,
 .entry-rail-actions .entry-help-menu__label {
   display: none;
 }
 .entry-rail-actions .entry-discord-badge__icon,
 .entry-rail-actions .entry-x-badge__icon,
-.entry-rail-actions .entry-mail-badge__icon,
-.entry-rail-actions .entry-settings-chip__icon {
+.entry-rail-actions .entry-mail-badge__icon {
   margin: 0;
 }
 .entry-rail-actions .entry-star-badge:hover,
 .entry-rail-actions .entry-discord-badge:hover,
 .entry-rail-actions .entry-x-badge:hover,
 .entry-rail-actions .entry-mail-badge:hover,
-.entry-rail-actions .use-everywhere-chip:hover,
-.entry-rail-actions .entry-settings-chip:hover {
+.entry-rail-actions .use-everywhere-chip:hover {
   border-color: transparent;
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
@@ -5096,48 +5066,6 @@
   color: var(--text-strong);
 }
 
-.entry-settings-chip {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: var(--shadow-xs);
-  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out),
-    color 120ms var(--ease-out), transform 120ms var(--ease-out);
-}
-.entry-settings-chip:hover {
-  background: var(--bg-subtle);
-  border-color: var(--border-strong);
-  color: var(--text-strong);
-}
-.entry-settings-chip:active {
-  transform: scale(0.98);
-}
-.entry-settings-chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.entry-settings-chip__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-strong);
-  flex: 0 0 auto;
-}
-.entry-settings-chip__label {
-  white-space: nowrap;
-}
-
 @media (max-width: 700px) {
   .entry-star-badge__label {
     display: none;
@@ -5152,12 +5080,6 @@
     display: none;
   }
   .entry-discord-badge__sep {
-    display: none;
-  }
-  .entry-settings-chip {
-    padding: 0 8px;
-  }
-  .entry-settings-chip__label {
     display: none;
   }
 }

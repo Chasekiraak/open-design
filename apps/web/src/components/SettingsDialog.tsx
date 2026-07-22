@@ -3772,6 +3772,7 @@ export function SettingsDialog({
     fallback: string,
   ) => {
     if (!model) return fallback;
+    if (model.id === 'default') return t('settings.modelUsesCliDefault');
     const label = model.label?.trim();
     const id = model.id.trim();
     if (label && label !== id) {
@@ -3832,10 +3833,15 @@ export function SettingsDialog({
     if (!hasModels && !hasReasoning) return null;
     const choice = cfg.agentModels?.[selected.id] ?? {};
     const effectiveChoice = effectiveAgentModelChoice(selected, choice) ?? choice;
-    const modelsForSelect =
+    const modelsForSelect = (
       selected.id === 'amr' && selected.models
         ? orderModelOptionsByAvailability(selected.models)
-        : selected.models;
+        : selected.models
+    )?.map((model) =>
+      model.id === 'default'
+        ? { ...model, label: t('settings.modelUsesCliDefault') }
+        : model,
+    );
     const knownModelIds = selected.models?.map((m) => m.id) ?? [];
     // Adapters opt out via `supportsCustomModel: false` on their
     // RuntimeAgentDef when their CLI has no `--model` flag (Antigravity,
@@ -7437,7 +7443,7 @@ function MediaProvidersSection({
     ?? availableProviders[0]
     ?? null;
   // Capability chip copy is derived from the provider's marketing hint —
-  // deliberately English tags ("Image · Audio · Custom model"), matching
+  // deliberately English tags ("Image · Audio · Custom configuration"), matching
   // the reference design.
   const providerCapabilityLabel = (provider: MediaProvider) => {
     const hint = provider.hint.toLowerCase();
@@ -7446,7 +7452,7 @@ function MediaProvidersSection({
     if (/video|sora|veo|wan|seedance|grok-imagine/.test(hint)) parts.push('Video');
     if (/voice|speech|audio|sfx|tts|clone/.test(hint) || provider.id === 'senseaudio') parts.push('Audio');
     if (/research|search/.test(hint)) parts.push('Research');
-    if (provider.supportsCustomModel) parts.push('Custom model');
+    if (provider.supportsCustomModel) parts.push('Custom configuration');
     if (parts.length === 0) {
       return provider.credentialsRequired === false
         ? t('settings.mediaProviderNoKeyRequired')
@@ -7461,7 +7467,6 @@ function MediaProvidersSection({
   const activeIsSavedState = Boolean(
     activeEntry && (activeHasPendingEdit || activeEntry.apiKeyConfigured) && !activeHasPendingEdit,
   );
-  const activeTail = activeEntry?.apiKeyTail?.trim();
   const activeClearable = Boolean(activeEntry && isStoredMediaProviderEntryPresent(activeEntry));
   const activeApiKeyVisible = activeProvider ? visibleApiKeys.has(activeProvider.id) : false;
   const activeRequiresCredentials = activeProvider?.credentialsRequired !== false;
@@ -7513,7 +7518,7 @@ function MediaProvidersSection({
             ) : reloadNotice?.kind === 'success' ? (
               <>
                 <Icon name="check" size={13} />
-                <span style={{ marginLeft: 4 }}>Reloaded</span>
+                <span style={{ marginLeft: 4 }}>{t('settings.mediaProviderReload')}</span>
               </>
             ) : (
               <>
@@ -7571,11 +7576,9 @@ function MediaProvidersSection({
                 {activeIsSavedState ? (
                   <span
                     className="field-status-badge field-status-badge--inline"
-                    title={t('settings.connectorsSavedTitle')}
+                    title={t('settings.mediaProviderConfigured')}
                   >
-                    {activeTail
-                      ? t('settings.connectorsSavedWithTail', { tail: activeTail })
-                      : t('settings.connectorsSaved')}
+                    {t('settings.mediaProviderConfigured')}
                   </span>
                 ) : null}
               </div>
@@ -7743,7 +7746,7 @@ function MediaProvidersSection({
               {t('tasks.comingSoon')}
             </span>
             <span className="filter-pill-count">
-              {comingSoonProviders.length}
+              ({comingSoonProviders.length})
             </span>
           </summary>
           <p className="hint" style={{ marginTop: 4, marginBottom: 8 }}>
@@ -8219,6 +8222,10 @@ function IntegrationsSection() {
   return (
     <section className="settings-section">
       <div className="mcp-client-body">
+        <div className="mcp-page-head">
+          <h3>{t('settings.mcpTitle')}</h3>
+        </div>
+
         {infoError ? (
           <div
             className="empty-card"
@@ -8228,7 +8235,6 @@ function IntegrationsSection() {
           </div>
         ) : null}
 
-        {/* Group 1: what the MCP server does */}
         <div className="mcp-capabilities-card">
           <p className="mcp-capabilities-label">
             {t('settings.mcpCapabilitiesTitle')}
@@ -8240,7 +8246,7 @@ function IntegrationsSection() {
           </ul>
         </div>
 
-        {/* Group 2: setup flow */}
+        {/* Setup flow */}
         <div className="mcp-setup-card">
           <div
             className="ds-picker"
@@ -8302,7 +8308,7 @@ function IntegrationsSection() {
           ) : null}
         </div>
 
-        {info ? (
+        {info && client.id !== 'claude' ? (
           <p style={{ margin: 0 }}>{client.buildInstruction(info)}</p>
         ) : null}
 
@@ -8430,28 +8436,9 @@ function IntegrationsSection() {
           </div>
         ) : null}
 
-        {/* Restart note is a "next step" after running the command,
-            not an error — keep it right after the code block. */}
-        <div
-          style={{
-            padding: '10px 12px',
-            background: 'var(--bg-subtle)',
-            border: '1px solid var(--border)',
-            borderLeft: '3px solid var(--border-strong)',
-            borderRadius: 6,
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>{t('settings.mcpRestartNote')}</strong>{' '}
-          <span style={{ color: 'var(--text-muted)' }}>
-            {t('settings.mcpRestartDetail')}
-          </span>
-        </div>
-
-          <p className="mcp-running-note">
-            {t('settings.mcpRunningNote')}
-          </p>
+        <p className="mcp-running-note">
+          {t('settings.mcpRunningNote')}
+        </p>
         </div>{/* end mcp-setup-card */}
       </div>
     </section>

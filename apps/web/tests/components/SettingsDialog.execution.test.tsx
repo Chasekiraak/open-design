@@ -372,7 +372,7 @@ async function waitForPersist(
 }
 
 function openGatewayPresetPopover() {
-  fireEvent.click(screen.getByRole('combobox', { name: 'Gateway preset' }));
+  fireEvent.click(screen.getByRole('combobox', { name: 'Provider preset' }));
   return screen.getByTestId('settings-byok-provider-preset-popover');
 }
 
@@ -570,12 +570,12 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(screen.getByRole('tab', { name: 'SenseAudio' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'AIHubMix' })).toBeTruthy();
     expect(screen.queryByRole('tab', { name: 'AWS Bedrock' })).toBeNull();
-    expect(screen.getByLabelText('Gateway preset')).toBeTruthy();
+    expect(screen.getByLabelText('Provider preset')).toBeTruthy();
     expect(screen.getByLabelText('Model')).toBeTruthy();
     const baseUrlInput = screen.getByLabelText('Base URL') as HTMLInputElement;
     expect(baseUrlInput.value).toBe('https://api.anthropic.com');
     expect(baseUrlInput.readOnly).toBe(true);
-    expect(screen.getByText('Default endpoint. Usually no need to change this.')).toBeTruthy();
+    expect(screen.getByText('Change this only if you use a proxy or compatible gateway.')).toBeTruthy();
     const memoryModelDetails = screen
       .getAllByText('Memory model')
       .find((node) => node.closest('summary'))
@@ -598,7 +598,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(apiKeyInput.type).toBe('password');
 
     fireEvent.click(screen.getByRole('tab', { name: 'OpenAI' }));
-    expect(screen.getByLabelText('Gateway preset')).toBeTruthy();
+    expect(screen.getByLabelText('Provider preset')).toBeTruthy();
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe(
       'https://api.openai.com/v1',
     );
@@ -799,7 +799,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     renderSettingsDialog();
 
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).readOnly).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize URL' }));
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).readOnly).toBe(false);
 
     cleanup();
@@ -873,13 +873,13 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     renderSettingsDialog({ apiProtocol: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', apiProviderBaseUrl: 'https://api.openai.com/v1' });
 
     fireEvent.click(screen.getByRole('tab', { name: 'OpenAI' }));
-    expect(screen.getByRole('combobox', { name: 'Gateway preset' }).textContent).toContain('OpenAI');
+    expect(screen.getByRole('combobox', { name: 'Provider preset' }).textContent).toContain('OpenAI');
 
     fireEvent.change(screen.getByLabelText('Base URL'), {
       target: { value: 'https://my-proxy.example.com/v1' },
     });
 
-    expect(screen.getByRole('combobox', { name: 'Gateway preset' }).textContent).toContain('Custom provider');
+    expect(screen.getByRole('combobox', { name: 'Provider preset' }).textContent).toContain('Custom provider');
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe(
       'https://my-proxy.example.com/v1',
     );
@@ -895,7 +895,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       'Ollama Cloud (managed)',
       'Ollama Self-hosted (local)',
     ]);
-    fireEvent.click(screen.getByRole('combobox', { name: 'Gateway preset' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Provider preset' }));
     expect((screen.getByLabelText('Base URL') as HTMLInputElement).readOnly).toBe(false);
 
     selectGatewayPreset('Ollama Self-hosted (local)');
@@ -995,7 +995,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       target: { value: 'sk-test' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize URL' }));
     // A non-http scheme is still rejected client-side. (An internal-IP URL is
     // no longer rejected here — it is syntactically valid and the daemon owns
     // the allowlist decision; see #3225.)
@@ -1035,13 +1035,13 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       apiProviderBaseUrl: 'https://api.anthropic.com',
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: /BYOK.*API provider/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /API providers.*API provider/i }));
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'unfinished-key' },
     });
 
     expect(screen.getByTestId('settings-byok-draft-notice').textContent).toBe(
-      'This setup remains a draft until the required fields are complete. Your current execution setup stays active.',
+      'Complete the required fields to save this provider. Your current setup will remain active.',
     );
 
     await waitFor(() => expect(first.onPersist).toHaveBeenCalled());
@@ -1074,7 +1074,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     first.unmount();
 
     const reopened = renderSettingsDialog(persistedDraft);
-    fireEvent.click(screen.getByRole('tab', { name: /BYOK.*API provider/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /API providers.*API provider/i }));
     expect((screen.getByLabelText('API key') as HTMLInputElement).value).toBe(
       'unfinished-key',
     );
@@ -2640,8 +2640,8 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     const localCliTab = screen.getByRole('tab', { name: /Local CLI.*1 installed/i });
     fireEvent.click(localCliTab);
 
-    expect(screen.getByText('Your CLIs (1)')).toBeTruthy();
-    const installGroupSummary = screen.getByText('Available to install (1)');
+    expect(screen.getByText('Installed CLIs (1)')).toBeTruthy();
+    const installGroupSummary = screen.getByText('Available CLIs (1)');
     expect(installGroupSummary.closest('details')?.hasAttribute('open')).toBe(false);
     const codexCard = screen.getByRole('button', { name: /Codex CLI/i }) as HTMLButtonElement;
     fireEvent.click(installGroupSummary);
@@ -2662,11 +2662,10 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     fireEvent.click(codexCard);
     const selectedCard = codexCard.closest('.agent-card') as HTMLElement;
-    expect(
-      within(selectedCard).getByRole('combobox', {
-        name: en['settings.modelPicker'],
-      }),
-    ).toBeTruthy();
+    const selectedModelPicker = within(selectedCard).getByRole('combobox', {
+      name: en['settings.modelPicker'],
+    });
+    expect(selectedModelPicker.textContent).toContain('CLI default');
     expect(
       selectedCard.compareDocumentPosition(installGroupSummary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -2773,7 +2772,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
-    expect(screen.getByText('Live from CLI')).toBeTruthy();
+    expect(screen.getByText('Synced from CLI')).toBeTruthy();
     // The badge is the only source label; the explanatory hint under the
     // picker was removed.
     expect(screen.queryByText(/Model list comes from this CLI/i)).toBeNull();
@@ -2821,7 +2820,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^Open Design\b/ }));
+    fireEvent.click(screen.getByTestId('settings-agent-select-amr'));
 
     const modelPickers = screen.getAllByRole('combobox', {
       name: en['settings.modelPicker'],
@@ -3011,7 +3010,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    fireEvent.click(screen.getByText('Available to install (1)'));
+    fireEvent.click(screen.getByText('Available CLIs (1)'));
     fireEvent.click(screen.getByRole('link', { name: en['settings.agentInstall.install'] }));
     expect(onRefreshAgents).not.toHaveBeenCalled();
 
@@ -3064,7 +3063,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     const localCliTab = screen.getByRole('tab', { name: /Local CLI.*daemon offline/i }) as HTMLButtonElement;
     expect(localCliTab.disabled).toBe(true);
     expect(localCliTab.getAttribute('title')).toBe('Daemon is not running');
-    expect(screen.getByRole('tab', { name: /BYOK.*API provider/i }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: /API providers.*API provider/i }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('renders a Local CLI connection test for selected installed agents', () => {
@@ -3134,7 +3133,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
     expect(screen.queryByText('1.0.0')).toBeNull();
     expect(screen.queryByText(/AMR \(vela\)/i)).toBeNull();
     expect(screen.queryByText(/vela/i)).toBeNull();
@@ -3180,10 +3179,10 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*2 installed/i }));
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Authorize' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Open Design\b/ }));
+    fireEvent.click(screen.getByTestId('settings-agent-select-amr'));
 
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
   });
@@ -3225,7 +3224,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    const amrCardButton = screen.getByRole('button', { name: /^Open Design\b/ });
+    const amrCardButton = screen.getByTestId('settings-agent-select-amr');
     const amrCard = amrCardButton.closest('.agent-card') as HTMLElement;
     expect(amrCard).toBeTruthy();
     expect(await screen.findByText('Signing in…')).toBeTruthy();
@@ -3295,7 +3294,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    const amrCard = screen.getByRole('button', { name: /^Open Design\b/ }).closest('.agent-card') as HTMLElement;
+    const amrCard = screen.getByTestId('settings-agent-select-amr').closest('.agent-card') as HTMLElement;
     expect(await screen.findByText('Signing in…')).toBeTruthy();
 
     fireEvent.mouseEnter(amrCard);
@@ -3366,7 +3365,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    const amrCard = screen.getByRole('button', { name: /^Open Design\b/ }).closest('.agent-card') as HTMLElement;
+    const amrCard = screen.getByTestId('settings-agent-select-amr').closest('.agent-card') as HTMLElement;
     expect(await screen.findByText('Signing in…')).toBeTruthy();
 
     fireEvent.mouseEnter(amrCard);
@@ -3453,7 +3452,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    const amrCard = screen.getByRole('button', { name: /^Open Design\b/ }).closest('.agent-card') as HTMLElement;
+    const amrCard = screen.getByTestId('settings-agent-select-amr').closest('.agent-card') as HTMLElement;
     expect(await screen.findByText('Signing in…')).toBeTruthy();
 
     fireEvent.mouseEnter(amrCard);
@@ -3516,7 +3515,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
     expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Plan pro/ })).toBeTruthy();
     expect(screen.getByText('signed-in@example.com')).toBeTruthy();
     expect(screen.queryByText(/AMR \(vela\)/i)).toBeNull();
@@ -3771,7 +3770,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
     expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
     expect(screen.queryByText(/@/i)).toBeNull();
     expect(screen.queryByText(/AMR \(vela\)/i)).toBeNull();
   });
@@ -3880,12 +3879,12 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
     expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^Open Design\b/ })).toBeTruthy();
+    expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
     expect(
       onPersist.mock.calls.some(
         ([nextConfig]) =>
@@ -3975,7 +3974,7 @@ describe('SettingsDialog media providers interactions', () => {
     // here so the test still exercises the cleared-payload path.
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    const clearButtons = screen.getAllByRole('button', { name: 'Clear' });
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear configuration' });
     fireEvent.click(clearButtons[0]!);
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -4006,7 +4005,7 @@ describe('SettingsDialog media providers interactions', () => {
     );
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const clearButtons = screen.getAllByRole('button', { name: 'Clear' });
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear configuration' });
     fireEvent.click(clearButtons[0]!);
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -4077,7 +4076,7 @@ describe('SettingsDialog media providers interactions', () => {
     // unimplemented confirm() returns undefined, which would cancel
     // the clear and leave this test asserting the wrong reveal state.
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear configuration' })[0]!);
     expect(apiKeyInput.type).toBe('password');
 
     fireEvent.change(apiKeyInput, { target: { value: 'sk-replacement' } });
@@ -4217,7 +4216,7 @@ describe('SettingsDialog connectors interactions', () => {
 
     expect(screen.getAllByRole('heading', { name: 'Connectors' }).length).toBeGreaterThan(0);
     expect(screen.getByText('Saved · ••••uQEg')).toBeTruthy();
-    expect((screen.getByPlaceholderText('Paste a new key to replace the saved one') as HTMLInputElement).value).toBe('');
+    expect((screen.getByPlaceholderText('Enter a new key to replace the saved key') as HTMLInputElement).value).toBe('');
     expect(screen.getByText(/your key is saved in the local daemon/i)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled).toBe(false);
 
@@ -4239,7 +4238,7 @@ describe('SettingsDialog connectors interactions', () => {
       { initialSection: 'composio' },
     );
 
-    fireEvent.change(screen.getByPlaceholderText('Paste a new key to replace the saved one'), {
+    fireEvent.change(screen.getByPlaceholderText('Enter a new key to replace the saved key'), {
       target: { value: 'cmp_replacement_secret' },
     });
 
@@ -4298,7 +4297,7 @@ describe('SettingsDialog connectors interactions', () => {
       { initialSection: 'composio' },
     );
 
-    fireEvent.change(screen.getByPlaceholderText('Paste a new key to replace the saved one'), {
+    fireEvent.change(screen.getByPlaceholderText('Enter a new key to replace the saved key'), {
       target: { value: 'cmp_unsaved_secret' },
     });
     fireEvent.click(first.container.querySelector('.settings-close') as HTMLElement);
@@ -4318,7 +4317,7 @@ describe('SettingsDialog connectors interactions', () => {
       },
       { initialSection: 'composio' },
     );
-    fireEvent.change(screen.getByPlaceholderText('Paste a new key to replace the saved one'), {
+    fireEvent.change(screen.getByPlaceholderText('Enter a new key to replace the saved key'), {
       target: { value: 'cmp_unsaved_secret_2' },
     });
     fireEvent.click(document.querySelector('.modal-backdrop') as HTMLElement);
@@ -4383,12 +4382,13 @@ describe('SettingsDialog MCP server interactions', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/mcp/install-info');
     });
-    expect(screen.getByText(/Run this in your terminal/i)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Connect Open Design to your coding agent/i })).toBeTruthy();
+    expect(screen.queryByText(/Run this command in your terminal/i)).toBeNull();
     await waitFor(() => {
       expect(screen.getByText(/claude mcp add-json --scope user open-design/i)).toBeTruthy();
     });
-    expect(screen.getByText(/Restart your client to pick up the new server/i)).toBeTruthy();
-    expect(screen.getByText(/Open Design must be running for MCP tool calls to succeed/i)).toBeTruthy();
+    expect(screen.getByText(/Keep Open Design running\. Restart your coding agent after setup\./i)).toBeTruthy();
+    expect(screen.getByText(/What your agent can do/i)).toBeTruthy();
   });
 
   it('switches client instructions and snippet content when a different MCP client is selected', async () => {
@@ -4432,7 +4432,7 @@ describe('SettingsDialog MCP server interactions', () => {
       expect(screen.getByText(/claude mcp add-json --scope user open-design/i)).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy MCP configuration snippet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy setup command' }));
 
     await waitFor(() => {
       expect(writeTextMock).toHaveBeenCalledWith(

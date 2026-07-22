@@ -157,15 +157,15 @@ describe('i18n locales', () => {
     }
   });
 
-  it('explains BYOK draft activation in English and Chinese', () => {
+  it('explains API provider draft activation in English and Chinese', () => {
     expect(en['settings.byokDraftNotice']).toBe(
-      'This setup remains a draft until the required fields are complete. Your current execution setup stays active.',
+      'Complete the required fields to save this provider. Your current setup will remain active.',
     );
     expect(zhCN['settings.byokDraftNotice']).toBe(
-      '必填项补全前，此配置只会保存为草稿；当前执行配置将继续保持生效。',
+      '填写必填项后即可保存此提供商；当前配置将继续保持生效。',
     );
     expect(zhTW['settings.byokDraftNotice']).toBe(
-      '必填項補齊前，此設定只會儲存為草稿；目前的執行設定將繼續維持生效。',
+      '填寫必填欄位後即可儲存此供應商；目前的設定將繼續維持生效。',
     );
   });
 

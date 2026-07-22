@@ -549,6 +549,7 @@ export interface Dict {
   'settings.agentModelHead': string;
   'settings.modelPicker': string;
   'settings.modelSourceLive': string;
+  'settings.modelUsesCliDefault': string;
   'settings.modelSourceFallback': string;
   'settings.reasoningPicker': string;
   'settings.modelPickerHint': string;

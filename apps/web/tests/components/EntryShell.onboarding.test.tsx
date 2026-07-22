@@ -292,7 +292,7 @@ beforeEach(() => {
 });
 
 describe('EntryShell settings menu', () => {
-  it('opens quick actions before opening the full settings dialog', async () => {
+  it('opens settings from the signed-out rail without duplicating the footer action', async () => {
     globalThis.fetch = vi.fn(async (input) => {
       const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
       if (url.endsWith('/api/community/discord')) {
@@ -317,12 +317,10 @@ describe('EntryShell settings menu', () => {
     }) as typeof fetch;
     const props = renderHome();
 
-    // #5517: with a cloud identity, settings lives in the nav-rail account
-    // menu; WITHOUT one (this render has no workspace context) the footer
-    // settings chip remains the entry, so it must stay clickable.
-    fireEvent.click(await screen.findByTestId('entry-settings-button'));
+    fireEvent.click(await screen.findByTestId('entry-nav-settings'));
 
     expect(props.onOpenSettings).toHaveBeenCalledWith();
+    expect(screen.queryByTestId('entry-settings-button')).toBeNull();
   });
 });
 
