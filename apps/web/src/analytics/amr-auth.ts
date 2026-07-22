@@ -92,8 +92,11 @@ export function resolveAmrAuthTracking(
   options?: {
     signedInUserId?: string | null;
     // The daemon's HTTP status and failure text for a refused login start.
-    errorStatus?: number | null;
-    errorDetail?: string | null;
+    // `StartVelaLoginResult.error` is an optional `string`, so the call sites
+    // hand this an explicit `undefined`; the type matches `amrAuthErrorDetail`'s
+    // own input rather than forcing every caller to strip the key first.
+    errorStatus?: number | null | undefined;
+    errorDetail?: string | null | undefined;
   },
 ): void {
   if (options && 'signedInUserId' in options) {
