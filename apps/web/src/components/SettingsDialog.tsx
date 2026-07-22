@@ -8734,14 +8734,22 @@ function NotificationsSection({
           <div className="settings-notify-card-header">
             <h4>{t('settings.notifyCompletionSound')}</h4>
             <div className="section-head-actions">
-              <div className="seg-control" role="group" aria-label={t('settings.notifyCompletionSound')} style={{ '--seg-cols': 1 } as React.CSSProperties}>
+              <div className="seg-control" role="group" aria-label={t('settings.notifyCompletionSound')} style={{ '--seg-cols': 2 } as React.CSSProperties}>
                 <button
                   type="button"
-                  className={'seg-btn' + (notif.soundEnabled ? ' active' : '')}
+                  className={'seg-btn seg-btn--on' + (notif.soundEnabled ? ' active' : '')}
                   aria-pressed={notif.soundEnabled}
-                  onClick={toggleSound}
+                  onClick={() => { if (!notif.soundEnabled) toggleSound(); }}
                 >
-                  <span className="seg-title">{notif.soundEnabled ? t('common.active') : t('common.offline')}</span>
+                  <span className="seg-title">{t('common.active')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'seg-btn' + (!notif.soundEnabled ? ' active' : '')}
+                  aria-pressed={!notif.soundEnabled}
+                  onClick={() => { if (notif.soundEnabled) toggleSound(); }}
+                >
+                  <span className="seg-title">{t('common.inactive')}</span>
                 </button>
               </div>
             </div>
@@ -8812,15 +8820,24 @@ function NotificationsSection({
           <div className="settings-notify-card-header">
             <h4>{t('settings.notifyDesktop')}</h4>
             <div className="section-head-actions">
-              <div className="seg-control" role="group" aria-label={t('settings.notifyDesktop')} style={{ '--seg-cols': 1 } as React.CSSProperties}>
+              <div className="seg-control" role="group" aria-label={t('settings.notifyDesktop')} style={{ '--seg-cols': 2 } as React.CSSProperties}>
                 <button
                   type="button"
-                  className={'seg-btn' + (notif.desktopEnabled ? ' active' : '')}
+                  className={'seg-btn seg-btn--on' + (notif.desktopEnabled ? ' active' : '')}
                   aria-pressed={notif.desktopEnabled}
                   disabled={permission === 'unsupported'}
-                  onClick={() => { void toggleDesktop(); }}
+                  onClick={() => { if (!notif.desktopEnabled) void toggleDesktop(); }}
                 >
-                  <span className="seg-title">{notif.desktopEnabled ? t('common.active') : t('common.offline')}</span>
+                  <span className="seg-title">{t('common.active')}</span>
+                </button>
+                <button
+                  type="button"
+                  className={'seg-btn' + (!notif.desktopEnabled ? ' active' : '')}
+                  aria-pressed={!notif.desktopEnabled}
+                  disabled={permission === 'unsupported'}
+                  onClick={() => { if (notif.desktopEnabled) void toggleDesktop(); }}
+                >
+                  <span className="seg-title">{t('common.inactive')}</span>
                 </button>
               </div>
             </div>

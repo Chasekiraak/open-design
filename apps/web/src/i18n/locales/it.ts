@@ -205,6 +205,7 @@ export const it: Dict = {
   'common.installed': 'installato',
   'common.notInstalled': 'non installato',
   'common.active': 'attivo',
+  'common.inactive': 'inattivo',
   'common.offline': 'offline',
   'common.selected': 'selezionato',
   'common.create': 'Crea',

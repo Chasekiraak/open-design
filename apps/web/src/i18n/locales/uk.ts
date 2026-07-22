@@ -205,6 +205,7 @@ export const uk: Dict = {
   'common.installed': 'встановлено',
   'common.notInstalled': 'не встановлено',
   'common.active': 'активно',
+  'common.inactive': 'неактивно',
   'common.offline': 'вимкнено',
   'common.selected': 'вибрано',
   'common.create': 'Створити',

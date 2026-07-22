@@ -149,6 +149,7 @@ export interface Dict {
   'common.installed': string;
   'common.notInstalled': string;
   'common.active': string;
+  'common.inactive': string;
   'common.offline': string;
   'common.selected': string;
   'common.create': string;

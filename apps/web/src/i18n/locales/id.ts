@@ -205,6 +205,7 @@ export const id: Dict = {
   'common.installed': 'terpasang',
   'common.notInstalled': 'belum terpasang',
   'common.active': 'aktif',
+  'common.inactive': 'nonaktif',
   'common.offline': 'offline',
   'common.selected': 'dipilih',
   'common.create': 'Buat',

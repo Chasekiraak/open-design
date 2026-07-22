@@ -213,6 +213,7 @@ export const zhTW: Dict = {
   "common.installed": "已安裝",
   "common.notInstalled": "未安裝",
   "common.active": "使用中",
+  "common.inactive": "未使用",
   "common.offline": "未執行",
   "common.selected": "已選",
   "common.create": "建立",

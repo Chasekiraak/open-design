@@ -205,6 +205,7 @@ export const ar: Dict = {
   'common.installed': 'مثبت',
   'common.notInstalled': 'غير مثبت',
   'common.active': 'نشط',
+  'common.inactive': 'غير نشط',
   'common.offline': 'غير متصل',
   'common.selected': 'محدد',
   'common.create': 'إنشاء',

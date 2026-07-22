@@ -205,6 +205,7 @@ export const fa: Dict = {
   'common.installed': 'نصب شده',
   'common.notInstalled': 'نصب نشده',
   'common.active': 'فعال',
+  'common.inactive': 'غیرفعال',
   'common.offline': 'آفلاین',
   'common.selected': 'انتخاب شده',
   'common.create': 'ایجاد',

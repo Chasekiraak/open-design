@@ -213,6 +213,7 @@ export const zhCN: Dict = {
   "common.installed": "已安装",
   "common.notInstalled": "未安装",
   "common.active": "使用中",
+  "common.inactive": "未使用",
   "common.offline": "未运行",
   "common.selected": "已选",
   "common.create": "创建",

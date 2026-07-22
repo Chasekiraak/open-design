@@ -205,6 +205,7 @@ export const ko: Dict = {
   'common.installed': '설치됨',
   'common.notInstalled': '설치되지 않음',
   'common.active': '활성',
+  'common.inactive': '비활성',
   'common.offline': '오프라인',
   'common.selected': '선택됨',
   'common.create': '생성',

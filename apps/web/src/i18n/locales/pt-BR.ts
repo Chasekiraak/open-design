@@ -205,6 +205,7 @@ export const ptBR: Dict = {
   'common.installed': 'instalado',
   'common.notInstalled': 'não instalado',
   'common.active': 'ativo',
+  'common.inactive': 'inativo',
   'common.offline': 'off-line',
   'common.selected': 'selecionado',
   'common.create': 'Criar',

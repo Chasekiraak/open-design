@@ -205,6 +205,7 @@ export const ru: Dict = {
   'common.installed': 'установлено',
   'common.notInstalled': 'не установлено',
   'common.active': 'активно',
+  'common.inactive': 'неактивно',
   'common.offline': 'офлайн',
   'common.selected': 'выбрано',
   'common.create': 'Создать',

@@ -205,6 +205,7 @@ export const fr: Dict = {
   'common.installed': 'installé',
   'common.notInstalled': 'non installé',
   'common.active': 'actif',
+  'common.inactive': 'inactif',
   'common.offline': 'hors ligne',
   'common.selected': 'sélectionné',
   'common.create': 'Créer',

@@ -205,6 +205,7 @@ export const tr: Dict = {
   'common.installed': 'kuruldu',
   'common.notInstalled': 'kurulmadı',
   'common.active': 'aktif',
+  'common.inactive': 'pasif',
   'common.offline': 'çevrim dışı',
   'common.selected': 'seçili',
   'common.create': 'Oluştur',

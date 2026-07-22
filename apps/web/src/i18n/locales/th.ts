@@ -205,6 +205,7 @@ export const th: Dict = {
   'common.installed': 'ติดตั้งแล้ว',
   'common.notInstalled': 'ยังไม่ได้ติดตั้ง',
   'common.active': 'เปิดใช้งาน',
+  'common.inactive': 'ปิดใช้งาน',
   'common.offline': 'ออฟไลน์',
   'common.selected': 'เลือกแล้ว',
   'common.create': 'สร้าง',
