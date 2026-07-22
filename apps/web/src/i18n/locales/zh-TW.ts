@@ -5145,6 +5145,7 @@ export const zhTW: Dict = {
   'community.typeVideo': '影片',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': '音訊',
+  'community.usePrompt': '使用提示詞',
   'marketplace.title': '外掛市集',
   'marketplace.filterTrusted': '受信任',
   'marketplace.filterRestricted': '受限',

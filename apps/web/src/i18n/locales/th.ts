@@ -4691,6 +4691,7 @@ export const th: Dict = {
   'community.typeVideo': 'Video',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': 'Audio',
+  'community.usePrompt': 'ใช้พรอมป์ต',
   'marketplace.title': 'Plugins marketplace',
   'marketplace.filterTrusted': 'Trusted',
   'marketplace.filterRestricted': 'Restricted',

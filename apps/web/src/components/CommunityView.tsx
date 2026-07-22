@@ -190,9 +190,12 @@ interface CommunityViewProps {
    *  template. The `templateId` is threaded through so the destination knows
    *  which card was remixed. */
   onRemixTemplate?: (remix: { templateId: string; prompt: string }) => void;
+  /** Send this template's prompt to the home composer input, without
+   *  remixing straight into a project. */
+  onUsePrompt?: (prompt: string) => void;
 }
 
-export function CommunityView({ onRemixTemplate }: CommunityViewProps) {
+export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewProps) {
   const { locale, t } = useI18n();
   const [plugins, setPlugins] = useState<InstalledPluginRecord[]>([]);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDemo | null>(null);
@@ -236,6 +239,9 @@ export function CommunityView({ onRemixTemplate }: CommunityViewProps) {
 
   return (
     <section className="community-template-view" aria-labelledby="community-template-title">
+      {/* Sticky header: title + search + both filter rows stay pinned while the
+          grid scrolls, mirroring the plugins-home Scenario-row treatment. */}
+      <div className="community-template-view__header">
       <header className="community-template-view__hero">
         <div>
           <h1 id="community-template-title" className="entry-section__title">{t('community.title')}</h1>
@@ -285,6 +291,7 @@ export function CommunityView({ onRemixTemplate }: CommunityViewProps) {
           ))}
         </div>
       </div>
+      </div>
 
       <div className="community-template-grid">
         {filteredTemplates.map((template) => (
@@ -302,15 +309,27 @@ export function CommunityView({ onRemixTemplate }: CommunityViewProps) {
             </div>
             <footer className="community-template-card__foot">
               <span>{template.meta}</span>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleTemplateAction(template);
-                }}
-              >
-                {templateActionLabel(template)}
-              </button>
+              <div className="community-template-card__actions">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleTemplateAction(template);
+                  }}
+                >
+                  {templateActionLabel(template)}
+                </button>
+                <button
+                  type="button"
+                  className="community-template-card__prompt-btn"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onUsePrompt?.(template.prompt);
+                  }}
+                >
+                  {t('community.usePrompt')}
+                </button>
+              </div>
             </footer>
           </article>
         ))}

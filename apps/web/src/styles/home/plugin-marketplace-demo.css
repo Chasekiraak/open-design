@@ -12,8 +12,15 @@
 }
 
 .community-template-view {
-  width: min(1560px, 100%);
-  padding: 30px 28px 72px;
+  /* Fill the entry inner (full width, left-aligned) so Community shares the
+     same content width and side inset as 草稿 / 全部项目 instead of sitting in a
+     narrower, centered column. The inner already supplies the gutter, so no
+     extra horizontal padding here. */
+  width: 100%;
+  margin: 0;
+  /* No extra top padding: the entry inner already positions content where
+     草稿 / 全部项目 start, so Community's title lines up with theirs. */
+  padding: 0 0 72px;
 }
 
 /* 扩展 page: match the design-systems safe area. Design-systems fills the entry
@@ -26,6 +33,43 @@
   padding: 0;
 }
 
+/* Pin the whole header (title + search + both filter rows) under the sticky
+   topbar so it stays reachable while the template grid scrolls beneath —
+   mirrors the plugins-home Scenario-row treatment (plugins-home.css). */
+.community-template-view__header {
+  position: sticky;
+  /* 0, not --entry-topbar-h: this header's natural offset inside the scroll
+     container is only ~12px, so a 44px threshold would displace it downward
+     before any scrolling happens. Pinning flush to the scroller top keeps the
+     resting layout untouched. */
+  top: 0;
+  z-index: 5;
+  /* NO fill at rest — even --glass-regular's 66% white tint read as a pale
+     slab against the grey wash. Blur alone is invisible over the flat wash
+     (blurring a flat color is a no-op) and only shows once cards slide
+     underneath. */
+  background: transparent;
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+}
+/* Chromium-only app: fade the glass tint in with actual scroll progress so
+   the pinned header regains the legibility fill exactly when cards start
+   passing under it, while the resting state stays completely flat. */
+@supports (animation-timeline: scroll()) {
+  .community-template-view__header {
+    animation: community-header-surface linear both;
+    animation-timeline: scroll(nearest);
+    animation-range: 0 96px;
+  }
+  @keyframes community-header-surface {
+    from {
+      background: transparent;
+    }
+    to {
+      background: var(--glass-regular);
+    }
+  }
+}
 .plugin-marketplace__hero,
 .community-template-view__hero {
   display: flex;
@@ -1298,6 +1342,7 @@
   padding-left: 28px;
 }
 
+/* Remix + Prompt are both outline buttons; hover fills black with green ink. */
 .community-template-card__foot button {
   appearance: none;
   min-height: 32px;
@@ -1310,21 +1355,23 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    background-color 140ms var(--ease-out),
+    color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out);
 }
-
-.community-template-card__foot button {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-contrast, #fff);
-}
-
 .community-template-card__foot button:hover:not(:disabled) {
-  /* Keep the accent fill on hover so the label stays visible — the global
-     button:hover in primitives.css would otherwise repaint to --bg-subtle and
-     wash the light-on-dark label away. */
-  background: var(--accent);
+  background: var(--text-strong);
   border-color: transparent;
-  filter: brightness(1.08);
+  color: var(--brand, #87ea5c);
+  filter: none;
+}
+/* Remix + Prompt sit side by side on the right. */
+.community-template-card__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .community-template-view__section-head span {
@@ -1408,7 +1455,10 @@
 
 .community-template-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Responsive fill so the now full-width view keeps consistent ~300px cards
+     (more columns as it widens) instead of three oversized, sparse ones. Cards
+     stay left-aligned when a category has only a few, matching the drafts grid. */
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 20px;
 }
 

@@ -4691,6 +4691,7 @@ export const de: Dict = {
   'community.typeVideo': 'Video',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': 'Audio',
+  'community.usePrompt': 'Prompt verwenden',
   'marketplace.title': 'Plugins marketplace',
   'marketplace.filterTrusted': 'Trusted',
   'marketplace.filterRestricted': 'Restricted',

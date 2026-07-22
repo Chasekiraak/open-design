@@ -4691,6 +4691,7 @@ export const hu: Dict = {
   'community.typeVideo': 'Video',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': 'Audio',
+  'community.usePrompt': 'Prompt használata',
   'marketplace.title': 'Plugins marketplace',
   'marketplace.filterTrusted': 'Trusted',
   'marketplace.filterRestricted': 'Restricted',

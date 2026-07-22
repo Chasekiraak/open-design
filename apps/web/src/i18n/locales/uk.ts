@@ -4691,6 +4691,7 @@ export const uk: Dict = {
   'community.typeVideo': 'Video',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': 'Audio',
+  'community.usePrompt': 'Використати промпт',
   'marketplace.title': 'Plugins marketplace',
   'marketplace.filterTrusted': 'Trusted',
   'marketplace.filterRestricted': 'Restricted',

@@ -1369,6 +1369,20 @@ export function EntryShell({
             {view === 'community' ? (
               <CommunityView
                 onRemixTemplate={({ prompt }) => {
+                  // Remix drops the user straight into a running project
+                  // instead of just prefilling Home's composer: create a
+                  // project seeded with this template's prompt (the same
+                  // auto-send-on-mount path Home's own submit uses) and let
+                  // onCreateProject open it.
+                  void onCreateProject({
+                    name: summarizeProjectNameFromPrompt(prompt) || t('common.untitled'),
+                    skillId: null,
+                    designSystemId: null,
+                    metadata: { kind: 'other', nameSource: 'prompt' },
+                    pendingPrompt: prompt,
+                  });
+                }}
+                onUsePrompt={(prompt) => {
                   // Seed the Home composer with the template's starting prompt,
                   // then switch to Home to review + send it (keep in sync with
                   // the standalone /community branch in App.tsx).

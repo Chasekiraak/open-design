@@ -5138,6 +5138,7 @@ export const zhCN: Dict = {
   'community.typeVideo': '视频',
   'community.typeHyperFrames': 'HyperFrames',
   'community.typeAudio': '音频',
+  'community.usePrompt': '使用提示词',
   'marketplace.title': '插件市场',
   'marketplace.filterTrusted': '受信任',
   'marketplace.filterRestricted': '受限',

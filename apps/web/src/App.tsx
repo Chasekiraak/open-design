@@ -102,6 +102,7 @@ import {
 } from './state/config';
 import { applyAppearanceToDocument } from './state/appearance';
 import { isMacPlatform } from './utils/platform';
+import { summarizeProjectNameFromPrompt } from './utils/projectName';
 import {
   amrArtifactUpgradeHomeMockOffer,
   type AmrArtifactUpgradeHomeOffer,
@@ -2632,6 +2633,20 @@ function AppInner() {
     appMain = (
       <CommunityView
         onRemixTemplate={({ prompt }) => {
+          // Remix drops the user straight into a running project instead of
+          // just prefilling Home's composer: create a project seeded with
+          // this template's prompt (the same auto-send-on-mount path Home's
+          // own submit uses) and navigate into it (keep in sync with the
+          // EntryShell-embedded community tab).
+          void handleCreateProject({
+            name: summarizeProjectNameFromPrompt(prompt) || t('common.untitled'),
+            skillId: null,
+            designSystemId: null,
+            metadata: { kind: 'other', nameSource: 'prompt' },
+            pendingPrompt: prompt,
+          });
+        }}
+        onUsePrompt={(prompt) => {
           // Seed the Home composer with the template's starting prompt, then hand
           // the user into Home to review + send it (instead of dropping the pick).
           seedHomeComposerPrompt(prompt);
