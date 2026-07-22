@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RecentProjectsStrip } from '../../src/components/RecentProjectsStrip';
@@ -331,5 +331,42 @@ describe('RecentProjectsStrip', () => {
         'project-html:index.html',
       );
     });
+  });
+});
+
+describe('recvq5fpqrXzV1 — per-card move-to-team menu item', () => {
+  // A personal-only workspace has no team plane to move a draft INTO — the
+  // daemon 403s the request. The bulk toolbar already gates its equivalent
+  // actions on `collaborationAvailable` (canBulkMoveToTeam/
+  // canBulkMoveToPersonal); this per-card "..." menu item was missing the
+  // same gate, so it stayed clickable and always failed.
+  it('hides the move-to-team/move-out-of-team item when collaboration is unavailable', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Draft' })]}
+        onOpen={() => {}}
+        onDuplicate={() => {}}
+        collaborationEnabled={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+
+    expect(screen.queryByRole('menuitem', { name: /Move to team space|Move out of team space/i })).toBeNull();
+  });
+
+  it('shows the move-to-team item when collaboration is available', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Draft' })]}
+        onOpen={() => {}}
+        onDuplicate={() => {}}
+        collaborationEnabled
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+
+    expect(screen.getByRole('menuitem', { name: /Move to team space/i })).toBeTruthy();
   });
 });

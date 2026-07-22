@@ -1016,7 +1016,15 @@ export function RecentProjectsStrip({
                           <span>{t('designs.menuDuplicate')}</span>
                         </button>
                       ) : null}
-                      {shared && creator.ownedBySelf ? (
+                      {/* recvq5fpqrXzV1: this menu item moves a project's
+                          visibility WITHIN the current workspace, which is
+                          meaningless (and the daemon 403s it) when the current
+                          workspace has no team plane to share into at all — a
+                          personal-only workspace. `collaborationAvailable` is
+                          the same gate the bulk toolbar's move actions
+                          already use (canBulkMoveToTeam/canBulkMoveToPersonal
+                          above); this per-card item was missing it. */}
+                      {collaborationAvailable && (shared && creator.ownedBySelf ? (
                         <button
                           type="button"
                           role="menuitem"
@@ -1047,7 +1055,7 @@ export function RecentProjectsStrip({
                                 : t('recentProjects.moveToTeam')}
                           </span>
                         </button>
-                      )}
+                      ))}
                       {shareErrorProjectId === project.id ? (
                         <div className="recent-projects__card-menu-error" role="alert">
                           {t(
