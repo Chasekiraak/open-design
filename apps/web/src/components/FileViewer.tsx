@@ -9559,7 +9559,7 @@ function HtmlViewer({
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: label,
-      });
+      }, workspaceContext);
       if (!saved.ok) {
         const status = 'status' in saved ? saved.status : undefined;
         const code = 'code' in saved ? saved.code : undefined;
@@ -9680,7 +9680,7 @@ function HtmlViewer({
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: `Undo ${latest.label}`,
-      });
+      }, workspaceContext);
       if (!saved) {
         setManualEditError('Could not save the undo result.');
         return;
@@ -9717,7 +9717,7 @@ function HtmlViewer({
         artifactManifest: file.artifactManifest,
         versionSource: 'manual',
         versionLabel: `Redo ${latest.label}`,
-      });
+      }, workspaceContext);
       if (!saved) {
         setManualEditError('Could not save the redo result.');
         return;
@@ -9852,7 +9852,7 @@ function HtmlViewer({
     try {
       const saved = await writeProjectTextFile(projectId, file.name, nextSource, {
         artifactManifest: file.artifactManifest,
-      });
+      }, workspaceContext);
       if (!saved) throw new Error('speaker_notes_save_failed');
       setSource(nextSource);
       sourceRef.current = nextSource;
@@ -11934,7 +11934,7 @@ function HtmlViewer({
         : { top: 12, right: 12, width: 320 }}
       onFloatingPositionChange={selectedManualEditTarget ? setManualEditPanelPosition : undefined}
       onPickImage={async (pickedFile) => {
-        const result = await uploadProjectFiles(projectId, [pickedFile]);
+        const result = await uploadProjectFiles(projectId, [pickedFile], undefined, workspaceContext);
         const uploaded = result.uploaded[0];
         if (!uploaded?.path) {
           setManualEditError(result.error ?? t('manualEdit.uploadImageFailed'));
@@ -14985,6 +14985,7 @@ function MarkdownViewer({
   viewerOnly?: boolean;
 }) {
   const { t, locale } = useI18n();
+  const { context: workspaceContext } = useWorkspaceContext();
   const [text, setText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
@@ -15121,7 +15122,7 @@ function MarkdownViewer({
         const showSaving = saveOptions.showSaving !== false;
         if (showSaving) setSaveState('saving');
         try {
-          const saved = await writeProjectTextFile(projectId, file.name, nextValue);
+          const saved = await writeProjectTextFile(projectId, file.name, nextValue, undefined, workspaceContext);
           if (!saved) throw new Error('write failed');
           lastSavedTextRef.current = nextValue;
           bumpSavedRevision((n) => n + 1);
@@ -15240,7 +15241,7 @@ function MarkdownViewer({
       const images = files.filter((item) => isMarkdownImageFile(item));
       if (images.length === 0) return false;
       const targetDir = markdownDirectory(file.name);
-      const result = await uploadProjectFiles(projectId, images, targetDir);
+      const result = await uploadProjectFiles(projectId, images, targetDir, workspaceContext);
       if (result.uploaded.length > 0) {
         await onFileSaved?.();
         const snippet = result.uploaded

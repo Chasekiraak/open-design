@@ -85,7 +85,7 @@ import { consumePendingHomeChip, HOME_CHIP_INTENT_EVENT } from '../runtime/home-
 import { navigate } from '../router';
 import { setPendingDesignSystemCreateEntry } from '../analytics/ds-create-entry';
 import { workspaceContextLinkedDirs } from './workspace-context';
-import { useTeamProjects } from '../collab/useWorkspaceContext';
+import { useTeamProjects, useWorkspaceContext } from '../collab/useWorkspaceContext';
 import {
   buildHomeMediaComposer,
   homeMediaSurfaceForChipId,
@@ -352,6 +352,7 @@ export function HomeView({
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
+  const { context: workspaceContext } = useWorkspaceContext();
   // Team-wide catalog from the resource hub via the daemon; empty off-team / when
   // the hub is unconfigured. Only the creator attribution is derived here — the
   // shared/not-shared answer arrives as `isSharedProject` from EntryShell, which
@@ -2351,7 +2352,7 @@ export function HomeView({
             }}
             onImported={(result, projectId) => {
               void (async () => {
-                await patchProject(projectId, { pendingPrompt: result.suggestedPrompt });
+                await patchProject(projectId, { pendingPrompt: result.suggestedPrompt }, workspaceContext);
                 setFigmaModalOpen(false);
                 onOpenProject(projectId);
               })();

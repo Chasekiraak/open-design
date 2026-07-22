@@ -4178,6 +4178,7 @@ describe('ProjectView daemon cleanup', () => {
       expect.objectContaining({
         artifactManifest: expect.objectContaining({ entry: 'theme.css' }),
       }),
+      null,
     );
   });
 
@@ -4276,6 +4277,7 @@ describe('ProjectView daemon cleanup', () => {
       expect.objectContaining({
         artifactManifest: expect.objectContaining({ entry: 'real-daemon-smoke.html' }),
       }),
+      null,
     );
     expect(saveTabs).not.toHaveBeenCalledWith('project-1', expect.objectContaining({ active: 'index.html' }));
   });

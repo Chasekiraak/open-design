@@ -6,6 +6,7 @@ import type {
   ConnectorStatusResponse,
   DesignSystemSummary,
   LibraryAsset,
+  WorkspaceCollabContext,
 } from '@open-design/contracts';
 import { streamViaDaemon } from '../providers/daemon';
 import {
@@ -129,6 +130,7 @@ import type {
   TrackingDesignSystemsEntryFrom,
 } from '@open-design/contracts/analytics';
 import { useI18n } from '../i18n';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 
 // Source counts the embedded DS creation flow can report back to its
 // wrapper at Generate-click time. OnboardingView uses this to emit the
@@ -343,6 +345,7 @@ export function DesignSystemCreationFlow({
   designSystems = [],
 }: CreationProps) {
   const { t } = useI18n();
+  const { context: workspaceContext } = useWorkspaceContext();
   const [step, setStep] = useState<SetupStep>('setup');
   // A Library "create design system from selection" hand-off pre-fills the
   // source material with the chosen assets (single-shot; cleared on read).
@@ -966,6 +969,7 @@ export function DesignSystemCreationFlow({
           state,
           composioConfigured,
           githubConnector,
+          workspaceContext,
           onProjectPrepared: (preparedProject) => {
             projectForCreated = preparedProject;
             onProjectPrepared?.(preparedProject);
@@ -1632,6 +1636,7 @@ export function DesignSystemDetailView({
   onInitialRevisionJobConsumed,
 }: DetailProps) {
   const { locale, t } = useI18n();
+  const { context: workspaceContext } = useWorkspaceContext();
   const [system, setSystem] = useState<DesignSystemDetail | null>(null);
   const [body, setBody] = useState('');
   const [tab, setTab] = useState<ReviewTab>('system');
@@ -2019,7 +2024,7 @@ export function DesignSystemDetailView({
     const nextBody = body;
     const updated = await savePatch({ body: nextBody });
     if (updated && workspaceProjectId) {
-      await writeProjectTextFile(workspaceProjectId, 'DESIGN.md', nextBody);
+      await writeProjectTextFile(workspaceProjectId, 'DESIGN.md', nextBody, undefined, workspaceContext);
       await refreshWorkspaceProjectFiles(workspaceProjectId);
     }
     setStatusLine(updated ? t('dsFlow.savedDesignMd') : t('dsFlow.saveChangesFailed'));
@@ -4118,6 +4123,7 @@ async function prepareCreatedDesignSystemProject({
   state,
   composioConfigured,
   githubConnector,
+  workspaceContext,
   onProjectPrepared,
   onSystemsRefresh,
   analyticsTrack,
@@ -4128,6 +4134,7 @@ async function prepareCreatedDesignSystemProject({
   state: SetupState;
   composioConfigured: boolean;
   githubConnector: ConnectorDetail | null;
+  workspaceContext?: WorkspaceCollabContext | null;
   onProjectPrepared?: (project: Project) => void;
   onSystemsRefresh?: () => Promise<void> | void;
   analyticsTrack: (
@@ -4162,7 +4169,7 @@ async function prepareCreatedDesignSystemProject({
       });
     }
     const localStart = performance.now();
-    const stagedLocalCode = await stageLocalCodeFiles(project.id, state.codeFileObjects);
+    const stagedLocalCode = await stageLocalCodeFiles(project.id, state.codeFileObjects, workspaceContext);
     if (state.codeFileObjects.length > 0 || state.codeFolders.length > 0) {
       emitSourceIngestResult(analyticsTrack, {
         sourceType: 'local_code',
@@ -4214,7 +4221,7 @@ async function prepareCreatedDesignSystemProject({
       });
     }
     const assetStart = performance.now();
-    const stagedAssets = await stageAssetFiles(project.id, state.assetFileObjects);
+    const stagedAssets = await stageAssetFiles(project.id, state.assetFileObjects, workspaceContext);
     if (state.assetFileObjects.length > 0) {
       emitSourceIngestResult(analyticsTrack, {
         sourceType: 'assets',
@@ -4249,6 +4256,8 @@ async function prepareCreatedDesignSystemProject({
         stagedFigma,
         stagedAssets,
       }),
+      undefined,
+      workspaceContext,
     );
     const metadata = mergeLinkedCodeFolders(project.metadata, state.codeFolders);
     const prompt = buildCreationAgentPrompt(
@@ -4258,7 +4267,11 @@ async function prepareCreatedDesignSystemProject({
       stagedAssets,
       stagedFigma,
     );
-    const preparedProject = await patchProject(project.id, { pendingPrompt: prompt, metadata });
+    const preparedProject = await patchProject(
+      project.id,
+      { pendingPrompt: prompt, metadata },
+      workspaceContext,
+    );
     try {
       window.sessionStorage.setItem(`od:auto-send-first:${project.id}`, '1');
     } catch {
@@ -5011,13 +5024,17 @@ function mergeLinkedCodeFolders(metadata: ProjectMetadata | undefined, codeFolde
   };
 }
 
-async function stageLocalCodeFiles(projectId: string, files: File[]): Promise<StagedLocalCodeContext> {
+async function stageLocalCodeFiles(
+  projectId: string,
+  files: File[],
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<StagedLocalCodeContext> {
   if (files.length === 0) return { uploadedPaths: [], skippedCount: 0 };
   const selected = selectLocalCodeFiles(files);
   const uploadedPaths: string[] = [];
   for (const file of selected) {
     const desiredName = `${LOCAL_CODE_UPLOAD_ROOT}/${localCodeRelativePath(file)}`;
-    const uploaded = await uploadProjectFile(projectId, file, desiredName);
+    const uploaded = await uploadProjectFile(projectId, file, desiredName, workspaceContext);
     if (uploaded) {
       uploadedPaths.push(uploaded.name);
     }
@@ -5058,13 +5075,17 @@ async function stageFigmaFiles(projectId: string, files: File[]): Promise<Staged
   };
 }
 
-async function stageAssetFiles(projectId: string, files: File[]): Promise<StagedAssetContext> {
+async function stageAssetFiles(
+  projectId: string,
+  files: File[],
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<StagedAssetContext> {
   if (files.length === 0) return { uploadedPaths: [], skippedCount: 0 };
   const selected = selectAssetFiles(files);
   const uploadedPaths: string[] = [];
   for (const file of selected) {
     const desiredName = `${ASSET_UPLOAD_ROOT}/${resourceRelativePath(file)}`;
-    const uploaded = await uploadProjectFile(projectId, file, desiredName);
+    const uploaded = await uploadProjectFile(projectId, file, desiredName, workspaceContext);
     if (uploaded) {
       uploadedPaths.push(uploaded.name);
     }

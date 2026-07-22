@@ -62,6 +62,7 @@ import { Icon } from './Icon';
 import { BoardComposerPopover } from './BoardComposerPopover';
 import { PreviewDrawOverlay } from './PreviewDrawOverlay';
 import { RemixIcon } from './RemixIcon';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 
 type BrowserHistoryEntry = {
   iconUrl?: string;
@@ -785,6 +786,7 @@ export function DesignBrowserPanel({
   browserTabId,
 }: DesignBrowserPanelProps) {
   const t = useT();
+  const { context: workspaceContext } = useWorkspaceContext();
   const desktopHostAvailable = isOpenDesignHostAvailable();
   const initialState = initialBrowserState(initialUrl, initialTitle);
   // `loadUrl` is the navigation target bound to the <webview>/<iframe> `src`.
@@ -1478,6 +1480,7 @@ export function DesignBrowserPanel({
         projectId,
         browserFileName('browser-capture', currentUrl, 'png'),
         base64,
+        workspaceContext,
       );
       if (!file) throw new Error(t('designBrowser.status.screenshotFailed'));
       await onRefreshFiles();
@@ -1563,6 +1566,8 @@ export function DesignBrowserPanel({
         projectId,
         browserFileName('browser-brief', currentUrl, 'md'),
         pageBriefMarkdown(brief, currentUrl),
+        undefined,
+        workspaceContext,
       );
       if (!file) throw new Error(t('designBrowser.status.briefSaveFailed'));
       await onRefreshFiles();
@@ -1620,12 +1625,12 @@ export function DesignBrowserPanel({
       const cssFile = `${dir}/styles.css`;
       const manifestFile = `${dir}/manifest.json`;
       const htmlSaved = await abortablePageSnapshotPromise(
-        writeProjectTextFile(projectId, htmlFile, capture.html),
+        writeProjectTextFile(projectId, htmlFile, capture.html, undefined, workspaceContext),
         controller.signal,
       );
       if (!htmlSaved) throw new Error(t('designBrowser.status.pageSnapshotFailed'));
       const cssSaved = await abortablePageSnapshotPromise(
-        writeProjectTextFile(projectId, cssFile, capture.css ?? ''),
+        writeProjectTextFile(projectId, cssFile, capture.css ?? '', undefined, workspaceContext),
         controller.signal,
       );
       if (!cssSaved) throw new Error(t('designBrowser.status.pageSnapshotFailed'));
@@ -1650,11 +1655,11 @@ export function DesignBrowserPanel({
       };
       const manifestText = JSON.stringify(manifest, null, 2);
       const savedManifest = await abortablePageSnapshotPromise(
-        writeProjectTextFile(projectId, manifestFile, manifestText),
+        writeProjectTextFile(projectId, manifestFile, manifestText, undefined, workspaceContext),
         controller.signal,
       );
       const savedIndex = await abortablePageSnapshotPromise(
-        writeProjectTextFile(projectId, BROWSER_PAGE_ARCHIVE_INDEX_FILE, manifestText),
+        writeProjectTextFile(projectId, BROWSER_PAGE_ARCHIVE_INDEX_FILE, manifestText, undefined, workspaceContext),
         controller.signal,
       );
       if (!savedManifest || !savedIndex) throw new Error(t('designBrowser.status.pageSnapshotFailed'));
@@ -1954,7 +1959,7 @@ export function DesignBrowserPanel({
     setSavingDomEdit(true);
     try {
       const html = await webviewNode.executeJavaScript<string>(BROWSER_SERIALIZE_HTML_SCRIPT, true);
-      const file = await writeProjectTextFile(projectId, relativePath, html);
+      const file = await writeProjectTextFile(projectId, relativePath, html, undefined, workspaceContext);
       if (!file) throw new Error(t('designBrowser.status.htmlSaveFailed'));
       await onRefreshFiles();
       setStatusMessage(t('designBrowser.status.htmlSaved'));

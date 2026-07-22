@@ -12,6 +12,7 @@ import {
 } from "../runtime/in-project-link";
 import { navigate } from "../router";
 import { deleteProjectFile, projectFileUrl, uploadProjectFiles } from "../providers/registry";
+import { useWorkspaceContext } from "../collab/useWorkspaceContext";
 import { useAnalytics } from "../analytics/provider";
 import {
   trackAssistantFeedbackButtonClick,
@@ -2626,6 +2627,7 @@ function FormBlock({
 }) {
   const t = useT();
   const analytics = useAnalytics();
+  const { context: workspaceContext } = useWorkspaceContext();
   const formKey =
     projectId && conversationId
       ? `${projectId}:${conversationId}:${assistantMessageId}:${form.id}`
@@ -2842,6 +2844,8 @@ function FormBlock({
         const result = await uploadProjectFiles(
           projectId,
           flatFiles.map((entry) => entry.file),
+          undefined,
+          workspaceContext,
         ).catch((error) => ({
           uploaded: [],
           failed: flatFiles.map((entry) => ({

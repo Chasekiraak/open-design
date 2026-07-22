@@ -179,6 +179,8 @@ describe('FileViewer markdown code block copy', () => {
         'project-1',
         'notes.md',
         'changed before close',
+        undefined,
+        null,
       );
     });
   });
@@ -235,6 +237,8 @@ describe('FileViewer markdown code block copy', () => {
       'project-1',
       'notes.md',
       'initial draft',
+      undefined,
+      null,
     );
     expect(onFileSaved).not.toHaveBeenCalled();
     expect(screen.queryByText('Saving...')).toBeNull();
@@ -281,6 +285,8 @@ describe('FileViewer markdown code block copy', () => {
       'project-1',
       'document.md',
       '# Document\n\nDraft',
+      undefined,
+      null,
     );
     expect(onFileSaved).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox')).toBe(editor);
@@ -311,6 +317,8 @@ describe('FileViewer markdown code block copy', () => {
       'project-1',
       'notes.md',
       'initial draft',
+      undefined,
+      null,
     );
 
     await act(async () => {

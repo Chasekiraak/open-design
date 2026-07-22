@@ -12,6 +12,7 @@ import {
   installGeneratedPluginFolder,
   listProjects,
   listPlugins,
+  patchProject,
   pickLocalFolderPath,
   publishGeneratedPluginToGitHub,
 } from '../../src/state/projects';
@@ -255,6 +256,58 @@ describe('duplicateProject', () => {
 
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+// Same enforceWorkspaceProjectMutation bypass as deleteProject/duplicateProject:
+// a rename, metadata patch, or pendingPrompt clear sent no workspace headers,
+// so a read-only team member could still push a PATCH through.
+describe('patchProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers so the daemon can enforce ownership', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: 'leaked-team-project', name: 'Renamed' }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchProject('leaked-team-project', { name: 'Renamed' }, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/leaked-team-project',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: 'local-only-project', name: 'Renamed' }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchProject('local-only-project', { name: 'Renamed' });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+
+  it('reports failure when the daemon refuses the patch', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(null, { status: 403 })));
+
+    await expect(
+      patchProject('someone-elses-project', { name: 'Renamed' }, personalWorkspaceContext()),
+    ).resolves.toBeNull();
   });
 });
 

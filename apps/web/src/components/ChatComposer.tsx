@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -92,6 +93,7 @@ import {
   type InlineMentionEntity,
 } from '../utils/inlineMentions';
 import { workspaceContextLinkedDir, workspaceContextLinkedDirs } from './workspace-context';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 import {
   LexicalComposerInput,
   type LexicalComposerInputHandle,
@@ -449,6 +451,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
   ) {
     const { locale, t } = useI18n();
     const analytics = useAnalytics();
+    const { context: workspaceContext } = useWorkspaceContext();
     const activeFileContext =
       projectMetadata?.importedFrom === 'folder' && activeProjectFileName
         ? activeProjectFileName
@@ -1345,7 +1348,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       }
       if (changed) {
         const metadata: ProjectMetadata = { ...base, linkedDirs: nextLinkedDirs };
-        const result = await patchProject(projectId, { metadata });
+        const result = await patchProject(projectId, { metadata }, workspaceContext);
         if (!result?.metadata) {
           onShowToast?.(t('homeWorkingDir.applyFailed'));
           return false;
@@ -1675,7 +1678,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       const currentLinkedDirs = base.linkedDirs ?? [...tracked.previousLinkedDirs, tracked.dir];
       const nextLinkedDirs = currentLinkedDirs.filter((dir) => dir !== tracked.dir);
       const metadata: ProjectMetadata = { ...base, linkedDirs: nextLinkedDirs };
-      const result = await patchProject(projectId, { metadata });
+      const result = await patchProject(projectId, { metadata }, workspaceContext);
       if (!result?.metadata) {
         onShowToast?.(t('homeWorkingDir.applyFailed'));
         return false;
@@ -1733,7 +1736,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       const cohort = deriveUploadCohort(files);
       const orderStart = reserveAttachmentOrders(files.length);
       try {
-        const result = await uploadProjectFiles(id, files);
+        const result = await uploadProjectFiles(id, files, undefined, workspaceContext);
         if (result.uploaded.length > 0) {
           const orderedUploaded = assignChatAttachmentOrders(result.uploaded, orderStart);
           appendOrderedStagedAttachments(orderedUploaded);
@@ -1885,7 +1888,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                 return;
               }
               setUploading(true);
-              const result = await uploadProjectFiles(id, annotationFiles);
+              const result = await uploadProjectFiles(id, annotationFiles, undefined, workspaceContext);
               if (result.uploaded.length > 0) {
                 uploaded = assignChatAttachmentOrders(result.uploaded, orderStart);
               }
@@ -2144,7 +2147,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         ...base,
         linkedDirs: linkedDirsWithWorkspaceContext(dir),
       };
-      const result = await patchProject(projectId, { metadata });
+      const result = await patchProject(projectId, { metadata }, workspaceContext);
       // The daemon rejects stale/inaccessible/system dirs with
       // INVALID_LINKED_DIR (patchProject → null). Only commit the selection
       // and promote it in recents when the project accepted it; otherwise
@@ -2180,7 +2183,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         ...base,
         linkedDirs: linkedDirsWithWorkspaceContext(null),
       };
-      const result = await patchProject(projectId, { metadata });
+      const result = await patchProject(projectId, { metadata }, workspaceContext);
       if (result?.metadata) {
         setPromotedWorkspaceContextDir(null);
         onProjectMetadataChange?.(result);
@@ -2427,7 +2430,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
 
     async function applyProjectSkill(skill: SkillSummary): Promise<boolean> {
       if (!projectId) return false;
-      const result = await patchProject(projectId, { skillId: skill.id });
+      const result = await patchProject(projectId, { skillId: skill.id }, workspaceContext);
       if (!result) return false;
       onProjectSkillChange?.(result.skillId ?? skill.id);
       return true;

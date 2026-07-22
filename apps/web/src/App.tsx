@@ -1760,7 +1760,12 @@ function AppInner() {
         // `area='chat_composer'` so it's distinguishable from the
         // file_manager Upload button and the chat_panel composer.
         const cohort = deriveUploadCohort(pendingFiles);
-        const uploadResult = await uploadProjectFiles(result.project.id, pendingFiles);
+        const uploadResult = await uploadProjectFiles(
+          result.project.id,
+          pendingFiles,
+          undefined,
+          workspaceContextRef.current,
+        );
         firstMessageAttachments = uploadResult.uploaded;
         const partial = uploadResult.failed.length > 0;
         if (partial) {
@@ -2175,7 +2180,7 @@ function AppInner() {
     setProjects((curr) =>
       curr.map((p) => (p.id === id ? { ...p, name: trimmed } : p)),
     );
-    void patchProject(id, { name: trimmed });
+    void patchProject(id, { name: trimmed }, workspaceContextRef.current);
   }, []);
 
   // The project header back button is an escape hatch back to Home. Avoid
@@ -2199,7 +2204,7 @@ function AppInner() {
         p.id === projectId ? { ...p, pendingPrompt: undefined } : p,
       ),
     );
-    void patchProject(projectId, { pendingPrompt: null });
+    void patchProject(projectId, { pendingPrompt: null }, workspaceContextRef.current);
   }, [route]);
 
   const handleTouchProject = useCallback(() => {
@@ -2209,7 +2214,7 @@ function AppInner() {
     setProjects((curr) =>
       curr.map((p) => (p.id === projectId ? { ...p, updatedAt } : p)),
     );
-    void patchProject(projectId, { updatedAt });
+    void patchProject(projectId, { updatedAt }, workspaceContextRef.current);
   }, [route]);
 
   const handleProjectChange = useCallback((updated: Project) => {

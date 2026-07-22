@@ -17,16 +17,30 @@ async function readBrand(projectId: string): Promise<Brand | null> {
   }
 }
 
-async function writeBrand(projectId: string, brand: Brand): Promise<boolean> {
-  const file = await writeProjectTextFile(projectId, 'brand.json', JSON.stringify(brand, null, 2));
+async function writeBrand(
+  projectId: string,
+  brand: Brand,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
+  const file = await writeProjectTextFile(
+    projectId,
+    'brand.json',
+    JSON.stringify(brand, null, 2),
+    undefined,
+    workspaceContext,
+  );
   return Boolean(file);
 }
 
-export async function patchBrand(projectId: string, mutate: (brand: Brand) => void): Promise<boolean> {
+export async function patchBrand(
+  projectId: string,
+  mutate: (brand: Brand) => void,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
   const brand = await readBrand(projectId);
   if (!brand) return false;
   mutate(brand);
-  return writeBrand(projectId, brand);
+  return writeBrand(projectId, brand, workspaceContext);
 }
 
 type EditableBrand = Brand & { seed?: Record<string, unknown> };
@@ -73,7 +87,12 @@ function syncSeedForColor(brand: EditableBrand, role: BrandColorRole, hex: strin
   brand.seed = seed;
 }
 
-export async function updateBrandColor(projectId: string, index: number, hex: string): Promise<boolean> {
+export async function updateBrandColor(
+  projectId: string,
+  index: number,
+  hex: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
   const nextHex = normalizeHex(hex);
   if (!nextHex) return false;
   const brand = await readBrand(projectId);
@@ -81,7 +100,7 @@ export async function updateBrandColor(projectId: string, index: number, hex: st
   if (!brand || !color) return false;
   color.hex = nextHex;
   syncSeedForColor(brand as EditableBrand, color.role, nextHex);
-  return writeBrand(projectId, brand);
+  return writeBrand(projectId, brand, workspaceContext);
 }
 
 export function replaceDesignMdColorAtIndex(body: string, index: number, hex: string): string | null {
@@ -122,7 +141,7 @@ export async function deleteBrandLogo(
     }
     fileToDelete = relativeProjectAssetPath(alternates[index - 1]);
     logo.alternates = alternates.filter((_, i) => i !== index - 1);
-  });
+  }, workspaceContext);
   if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete, workspaceContext);
   return ok;
 }
@@ -137,7 +156,7 @@ export async function deleteBrandImage(
     if (!brand.imagery?.samples) return;
     fileToDelete = relativeProjectAssetPath(brand.imagery.samples[index]?.file);
     brand.imagery.samples = brand.imagery.samples.filter((_, i) => i !== index);
-  });
+  }, workspaceContext);
   if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete, workspaceContext);
   return ok;
 }
@@ -146,8 +165,12 @@ export async function readDesignMd(projectId: string): Promise<string> {
   return (await fetchProjectFileText(projectId, 'DESIGN.md', { cache: 'no-store' })) ?? '';
 }
 
-export async function writeDesignMd(projectId: string, body: string): Promise<boolean> {
-  const file = await writeProjectTextFile(projectId, 'DESIGN.md', body);
+export async function writeDesignMd(
+  projectId: string,
+  body: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
+  const file = await writeProjectTextFile(projectId, 'DESIGN.md', body, undefined, workspaceContext);
   return Boolean(file);
 }
 

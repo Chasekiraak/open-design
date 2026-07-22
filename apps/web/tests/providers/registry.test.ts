@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import {
+  buildWorkspacePermissions,
+  buildWorkspaceSeatSummary,
+  type WorkspaceCollabContext,
+} from '@open-design/contracts';
 
 import {
   cancelConnectorAuthorization,
@@ -24,6 +29,22 @@ import {
   uploadProjectFiles,
   writeProjectTextFileDetailed,
 } from '../../src/providers/registry';
+
+function personalWorkspaceContext(): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }),
+    permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+  };
+}
 
 function agentStreamResponse(text: string): Response {
   const encoder = new TextEncoder();
@@ -151,6 +172,47 @@ describe('writeProjectTextFileDetailed', () => {
       code: 'ARTIFACT_REGRESSION',
       message: 'new artifact is smaller than the prior version',
     });
+  });
+
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ file: { name: 'preview.html', path: 'preview.html', size: 0, mtime: 0 } }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await writeProjectTextFileDetailed(
+      'project-1',
+      'preview.html',
+      '<html></html>',
+      undefined,
+      personalWorkspaceContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/files',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ file: { name: 'preview.html', path: 'preview.html', size: 0, mtime: 0 } }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await writeProjectTextFileDetailed('project-1', 'preview.html', '<html></html>');
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
   });
 });
 
@@ -833,6 +895,40 @@ describe('uploadProjectFiles', () => {
     expect(result.uploaded).toHaveLength(2);
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]).toMatchObject({ name: 'c.txt' });
+  });
+
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      files: [{ name: 'hello.txt', path: 'hello.txt', size: 5, originalName: 'hello.txt' }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await uploadProjectFiles('project-1', [file], undefined, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/upload',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      files: [{ name: 'hello.txt', path: 'hello.txt', size: 5, originalName: 'hello.txt' }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await uploadProjectFiles('project-1', [file]);
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toBeUndefined();
   });
 });
 

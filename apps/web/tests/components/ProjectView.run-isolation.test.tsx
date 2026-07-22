@@ -1730,6 +1730,7 @@ describe('ProjectView conversation run isolation', () => {
           name: 'Hello From B',
           metadata: expect.objectContaining({ nameSource: 'prompt' }),
         }),
+        null,
       ),
     );
   });
@@ -1781,6 +1782,7 @@ describe('ProjectView conversation run isolation', () => {
           name: 'Agent Title',
           metadata: expect.objectContaining({ nameSource: 'agent' }),
         }),
+        null,
       ),
     );
   });

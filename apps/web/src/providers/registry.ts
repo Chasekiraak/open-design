@@ -2083,8 +2083,9 @@ export async function writeProjectTextFile(
     versionLabel?: string;
     versionPrompt?: string | null;
   },
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ProjectFile | null> {
-  const result = await writeProjectTextFileDetailed(projectId, name, content, options);
+  const result = await writeProjectTextFileDetailed(projectId, name, content, options, workspaceContext);
   return result.ok ? result.file : null;
 }
 
@@ -2102,11 +2103,15 @@ export async function writeProjectTextFileDetailed(
     versionLabel?: string;
     versionPrompt?: string | null;
   },
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WriteProjectTextFileResult> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify({
         name,
         content,
@@ -2136,11 +2141,15 @@ export async function writeProjectBase64File(
   projectId: string,
   name: string,
   base64: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ProjectFile | null> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify({ name, content: base64, encoding: 'base64' }),
     });
     if (!resp.ok) return null;
@@ -2155,6 +2164,7 @@ export async function uploadProjectFile(
   projectId: string,
   file: File,
   desiredName?: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ProjectFile | null> {
   try {
     const form = new FormData();
@@ -2162,6 +2172,7 @@ export async function uploadProjectFile(
     if (desiredName) form.append('name', desiredName);
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`, {
       method: 'POST',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
       body: form,
     });
     if (!resp.ok) return null;
@@ -2230,6 +2241,7 @@ export async function uploadProjectFiles(
   projectId: string,
   files: File[],
   dir?: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<UploadProjectFilesResult> {
   if (files.length === 0) return { uploaded: [], failed: [] };
 
@@ -2251,7 +2263,11 @@ export async function uploadProjectFiles(
     try {
       const resp = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/upload`,
-        { method: 'POST', body: form },
+        {
+          method: 'POST',
+          ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
+          body: form,
+        },
       );
 
       if (!resp.ok) {

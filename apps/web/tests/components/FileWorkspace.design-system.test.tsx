@@ -294,6 +294,8 @@ describe('FileWorkspace design-system project surface', () => {
       'ds-acme',
       'DESIGN.md',
       expect.stringContaining('`#FF6A3D`'),
+      undefined,
+      null,
     ));
 
     await flushKit();
@@ -316,6 +318,8 @@ describe('FileWorkspace design-system project surface', () => {
       'ds-acme',
       'DESIGN.md',
       expect.stringContaining('`#10B981`'),
+      undefined,
+      null,
     ));
   });
 
@@ -364,6 +368,12 @@ describe('FileWorkspace design-system project surface', () => {
       }
       if (url === '/api/projects/ds-acme/collab/status') {
         return new Response(JSON.stringify({ syncState: 'local_only' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -424,6 +434,8 @@ describe('FileWorkspace design-system project surface', () => {
       'ds-acme',
       'brand.json',
       expect.stringContaining('"hex": "#FF6A3D"'),
+      undefined,
+      null,
     ));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/brands/brand-acme/finalize',
@@ -493,6 +505,12 @@ describe('FileWorkspace design-system project surface', () => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       events.push(url);
       return new Response(JSON.stringify({ id: 'brand-acme' }), {
         status: 200,
@@ -536,6 +554,8 @@ describe('FileWorkspace design-system project surface', () => {
       'ds-acme',
       'brand.json',
       expect.not.stringContaining('imagery/hero.png'),
+      undefined,
+      null,
     ));
     expect(registryMocks.deleteProjectFile).toHaveBeenCalledWith('ds-acme', 'imagery/hero.png');
     expect(fetchMock).toHaveBeenCalledWith(
@@ -583,6 +603,12 @@ describe('FileWorkspace design-system project surface', () => {
       }
       if (url === '/api/projects/ds-acme/collab/status') {
         return new Response(JSON.stringify({ syncState: 'local_only' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });

@@ -2136,7 +2136,7 @@ export function FileWorkspace({
     const cohort = deriveUploadCohort(picked);
     let result: UploadProjectFilesResult;
     try {
-      result = await uploadProjectFiles(projectId, picked, uploadDir);
+      result = await uploadProjectFiles(projectId, picked, uploadDir, workspaceContext);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       setUploadError(`Upload failed for ${picked.length} file(s) (${detail}).`);
@@ -2491,7 +2491,13 @@ export function FileWorkspace({
 
   async function createMarkdownDocument() {
     const target = nextMarkdownDocumentPath(files, uploadDir);
-    const file = await writeProjectTextFile(projectId, target, initialMarkdownDocument(target, projectKind, t));
+    const file = await writeProjectTextFile(
+      projectId,
+      target,
+      initialMarkdownDocument(target, projectKind, t),
+      undefined,
+      workspaceContext,
+    );
     if (!file) return;
     await onRefreshFiles();
     await refreshProjectFolders();
@@ -2508,7 +2514,7 @@ export function FileWorkspace({
       const file = await writeProjectTextFile(projectId, target, content, {
         versionSource: 'manual',
         versionPrompt: pagePresetVersionPrompt(preset, t, locale),
-      });
+      }, workspaceContext);
       if (!file) {
         // Never let a failed create read as a silent no-op click.
         setLauncherToast(t('workspace.pageCreateFailed'));
@@ -2664,7 +2670,7 @@ export function FileWorkspace({
     const startedAt = Date.now();
     let result: boolean | undefined;
     try {
-      const file = await writeProjectTextFile(projectId, name, text);
+      const file = await writeProjectTextFile(projectId, name, text, undefined, workspaceContext);
       const elapsed = Date.now() - startedAt;
       // Ensures saving UI shows so the button does not flicker
       if (showSaving && elapsed < 500) await new Promise((resolve) => setTimeout(resolve, 500 - elapsed));
@@ -2795,7 +2801,7 @@ export function FileWorkspace({
   ): Promise<{ fileName: string } | false> {
     const targetDir = parentDirForProjectFile(sketchName);
     const targetName = targetDir ? `${targetDir}/${imageFileName}` : imageFileName;
-    const file = await writeProjectBase64File(projectId, targetName, base64);
+    const file = await writeProjectBase64File(projectId, targetName, base64, workspaceContext);
     if (!file) {
       setUploadError(t('common.exportImageFailed'));
       return false;
@@ -4137,6 +4143,7 @@ function DesignSystemProjectPanel({
   const { uploading: kitUploading, uploadModule: kitUploadModule } = useKitModuleUpload({
     projectId,
     title: system.title,
+    workspaceContext,
     onUploaded: (module) => {
       setKitActionBusy(`upload:${module}`);
       notifyKit('loading', t('ds.uploading'));
@@ -4163,7 +4170,7 @@ function DesignSystemProjectPanel({
   async function persistDesignMd(nextBody: string) {
     const updated = await updateDesignSystemDraft(system.id, { body: nextBody });
     if (!updated) throw new Error(t('ds.actionFailed'));
-    const file = await writeProjectTextFile(projectId, 'DESIGN.md', nextBody);
+    const file = await writeProjectTextFile(projectId, 'DESIGN.md', nextBody, undefined, workspaceContext);
     if (!file) throw new Error(t('ds.actionFailed'));
     setDesignMdBody(nextBody);
     await refreshKitDependencies();
@@ -4266,7 +4273,7 @@ function DesignSystemProjectPanel({
     setKitActionBusy('color');
     notifyKit('loading', t('ds.saving'));
     try {
-      const ok = await updateBrandColor(projectId, index, nextHex);
+      const ok = await updateBrandColor(projectId, index, nextHex, workspaceContext);
       if (!ok) {
         const nextBody = designMdBodyWithColor(designMdBody, kit?.colors ?? [], index, nextHex);
         await persistDesignMd(nextBody);

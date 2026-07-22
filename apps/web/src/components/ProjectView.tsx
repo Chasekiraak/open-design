@@ -223,6 +223,7 @@ import { localizePluginTitle } from './plugins-home/localization';
 import { DesignSystemPicker } from './DesignSystemPicker';
 import { PresenceBar } from '../collab/PresenceBar';
 import { useProjectCollab } from '../collab/useProjectCollab';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { CollabProvider, type CollabContextValue } from '../collab/collab-context';
 import { persistCommentAnchors } from '../collab/comment-anchor-client';
 import type { AnchorWriteBack } from '../comments';
@@ -1413,6 +1414,7 @@ export function ProjectView({
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
+  const { context: workspaceContext } = useWorkspaceContext();
   // Onboarding first-generation funnel (spec §11.1). Consume the pending entry
   // (set by the Home recommendation) exactly once on mount; the refs guard the
   // two lifecycle events so each fires only for the genuine first send / first
@@ -2586,7 +2588,7 @@ export function ProjectView({
             });
       const file = await writeProjectTextFile(project.id, fileName, artifactToPersist.html, {
         artifactManifest: manifest ?? undefined,
-      });
+      }, workspaceContext);
       if (file) {
         savedArtifactRef.current = file.name;
         setFilesRefresh((n) => n + 1);
@@ -3548,7 +3550,7 @@ export function ProjectView({
       // re-display the images instead of losing them on echo.
       let uploadedAttachments: PreviewCommentAttachment[] | undefined;
       if (images.length > 0) {
-        const result = await uploadProjectFiles(project.id, images);
+        const result = await uploadProjectFiles(project.id, images, undefined, workspaceContext);
         if (result.uploaded.length !== images.length) return null;
         uploadedAttachments = result.uploaded.map((file) => ({ path: file.path, name: file.name }));
       }
@@ -5294,7 +5296,7 @@ export function ProjectView({
           void patchProject(project.id, {
             name: projectName,
             ...(metadata ? { metadata } : {}),
-          });
+          }, workspaceContext);
         }
       }
       const canReplaceConversationTitle = (title: string | null | undefined) => {
@@ -5340,7 +5342,7 @@ export function ProjectView({
           void patchProject(project.id, {
             name: agentTitle,
             ...(metadata ? { metadata } : {}),
-          });
+          }, workspaceContext);
         }
       };
 
@@ -6677,7 +6679,7 @@ export function ProjectView({
       // along the first task rather than being duplicated across every note.
       let uploaded: ChatAttachment[] = [];
       if (images.length > 0) {
-        const result = await uploadProjectFiles(project.id, images);
+        const result = await uploadProjectFiles(project.id, images, undefined, workspaceContext);
         uploaded = result.uploaded;
       }
       if (commentAttachments.length === 0) {
@@ -7035,7 +7037,7 @@ export function ProjectView({
       },
     };
     onProjectChange({ ...project, metadata });
-    void patchProject(project.id, { metadata });
+    void patchProject(project.id, { metadata }, workspaceContext);
   }, [onProjectChange, project]);
 
   const sendDesignSystemFeedback = useCallback((
@@ -7389,7 +7391,7 @@ export function ProjectView({
       void patchProject(project.id, {
         name: trimmed,
         ...(metadata ? { metadata } : {}),
-      });
+      }, workspaceContext);
     },
     [project, onProjectChange],
   );
@@ -7509,7 +7511,7 @@ export function ProjectView({
         updatedAt: Date.now(),
       };
       onProjectChange(updated);
-      void patchProject(project.id, { designSystemId: nextId });
+      void patchProject(project.id, { designSystemId: nextId }, workspaceContext);
     },
     [project, projectDesignSystemId, onProjectChange, designSystems, analytics.track],
   );

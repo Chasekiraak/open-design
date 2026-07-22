@@ -439,11 +439,15 @@ type ProjectPatch = Omit<Partial<Project>, 'pendingPrompt' | 'customInstructions
 export async function patchProject(
   id: string,
   patch: ProjectPatch,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<Project | null> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(patch),
     });
     if (!resp.ok) return null;
