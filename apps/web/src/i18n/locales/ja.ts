@@ -803,7 +803,6 @@ export const ja: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "ボーナスクレジット",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const ja: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': '公開を取り消す',
+  'fileViewer.shareEmptyStateTitle': '共有できるものがまだありません',
+  'fileViewer.shareEmptyStateDescription': 'チームを作成または参加すると、このファイルをメンバーと共有できます',
+  'fileViewer.shareEmptyStateCreateTeam': 'チームを作成',
+
   'fileViewer.publishFileRequiresTeam': '公開リンクの発行にはチームワークスペースが必要です。チームワークスペースに切り替えるか、デプロイでこのファイルを公開してください。',
   'fileViewer.publishFileRequiresWorkspace': '公開リンクの発行にはワークスペースへのサインインが必要です。Open Design Cloud にサインインするか、デプロイでこのファイルを公開してください。',
   'fileViewer.publishFileFailed': 'このファイルを公開できませんでした。もう一度お試しください。',

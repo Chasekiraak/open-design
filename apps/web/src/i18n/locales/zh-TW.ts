@@ -816,7 +816,6 @@ export const zhTW: Dict = {
   "entry.creditsOpening": "正在開啟...",
   "entry.creditsRemaining": "剩餘積分",
   "entry.credits": "積分",
-  "entry.creditsBonus": "附加積分",
   "entry.creditsUsage": "查看使用情況",
   "entry.creditsMemberNoticeTitle": "額度不足？",
   "entry.creditsMemberNoticeBody": "你目前是 Member，不能自行續額度。需要更多額度時，可以提醒團隊 Admin 提額。",
@@ -3365,6 +3364,10 @@ export const zhTW: Dict = {
   "fileViewer.openFileRequired": "打开文件后可用。",
   "fileViewer.publishFile": "發布檔案",
   "fileViewer.unpublishFile": "取消發佈",
+  "fileViewer.shareEmptyStateTitle": "暫時無法分享",
+  "fileViewer.shareEmptyStateDescription": "建立或加入一個團隊,就能把這個檔案分享給同事",
+  "fileViewer.shareEmptyStateCreateTeam": "建立團隊",
+
   "fileViewer.publishFileRequiresTeam": "發布公開連結需要團隊工作區。請切換到團隊工作區，或使用「部署」發布此檔案。",
   "fileViewer.publishFileRequiresWorkspace": "發布公開連結需要登入工作區。請登入 Open Design Cloud，或使用「部署」發布此檔案。",
   "fileViewer.publishFileFailed": "無法發布此檔案，請重試。",

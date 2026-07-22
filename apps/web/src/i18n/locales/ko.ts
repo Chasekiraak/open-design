@@ -803,7 +803,6 @@ export const ko: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "보너스 크레딧",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const ko: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': '게시 취소',
+  'fileViewer.shareEmptyStateTitle': '아직 공유할 항목이 없습니다',
+  'fileViewer.shareEmptyStateDescription': '팀을 만들거나 참여하면 이 파일을 동료와 공유할 수 있습니다',
+  'fileViewer.shareEmptyStateCreateTeam': '팀 만들기',
+
   'fileViewer.publishFileRequiresTeam': '공개 링크를 게시하려면 팀 워크스페이스가 필요합니다. 팀 워크스페이스로 전환하거나 배포를 사용해 이 파일을 게시하세요.',
   'fileViewer.publishFileRequiresWorkspace': '공개 링크를 게시하려면 워크스페이스에 로그인해야 합니다. Open Design Cloud에 로그인하거나 배포를 사용해 이 파일을 게시하세요.',
   'fileViewer.publishFileFailed': '이 파일을 게시하지 못했습니다. 다시 시도해 주세요.',

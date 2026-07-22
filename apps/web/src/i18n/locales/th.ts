@@ -803,7 +803,6 @@ export const th: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "เครดิตโบนัส",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const th: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'ยกเลิกการเผยแพร่',
+  'fileViewer.shareEmptyStateTitle': 'ยังไม่มีอะไรให้แชร์',
+  'fileViewer.shareEmptyStateDescription': 'สร้างหรือเข้าร่วมทีมเพื่อแชร์ไฟล์นี้กับเพื่อนร่วมทีม',
+  'fileViewer.shareEmptyStateCreateTeam': 'สร้างทีม',
+
   'fileViewer.publishFileRequiresTeam': 'การเผยแพร่ลิงก์สาธารณะต้องใช้พื้นที่ทำงานแบบทีม สลับไปยังพื้นที่ทำงานแบบทีม หรือใช้ Deploy เพื่อเผยแพร่ไฟล์นี้',
   'fileViewer.publishFileRequiresWorkspace': 'การเผยแพร่ลิงก์สาธารณะต้องลงชื่อเข้าใช้พื้นที่ทำงาน ลงชื่อเข้าใช้ Open Design Cloud หรือใช้ Deploy เพื่อเผยแพร่ไฟล์นี้',
   'fileViewer.publishFileFailed': 'ไม่สามารถเผยแพร่ไฟล์นี้ได้ โปรดลองอีกครั้ง',

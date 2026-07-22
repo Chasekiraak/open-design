@@ -803,7 +803,6 @@ export const ptBR: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Créditos bônus",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const ptBR: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Cancelar publicação',
+  'fileViewer.shareEmptyStateTitle': 'Nada para compartilhar ainda',
+  'fileViewer.shareEmptyStateDescription': 'Crie ou participe de uma equipe para compartilhar este arquivo com colegas',
+  'fileViewer.shareEmptyStateCreateTeam': 'Criar equipe',
+
   'fileViewer.publishFileRequiresTeam': 'Publicar um link público exige um espaço de trabalho de equipe. Mude para um espaço de equipe ou use Implantar para publicar este arquivo.',
   'fileViewer.publishFileRequiresWorkspace': 'Publicar um link público exige estar conectado a um espaço de trabalho. Entre no Open Design Cloud ou use Implantar para publicar este arquivo.',
   'fileViewer.publishFileFailed': 'Não foi possível publicar este arquivo. Tente novamente.',

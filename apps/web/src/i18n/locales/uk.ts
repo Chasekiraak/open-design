@@ -803,7 +803,6 @@ export const uk: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Бонусні кредити",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const uk: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Скасувати публікацію',
+  'fileViewer.shareEmptyStateTitle': 'Поки нічим ділитися',
+  'fileViewer.shareEmptyStateDescription': 'Створіть команду або приєднайтеся до неї, щоб поділитися цим файлом з колегами',
+  'fileViewer.shareEmptyStateCreateTeam': 'Створити команду',
+
   'fileViewer.publishFileRequiresTeam': 'Щоб опублікувати загальнодоступне посилання, потрібен командний робочий простір. Перейдіть до командного простору або скористайтеся «Розгорнути».',
   'fileViewer.publishFileRequiresWorkspace': 'Щоб опублікувати загальнодоступне посилання, потрібно ввійти в робочий простір. Увійдіть в Open Design Cloud або скористайтеся «Розгорнути».',
   'fileViewer.publishFileFailed': 'Не вдалося опублікувати цей файл. Спробуйте ще раз.',

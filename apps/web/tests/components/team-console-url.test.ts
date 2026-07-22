@@ -27,12 +27,16 @@ describe('teamConsoleUrl', () => {
     );
   });
 
-  // Creating a workspace is a console flow whose dialog hangs off B's sidebar;
-  // `workspace=create` (vela components/layout/sidebar-actions.tsx) opens it on
-  // arrival so the entry lands on the dialog rather than a page.
-  it('deep-links create-team straight into the create dialog', () => {
+  // recvq725Kx0rM4: this used to assert a `workspace=create` deep-link param
+  // on the premise that B's dashboard honors it — checked against B's real
+  // route source and it does not; the dialog only opens from a sidebar button
+  // click (pure client state, no URL hook). The stale param made the entry
+  // look broken (dashboard loads, nothing opens) rather than just "you land
+  // on the dashboard, not the dialog". No dead param until B exposes a real
+  // deep-link to replace this with.
+  it('lands create-team on the plain dashboard, with no dead deep-link param', () => {
     expect(teamConsoleUrl(base, 'create-team')).toBe(
-      'https://web.example/dashboard?workspaceId=ws-1&workspace=create',
+      'https://web.example/dashboard?workspaceId=ws-1',
     );
   });
 

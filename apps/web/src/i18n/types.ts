@@ -1191,7 +1191,6 @@ export interface Dict {
   'entry.creditsOpening': string;
   'entry.creditsRemaining': string;
   'entry.credits': string;
-  'entry.creditsBonus': string;
   'entry.creditsUsage': string;
   'entry.creditsMemberNoticeTitle': string;
   'entry.creditsMemberNoticeBody': string;
@@ -4018,6 +4017,9 @@ export interface Dict {
   'fileViewer.openFileRequired': string;
   'fileViewer.publishFile': string;
   'fileViewer.unpublishFile': string;
+  'fileViewer.shareEmptyStateTitle': string;
+  'fileViewer.shareEmptyStateDescription': string;
+  'fileViewer.shareEmptyStateCreateTeam': string;
   /** @deprecated Orphaned: the public-file gate is no longer team-scoped.
    *  `fileViewer.publishFileRequiresWorkspace` replaced it. */
   'fileViewer.publishFileRequiresTeam': string;

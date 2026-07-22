@@ -803,7 +803,6 @@ export const id: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Kredit bonus",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const id: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Batalkan publikasi',
+  'fileViewer.shareEmptyStateTitle': 'Belum ada yang bisa dibagikan',
+  'fileViewer.shareEmptyStateDescription': 'Buat atau gabung ke tim untuk membagikan file ini ke rekan tim',
+  'fileViewer.shareEmptyStateCreateTeam': 'Buat tim',
+
   'fileViewer.publishFileRequiresTeam': 'Menerbitkan tautan publik memerlukan ruang kerja tim. Beralihlah ke ruang kerja tim, atau gunakan Deploy untuk menerbitkan berkas ini.',
   'fileViewer.publishFileRequiresWorkspace': 'Menerbitkan tautan publik memerlukan ruang kerja yang sudah masuk. Masuk ke Open Design Cloud, atau gunakan Deploy untuk menerbitkan berkas ini.',
   'fileViewer.publishFileFailed': 'Tidak dapat menerbitkan berkas ini. Silakan coba lagi.',

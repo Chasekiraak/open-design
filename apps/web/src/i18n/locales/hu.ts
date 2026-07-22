@@ -803,7 +803,6 @@ export const hu: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Bónusz kreditek",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const hu: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Közzététel visszavonása',
+  'fileViewer.shareEmptyStateTitle': 'Még nincs mit megosztani',
+  'fileViewer.shareEmptyStateDescription': 'Hozz létre egy csapatot, vagy csatlakozz egyhez, hogy megoszthasd ezt a fájlt a kollégáiddal',
+  'fileViewer.shareEmptyStateCreateTeam': 'Csapat létrehozása',
+
   'fileViewer.publishFileRequiresTeam': 'A nyilvános hivatkozás közzétételéhez csapatmunkaterület szükséges. Válts csapatmunkaterületre, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileRequiresWorkspace': 'A nyilvános hivatkozás közzétételéhez be kell jelentkezned egy munkaterületre. Jelentkezz be az Open Design Cloudba, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileFailed': 'Nem sikerült közzétenni ezt a fájlt. Próbáld újra.',

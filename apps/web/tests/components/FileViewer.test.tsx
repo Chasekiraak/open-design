@@ -3555,6 +3555,12 @@ describe('FileViewer SVG artifacts', () => {
     // under and the daemon answers 409 WORKSPACE_IDENTITY_REQUIRED.
     expect(screen.queryByText('Publish this file for everyone')).toBeNull();
     expect(screen.queryByRole('button', { name: /Publish file/i })).toBeNull();
+    expect(screen.queryByText('Share project in workspace')).toBeNull();
+    // recvq6W8GX8NaH: with neither card able to render, the tab used to be
+    // reachable but silently blank. It must explain why instead — and with no
+    // workspaceSettingsUrl on a null context, no dead "create team" link.
+    expect(screen.getByText('Nothing to share yet')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /create team/i })).toBeNull();
 
     // And nothing may probe the endpoint on behalf of a caller it will refuse.
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -3562,6 +3568,45 @@ describe('FileViewer SVG artifacts', () => {
       typeof input === 'string' ? input : String(input),
     );
     expect(requested.some((url) => url.includes('publish-public'))).toBe(false);
+  });
+
+  // recvq6W8GX8NaH: same empty state, but this time a create-team link IS
+  // offered because the context carries a console URL to send the user to.
+  it('offers a create-team link in the share empty state when a console URL is available', async () => {
+    stubFetchWithWorkspaceContext(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/workspace/context')) {
+          return new Response(
+            JSON.stringify({
+              context: {
+                workspaceId: null,
+                workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-none',
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ deployments: [] }), { status: 200 });
+      }),
+    );
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={publicPublishFile()}
+        liveHtml="<html><body><h1>Hello</h1></body></html>"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /share/i }));
+    expect(await screen.findByRole('tab', { name: /share/i })).toBeTruthy();
+    expect(await screen.findByText('Nothing to share yet')).toBeTruthy();
+    const createTeamLink = screen.getByRole('link', { name: /create team/i });
+    // teamConsoleUrl(base, 'create-team') — see EntryNavRail.tsx for the exact
+    // section-path rewrite; this only pins that the SAME helper was reused.
+    expect(createTeamLink.getAttribute('href')).toContain('/dashboard');
+    expect(createTeamLink.getAttribute('href')).toContain('workspaceId=ws-none');
   });
 
   // recvq56vFjQKfT: viewer-only reused the SAME flag that blocks edit/export

@@ -54,7 +54,7 @@ const GITHUB_HELP_URL = `${REPO_URL}/issues/new`;
 const GITHUB_FEATURE_URL = `${REPO_URL}/pulls`;
 const DISCORD_URL = 'https://discord.gg/mHAjSMV6gz';
 const X_URL = 'https://x.com/OpenDesignHQ';
-const CONTACT_EMAIL_URL = 'mailto:contact@open.design';
+const CONTACT_EMAIL_URL = 'mailto:support@open-design.ai';
 const externalLinkProps = { target: '_blank', rel: 'noreferrer noopener' } as const;
 
 // Last directory this shell successfully read. `coalescedGet` only collapses
@@ -163,10 +163,18 @@ export function teamConsoleUrl(
     }
     url.pathname = `/${segments.join('/')}`;
     if (section === 'upgrade') url.searchParams.set('billing', 'checkout');
-    // Creating a workspace is a console flow whose dialog hangs off B's sidebar.
-    // `workspace=create` opens it on arrival, so this entry lands ON the dialog
-    // instead of dropping the user on a page to find it themselves.
-    if (section === 'create-team') url.searchParams.set('workspace', 'create');
+    // recvq725Kx0rM4: `create-team` used to set `?workspace=create` on the
+    // premise that B's dashboard honors it as a deep link into the
+    // create-workspace dialog, the same way `billing=checkout` opens the
+    // upgrade dialog. Checked against B's actual route source
+    // (routes/team-dashboard.tsx, routes/workspace-settings.tsx): neither
+    // reads a `workspace` search param at all — the dialog is opened by
+    // clicking a sidebar button (`sidebar-actions.tsx`'s `openCreateWorkspace`),
+    // pure client state with no URL hook. The stale param made this entry
+    // look like "nothing happened" (dashboard loads, no dialog) rather than a
+    // broken link, which is why it read as "路径丢失" instead of "先跳个页面
+    // 自己找按钮". Land on the plain dashboard — no dead deep-link param —
+    // until B exposes a real one to replace this comment and the omission.
     return url.toString();
   } catch {
     return base;
@@ -263,10 +271,6 @@ export function EntryNavRail({
       ? t('entry.billingTierTeam')
       : t('entry.billingTierFree');
   const creditsBalance = billing ? billing.totalAvailableCredits : null;
-  // #112: B splits the wallet into the plan's own grant and everything topped
-  // up on top of it (purchases, workspace-sponsored grants, promos). The row
-  // used to print a literal 0 because the summary carried no such field.
-  const bonusCreditsBalance = billing ? billing.rechargeCredits : null;
   // #5517: wordmark badge on the account row (replaces the chevron) and a
   // small twin inside the menu's billing card. Derive from the raw tier id
   // first so "team_plus" maps to the plus badge regardless of display label.
@@ -506,10 +510,11 @@ export function EntryNavRail({
                       <span className="entry-nav-rail__account-head-email">{accountEmail}</span>
                     ) : null}
                   </div>
-                  {/* #5517 billing card: plan (+badge) + 升级 CTA + credits and
-                      bonus rows. Credits are real billing data; the bonus row
-                      mirrors #5517's static 0 (vela reports one combined
-                      total). The credits row links out to B's wallet page. */}
+                  {/* #5517 billing card: plan (+badge) + 升级 CTA + credits row.
+                      Credits are real billing data. The credits row links out
+                      to B's wallet page. Product ruling (2026-07-22): we do
+                      not have a separate "附加积分" (bonus/top-up credits)
+                      concept to show — 积分 is the one number that matters. */}
                   {billing ? (
                     <div className="entry-nav-rail__menu-credits">
                       <div className="entry-nav-rail__menu-credits-head">
@@ -530,12 +535,7 @@ export function EntryNavRail({
                           </button>
                         ) : null}
                       </div>
-                      {/* #5517 rows: 积分 + 附加积分. Both are real B numbers —
-                          the wallet arrives split into a subscription-grant
-                          bucket and a top-up bucket, and 积分 is their total,
-                          so 附加积分 is the part of that total which did not
-                          come from the plan.
-                          #62 (product ruling): clicking 积分 jumps straight to
+                      {/* #62 (product ruling): clicking 积分 jumps straight to
                           B's web wallet page for the usage detail — there is
                           NO intermediate credits popover in the client. */}
                       <button
@@ -557,16 +557,6 @@ export function EntryNavRail({
                           <Icon name="chevron-right" size={14} />
                         </span>
                       </button>
-                      <div className="entry-nav-rail__menu-credits-row">
-                        <span className="entry-nav-rail__menu-credits-label">
-                          <RemixIcon name="battery-charge-line" size={14} /> {t('entry.creditsBonus')}
-                        </span>
-                        <span className="entry-nav-rail__menu-credits-value">
-                          {bonusCreditsBalance != null
-                            ? bonusCreditsBalance.toLocaleString('en-US')
-                            : '—'}
-                        </span>
-                      </div>
                     </div>
                   ) : null}
                   <button

@@ -803,7 +803,6 @@ export const tr: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Bonus krediler",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const tr: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Yayından kaldır',
+  'fileViewer.shareEmptyStateTitle': 'Henüz paylaşılacak bir şey yok',
+  'fileViewer.shareEmptyStateDescription': 'Bu dosyayı takım arkadaşlarınızla paylaşmak için bir takım oluşturun veya katılın',
+  'fileViewer.shareEmptyStateCreateTeam': 'Takım oluştur',
+
   'fileViewer.publishFileRequiresTeam': 'Herkese açık bağlantı yayınlamak için ekip çalışma alanı gerekir. Bir ekip çalışma alanına geçin veya bu dosyayı Dağıt ile yayınlayın.',
   'fileViewer.publishFileRequiresWorkspace': 'Herkese açık bağlantı yayınlamak için bir çalışma alanında oturum açmanız gerekir. Open Design Cloud’da oturum açın veya bu dosyayı Dağıt ile yayınlayın.',
   'fileViewer.publishFileFailed': 'Bu dosya yayınlanamadı. Lütfen tekrar deneyin.',

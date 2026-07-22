@@ -803,7 +803,6 @@ export const fa: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "اعتبار پاداش",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const fa: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'لغو انتشار',
+  'fileViewer.shareEmptyStateTitle': 'چیزی برای اشتراک‌گذاری وجود ندارد',
+  'fileViewer.shareEmptyStateDescription': 'برای اشتراک‌گذاری این فایل با همکاران، یک تیم بسازید یا به تیمی بپیوندید',
+  'fileViewer.shareEmptyStateCreateTeam': 'ایجاد تیم',
+
   'fileViewer.publishFileRequiresTeam': 'انتشار پیوند عمومی به فضای کاری تیمی نیاز دارد. به یک فضای کاری تیمی بروید یا این فایل را با «استقرار» منتشر کنید.',
   'fileViewer.publishFileRequiresWorkspace': 'انتشار پیوند عمومی به ورود به یک فضای کاری نیاز دارد. به Open Design Cloud وارد شوید یا این فایل را با «استقرار» منتشر کنید.',
   'fileViewer.publishFileFailed': 'انتشار این فایل ممکن نشد. لطفاً دوباره تلاش کنید.',

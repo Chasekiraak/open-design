@@ -211,6 +211,7 @@ async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean>
 import { HandoffButton } from './HandoffButton';
 import { SocialShareGrid } from './SocialShareGrid';
 import { Toast } from './Toast';
+import { teamConsoleUrl } from './EntryNavRail';
 import {
   PreviewDrawOverlay,
   ANNOTATION_EVENT,
@@ -6252,6 +6253,28 @@ function ReactComponentViewer({
                             </button>
                           )}
                         </div>
+                        ) : null}
+                        {!workspaceContextHasTeamIdentity(workspaceContext) && !canPublishPublic ? (
+                          <div className="chrome-share-card chrome-share-card--empty">
+                            <div className="chrome-share-card__header">
+                              <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
+                              <span className="share-menu-text">
+                                <span>{t('fileViewer.shareEmptyStateTitle')}</span>
+                                <small>{t('fileViewer.shareEmptyStateDescription')}</small>
+                              </span>
+                            </div>
+                            {workspaceContext?.workspaceSettingsUrl ? (
+                              <a
+                                className="chrome-publish-primary"
+                                href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                              >
+                                <RemixIcon name="add-line" size={15} />
+                                {t('fileViewer.shareEmptyStateCreateTeam')}
+                              </a>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
                     ) : null}
@@ -12917,6 +12940,38 @@ function HtmlViewer({
                           </button>
                         )}
                       </div>
+                      ) : null}
+                      {/* Neither card above has anything to show for a
+                          personal/free account with no team identity and no
+                          public-publish entitlement — the tab was still
+                          reachable (rawCanShare is broader than either card's
+                          own gate), so leaving this blank read as broken
+                          rather than "nothing to share yet". Point at the
+                          same B console create-team flow the entry rail's
+                          workspace switcher uses; render plain text instead
+                          of a dead link when B has not given us a console
+                          URL to send them to. */}
+                      {!workspaceContextHasTeamIdentity(workspaceContext) && !canPublishPublic ? (
+                        <div className="chrome-share-card chrome-share-card--empty">
+                          <div className="chrome-share-card__header">
+                            <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
+                            <span className="share-menu-text">
+                              <span>{t('fileViewer.shareEmptyStateTitle')}</span>
+                              <small>{t('fileViewer.shareEmptyStateDescription')}</small>
+                            </span>
+                          </div>
+                          {workspaceContext?.workspaceSettingsUrl ? (
+                            <a
+                              className="chrome-publish-primary"
+                              href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                            >
+                              <RemixIcon name="add-line" size={15} />
+                              {t('fileViewer.shareEmptyStateCreateTeam')}
+                            </a>
+                          ) : null}
+                        </div>
                       ) : null}
                       </div>
                     ) : null}

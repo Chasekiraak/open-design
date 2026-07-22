@@ -9,9 +9,10 @@
 // exists. B reports an unsubscribed workspace as `billingState: 'free'` with a
 // null planId and an EMPTY membershipTier — the label has to follow that.
 //
-// #112: the 附加积分 row printed a hardcoded 0 because the summary shape carried
-// no bucket for it, even though B splits the wallet into a subscription grant
-// bucket and a top-up bucket.
+// #112 (superseded 2026-07-22): a 附加积分 (bonus/top-up credits) row used to
+// live here. Product ruling: we have no such concept to show the user — 积分
+// is the one number that matters — so the row was removed outright rather
+// than fixed to show a real value.
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { WorkspaceBillingSummary, WorkspaceCollabContext } from '@open-design/contracts';
@@ -154,8 +155,8 @@ describe('account menu billing card — 积分 row opens the web wallet (#62)', 
   });
 });
 
-describe('account menu billing card — 附加积分 (#112)', () => {
-  it('shows B’s real top-up bucket instead of a hardcoded 0', () => {
+describe('account menu billing card — no 附加积分 row (#112 superseded)', () => {
+  it('never renders a bonus/top-up credits row, however the wallet splits its balance', () => {
     renderRail({
       context: context({ billingState: 'active', planId: 'team_plus' } as Partial<WorkspaceCollabContext>),
       billing: billing({
@@ -166,17 +167,6 @@ describe('account menu billing card — 附加积分 (#112)', () => {
       }),
     });
 
-    const card = billingCard();
-    const bonusRow = card.getByText('附加积分').closest('.entry-nav-rail__menu-credits-row');
-    expect(bonusRow).toBeTruthy();
-    expect(within(bonusRow as HTMLElement).getByText('386,294')).toBeTruthy();
-  });
-
-  it('shows a real zero top-up bucket as 0', () => {
-    renderRail({ context: context(), billing: billing() });
-
-    const card = billingCard();
-    const bonusRow = card.getByText('附加积分').closest('.entry-nav-rail__menu-credits-row');
-    expect(within(bonusRow as HTMLElement).getByText('0')).toBeTruthy();
+    expect(billingCard().queryByText('附加积分')).toBeNull();
   });
 });

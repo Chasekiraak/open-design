@@ -803,7 +803,6 @@ export const fr: Dict = {
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
   "entry.credits": "Credits",
-  "entry.creditsBonus": "Crédits bonus",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",
@@ -3187,6 +3186,10 @@ export const fr: Dict = {
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
   'fileViewer.unpublishFile': 'Annuler la publication',
+  'fileViewer.shareEmptyStateTitle': 'Rien à partager pour l\'instant',
+  'fileViewer.shareEmptyStateDescription': 'Créez ou rejoignez une équipe pour partager ce fichier avec vos collègues',
+  'fileViewer.shareEmptyStateCreateTeam': 'Créer une équipe',
+
   'fileViewer.publishFileRequiresTeam': 'La publication d’un lien public nécessite un espace de travail d’équipe. Passez à un espace d’équipe ou utilisez Déployer pour publier ce fichier.',
   'fileViewer.publishFileRequiresWorkspace': 'La publication d’un lien public nécessite d’être connecté à un espace de travail. Connectez-vous à Open Design Cloud ou utilisez Déployer pour publier ce fichier.',
   'fileViewer.publishFileFailed': 'Impossible de publier ce fichier. Veuillez réessayer.',
