@@ -2340,7 +2340,7 @@ export function FileWorkspace({
   async function handleDelete(name: string) {
     if (viewerOnly) return; // read-only viewer of a team-shared project
     if (!confirm(t('workspace.deleteFileConfirm', { name }))) return;
-    const ok = await deleteProjectFile(projectId, name);
+    const ok = await deleteProjectFile(projectId, name, workspaceContext);
     if (ok) {
       await onRefreshFiles();
       const nextTabs = persistedTabs.filter((n) => n !== name);
@@ -2376,7 +2376,7 @@ export function FileWorkspace({
     const deleted: string[] = [];
     const failed: string[] = [];
     for (const name of names) {
-      const ok = await deleteProjectFile(projectId, name);
+      const ok = await deleteProjectFile(projectId, name, workspaceContext);
       if (ok) deleted.push(name);
       else failed.push(name);
     }
@@ -2419,7 +2419,7 @@ export function FileWorkspace({
       );
     }
 
-    const result = await renameProjectFile(projectId, oldName, nextName);
+    const result = await renameProjectFile(projectId, oldName, nextName, workspaceContext);
     const renamed = result.file;
     await onRefreshFiles();
     await refreshProjectFolders();
@@ -4044,6 +4044,7 @@ function DesignSystemProjectPanel({
 }) {
   const t = useT();
   const analytics = useAnalytics();
+  const { context: workspaceContext } = useWorkspaceContext();
   const [reviewDecisions, setReviewDecisions] = useState<Record<string, DesignSystemReviewDecision>>({});
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [feedbackSection, setFeedbackSection] = useState<string | null>(null);
@@ -4297,7 +4298,7 @@ function DesignSystemProjectPanel({
     setKitActionBusy(`delete-logo:${index}`);
     notifyKitLoading(t('ds.deleteLogo'));
     try {
-      const ok = await deleteBrandLogo(projectId, index);
+      const ok = await deleteBrandLogo(projectId, index, workspaceContext);
       if (!ok) throw new Error(t('ds.actionFailed'));
       await refreshKitDependencies({ finalizeBrand: true });
       notifyKit('success', t('ds.actionDone'));
@@ -4313,7 +4314,7 @@ function DesignSystemProjectPanel({
     setKitActionBusy(`delete-image:${index}`);
     notifyKitLoading(t('ds.deleteImage', { caption: '' }).trim());
     try {
-      const ok = await deleteBrandImage(projectId, index);
+      const ok = await deleteBrandImage(projectId, index, workspaceContext);
       if (!ok) throw new Error(t('ds.actionFailed'));
       await refreshKitDependencies({ finalizeBrand: true });
       notifyKit('success', t('ds.actionDone'));

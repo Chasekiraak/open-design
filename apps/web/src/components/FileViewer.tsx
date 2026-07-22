@@ -2864,6 +2864,7 @@ function FileVersionManagerModal({
 }) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
+  const { context: workspaceContext } = useWorkspaceContext();
   const tRef = useRef(t);
   const [versions, setVersions] = useState<ProjectFileVersion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3356,7 +3357,12 @@ function FileVersionManagerModal({
       });
     };
     try {
-      const result = await restoreProjectFileVersion(projectId, file.name, selectedVersion);
+      const result = await restoreProjectFileVersion(
+        projectId,
+        file.name,
+        selectedVersion,
+        workspaceContext,
+      );
       if (!result) {
         fireRestoreResult('failed', 'restore_request_failed');
         setError(t('fileViewer.versions.restoreFailed'));

@@ -1,4 +1,4 @@
-import type { Brand, BrandColorRole } from '@open-design/contracts';
+import type { Brand, BrandColorRole, WorkspaceCollabContext } from '@open-design/contracts';
 import {
   deleteProjectFile,
   fetchProjectFileText,
@@ -104,7 +104,11 @@ export function replaceDesignMdColorAtIndex(body: string, index: number, hex: st
   return null;
 }
 
-export async function deleteBrandLogo(projectId: string, index: number): Promise<boolean> {
+export async function deleteBrandLogo(
+  projectId: string,
+  index: number,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
   let fileToDelete: string | null = null;
   const ok = await patchBrand(projectId, (brand) => {
     const logo = brand.logo;
@@ -119,18 +123,22 @@ export async function deleteBrandLogo(projectId: string, index: number): Promise
     fileToDelete = relativeProjectAssetPath(alternates[index - 1]);
     logo.alternates = alternates.filter((_, i) => i !== index - 1);
   });
-  if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete);
+  if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete, workspaceContext);
   return ok;
 }
 
-export async function deleteBrandImage(projectId: string, index: number): Promise<boolean> {
+export async function deleteBrandImage(
+  projectId: string,
+  index: number,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
   let fileToDelete: string | null = null;
   const ok = await patchBrand(projectId, (brand) => {
     if (!brand.imagery?.samples) return;
     fileToDelete = relativeProjectAssetPath(brand.imagery.samples[index]?.file);
     brand.imagery.samples = brand.imagery.samples.filter((_, i) => i !== index);
   });
-  if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete);
+  if (ok && fileToDelete) await deleteProjectFile(projectId, fileToDelete, workspaceContext);
   return ok;
 }
 
