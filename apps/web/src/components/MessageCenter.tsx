@@ -2,7 +2,7 @@ import { Button } from '@open-design/components';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { useI18n } from '../i18n';
+import { useI18n, type Locale } from '../i18n';
 import {
   clearAnonymousState,
   isAmrLoggedIn,
@@ -202,7 +202,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
       <Icon name="bell" size={17} />{unreadCount > 0 ? <span className={styles.badge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}
     </button>
     {open ? createPortal(<div className={styles.backdrop} data-testid="message-center-backdrop"><aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-testid="message-center-dialog">
-      <header className={styles.header}><div className={styles.headerCopy}><h2 id={titleId}>{t('messageCenter.title')}</h2><p>{t('messageCenter.subtitle')}</p></div><button type="button" className={styles.close} onClick={closePanel} aria-label={t('messageCenter.close')}><Icon name="close" size={15}/></button></header>
+      <header className={styles.header}><div className={styles.headerCopy}><h2 id={titleId}>{t('messageCenter.title')}</h2><p>{t('messageCenter.subtitle')}</p></div><button type="button" className={styles.close} onClick={closePanel} aria-label={t('messageCenter.close')}><Icon name="close" size={18} strokeWidth={2}/></button></header>
       <div className={styles.controls}><div className={styles.filters} role="group" aria-label={t('messageCenter.title')}>{FILTERS.map((item) => <button key={item.id} type="button" className={`${styles.filter}${filter === item.id ? ` ${styles.filterActive}` : ''}`} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}{item.id === 'unread' && unreadCount > 0 ? <span className={styles.filterBadge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}</button>)}</div><button type="button" className={styles.markAll} onClick={() => void markAllRead().catch(() => setSyncState('error'))} disabled={unreadCount === 0}>{t('messageCenter.markAllRead')}</button></div>
       <div className={styles.list} aria-live="polite">
         {syncState === 'error' && messages.length > 0 ? (
@@ -228,7 +228,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
               </button>
             </div>
           </div>
-        ) : visibleMessages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{emptyTitle}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.map((message) => <MessageItem key={message.id} message={message} onRead={markRead} onError={() => setSyncState('error')}/>)}
+        ) : visibleMessages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{emptyTitle}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.map((message) => <MessageItem key={message.id} locale={locale} message={message} onRead={markRead} onError={() => setSyncState('error')}/>)}
       </div>
       <footer className={styles.footer}><p>{t('messageCenter.desktopSettingsHint')}</p>{onOpenNotificationSettings ? <Button variant="ghost" onClick={() => { closePanel(); onOpenNotificationSettings(); }}>{t('messageCenter.desktopSettings')}</Button> : null}</footer>
     </aside></div>, document.body) : null}
@@ -236,16 +236,18 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
 }
 
 function MessageItem({
+  locale,
   message,
   onRead,
   onError,
 }: {
+  locale: Locale;
   message: MessageCenterMessage;
   onRead: (id: string) => Promise<void>;
   onError: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const formatted = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(message.publishedAt));
+  const formatted = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(message.publishedAt));
   const ctaUrl = safeExternalUrl(message.ctaUrl);
   return <article className={`${styles.item}${message.readAt ? '' : ` ${styles.itemUnread}`}${expanded ? ` ${styles.itemExpanded}` : ''}`}>
     <button type="button" className={styles.itemSummary} aria-expanded={expanded} onClick={() => { setExpanded((value) => !value); void onRead(message.id).catch(onError); }}><span className={styles.itemMeta}><span>{message.typeName}</span><time dateTime={message.publishedAt}>{formatted}</time></span><strong>{message.title}</strong><span className={styles.bodyPreview}>{message.body}</span></button>

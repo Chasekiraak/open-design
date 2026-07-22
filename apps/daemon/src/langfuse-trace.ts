@@ -309,6 +309,7 @@ export interface TurnInfo {
     stablePromptHash: string;
     hit: boolean;
     missReason: string | null;
+    changedSections?: string[] | null;
   };
 }
 
@@ -1499,6 +1500,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
     stablePromptHash: ctx.turn?.promptCache?.stablePromptHash,
     stablePromptCacheHit: ctx.turn?.promptCache?.hit,
     stablePromptCacheMissReason: ctx.turn?.promptCache?.missReason,
+    stablePromptChangedSections: ctx.turn?.promptCache?.changedSections,
     appVersion: ctx.runtime?.appVersion,
     appChannel: ctx.runtime?.appChannel,
     packaged: ctx.runtime?.packaged,

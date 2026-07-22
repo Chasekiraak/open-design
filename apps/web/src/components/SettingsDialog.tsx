@@ -10,6 +10,7 @@ import {
   settingsSectionToTracking,
 } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
+import { byokErrorCode } from '../analytics/byok-error-code';
 import {
   amrHandoffDeviceId,
   attributedAmrUrl,
@@ -1217,7 +1218,8 @@ function sameAgentModelChoice(
   right: AgentModelChoice | undefined,
 ): boolean {
   return (left?.model ?? null) === (right?.model ?? null)
-    && (left?.reasoning ?? null) === (right?.reasoning ?? null);
+    && (left?.reasoning ?? null) === (right?.reasoning ?? null)
+    && (left?.serviceTier ?? null) === (right?.serviceTier ?? null);
 }
 
 export function reconcileAmrProfileEnv(
@@ -2378,6 +2380,7 @@ export function SettingsDialog({
           agentId: selected.id,
           model: choice.model || undefined,
           reasoning: choice.reasoning || undefined,
+          serviceTier: choice.serviceTier || undefined,
           agentCliEnv: cfg.agentCliEnv ?? {},
         },
         controller.signal,
@@ -2514,7 +2517,7 @@ export function SettingsDialog({
           area: 'execution_model',
           provider_id: byokProviderId,
           result: byokTrackingTestResult(result),
-          ...(result.ok ? {} : { error_code: result.kind || 'UNKNOWN' }),
+          ...(result.ok ? {} : { error_code: byokErrorCode(result) }),
           ...(result.ok ? {} : { error_kind: result.kind || 'UNKNOWN' }),
           field_missing: 'none',
           config_key_changed: configKeyChanged,
@@ -3790,15 +3793,22 @@ export function SettingsDialog({
         ? choice.model
         : null;
     const setChoice = (
-      next: { model?: string; reasoning?: string },
+      next: { model?: string; reasoning?: string; serviceTier?: string },
     ) => {
       setCfg((c) => {
         const prev = c.agentModels?.[selected.id] ?? {};
+        const merged = { ...prev, ...next };
+        if (
+          Object.prototype.hasOwnProperty.call(next, 'serviceTier') &&
+          next.serviceTier === undefined
+        ) {
+          delete merged.serviceTier;
+        }
         return {
           ...c,
           agentModels: {
             ...(c.agentModels ?? {}),
-            [selected.id]: { ...prev, ...next },
+            [selected.id]: merged,
           },
         };
       });
@@ -3814,6 +3824,14 @@ export function SettingsDialog({
       effectiveChoice.reasoning ??
       choice.reasoning ??
       selected.reasoningOptions?.[0]?.id ?? '';
+    const currentModelOption =
+      selected.models?.find((m) => m.id === modelValue) ?? null;
+    const serviceTierOptions = currentModelOption?.serviceTierOptions ?? [];
+    const hasServiceTiers = serviceTierOptions.length > 0;
+    const serviceTierValue =
+      serviceTierOptions.some((tier) => tier.id === choice.serviceTier)
+        ? choice.serviceTier!
+        : 'default';
     const customActive =
       allowCustomModel &&
       hasModels &&
@@ -3868,7 +3886,7 @@ export function SettingsDialog({
                         next.add(selected.id);
                         return next;
                       });
-                      setChoice({ model: '' });
+                      setChoice({ model: '', serviceTier: undefined });
                     } else {
                       setAgentCustomModelIds((prev) => {
                         if (!prev.has(selected.id)) return prev;
@@ -3876,7 +3894,17 @@ export function SettingsDialog({
                         next.delete(selected.id);
                         return next;
                       });
-                      setChoice({ model: nextValue });
+                      const nextModelOption = selected.models?.find((m) => m.id === nextValue);
+                      const nextServiceTierOptions =
+                        nextModelOption?.serviceTierOptions ?? [];
+                      setChoice({
+                        model: nextValue,
+                        serviceTier: nextServiceTierOptions.some(
+                          (tier) => tier.id === choice.serviceTier,
+                        )
+                          ? choice.serviceTier
+                          : undefined,
+                      });
                     }
                   }}
                   additionalOptions={
@@ -3926,7 +3954,7 @@ export function SettingsDialog({
               value={modelValue}
               placeholder={t('settings.modelCustomPlaceholder')}
               onChange={(e) =>
-                setChoice({ model: e.target.value.trim() })
+                setChoice({ model: e.target.value.trim(), serviceTier: undefined })
               }
             />
           </label>
@@ -3946,6 +3974,36 @@ export function SettingsDialog({
                 {selected.reasoningOptions!.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.label}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron-down"
+                size={12}
+                className="agent-model-select-chevron"
+              />
+            </div>
+          </label>
+        ) : null}
+        {hasServiceTiers ? (
+          <label className="field">
+            <span className="field-label">
+              {t('settings.serviceTierPicker')}
+            </span>
+            <div className="agent-model-select-wrap">
+              <select
+                value={serviceTierValue}
+                onChange={(e) =>
+                  setChoice({
+                    serviceTier:
+                      e.target.value === 'default' ? undefined : e.target.value,
+                  })
+                }
+              >
+                <option value="default">{t('common.default')}</option>
+                {serviceTierOptions.map((tier) => (
+                  <option key={tier.id} value={tier.id}>
+                    {tier.label}
                   </option>
                 ))}
               </select>
