@@ -911,15 +911,17 @@ export function EntryNavRail({
             >
               <Icon name="puzzle" size={16} />
             </NavButton>
-            {/* recvq4hGF7BJkI: no settings entry here. A signed-out/no-context
-                rail has no account menu, so EntryShell's `railFooterActions`
-                (footerExtra below) already renders `entry-settings-chip` for
-                exactly this case, on this same `context`-falsy condition — its
-                own comment calls it out as "the ONLY settings entry" for
-                local/BYOK use. This button used to duplicate that chip: any
-                personal/local workspace without a cloud identity got two
-                visible settings entries (this list item AND the footer chip)
-                for the one `onOpenSettings` action. */}
+            {/* Signed-out rail has no account menu. EntryShell no longer adds
+                a second settings action to the footer, so this is the one
+                local/BYOK entry point for opening user settings. */}
+            <NavButton
+              ariaLabel={t('entry.accountSettings')}
+              tooltip={t('entry.accountSettings')}
+              onClick={() => onOpenSettings?.()}
+              testId="entry-nav-settings"
+            >
+              <Icon name="settings" size={16} />
+            </NavButton>
           </>
         )}
       </div>

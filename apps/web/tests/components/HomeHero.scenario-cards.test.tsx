@@ -82,7 +82,7 @@ describe('HomeHero scenario cards', () => {
     openTemplatePicker();
     expect(
       screen.getByTestId('home-hero-template-wedge-prototype').getAttribute('aria-label'),
-    ).toContain('Prototype');
+    ).toContain('UI Mockup');
     expect(
       screen.getByTestId('home-hero-template-wedge-deck').getAttribute('aria-label'),
     ).toContain('Slide deck');

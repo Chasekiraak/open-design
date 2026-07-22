@@ -78,8 +78,8 @@ describe('TemplatePicker', () => {
     expect(screen.getByTestId('home-hero-template-picker').className).not.toContain('has-selection');
     expect(screen.queryByTestId('home-hero-template-reset')).toBeNull();
     // #5517 dropped the explicit "None" placeholder at rest — the gray
-    // "Template" kicker alone reads as the empty state, and the label slot
-    // only appears once a template is selected.
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Template');
+    // creation-type kicker alone reads as the empty state, and the label slot
+    // only appears once a creation type is selected.
+    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Creation type');
   });
 });
