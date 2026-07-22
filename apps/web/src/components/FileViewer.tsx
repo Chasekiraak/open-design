@@ -9542,6 +9542,18 @@ function HtmlViewer({
         afterSource: result.source,
         createdAt: Date.now(),
       };
+      // A committed content patch rewrites manualEditFrozenSource below, which
+      // rebuilds the preview srcDoc and reloads the iframe from the top.
+      // Snapshot the scroll position first so the post-reload restore path
+      // (the srcDoc effect + the bridge's od:preview-scroll-request round
+      // trip) puts the user back where they were. The edit-entry snapshot has
+      // usually expired by save time, and without a fresh one the new
+      // document's initial 0/0 scroll report clobbers the last-known
+      // position (#92). set-style patches stream live via postMessage and
+      // never reload, so they don't need (or take) a snapshot.
+      if (patch.kind !== 'set-style') {
+        capturePreviewScrollPosition();
+      }
       setSource(result.source);
       sourceRef.current = result.source;
       setInlinedSource(null);
@@ -9638,6 +9650,9 @@ function HtmlViewer({
         setManualEditError('Could not save the undo result.');
         return;
       }
+      // Same srcDoc rebuild as a committed patch — keep the scroll position
+      // across the reload (#92).
+      capturePreviewScrollPosition();
       setSource(latest.beforeSource);
       sourceRef.current = latest.beforeSource;
       setInlinedSource(null);
@@ -9672,6 +9687,9 @@ function HtmlViewer({
         setManualEditError('Could not save the redo result.');
         return;
       }
+      // Same srcDoc rebuild as a committed patch — keep the scroll position
+      // across the reload (#92).
+      capturePreviewScrollPosition();
       setSource(latest.afterSource);
       sourceRef.current = latest.afterSource;
       setInlinedSource(null);

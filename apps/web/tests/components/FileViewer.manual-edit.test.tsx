@@ -398,6 +398,89 @@ describe('FileViewer manual edit regressions', () => {
     expect(document.querySelector('.manual-edit-workspace')).not.toBeNull();
   });
 
+  it('replies to the reloaded preview with the pre-save scroll position after a panel save (#92)', async () => {
+    const source = '<!doctype html><html><body><main data-od-id="hero">Hero</main></body></html>';
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/projects/project-1/files') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ file: htmlPreviewFile() }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(source, { status: 200, headers: { 'Content-Type': 'text/html' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={htmlPreviewFile()}
+        liveHtml={source}
+      />,
+    );
+
+    clickManualTool('manual-edit-mode-toggle');
+    await selectManualEditTarget();
+
+    // The host cannot read a sandboxed iframe's scroll directly; the bridge
+    // reports it via od:preview-scroll while the user works. Dispatch from
+    // every mounted preview frame — only the active one passes the host's
+    // source filter, mirroring production.
+    const previewFrames = ['artifact-preview-frame', 'artifact-preview-frame-srcdoc']
+      .map((testId) => screen.queryByTestId(testId) as HTMLIFrameElement | null)
+      .filter((frame): frame is HTMLIFrameElement => Boolean(frame?.contentWindow));
+    expect(previewFrames.length).toBeGreaterThan(0);
+    act(() => {
+      for (const frame of previewFrames) {
+        window.dispatchEvent(new MessageEvent('message', {
+          data: { type: 'od:preview-scroll', frameLeft: 0, frameTop: 1234, canvasLeft: 0, canvasTop: 1234 },
+          source: frame.contentWindow,
+        }));
+      }
+    });
+
+    // A TEXT change is a content patch: saving it rewrites the frozen source,
+    // which rebuilds the srcDoc and reloads the iframe from the top (a style
+    // change streams live and never reloads, so it would not cover this bug).
+    const textarea = document.querySelector('.manual-edit-right textarea') as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    fireEvent.change(textarea, { target: { value: 'Hero edited' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/projects/project-1/files',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect(document.querySelector('.manual-edit-right')).toBeNull();
+    });
+
+    // The reloaded document's bridge asks where to scroll back to. The reply
+    // must carry the pre-save position — not the long-stale edit-entry
+    // snapshot and not a zeroed fallback (#92: preview jumped to the top).
+    const restoreMessages: Array<{ frameTop?: number; canvasTop?: number }> = [];
+    const spies = previewFrames.map((frame) =>
+      vi.spyOn(frame.contentWindow as Window, 'postMessage').mockImplementation(((message: unknown) => {
+        const data = message as { type?: string; frameTop?: number; canvasTop?: number } | null;
+        if (data && data.type === 'od:preview-scroll-restore') restoreMessages.push(data);
+      }) as never),
+    );
+    try {
+      act(() => {
+        for (const frame of previewFrames) {
+          window.dispatchEvent(new MessageEvent('message', {
+            data: { type: 'od:preview-scroll-request' },
+            source: frame.contentWindow,
+          }));
+        }
+      });
+      await waitFor(() => {
+        expect(restoreMessages.length).toBeGreaterThan(0);
+      });
+      expect(restoreMessages.some((data) => data.frameTop === 1234 && data.canvasTop === 1234)).toBe(true);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
   it('holds a dropped drag as a pending style and only persists it on save', async () => {
     const source = '<!doctype html><html><body><main data-od-id="hero">Hero</main></body></html>';
     const savedBodies: string[] = [];
