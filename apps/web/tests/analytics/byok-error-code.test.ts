@@ -141,3 +141,40 @@ describe('byokErrorCode status precedence', () => {
     expect(byokErrorCode({ kind: 'unknown', status: 302, detail: 'redirect' })).toBe('HTTP_302');
   });
 });
+
+/**
+ * OpenSSL cause codes (review of PR #5960).
+ *
+ * Forwarding `cause.code` from the daemon created a second gap: OpenSSL's TLS
+ * codes carry no Node-errno shape and no lowercase word, so
+ * `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` matched neither the errno pattern nor a
+ * `\bcertificate\b` fallback and came back `UNKNOWN_NO_SIGNAL` — the signal was
+ * preserved on the wire and then dropped here. The daemon appends the cause in
+ * a known trailing position, so read that rather than enumerate a set that
+ * upstream keeps growing.
+ */
+describe('byokErrorCode against OpenSSL cause codes', () => {
+  it.each([
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'CERT_NOT_YET_VALID',
+    'CERT_HAS_EXPIRED',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'EPROTO',
+  ])('names %s from the daemon-appended cause', (code) => {
+    expect(byokErrorCode({ kind: 'unknown', detail: `fetch failed (${code})` })).toBe(code);
+  });
+
+  it('falls back to TLS_FAILED for a cert failure with no parseable code', () => {
+    expect(
+      byokErrorCode({ kind: 'unknown', detail: 'CERT verification failed somewhere upstream' }),
+    ).toBe('TLS_FAILED');
+  });
+
+  it('keeps the JSON-portal case ahead of a bare success status', () => {
+    expect(
+      byokErrorCode({ kind: 'unknown', status: 200, detail: 'Unexpected token < in JSON at position 0' }),
+    ).toBe('INVALID_JSON_RESPONSE');
+  });
+});

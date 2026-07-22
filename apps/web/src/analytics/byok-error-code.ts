@@ -13,7 +13,16 @@
  * wins; the fallthrough now recovers whatever signal is actually present.
  */
 
-const NODE_ERROR_CODE = /\b(E[A-Z]{3,}|UND_ERR_[A-Z_]+|ERR_[A-Z_]+|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN)\b/;
+// The daemon appends the transport cause as a trailing `(CODE)` (see
+// `networkErrorDetail` in apps/daemon/src/connectionTest.ts). Reading that
+// position directly beats enumerating codes: OpenSSL's set alone includes
+// UNABLE_TO_GET_ISSUER_CERT_LOCALLY, CERT_NOT_YET_VALID and CERT_HAS_EXPIRED,
+// none of which match a Node-errno shape, and an allowlist would silently drop
+// every code added upstream after this file was written.
+const APPENDED_CAUSE_CODE = /\(([A-Z][A-Z0-9_]{2,})\)\s*$/;
+
+// Codes appearing inline rather than in the daemon's appended position.
+const NODE_ERROR_CODE = /\b(E[A-Z]{3,}|UND_ERR_[A-Z_]+|ERR_[A-Z_]+|(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]{2,})\b/;
 
 export interface ByokErrorCodeInput {
   kind?: string | null;
@@ -47,11 +56,16 @@ export function byokErrorCode(result: ByokErrorCodeInput): string {
 
   // No status means the request never got a response. The daemon's network
   // classifier drops `cause.code` when it isn't in its allowlist, but the raw
-  // code survives in `detail`.
+  // code survives in `detail` — appended in a known position first, inline
+  // otherwise.
   const detail = typeof result.detail === 'string' ? result.detail : '';
+  const appended = APPENDED_CAUSE_CODE.exec(detail)?.[1];
+  if (appended) return appended;
   const nodeCode = NODE_ERROR_CODE.exec(detail)?.[1];
   if (nodeCode) return nodeCode;
-  if (/\bcertificate\b|\bTLS\b|\bSSL\b/i.test(detail)) return 'TLS_FAILED';
+  // `CERT` covers the OpenSSL family whose names carry no lowercase word —
+  // `\bcertificate\b` never matches UNABLE_TO_GET_ISSUER_CERT_LOCALLY.
+  if (/\bcertificate\b|\bTLS\b|\bSSL\b|CERT/i.test(detail)) return 'TLS_FAILED';
   if (/\bJSON\b|\bunexpected token\b/i.test(detail)) return 'INVALID_JSON_RESPONSE';
 
   // Genuinely nothing to go on — distinct from `unknown` so the residue is
