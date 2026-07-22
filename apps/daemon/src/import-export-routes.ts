@@ -1,6 +1,5 @@
 import type { Express, Response } from 'express';
 import { PROJECT_EXPORT_MANIFEST_SCHEMA, isExportFormat } from '@open-design/contracts';
-import type { ApiErrorCode } from '@open-design/contracts';
 import nodePath from 'node:path';
 import os from 'node:os';
 import { readFile, rm } from 'node:fs/promises';
@@ -24,31 +23,6 @@ import { readProjectFileVersion } from './project-file-versions.js';
 import { authorizeReasoningEgress, sendReasoningEgressDenial } from './reasoning-egress.js';
 import { sandboxImportedProjectRootUnavailableReason } from './sandbox-mode.js';
 import { parseOrchestratorWorkspace } from './workspace-contract.js';
-
-/**
- * A sidecar contract violation carries a structured `code` (e.g.
- * SIDECAR_UNKNOWN_MESSAGE, raised when a newer daemon sends a message name an
- * older desktop binary has no case for). Flattening every failure to
- * UPSTREAM_UNAVAILABLE forced the web layer to regex-match English prose to
- * tell a version-skewed mesh from a genuinely dead renderer — 180 events over
- * 43 devices classified by string matching. Pass the real code through so the
- * classification is structural.
- */
-const FORWARDABLE_SIDECAR_CODES = new Set<ApiErrorCode>([
-  'SIDECAR_UNKNOWN_MESSAGE',
-  'SIDECAR_INVALID_MESSAGE',
-]);
-
-function desktopRendererErrorCode(err: unknown): ApiErrorCode {
-  const code = (err as { code?: unknown } | null | undefined)?.code;
-  // Only forward codes that are declared in ApiErrorCode. The injected
-  // `ctx.http.sendApiError` is typed `(...args: any[]) => any`, so an
-  // undeclared code would compile and reach the wire while every
-  // ApiErrorCode-typed handler on the web side silently failed to match it.
-  return typeof code === 'string' && FORWARDABLE_SIDECAR_CODES.has(code as ApiErrorCode)
-    ? (code as ApiErrorCode)
-    : 'UPSTREAM_UNAVAILABLE';
-}
 
 export interface RegisterImportRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'ids' | 'paths' | 'imports' | 'auth' | 'projectStore' | 'conversations' | 'projectFiles' | 'validation'> {}
 
@@ -586,7 +560,7 @@ export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectEx
             return sendApiError(
               res,
               502,
-              desktopRendererErrorCode(err),
+              'UPSTREAM_UNAVAILABLE',
               `desktop renderer unavailable: ${err?.message || String(err)}`,
             );
           }
@@ -692,7 +666,7 @@ export function registerProjectExportRoutes(app: Express, ctx: RegisterProjectEx
         return sendApiError(
           res,
           502,
-          desktopRendererErrorCode(err),
+          'UPSTREAM_UNAVAILABLE',
           `desktop renderer unavailable: ${err?.message || String(err)}`,
         );
       }

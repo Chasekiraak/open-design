@@ -512,6 +512,26 @@ describe('exception attribution', () => {
     expect(list[0]!.value).toBe('boom');
   });
 
+  it.each([
+    ['missing stack', undefined],
+    ['empty stack', ''],
+    ['header-only stack', 'Error: Script error.'],
+    ['unparseable stack', 'some vendor noise\nmore noise'],
+  ])('ships a non-empty stacktrace for a %s', (_label, stackValue) => {
+    const err = new Error('Script error.');
+    if (stackValue === undefined) {
+      delete (err as { stack?: string }).stack;
+    } else {
+      Object.defineProperty(err, 'stack', { value: stackValue, configurable: true });
+    }
+
+    reportHandledException(err);
+
+    const list = (lastFetchedBody().properties as Record<string, unknown>)
+      .$exception_list as Array<{ stacktrace?: { frames?: unknown[] } }>;
+    expect(list[0]!.stacktrace?.frames?.length).toBeGreaterThan(0);
+  });
+
   it('ships a synthetic frame rather than a zero-frame stacktrace', () => {
     // A cross-origin "Script error.": no stack, no filename, nothing to parse.
     const stackless = new Error('Script error.');

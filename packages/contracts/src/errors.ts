@@ -79,16 +79,6 @@ export const API_ERROR_CODES = [
   // `tools live-artifacts create` path) as a 422.
   'ARTIFACT_PUBLICATION_BLOCKED',
   'UPSTREAM_UNAVAILABLE',
-  // A sidecar contract violation forwarded verbatim from
-  // @open-design/sidecar-proto's SIDECAR_ERROR_CODES, rather than flattened
-  // into UPSTREAM_UNAVAILABLE. UNKNOWN_MESSAGE is the daemon↔desktop version
-  // skew — a freshly-updated daemon sending a message name the older desktop
-  // binary has no case for. These are declared here so the code the daemon puts
-  // on the wire stays inside ApiErrorCode; the injected `ctx.http.sendApiError`
-  // is typed `(...args: any[]) => any`, so nothing else would catch a code that
-  // silently left the union.
-  'SIDECAR_UNKNOWN_MESSAGE',
-  'SIDECAR_INVALID_MESSAGE',
   'RATE_LIMITED',
   // PR #974 round-4: desktop-paired daemon received an import request
   // but the desktop main process has not yet registered its HMAC secret

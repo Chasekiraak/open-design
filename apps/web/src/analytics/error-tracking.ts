@@ -402,36 +402,47 @@ function buildExceptionList(
 const STACK_RE_V8 = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/;
 const STACK_RE_SPIDERMONKEY = /^(.*?)@(.+?):(\d+):(\d+)$/;
 
+/**
+ * Never ship a zero-frame stacktrace.
+ *
+ * PostHog derives `$exception_types` / `$exception_values` from
+ * `$exception_list` during ingestion and skips entries that fail frame-level
+ * validation, so an empty `frames` array is how an exception lands with neither
+ * field set — the `Error` row with no value in the stability report.
+ *
+ * The guard runs on the PARSED result, not on the raw string: a header-only
+ * stack (`"Error: Script error."`) is truthy yet yields no frames, because the
+ * first line is dropped as a message rather than a frame. Checking the input
+ * only would let exactly that case through.
+ */
 function parseStack(stack: string, metadata: CaptureMetadata): Array<Record<string, unknown>> {
-  if (!stack) {
-    if (metadata.filename) {
-      return [
-        {
-          function: '<anonymous>',
-          filename: metadata.filename,
-          abs_path: metadata.filename,
-          lineno: metadata.lineno ?? 0,
-          colno: metadata.colno ?? 0,
-          in_app: true,
-        },
-      ];
-    }
-    // Never ship a zero-frame stacktrace: PostHog derives `$exception_types` /
-    // `$exception_values` from `$exception_list` during ingestion and skips
-    // entries that fail frame-level validation, so an empty `frames` array is
-    // how a cross-origin "Script error." (no stack, no filename) lands in
-    // PostHog with neither field set. A synthetic frame keeps it typed.
+  const parsed = stack ? parseStackFrames(stack) : [];
+  if (parsed.length > 0) return parsed;
+  if (metadata.filename) {
     return [
       {
-        function: '<unknown>',
-        filename: '<no stack>',
-        abs_path: '<no stack>',
+        function: '<anonymous>',
+        filename: metadata.filename,
+        abs_path: metadata.filename,
         lineno: metadata.lineno ?? 0,
         colno: metadata.colno ?? 0,
         in_app: true,
       },
     ];
   }
+  return [
+    {
+      function: '<unknown>',
+      filename: '<no stack>',
+      abs_path: '<no stack>',
+      lineno: metadata.lineno ?? 0,
+      colno: metadata.colno ?? 0,
+      in_app: true,
+    },
+  ];
+}
+
+function parseStackFrames(stack: string): Array<Record<string, unknown>> {
   const lines = stack.split('\n');
   // The first line is usually the message (e.g. "TypeError: foo is not a
   // function") rather than a frame — skip it when it doesn't start with

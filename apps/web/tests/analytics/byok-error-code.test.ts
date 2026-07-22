@@ -65,3 +65,41 @@ describe('byokErrorCode', () => {
     expect(byokErrorCode({ kind: null, status: 500 })).toBe('HTTP_500');
   });
 });
+
+/**
+ * End-to-end shape guard (review of PR #5960).
+ *
+ * The first cut of these tests fed `byokErrorCode` a synthetic `detail` string
+ * that production never emits, so they passed while the certificate bucket
+ * stayed empty in the field. undici surfaces a TLS failure as a `TypeError`
+ * whose message is the generic `fetch failed`, with the real reason only on
+ * `cause.code` — and `networkErrorToKind` maps only an allowlist, so a
+ * self-signed cert lands as `kind: 'unknown'`.
+ *
+ * The daemon now appends the cause code to `detail` (see
+ * apps/daemon/src/connectionTest.ts `networkErrorDetail`); these assert against
+ * the shape it actually produces.
+ */
+describe('byokErrorCode against real daemon detail shapes', () => {
+  it('names a self-signed certificate from the undici cause code', () => {
+    expect(
+      byokErrorCode({ kind: 'unknown', detail: 'fetch failed (DEPTH_ZERO_SELF_SIGNED_CERT)' }),
+    ).toBe('DEPTH_ZERO_SELF_SIGNED_CERT');
+  });
+
+  it('names a self-signed chain', () => {
+    expect(
+      byokErrorCode({ kind: 'unknown', detail: 'fetch failed (SELF_SIGNED_CERT_IN_CHAIN)' }),
+    ).toBe('SELF_SIGNED_CERT_IN_CHAIN');
+  });
+
+  it('names a refused connection carried the same way', () => {
+    expect(byokErrorCode({ kind: 'unknown', detail: 'fetch failed (ECONNREFUSED)' })).toBe(
+      'ECONNREFUSED',
+    );
+  });
+
+  it('still degrades to the measurable residue when there is genuinely no cause', () => {
+    expect(byokErrorCode({ kind: 'unknown', detail: 'fetch failed' })).toBe('UNKNOWN_NO_SIGNAL');
+  });
+});
