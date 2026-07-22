@@ -2145,7 +2145,11 @@ function AppInner() {
   }, []);
 
   const handleDeleteProject = useCallback(async (id: string) => {
-    const ok = await deleteProjectApi(id);
+    // Carry the active workspace identity so the daemon's cross-workspace
+    // ownership check actually runs — see deleteProject's docblock
+    // (recvq5ecTkar91: a leaked-in project was really deletable, not just
+    // visible, because this call sent no workspace headers at all).
+    const ok = await deleteProjectApi(id, workspaceContextRef.current);
     if (!ok) return false;
     clearLocalProject(id, { deleted: true });
     iframeKeepAlivePool.evictProject(id, { includeActive: true });

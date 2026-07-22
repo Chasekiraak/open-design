@@ -446,10 +446,28 @@ export async function patchProject(
   }
 }
 
-export async function deleteProject(id: string): Promise<boolean> {
+/**
+ * Delete a project.
+ *
+ * `workspaceContext`, when known, MUST be attached: `enforceWorkspaceProjectMutation`
+ * (apps/daemon/src/routes/project/index.ts) treats a request carrying NEITHER
+ * `x-od-workspace-id` NOR `x-od-workspace-member-id` as a legacy pre-workspace
+ * caller and skips its ownership check entirely (`ctx === null` → allowed).
+ * Omitting these headers — which this call used to do unconditionally — meant
+ * every delete from a workspace-team build bypassed the daemon's own
+ * cross-workspace permission check, so a project that leaked into the wrong
+ * workspace's 草稿 grid (recvq5bz3HIDVt) was ALSO really deletable from there
+ * (recvq5ecTkar91), not just visible. See {@link moveWorkspaceProject} for the
+ * same headers on the sibling move endpoint.
+ */
+export async function deleteProject(
+  id: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<boolean> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
     });
     return resp.ok;
   } catch {

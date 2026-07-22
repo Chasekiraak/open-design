@@ -4,6 +4,7 @@ import {
   contributeGeneratedPluginToOpenDesign,
   createProject,
   createPluginShareProject,
+  deleteProject,
   importClaudeDesignZip,
   importFolderProject,
   installGeneratedPluginFolder,
@@ -12,6 +13,27 @@ import {
   pickLocalFolderPath,
   publishGeneratedPluginToGitHub,
 } from '../../src/state/projects';
+import {
+  buildWorkspacePermissions,
+  buildWorkspaceSeatSummary,
+  type WorkspaceCollabContext,
+} from '@open-design/contracts';
+
+function personalWorkspaceContext(): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }),
+    permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+  };
+}
 
 describe('applyPlugin', () => {
   afterEach(() => {
@@ -131,6 +153,58 @@ describe('createProject', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+  });
+});
+
+// recvq5ecTkar91: a team project that leaked into a personal workspace's 草稿
+// grid was also really deletable from there, not just visible — because this
+// call never told the daemon which workspace it was acting from.
+// `enforceWorkspaceProjectMutation` (apps/daemon/src/routes/project/index.ts)
+// treats a request with NEITHER `x-od-workspace-id` NOR
+// `x-od-workspace-member-id` as a legacy caller outside the workspace system
+// entirely and skips its ownership check — so every delete from a
+// workspace-team build silently bypassed cross-workspace permission checking,
+// wrong-workspace project or not. Attaching the same headers
+// `moveWorkspaceProject` already sends is what lets the daemon's existing
+// (correct) `getWorkspaceProject(ctx.workspaceId, projectId)` scoping fire.
+describe('deleteProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers so the daemon can enforce ownership', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deleteProject('leaked-team-project', personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/leaked-team-project',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+          'x-od-workspace-type': 'personal',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deleteProject('local-only-project');
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init).toEqual({ method: 'DELETE' });
+  });
+
+  it('reports failure when the daemon refuses the delete', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(null, { status: 403 })));
+
+    await expect(deleteProject('someone-elses-project', personalWorkspaceContext())).resolves.toBe(false);
   });
 });
 
