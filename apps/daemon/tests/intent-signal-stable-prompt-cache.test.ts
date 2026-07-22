@@ -98,6 +98,9 @@ describe('intent signals × stable prompt cache', () => {
     started = null;
     if (binDir) await rm(binDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     binDir = null;
+    // OD_DATA_DIR is shared by every test file in this Vitest process, so a
+    // memory entry left behind here would silently join the personal-memory
+    // block of unrelated suites.
     if (process.env.OD_DATA_DIR) {
       for (const id of createdMemoryIds.splice(0)) {
         await deleteMemoryEntry(process.env.OD_DATA_DIR, id);
@@ -113,6 +116,11 @@ describe('intent signals × stable prompt cache', () => {
     restoreEnv(originalEnv);
   });
 
+  /**
+   * Land a fact in the personal-memory store the way the extractor would, but
+   * deterministically. `extraction` stays null so no model-driven extraction
+   * competes with what the test wrote.
+   */
   async function addMemoryEntry(input: {
     name: string;
     description: string;
@@ -125,13 +133,18 @@ describe('intent signals × stable prompt cache', () => {
     createdMemoryIds.push(entry.id);
   }
 
-  async function bootServer({ memoryEnabled = false }: { memoryEnabled?: boolean } = {}): Promise<{ url: string }> {
+  async function bootServer({ memoryEnabled = false }: { memoryEnabled?: boolean } = {}): Promise<{
+    url: string;
+  }> {
     binDir = await mkdtemp(path.join(os.tmpdir(), 'od-intent-cache-bin-'));
     const bin = await writeResumingOpencode(binDir);
     clearTelemetryEnv();
     // Memory auto-extraction folds prior form answers into the stable-region
     // "Personal memory" block, which legitimately changes the stable hash —
     // disable it so the assertions isolate the intent-signal contribution.
+    // `memoryEnabled` turns the block back on for the tests that assert on
+    // memory attribution itself; `extraction` stays null either way so only
+    // what the test writes can move the block.
     if (process.env.OD_DATA_DIR) {
       originalMemoryConfig = await readMemoryConfig(process.env.OD_DATA_DIR);
       await writeMemoryConfig(process.env.OD_DATA_DIR, {
@@ -197,6 +210,9 @@ describe('intent signals × stable prompt cache', () => {
     expect(await runPromptCache(url, conversationId, turn2.id)).toMatchObject({
       hit: false,
       missReason: 'stable-prompt-changed',
+      // The deck signal is the only thing that moved, so attribution must name
+      // `intent` alone. A wider list would mean the section map cannot isolate
+      // a cause; `unattributed` would mean it missed this input entirely.
       changedSections: ['intent'],
     });
 
@@ -211,6 +227,11 @@ describe('intent signals × stable prompt cache', () => {
     expect(await runPromptCache(url, conversationId, turn3.id)).toMatchObject({ hit: true });
   });
 
+  // Drift attribution (prompts/stable-sections.ts). `stable-prompt-changed`
+  // says only THAT the cached prefix moved; these assert it also says WHICH
+  // input moved, which is what makes a drift actionable without hand-diffing
+  // Langfuse prompts. Memory is the case that matters most: it is the dominant
+  // cause of first-resume drift in production.
   it('attributes a mid-conversation memory change to the memory section alone', async () => {
     const { url } = await bootServer({ memoryEnabled: true });
     const { projectId, conversationId } = await createFreeformProject(url);
@@ -221,6 +242,8 @@ describe('intent signals × stable prompt cache', () => {
     });
     expect(turn1.status).toBe('succeeded');
 
+    // A fact lands in the store after the session was seeded, exactly as the
+    // extractor does mid-conversation in production.
     await addMemoryEntry({
       name: 'Tone preference',
       description: 'prefers terse copy',
@@ -228,6 +251,10 @@ describe('intent signals × stable prompt cache', () => {
       body: 'Writes in short declarative sentences.',
     });
 
+    // A follow-up with no deck/media/platform vocabulary of its own, so no
+    // intent signal may flip: `memory` has to be the ONLY named section. A
+    // wider list here would mean the map cannot isolate a cause, and
+    // `unattributed` would mean it missed the memory input entirely.
     const followUp = 'make the header a bit bolder';
     const turn2 = await sendRunAndWait(url, projectId, conversationId, {
       message: `## user\n${followUp}`,
@@ -257,6 +284,8 @@ describe('intent signals × stable prompt cache', () => {
       currentPrompt: followUp,
     });
     expect(turn2.status).toBe('succeeded');
+    // Attribution must stay silent when nothing drifted — an empty-but-present
+    // list would read in telemetry as a drift with no cause.
     expect(await runPromptCache(url, conversationId, turn2.id)).toMatchObject({
       hit: true,
       changedSections: null,

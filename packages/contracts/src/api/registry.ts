@@ -20,7 +20,9 @@ export interface AgentModelOption {
   outputPriceUsdPerMillion?: number;
   /** Provider/catalog-owned model picker metadata. */
   metadata?: ModelMetadata;
-  /** Optional service tiers supported by this model, e.g. GPT-5.5 Fast. */
+  /** Raw Codex `additional_speed_tiers` values, when the CLI catalog exposes them. */
+  additionalSpeedTiers?: string[];
+  /** Service tiers supported by this model, keyed by Codex config id. */
   serviceTierOptions?: AgentModelOption[];
 }
 

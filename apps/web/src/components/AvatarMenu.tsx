@@ -621,7 +621,6 @@ export function AvatarMenu({
                       </span>
                       <select
                         className="avatar-select"
-                        data-testid="avatar-service-tier"
                         value={currentServiceTierId}
                         onChange={(e) =>
                           onAgentModelChange(currentAgent.id, {

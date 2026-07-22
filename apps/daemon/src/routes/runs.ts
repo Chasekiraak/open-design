@@ -145,7 +145,6 @@ interface ChatRun {
   assistantMessageId: string | null;
   agentId: string | null;
   model?: string | null;
-  serviceTier?: string | null;
   status: ChatRunStatus;
   createdAt: number;
   updatedAt: number;
@@ -1274,6 +1273,10 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             stable_prompt_hash: run.promptCache?.stablePromptHash,
             stable_prompt_cache_hit: run.promptCache?.hit,
             stable_prompt_cache_miss_reason: run.promptCache?.missReason,
+            // Which stable-prefix input drifted, for miss_reason
+            // 'stable-prompt-changed' only. `unattributed` means the prefix
+            // moved but no tracked section did — a coverage gap in
+            // prompts/stable-sections.ts, not a cause.
             stable_prompt_changed_sections: run.promptCache?.changedSections ?? undefined,
             area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
             result,
@@ -1617,7 +1620,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     try {
       pinAssistantMessageOnRunCreate(db, run);
     } catch (err) {
-      console.warn('[runs] legacy chat message create pin failed', err);
+      console.warn('[chat] message create pin failed', err);
     }
     design.runs.stream(run, req, res);
     reconcileAssistantMessageOnRunEnd(db, design.runs, run);

@@ -1698,6 +1698,7 @@ describe("desktop updater", () => {
     const launcherRuntimePath = join(root, "launcher", "runtime.json");
     const launcherRoot = root;
     const launcherLaunchPath = join(root, "installed", "Open Design.exe");
+    const runtimeBase = join(root, "runtime");
     const spawned: Array<{ args: string[]; command: string; options: unknown }> = [];
     const unref = vi.fn();
     const child = {
@@ -1735,6 +1736,7 @@ describe("desktop updater", () => {
         launcherLaunchPath,
         launcherRuntimePath,
         namespace: "release-beta-win",
+        runtimeBase,
         source: SIDECAR_SOURCES.PACKAGED,
       }, {
         extractLauncherPayloadArchive: async ({ destinationRoot }) => {
@@ -1786,7 +1788,7 @@ describe("desktop updater", () => {
       expect(spawned).toHaveLength(1);
       expect(unref).toHaveBeenCalledTimes(1);
       expect(spawned[0]?.command).toBe(payloadLaunchPath);
-      expect(spawned[0]?.options).toEqual({ detached: true, stdio: "ignore", windowsHide: true });
+      expect(spawned[0]?.options).toEqual({ cwd: runtimeBase, detached: true, stdio: "ignore", windowsHide: true });
       const args = spawned[0]?.args ?? [];
       expect(args).toEqual(expect.arrayContaining([
         LAUNCHER_AFTER_QUIT_FLAG,
@@ -2043,7 +2045,8 @@ describe("desktop updater", () => {
     const root = makeRoot();
     const observationRoot = join(root, "observations", "installer");
     const fixture = await createUpdaterFixture();
-    const launches: Array<{ appPid: number; installerPath: string; root: string; timeoutMs: number }> = [];
+    const launches: Array<{ appPid: number; cwd: string; installerPath: string; root: string; timeoutMs: number }> = [];
+    const runtimeBase = join(root, "runtime");
     try {
       const updater = createDesktopUpdater(
         {
@@ -2055,6 +2058,7 @@ describe("desktop updater", () => {
           },
           installerObservationRoot: observationRoot,
           namespace: "release",
+          runtimeBase,
           source: SIDECAR_SOURCES.TOOLS_PACK,
         },
         { launchInstallerAfterQuit: async (input) => {
@@ -2072,6 +2076,7 @@ describe("desktop updater", () => {
       expect(installed.installResult?.path).toBe(checked.downloadPath);
       expect(launches).toEqual([{
         appPid: process.pid,
+        cwd: runtimeBase,
         installerPath: checked.downloadPath,
         root: updateRoot,
         timeoutMs: 10 * 60 * 1000,
@@ -2133,7 +2138,8 @@ describe("desktop updater", () => {
   it("writes and detaches the mac helper script that opens the installer after quit", async () => {
     const root = makeRoot();
     const fixture = await createUpdaterFixture();
-    const spawned: Array<{ args: string[]; command: string }> = [];
+    const runtimeBase = join(root, "runtime");
+    const spawned: Array<{ args: string[]; command: string; options: unknown }> = [];
     try {
       const updater = createDesktopUpdater(
         {
@@ -2143,12 +2149,13 @@ describe("desktop updater", () => {
             ...updaterEnv(fixture.metadataUrl),
             [DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]: "0",
           },
+          runtimeBase,
           source: SIDECAR_SOURCES.TOOLS_PACK,
         },
         {
           processPid: 4242,
-          spawnDetached: (command, args) => {
-            spawned.push({ args, command });
+          spawnDetached: (command, args, options) => {
+            spawned.push({ args, command, options });
             return { unref: vi.fn() } as never;
           },
         },
@@ -2160,6 +2167,7 @@ describe("desktop updater", () => {
       expect(installed.installResult?.path).toBe(checked.downloadPath);
       expect(spawned).toHaveLength(1);
       expect(spawned[0]?.command).toBe("/bin/sh");
+      expect(spawned[0]?.options).toEqual({ cwd: runtimeBase, detached: true, stdio: "ignore", windowsHide: true });
       const [scriptPath, pidArg, installerArg, timeoutArg] = spawned[0]?.args ?? [];
       expect(scriptPath).toEqual(expect.stringContaining(join(root, "helpers", "open-installer-after-quit-")));
       expect(pidArg).toBe("4242");
@@ -2179,6 +2187,7 @@ describe("desktop updater", () => {
     const root = makeRoot();
     const fixture = await createUpdaterFixture({ platform: "win" });
     const openPath = vi.fn(async () => "openPath should not run for Windows deferred installer launch");
+    const runtimeBase = join(root, "runtime");
     const unref = vi.fn();
     const spawned: Array<{ args: string[]; command: string; options: unknown }> = [];
     try {
@@ -2190,6 +2199,7 @@ describe("desktop updater", () => {
             ...updaterEnv(fixture.metadataUrl, "win32"),
             [DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]: "0",
           },
+          runtimeBase,
           source: SIDECAR_SOURCES.TOOLS_PACK,
         },
         {
@@ -2210,7 +2220,7 @@ describe("desktop updater", () => {
       expect(spawned).toHaveLength(1);
       expect(unref).toHaveBeenCalledTimes(1);
       expect(spawned[0]?.command).toEqual(expect.stringContaining(join("System32", "WindowsPowerShell", "v1.0", "powershell.exe")));
-      expect(spawned[0]?.options).toEqual({ detached: true, stdio: "ignore", windowsHide: true });
+      expect(spawned[0]?.options).toEqual({ cwd: runtimeBase, detached: true, stdio: "ignore", windowsHide: true });
       const args = spawned[0]?.args ?? [];
       const launcherPath = args.at(args.indexOf("-File") + 1);
       const scriptPath = args.at(args.indexOf("-HelperPath") + 1);

@@ -4,6 +4,7 @@ import { posix, win32 } from "node:path";
 import {
   collectProcessTreePids,
   listProcessSnapshots,
+  processCommandExactlyRunsExecutable,
   stopProcesses,
   type StopProcessesResult,
 } from "@open-design/platform";
@@ -63,29 +64,6 @@ function sameExecutablePath(left: string, right: string, platform: NodeJS.Platfo
   return posix.normalize(left) === posix.normalize(right);
 }
 
-function commandExactlyRunsExecutable(
-  command: string,
-  executablePath: string,
-  platform: NodeJS.Platform,
-): boolean {
-  const normalizedExecutable = platform === "win32"
-    ? win32.normalize(executablePath).toLowerCase()
-    : posix.normalize(executablePath);
-  const normalizedCommand = platform === "win32"
-    ? command.trim().replace(/\//g, "\\").toLowerCase()
-    : command.trim();
-
-  if (platform === "win32") {
-    return normalizedCommand === normalizedExecutable
-      || normalizedCommand.startsWith(`"${normalizedExecutable}" `)
-      || normalizedCommand === `"${normalizedExecutable}"`;
-  }
-
-  return normalizedCommand === normalizedExecutable
-    || normalizedCommand.startsWith(`"${normalizedExecutable}" `)
-    || normalizedCommand === `"${normalizedExecutable}"`;
-}
-
 async function resolveInstalledOuterExecutable(
   installedLaunchPath: string | null,
   payloadExecutablePath: string,
@@ -100,6 +78,7 @@ async function resolveInstalledOuterExecutable(
     if (win32.basename(installedLaunchPath).toLowerCase() !== win32.basename(payloadExecutablePath).toLowerCase()) {
       return null;
     }
+
     const executableEntry = await inspectInstalledOuterPath(installedLaunchPath);
     if (executableEntry == null || !executableEntry.isFile() || executableEntry.isSymbolicLink()) return null;
     return installedLaunchPath;
@@ -109,10 +88,11 @@ async function resolveInstalledOuterExecutable(
 
   const launchEntry = await inspectInstalledOuterPath(installedLaunchPath);
   if (launchEntry == null || launchEntry.isSymbolicLink()) return null;
-  if (!launchEntry.isDirectory() || !installedLaunchPath.endsWith(".app")) return null;
 
+  if (!launchEntry.isDirectory() || !installedLaunchPath.endsWith(".app")) return null;
   const appName = posix.basename(installedLaunchPath, ".app");
   const executablePath = posix.join(installedLaunchPath, "Contents", "MacOS", appName);
+
   const executableEntry = await inspectInstalledOuterPath(executablePath);
   if (executableEntry == null || !executableEntry.isFile() || executableEntry.isSymbolicLink()) return null;
   return executablePath;
@@ -149,7 +129,7 @@ async function retireObsoleteInstalledOuter(
   const enumerateProcesses = deps.listProcessSnapshots ?? listProcessSnapshots;
   let snapshots = await enumerateProcesses();
   let rootPids = snapshots
-    .filter((snapshot) => snapshot.pid !== context.currentPid && commandExactlyRunsExecutable(
+    .filter((snapshot) => snapshot.pid !== context.currentPid && processCommandExactlyRunsExecutable(
       snapshot.command,
       executablePath,
       context.platform,
@@ -162,7 +142,7 @@ async function retireObsoleteInstalledOuter(
     snapshots = await enumerateProcesses();
     const expectedRootPids = new Set(rootPids);
     rootPids = snapshots
-      .filter((snapshot) => expectedRootPids.has(snapshot.pid) && commandExactlyRunsExecutable(
+      .filter((snapshot) => expectedRootPids.has(snapshot.pid) && processCommandExactlyRunsExecutable(
         snapshot.command,
         executablePath,
         context.platform,
@@ -204,6 +184,11 @@ async function retireObsoleteInstalledOuter(
   return { executablePath, result, rootPids: safeRootPids, status, treePids };
 }
 
+/**
+ * Build a re-usable, single-flight cleanup callback for desktop SHOW and quit.
+ * A later invocation starts a fresh scan so a later installed-outer open is
+ * not hidden by a previously successful retirement.
+ */
 export function createObsoleteInstalledOuterRetirement(
   context: ObsoleteInstalledOuterRetirementContext,
   deps: ObsoleteInstalledOuterRetirementDeps = {},

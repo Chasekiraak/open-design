@@ -1298,7 +1298,9 @@ test('[P1] GPT 5.5 Fast service tier carries into the next Codex daemon run requ
   await selectAvatarModelOption(page, modelSelect, /^GPT 5\.5$/i);
   await expect(modelSelect).toContainText(/GPT 5\.5/i);
 
-  const serviceTierSelect = menu.getByTestId('avatar-service-tier');
+  const serviceTierSelect = menu
+    .locator('label.avatar-select-row', { hasText: /Service tier/i })
+    .locator('select');
   await expect(serviceTierSelect).toBeVisible();
   await serviceTierSelect.selectOption('priority');
   await expect(serviceTierSelect).toHaveValue('priority');

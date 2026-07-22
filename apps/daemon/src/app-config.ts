@@ -164,7 +164,11 @@ export function appConfigDir(projectRoot: string, env: NodeJS.ProcessEnv = proce
   return path.isAbsolute(expanded) ? expanded : path.resolve(projectRoot, expanded);
 }
 
-const AGENT_MODEL_KEYS: ReadonlySet<string> = new Set(['model', 'reasoning', 'serviceTier']);
+const AGENT_MODEL_KEYS: ReadonlySet<string> = new Set([
+  'model',
+  'reasoning',
+  'serviceTier',
+]);
 const RETIRED_AGENT_IDS: ReadonlySet<string> = new Set(['gemini']);
 
 const TELEMETRY_KEYS: ReadonlySet<string> = new Set([

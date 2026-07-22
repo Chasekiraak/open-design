@@ -299,7 +299,7 @@ export interface DaemonStreamOptions {
   // exist, and stitches them into the user message as `@<path>` hints.
   attachments?: string[];
   commentAttachments?: ChatCommentAttachment[];
-  // Per-CLI model + reasoning the user picked in the model menu. Both are
+  // Per-CLI model + reasoning / service tier the user picked in the model menu. These are
   // optional; the daemon validates them against the agent's declared
   // options and falls back to the CLI default when missing.
   model?: string | null;

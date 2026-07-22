@@ -9,6 +9,9 @@ import {
   STABLE_SECTION_NAMES,
 } from '../../src/prompts/stable-sections.js';
 
+// A minimal set of inputs standing in for one turn's stable prefix. Only the
+// keys a section actually reads matter; everything else is ignored by design so
+// adding an unrelated composer argument cannot silently join a section.
 const BASE = {
   agentId: 'claude',
   memoryBody: '## Personal memory\n\n- prefers terse copy',
@@ -43,7 +46,10 @@ describe('computeStableSectionHashes', () => {
     expect(hashes).not.toHaveProperty('critique');
   });
 
-  it('leaves the mcp section dormant unless that input is present', () => {
+  it('leaves the mcp section dormant: #5336 removed that input from the prefix', () => {
+    // The section exists to catch a live-OAuth input being re-admitted to the
+    // cached prefix. Nothing passes `connectedExternalMcp` today, so it must
+    // stay absent — a hash here would mean the mistake is back.
     expect(computeStableSectionHashes(BASE)).not.toHaveProperty('mcp');
     expect(computeStableSectionHashes({ ...BASE, connectedExternalMcp: [{ id: 'github' }] }))
       .toHaveProperty('mcp');
@@ -68,15 +74,16 @@ describe('diffStableSections', () => {
     expect(diffStableSections(before, after)).toEqual(['memory', 'mode', 'design-system']);
   });
 
-  it('treats a section appearing or disappearing as a change', () => {
-    expect(diffStableSections(
-      computeStableSectionHashes({ agentId: 'claude' }),
-      computeStableSectionHashes({ agentId: 'claude', memoryBody: 'first fact' }),
-    )).toEqual(['memory']);
-    expect(diffStableSections(
-      computeStableSectionHashes({ agentId: 'claude', memoryBody: 'a fact' }),
-      computeStableSectionHashes({ agentId: 'claude' }),
-    )).toEqual(['memory']);
+  it('treats a section appearing for the first time as a change', () => {
+    const before = computeStableSectionHashes({ agentId: 'claude' });
+    const after = computeStableSectionHashes({ agentId: 'claude', memoryBody: 'first fact' });
+    expect(diffStableSections(before, after)).toEqual(['memory']);
+  });
+
+  it('treats a section disappearing as a change', () => {
+    const before = computeStableSectionHashes({ agentId: 'claude', memoryBody: 'a fact' });
+    const after = computeStableSectionHashes({ agentId: 'claude' });
+    expect(diffStableSections(before, after)).toEqual(['memory']);
   });
 
   it('reports nothing when the inputs are unchanged', () => {
@@ -96,7 +103,10 @@ describe('describeChangedStableSections', () => {
     expect(describeChangedStableSections(before, after)).toEqual(['skill']);
   });
 
-  it('reports unattributed when the prefix drifted but no tracked section did', () => {
+  it('reports `unattributed` when the prefix drifted but no tracked section did', () => {
+    // The caller only asks once the overall hash already moved, so "nothing
+    // changed" can only mean the input that moved is missing from the section
+    // table — a coverage gap that has to be visible, not silently clean.
     const hashes = computeStableSectionHashes(BASE);
     expect(describeChangedStableSections(hashes, hashes)).toEqual(['unattributed']);
   });
@@ -108,23 +118,30 @@ describe('serializeStableSections / parseStableSections', () => {
     expect(parseStableSections(serializeStableSections(hashes))).toEqual(hashes);
   });
 
-  it('degrades safely for legacy or malformed stored values', () => {
+  it('reads a legacy row with no stored sections as null', () => {
     expect(parseStableSections(null)).toBeNull();
     expect(parseStableSections('')).toBeNull();
+  });
+
+  it('degrades to null on malformed JSON instead of throwing', () => {
+    // A row written by another daemon build must never break the turn.
     expect(parseStableSections('{not json')).toBeNull();
     expect(parseStableSections('[]')).toBeNull();
     expect(parseStableSections('"a string"')).toBeNull();
   });
 
   it('drops entries that are not known sections with string digests', () => {
-    expect(parseStableSections(
+    const parsed = parseStableSections(
       JSON.stringify({ memory: 'abc123', unknownSection: 'def', mode: 42 }),
-    )).toEqual({ memory: 'abc123' });
+    );
+    expect(parsed).toEqual({ memory: 'abc123' });
   });
 });
 
 describe('section table', () => {
-  it('covers the high-signal drift sections', () => {
+  it('covers the sections the drift investigation asked for', () => {
+    // Minimum split agreed in the 0.14.1 drift investigation, so telemetry can
+    // answer "which part moved" without a hand diff of Langfuse prompts.
     for (const name of ['memory', 'intent', 'mode', 'design-system', 'skill', 'runtime']) {
       expect(STABLE_SECTION_NAMES).toContain(name);
     }

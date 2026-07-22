@@ -29,7 +29,11 @@ export interface AgentResumeContext {
   isResuming: boolean;
   /** Hash of the stable instruction block last sent on this session, or null. */
   storedStablePromptHash: string | null;
-  /** Per-section digests behind storedStablePromptHash, diagnostic only. */
+  /**
+   * Per-section digests behind `storedStablePromptHash`, for naming which input
+   * drifted when the hash no longer matches. Diagnostic only — never an input
+   * to the resume decision.
+   */
   storedStableSections: StableSectionHashes | null;
   /** Set when a stored session existed but was rejected; see the type. */
   invalidationReason: ResumeInvalidationReason | null;

@@ -119,6 +119,10 @@ const EXIT_RE =
 // child. There is no daemon log path in this message, so no log tail is read.
 const STATUS_TIMEOUT_RE = /^timed out waiting for sidecar status at /;
 
+// Node's message for a spawn that never became a process (`spawn UNKNOWN`,
+// `spawn C:\…\Open Design.exe ENOENT`). Message shape is the fallback; the
+// error object's `syscall` is the primary signal since it survives an empty
+// message.
 const SPAWN_RE = /^spawn\b/;
 
 export function classifyStartupFailure(
@@ -137,6 +141,9 @@ export function classifyStartupFailure(
     if (STATUS_TIMEOUT_RE.test(message)) {
       return { failureKind: "status-timeout", exitCode: null, signal: null, logPath: null };
     }
+    // The process was never created. Prefer the syscall on the error object: it
+    // is present even when the message is empty, which is exactly the case the
+    // message-only classifier used to lose.
     if (readErrnoFields(error).syscall === "spawn" || SPAWN_RE.test(message)) {
       return { failureKind: "spawn-failed", exitCode: null, signal: null, logPath: null };
     }
@@ -159,11 +166,22 @@ export function classifyStartupFailure(
   return { failureKind, exitCode, signal, logPath };
 }
 
+// A thrown-error headline in a log tail: `SqliteError: database disk image is
+// malformed`, `TypeError: x is not a function`, `Error [ERR_X]: …`. Anchored on
+// a leading identifier that ends in Error/Exception so stack frames (`    at …`)
+// and our own bracketed prefixes (`[open-design packaged] exited …`) never match.
 const DAEMON_ERROR_LINE_RE =
   /^(?:\s*(?:Uncaught|Unhandled)\s+)?[A-Za-z_$][\w$]*(?:Error|Exception)(?:\s*\[[^\]]+\])?\s*:\s*.+$/;
 
 // Pull the real error code + missing module out of a sidecar log tail. Pure
 // function so it can be fed the #4638 log text verbatim in tests.
+//
+// `daemonError` is the attribution backstop: the `ERR_*` match only names
+// module-resolution-shaped deaths, so a daemon that threw anything else
+// (SQLite corruption, EPERM, a plain throw) used to report an empty parse even
+// though its reason was printed in the very tail we just read. The LAST
+// matching line wins — the tail is chronological, so the fatal throw is the one
+// nearest the exit.
 export function parseDaemonLogTail(logText: string): {
   errorCode?: string;
   missingModule?: string;
@@ -182,12 +200,25 @@ export function parseDaemonLogTail(logText: string): {
   return out;
 }
 
+// Reduce `syscall` to the bare operation token.
+//
+// Node does NOT guarantee this is only the operation name: a failed
+// child_process.spawn sets it to the whole invocation —
+// `spawn /Users/alice/.../tool`, or `spawn C:\Users\Alice\...` on Windows.
+// Forwarding it verbatim would put the local username and install path into a
+// safety event that is retained even for opted-out users, while every other
+// path this module sends is scrubbed. The operation is the entire analytic
+// value here (the path is already available, scrubbed, via error_message), so
+// keep the first token and scrub what survives as a second line of defence.
 function normalizeSyscall(syscall: string): string | null {
   const token = syscall.trim().split(/\s+/, 1)[0] ?? "";
   if (!token) return null;
   return scrubUserPaths(token).slice(0, 40);
 }
 
+// Node's system-error triplet, read off the thrown object rather than its
+// message. `spawn UNKNOWN` (win32 CreateProcess refused) and friends carry the
+// only usable cause here; the message alone cannot separate them.
 export function readErrnoFields(error: unknown): {
   code: string | null;
   errno: number | null;
@@ -421,6 +452,11 @@ export async function reportStartupFailure(
         : null;
     const errorName = args.error instanceof Error ? args.error.name : "unknown";
     const sys = readErrnoFields(args.error);
+    // A thrown error must never reach PostHog as error_message=null. The field
+    // black hole was an Error with BOTH an empty `.message` and no `.stack`:
+    // every free-form field went null and the event became uncountable residue
+    // indistinguishable from "no error at all". Name it instead, folding in the
+    // system code when there is one, so the leftover stays a measurable bucket.
     const resolvedMessage =
       rawMessage.length > 0
         ? truncateForTelemetry(scrubUserPaths(rawMessage), ERROR_MESSAGE_MAX)

@@ -2,16 +2,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  describeChangedStableSections,
-  type StableChangedSection,
-  type StableSectionHashes,
-} from '../prompts/stable-sections.js';
-import {
   renderCodexImagegenOverride,
   resolveCodexImagegenModelId,
   shouldRenderCodexImagegenOverride,
 } from '../prompts/system.js';
 import { renderResearchCommandContract } from '../prompts/research-contract.js';
+import {
+  describeChangedStableSections,
+  type StableChangedSection,
+  type StableSectionHashes,
+} from '../prompts/stable-sections.js';
 
 export const MAX_CHAT_IMAGE_BYTES = 1024 * 1024;
 export const UPLOAD_DIR = path.join(os.tmpdir(), 'od-uploads');
@@ -432,6 +432,9 @@ export function describeStablePromptCache({
     stablePromptHash: currentStableHash,
     hit: false,
     missReason,
+    // Attribute only real drift. `missing-stored-hash` is a legacy/again-seeded
+    // row with no baseline to diff against, so naming sections there would
+    // report the whole map as "changed" and drown the signal we care about.
     changedSections: missReason === 'stable-prompt-changed' && currentStableSections
       ? describeChangedStableSections(storedStableSections, currentStableSections)
       : null,

@@ -29,7 +29,7 @@ function parseCodexServiceTiers(raw: unknown): RuntimeModelOption[] | undefined 
         ? entry.name.trim()
         : typeof entry.label === 'string' && entry.label.trim()
           ? entry.label.trim()
-          : id;
+        : id;
     out.push({ id, label });
   }
   return out.length > 0 ? out : undefined;

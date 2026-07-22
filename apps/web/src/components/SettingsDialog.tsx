@@ -9,8 +9,8 @@ import {
   executionModeToTracking,
   settingsSectionToTracking,
 } from '@open-design/contracts/analytics';
-import { byokErrorCode } from '../analytics/byok-error-code';
 import { useAnalytics } from '../analytics/provider';
+import { byokErrorCode } from '../analytics/byok-error-code';
 import {
   amrHandoffDeviceId,
   attributedAmrUrl,
@@ -2380,6 +2380,7 @@ export function SettingsDialog({
           agentId: selected.id,
           model: choice.model || undefined,
           reasoning: choice.reasoning || undefined,
+          serviceTier: choice.serviceTier || undefined,
           agentCliEnv: cfg.agentCliEnv ?? {},
         },
         controller.signal,
@@ -3768,18 +3769,9 @@ export function SettingsDialog({
         </div>
       );
     }
+    if (!hasModels && !hasReasoning) return null;
     const choice = cfg.agentModels?.[selected.id] ?? {};
     const effectiveChoice = effectiveAgentModelChoice(selected, choice) ?? choice;
-    const configuredModel =
-      typeof effectiveChoice.model === 'string' && effectiveChoice.model
-        ? effectiveChoice.model
-        : null;
-    const effectiveModelId = configuredModel ?? defaultAgentModelId(selected) ?? '';
-    const currentModelOption =
-      selected.models?.find((m) => m.id === effectiveModelId) ?? null;
-    const serviceTierOptions = currentModelOption?.serviceTierOptions ?? [];
-    const hasServiceTiers = serviceTierOptions.length > 0;
-    if (!hasModels && !hasReasoning && !hasServiceTiers) return null;
     const modelsForSelect =
       selected.id === 'amr' && selected.models
         ? orderModelOptionsByAvailability(selected.models)
@@ -3792,6 +3784,10 @@ export function SettingsDialog({
     // a live catalog). Undefined === allow, matching today's UX.
     const allowCustomModel = selected.supportsCustomModel !== false;
     const explicitCustomMode = agentCustomModelIds.has(selected.id);
+    const configuredModel =
+      typeof effectiveChoice.model === 'string' && effectiveChoice.model
+        ? effectiveChoice.model
+        : null;
     const customModelDraft =
       explicitCustomMode && typeof choice.model === 'string'
         ? choice.model
@@ -3801,11 +3797,18 @@ export function SettingsDialog({
     ) => {
       setCfg((c) => {
         const prev = c.agentModels?.[selected.id] ?? {};
+        const merged = { ...prev, ...next };
+        if (
+          Object.prototype.hasOwnProperty.call(next, 'serviceTier') &&
+          next.serviceTier === undefined
+        ) {
+          delete merged.serviceTier;
+        }
         return {
           ...c,
           agentModels: {
             ...(c.agentModels ?? {}),
-            [selected.id]: { ...prev, ...next },
+            [selected.id]: merged,
           },
         };
       });
@@ -3821,11 +3824,14 @@ export function SettingsDialog({
       effectiveChoice.reasoning ??
       choice.reasoning ??
       selected.reasoningOptions?.[0]?.id ?? '';
-    const serviceTierValue = serviceTierOptions.some(
-      (tier) => tier.id === choice.serviceTier,
-    )
-      ? choice.serviceTier!
-      : 'default';
+    const currentModelOption =
+      selected.models?.find((m) => m.id === modelValue) ?? null;
+    const serviceTierOptions = currentModelOption?.serviceTierOptions ?? [];
+    const hasServiceTiers = serviceTierOptions.length > 0;
+    const serviceTierValue =
+      serviceTierOptions.some((tier) => tier.id === choice.serviceTier)
+        ? choice.serviceTier!
+        : 'default';
     const customActive =
       allowCustomModel &&
       hasModels &&
@@ -3888,7 +3894,17 @@ export function SettingsDialog({
                         next.delete(selected.id);
                         return next;
                       });
-                      setChoice({ model: nextValue, serviceTier: undefined });
+                      const nextModelOption = selected.models?.find((m) => m.id === nextValue);
+                      const nextServiceTierOptions =
+                        nextModelOption?.serviceTierOptions ?? [];
+                      setChoice({
+                        model: nextValue,
+                        serviceTier: nextServiceTierOptions.some(
+                          (tier) => tier.id === choice.serviceTier,
+                        )
+                          ? choice.serviceTier
+                          : undefined,
+                      });
                     }
                   }}
                   additionalOptions={

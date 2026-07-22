@@ -46,28 +46,19 @@ describe("desktop updater host boundary", () => {
     expect(startupIpcBody).toContain("desktop runtime is not initialized");
   });
 
-  it("does not block BrowserWindow startup when the desktop auth handshake fails", () => {
+  it("keeps obsolete installed-outer policy outside generic desktop while exposing the SHOW hook", () => {
     const main = source("src/main/index.ts");
-    const authStart = main.indexOf("const registered = await registerDesktopAuthWithDaemon");
-    const updaterStart = main.indexOf("const updater = createDesktopUpdater", authStart);
-    const runtimeStart = main.indexOf("desktop = await createDesktopRuntime", authStart);
-    expect(authStart).toBeGreaterThanOrEqual(0);
-    expect(updaterStart).toBeGreaterThan(authStart);
-    expect(runtimeStart).toBeGreaterThan(updaterStart);
-
-    const authToUpdater = main.slice(authStart, updaterStart);
-    expect(authToUpdater).toContain("if (!registered)");
-    expect(authToUpdater).toContain("console.warn");
-    expect(authToUpdater).toContain("first folder-import attempt will lazily retry registration before failing");
-    expect(authToUpdater).not.toContain("throw ");
-    expect(authToUpdater).not.toContain("return;");
-
-    const runtimeOptionsStart = main.indexOf("desktopAuthSecret", runtimeStart);
-    const runtimeOptionsEnd = main.indexOf("updateScheduler = createDesktopUpdaterScheduler", runtimeStart);
-    expect(runtimeOptionsStart).toBeGreaterThan(runtimeStart);
-    expect(runtimeOptionsEnd).toBeGreaterThan(runtimeOptionsStart);
-    const runtimeOptions = main.slice(runtimeOptionsStart, runtimeOptionsEnd);
-    expect(runtimeOptions).toContain("registerDesktopAuthWithDaemon: () => registerDesktopAuthWithDaemon(runtime, desktopAuthSecret)");
+    const showStart = main.indexOf("case SIDECAR_MESSAGES.SHOW:");
+    const clickStart = main.indexOf("case SIDECAR_MESSAGES.CLICK:", showStart);
+    expect(showStart).toBeGreaterThanOrEqual(0);
+    expect(clickStart).toBeGreaterThan(showStart);
+    const showHandler = main.slice(showStart, clickStart);
+    expect(showHandler).toContain("activeDesktop.show()");
+    expect(showHandler).toContain("notifyDesktopExternalShow(options.onExternalShow)");
+    expect(showHandler.indexOf("activeDesktop.show()"))
+      .toBeLessThan(showHandler.indexOf("notifyDesktopExternalShow(options.onExternalShow)"));
+    expect(main).not.toContain("listProcessSnapshots");
+    expect(main).not.toContain("stopProcesses");
   });
 
   it("keeps desktop STATUS responsive when updater status is slow", () => {

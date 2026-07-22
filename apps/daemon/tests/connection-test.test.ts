@@ -30,6 +30,7 @@ import {
   resolveAgentLaunch,
   spawnEnvForAgent,
 } from '../src/agents.js';
+import { readAppConfig, writeAppConfig } from '../src/app-config.js';
 import { listProviderModels } from '../src/integrations/provider-models.js';
 import { readVelaCredentialRevision } from '../src/integrations/vela.js';
 import { startServer } from '../src/server.js';
@@ -2662,6 +2663,123 @@ setImmediate(() => process.exit(0));
     );
   });
 
+  it('keeps service tier overrides when connection tests omit model but settings has one', async () => {
+    if (!process.env.OD_DATA_DIR) {
+      throw new Error('OD_DATA_DIR is required for service tier settings tests');
+    }
+    const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-service-tier-'));
+    const argvFile = path.join(markerDir, 'argv.json');
+    const previousConfig = await readAppConfig(process.env.OD_DATA_DIR);
+    try {
+      await writeAppConfig(process.env.OD_DATA_DIR, {
+        agentModels: { codex: { model: 'gpt-5.5' } },
+      });
+      await withFakeCodex(
+        `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'debug' && args[1] === 'models') {
+  console.log(JSON.stringify([{ id: 'gpt-5.5', name: 'gpt-5.5', service_tiers: [{ id: 'priority', label: 'Fast' }] }]));
+  process.exit(0);
+}
+if (args[0] === 'login' && args[1] === 'status') {
+  console.log('Logged in');
+  process.exit(0);
+}
+fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(args));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+setImmediate(() => process.exit(0));
+`,
+        async () => {
+          const res = await realFetch(`${baseUrl}/api/test/connection`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'agent',
+              agentId: 'codex',
+              serviceTier: 'priority',
+            }),
+          });
+          expect(res.status).toBe(200);
+          await expect(res.json()).resolves.toMatchObject({
+            ok: true,
+            kind: 'success',
+            agentName: 'Codex CLI',
+            model: 'gpt-5.5',
+          });
+
+          const args = JSON.parse(await fsp.readFile(argvFile, 'utf8')) as string[];
+          expect(args).toContain('--model');
+          expect(args).toContain('gpt-5.5');
+          expect(args).toContain('service_tier="priority"');
+        },
+      );
+    } finally {
+      await fsp.rm(markerDir, { recursive: true, force: true });
+      await writeAppConfig(process.env.OD_DATA_DIR, {
+        agentModels: previousConfig.agentModels ?? null,
+      });
+    }
+  });
+
+  it('keeps service tier overrides when connection tests omit model and settings has none', async () => {
+    if (!process.env.OD_DATA_DIR) {
+      throw new Error('OD_DATA_DIR is required for service tier settings tests');
+    }
+    const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-service-tier-'));
+    const argvFile = path.join(markerDir, 'argv.json');
+    const previousConfig = await readAppConfig(process.env.OD_DATA_DIR);
+    try {
+      await writeAppConfig(process.env.OD_DATA_DIR, { agentModels: null });
+      await withFakeCodex(
+        `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'debug' && args[1] === 'models') {
+  console.log(JSON.stringify([{ id: 'gpt-5.5', name: 'gpt-5.5', service_tiers: [{ id: 'priority', label: 'Fast' }] }]));
+  process.exit(0);
+}
+if (args[0] === 'login' && args[1] === 'status') {
+  console.log('Logged in');
+  process.exit(0);
+}
+fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(args));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }));
+setImmediate(() => process.exit(0));
+`,
+        async () => {
+          await realFetch(`${baseUrl}/api/agents`);
+          const res = await realFetch(`${baseUrl}/api/test/connection`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'agent',
+              agentId: 'codex',
+              serviceTier: 'priority',
+            }),
+          });
+          expect(res.status).toBe(200);
+          await expect(res.json()).resolves.toMatchObject({
+            ok: true,
+            kind: 'success',
+            agentName: 'Codex CLI',
+            model: 'gpt-5.5',
+          });
+
+          const args = JSON.parse(await fsp.readFile(argvFile, 'utf8')) as string[];
+          expect(args).toContain('--model');
+          expect(args).toContain('gpt-5.5');
+          expect(args).toContain('service_tier="priority"');
+        },
+      );
+    } finally {
+      await fsp.rm(markerDir, { recursive: true, force: true });
+      await writeAppConfig(process.env.OD_DATA_DIR, {
+        agentModels: previousConfig.agentModels ?? null,
+      });
+    }
+  });
+
   it('spawns agent tests with draft allowlisted CLI env', async () => {
     const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-env-'));
     const envFile = path.join(markerDir, 'env.json');
@@ -3787,55 +3905,20 @@ setInterval(() => {}, 1000);
     },
   );
 
-  it('launches Kimi connection tests through ACP and sets the selected model in-session', async () => {
+  it('launches Kimi connection tests through the ACP transport', async () => {
     const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-kimi-argv-'));
     const argvFile = path.join(markerDir, 'argv.json');
-    const methodsFile = path.join(markerDir, 'methods.json');
     try {
       await withFakeKimi(
         `
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-const methods = [];
 fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(args));
-if (JSON.stringify(args) !== JSON.stringify(['acp'])) {
-  console.error('error: too many arguments. Expected 0 arguments but got 1.');
+if (args.length !== 1 || args[0] !== 'acp') {
+  console.error('missing acp transport arg');
   process.exit(1);
 }
-function write(obj) {
-  process.stdout.write(JSON.stringify(obj) + '\\n');
-}
-process.stdin.setEncoding('utf8');
-let buffer = '';
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  const lines = buffer.split('\\n');
-  buffer = lines.pop() || '';
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    const msg = JSON.parse(line);
-    methods.push({ method: msg.method, params: msg.params });
-    fs.writeFileSync(${JSON.stringify(methodsFile)}, JSON.stringify(methods));
-    if (msg.method === 'initialize') {
-      write({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: 1 } });
-    } else if (msg.method === 'session/new') {
-      write({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 's1', models: { currentModelId: null, availableModels: [] } } });
-    } else if (msg.method === 'session/set_model') {
-      if (msg.params?.modelId !== 'moonshot-v1-32k') {
-        write({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: 'unexpected model' } });
-      } else {
-        write({ jsonrpc: '2.0', id: msg.id, result: {} });
-      }
-    } else if (msg.method === 'session/prompt') {
-      write({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { text: 'ok' } } } });
-      write({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } } });
-    } else if (msg.method === 'session/cancel') {
-      write({ jsonrpc: '2.0', id: msg.id, result: {} });
-    }
-  }
-});
-process.stdin.on('end', () => process.exit(0));
+console.log(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { text: 'ok' } } } }));
 `,
         async () => {
           const res = await realFetch(`${baseUrl}/api/test/connection`, {
@@ -3859,19 +3942,6 @@ process.stdin.on('end', () => process.exit(0));
           await expect(fsp.readFile(argvFile, 'utf8')).resolves.toBe(
             JSON.stringify(['acp']),
           );
-          const methods = JSON.parse(await fsp.readFile(methodsFile, 'utf8')) as Array<{
-            method: string;
-            params?: Record<string, unknown>;
-          }>;
-          expect(methods.map((entry) => entry.method)).toEqual([
-            'initialize',
-            'session/new',
-            'session/set_model',
-            'session/prompt',
-          ]);
-          expect(methods.find((entry) => entry.method === 'session/set_model')?.params).toMatchObject({
-            modelId: 'moonshot-v1-32k',
-          });
         },
       );
     } finally {

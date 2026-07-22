@@ -164,12 +164,14 @@ export function resolveModelForServiceTier(
   return modelId ?? null;
 }
 
-// Some adapters omit the synthetic `'default'` option from `fallbackModels`
-// because they only accept concrete ids for explicit model selection. When a
-// chat run has no model at all, prefer the first model from the live list last
-// surfaced to the UI, then fall back to the def's first concrete fallback id.
-// An explicit `'default'` choice is preserved so ACP runtimes can leave model
-// selection to the upstream session's own configured default.
+// Some adapters reject the synthetic `'default'` model id (e.g. AMR / vela,
+// which requires an explicit `session/set_model` before `session/prompt`).
+// Those defs declare it by omitting DEFAULT_MODEL_OPTION from
+// `fallbackModels` entirely. When the chat run produces a null or 'default'
+// model for one of those adapters, prefer the first model from the live list
+// last surfaced to the UI, then fall back to the def's first concrete fallback
+// id so the spawn layer always has a real model to forward.
+// Defs that DO list 'default' (the common case) are left untouched.
 export function resolveModelForAgent(
   def: RuntimeAgentDef,
   resolved: string | null,

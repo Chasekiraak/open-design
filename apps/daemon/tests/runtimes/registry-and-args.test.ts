@@ -632,6 +632,80 @@ test('codex parses live model catalog from debug models JSON', () => {
   ]);
 });
 
+test('codex derives service tiers from live speed tiers when service_tiers is absent', () => {
+  assert.ok(codex.listModels, 'codex must define live model discovery');
+  const parsed = codex.listModels.parse(JSON.stringify({
+    models: [
+      {
+        slug: 'gpt-5.5',
+        display_name: 'GPT-5.5',
+        visibility: 'list',
+        additional_speed_tiers: ['fast'],
+      },
+    ],
+  }));
+
+  assert.deepEqual(parsed, [
+    { id: 'default', label: 'Default (CLI config)' },
+    {
+      id: 'gpt-5.5',
+      label: 'GPT-5.5',
+      additionalSpeedTiers: ['fast'],
+      serviceTierOptions: [{ id: 'priority', label: 'Fast' }],
+    },
+  ]);
+});
+
+test('codex preserves explicit live service tiers from debug models JSON', () => {
+  assert.ok(codex.listModels, 'codex must define live model discovery');
+  const parsed = codex.listModels.parse(JSON.stringify({
+    models: [
+      {
+        slug: 'gpt-6-codex',
+        display_name: 'GPT-6 Codex',
+        visibility: 'list',
+        service_tiers: [
+          { id: 'priority', name: 'Fast' },
+          { id: 'standard', name: 'Standard' },
+        ],
+      },
+    ],
+  }));
+
+  assert.deepEqual(parsed, [
+    { id: 'default', label: 'Default (CLI config)' },
+    {
+      id: 'gpt-6-codex',
+      label: 'GPT-6 Codex',
+      serviceTierOptions: [
+        { id: 'priority', label: 'Fast' },
+        { id: 'standard', label: 'Standard' },
+      ],
+    },
+  ]);
+});
+
+test('codex preserves service tier labels from bare-array debug models JSON', () => {
+  assert.ok(codex.listModels, 'codex must define live model discovery');
+  const parsed = codex.listModels.parse(JSON.stringify([
+    {
+      slug: 'gpt-5.5',
+      display_name: 'GPT-5.5',
+      visibility: 'list',
+      service_tiers: [{ id: 'priority', label: 'Fast' }],
+    },
+  ]));
+
+  assert.deepEqual(parsed, [
+    { id: 'default', label: 'Default (CLI config)' },
+    {
+      id: 'gpt-5.5',
+      label: 'GPT-5.5',
+      serviceTierOptions: [{ id: 'priority', label: 'Fast' }],
+    },
+  ]);
+});
+
 test('codex detection surfaces live debug models separately from fallback models', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'od-agents-codex-live-models-'));
   try {
@@ -664,6 +738,47 @@ exit 2
         'default',
         'gpt-6-codex',
       ]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('codex detection enriches sparse live GPT-5.5 metadata from fallback tiers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'od-agents-codex-sparse-live-models-'));
+  try {
+    await withEnvSnapshot(['PATH', 'OD_AGENT_HOME', 'CODEX_BIN'], async () => {
+      const codexBin = join(dir, 'codex');
+      writeFileSync(
+        codexBin,
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex-cli 9.9.9"; exit 0; fi
+if [ "$1" = "debug" ] && [ "$2" = "models" ]; then
+  printf '%s\\n' '{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list"}]}'
+  exit 0
+fi
+exit 2
+`,
+      );
+      chmodSync(codexBin, 0o755);
+      process.env.OD_AGENT_HOME = dir;
+      process.env.PATH = dir;
+      delete process.env.CODEX_BIN;
+
+      const agents = await detectAgents();
+      const detected = agents.find((agent) => agent.id === 'codex');
+      const gpt55 = detected?.models.find((model) => model.id === 'gpt-5.5');
+
+      assert.ok(detected);
+      assert.equal(detected.available, true);
+      assert.equal(detected.modelsSource, 'live');
+      assert.deepEqual(gpt55, {
+        id: 'gpt-5.5',
+        label: 'GPT-5.5',
+        additionalSpeedTiers: ['fast'],
+        serviceTierOptions: [{ id: 'priority', label: 'Fast' }],
+      });
+      assert.equal(isKnownServiceTier(codex, 'gpt-5.5', 'priority'), true);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -94,6 +94,11 @@ function migrate(db: SqliteDb): void {
       agent_id        TEXT NOT NULL,
       session_id      TEXT NOT NULL,
       stable_prompt_hash TEXT,
+      -- Per-section digests of the stable prefix inputs behind
+      -- stable_prompt_hash, as JSON (see prompts/stable-sections.ts). Purely
+      -- diagnostic: when the hash moves, diffing this against the current turn
+      -- names WHICH input drifted. Never gates a re-send -- stable_prompt_hash
+      -- stays the only source of truth for that.
       stable_prompt_sections TEXT,
       -- Resume identity guard: the session is only safe to resume when the
       -- conversation has not changed shape under it. model/cwd are the runtime
@@ -368,6 +373,9 @@ function migrate(db: SqliteDb): void {
   if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_hash')) {
     db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_hash TEXT`);
   }
+  // Drift attribution (see agent_sessions CREATE TABLE comment). Rows written
+  // before this column exists read back null and report `unattributed` for one
+  // turn, then self-heal on the next write.
   if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_sections')) {
     db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_sections TEXT`);
   }
