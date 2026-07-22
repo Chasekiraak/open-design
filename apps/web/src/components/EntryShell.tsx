@@ -1047,39 +1047,18 @@ export function EntryShell({
   }
 
   // #5517: the GitHub/Discord/X/mail badges and the settings chip leave the
-  // rail footer — socials live in the account menu's social row and settings
-  // stays reachable through the account menu — so the footer reads as just
-  // the credits chip + account row. Without a cloud identity there is no
-  // account menu (the rail shows the brand logo instead), so the settings
-  // chip stays in the footer as the only settings entry for local/BYOK use.
+  // rail footer. Socials live in the account menu, while settings stays
+  // reachable through either the account menu or the signed-out rail item.
   // The updater popup host also lives here (the entry topbar is gone — the
   // rail toggle is the pinned Home tab in the workspace tabs bar); it renders
   // nothing until an update is in flight.
   const railFooterActions = (
-    <>
-      <UpdaterPopup
-        allowSilentUpdates={config.allowSilentUpdates}
-        onAllowSilentUpdatesChange={(allowSilentUpdates) =>
-          onConfigPersist({ ...config, allowSilentUpdates })
-        }
-      />
-      {workspaceContext ? null : (
-        <button
-          type="button"
-          className="entry-settings-chip od-tooltip"
-          onClick={() => onOpenSettings()}
-          data-tooltip={t('entry.openSettingsTitle')}
-          data-tooltip-placement="right"
-          aria-label={t('entry.openSettingsAria')}
-          data-testid="entry-settings-button"
-        >
-          <span className="entry-settings-chip__icon" aria-hidden>
-            <Icon name="settings" size={13} />
-          </span>
-          <span className="entry-settings-chip__label">{t('settings.title')}</span>
-        </button>
-      )}
-    </>
+    <UpdaterPopup
+      allowSilentUpdates={config.allowSilentUpdates}
+      onAllowSilentUpdatesChange={(allowSilentUpdates) =>
+        onConfigPersist({ ...config, allowSilentUpdates })
+      }
+    />
   );
 
   // Drop the personalized recommendation. Fired when the user browses all

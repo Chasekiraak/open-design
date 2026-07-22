@@ -25,9 +25,9 @@ describe('SettingsDialog media providers', () => {
       },
     });
 
-    expect(screen.getByText('Saved · ••••1234')).toBeTruthy();
+    expect(document.querySelector('.field-status-badge--inline')?.textContent).toBe('Configured');
     expect(screen.getByLabelText('OpenAI API key').getAttribute('placeholder')).toBe(
-      'Paste a new key to replace the saved one',
+      'Enter a new key to replace the saved key',
     );
   });
 
@@ -69,17 +69,17 @@ describe('SettingsDialog media providers', () => {
       ),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
 
     await waitFor(() => {
       expect(reloadMock).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('Reloaded media provider settings from the local daemon.')).toBeTruthy();
+      expect(screen.getByText('Provider settings refreshed.')).toBeTruthy();
     });
 
     // The redesigned section shows one detail card at a time; select the
     // OpenAI pill to inspect the daemon-refreshed entry.
     fireEvent.click(screen.getByRole('tab', { name: /OpenAI/ }));
-    expect(screen.getByText('Saved · ••••9876')).toBeTruthy();
+    expect(document.querySelector('.field-status-badge--inline')?.textContent).toBe('Configured');
     expect((screen.getByLabelText('OpenAI Base URL') as HTMLInputElement).value).toBe(
       'https://daemon.example/v1',
     );
@@ -114,7 +114,7 @@ describe('SettingsDialog media providers', () => {
       },
     );
 
-    const reloadButton = screen.getByRole('button', { name: 'Reload from daemon' });
+    const reloadButton = screen.getByRole('button', { name: 'Refresh providers' });
     fireEvent.click(reloadButton);
 
     expect(reloadMock).toHaveBeenCalledTimes(1);
@@ -124,15 +124,15 @@ describe('SettingsDialog media providers', () => {
       await vi.advanceTimersByTimeAsync(50);
     });
 
-    expect(screen.getByText('Reloaded media provider settings from the local daemon.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Reloaded' })).toBeTruthy();
+    expect(screen.getByText('Provider settings refreshed.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh providers' })).toBeTruthy();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
 
-    expect(screen.queryByText('Reloaded media provider settings from the local daemon.')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Reload from daemon' })).toBeTruthy();
+    expect(screen.queryByText('Provider settings refreshed.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh providers' })).toBeTruthy();
   });
 
   it('shows a sticky error when reloading media providers from daemon fails', async () => {
@@ -149,15 +149,15 @@ describe('SettingsDialog media providers', () => {
       },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
 
     await waitFor(() => {
       expect(reloadMock).toHaveBeenCalledTimes(1);
       expect(
-        screen.getByText('Could not reload media provider settings from the local daemon.'),
+        screen.getByText('Could not refresh provider settings.'),
       ).toBeTruthy();
     });
-    expect(screen.getByRole('button', { name: 'Reload from daemon' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh providers' })).toBeTruthy();
   });
 
   it('refreshes daemon-backed providers while keeping untouched local-only providers when daemon reload returns a partial provider set', async () => {
@@ -191,11 +191,11 @@ describe('SettingsDialog media providers', () => {
       },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
 
     await waitFor(() => {
       expect(reloadMock).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('Reloaded media provider settings from the local daemon.')).toBeTruthy();
+      expect(screen.getByText('Provider settings refreshed.')).toBeTruthy();
     });
 
     // Both openai and fal start configured, so the default detail card is
@@ -206,7 +206,7 @@ describe('SettingsDialog media providers', () => {
       'https://daemon.example/v1',
     );
     expect((screen.getByLabelText('OpenAI API key') as HTMLInputElement).value).toBe('');
-    expect(screen.getByText('Saved · ••••9876')).toBeTruthy();
+    expect(document.querySelector('.field-status-badge--inline')?.textContent).toBe('Configured');
     // Fal.ai is a non-integrated (coming-soon) provider and no longer has
     // editable input fields in the UI; its config is preserved in state via
     // mergeDaemonMediaProviders (covered by state/config.test.ts).
@@ -283,7 +283,7 @@ describe('SettingsDialog media providers', () => {
       target: { value: 'https://local-pending.example/v1' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
 
     await waitFor(() => {
       expect(reloadMock).toHaveBeenCalledTimes(1);
@@ -345,18 +345,18 @@ describe('SettingsDialog media providers', () => {
       );
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
 
     await waitFor(() => {
       expect(reloadMock).toHaveBeenCalledTimes(1);
-      expect(screen.getByText('Reloaded media provider settings from the local daemon.')).toBeTruthy();
+      expect(screen.getByText('Provider settings refreshed.')).toBeTruthy();
     });
 
     expect((screen.getByLabelText('OpenAI API key') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('OpenAI Base URL') as HTMLInputElement).value).toBe(
       'https://daemon.example/v1',
     );
-    expect(screen.getByText('Saved · ••••9876')).toBeTruthy();
+    expect(document.querySelector('.field-status-badge--inline')?.textContent).toBe('Configured');
   });
 
   it('keeps newer pending provider edits during reload when an older media autosave resolves', async () => {
@@ -438,7 +438,7 @@ describe('SettingsDialog media providers', () => {
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh providers' }));
       await Promise.resolve();
     });
     expect(reloadMock).toHaveBeenCalledTimes(1);
@@ -474,7 +474,7 @@ describe('SettingsDialog media providers', () => {
     // time, with the provider name as the card heading).
     fireEvent.click(screen.getByRole('tab', { name: /OpenAI/ }));
     expect(screen.getByRole('heading', { name: 'OpenAI' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear configuration' }));
 
     await waitFor(() => {
       expect(onPersist).toHaveBeenCalledWith(
@@ -511,12 +511,12 @@ describe('SettingsDialog media providers', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Nano Banana/ }));
     expect(screen.getByRole('heading', { name: 'Nano Banana' })).toBeTruthy();
 
-    expect(screen.getByText('Saved · ••••5555')).toBeTruthy();
+    expect(document.querySelector('.field-status-badge--inline')?.textContent).toBe('Configured');
     expect(screen.getByLabelText('Nano Banana API key').getAttribute('placeholder')).toBe(
-      'Paste a new key to replace the saved one',
+      'Enter a new key to replace the saved key',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear configuration' }));
 
     await waitFor(() => {
       expect(onPersist).toHaveBeenCalledWith(
