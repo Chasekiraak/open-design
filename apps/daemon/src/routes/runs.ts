@@ -41,6 +41,7 @@ import {
   upsertMessage,
 } from '../db.js';
 import { readVelaLoginStatus } from '../integrations/vela.js';
+import { getDetectedRuntimeVersions } from '../runtimes/detection.js';
 import {
   deriveLangfuseDeliveryState,
   readTelemetrySinkConfig,
@@ -170,6 +171,13 @@ interface ChatRun {
   retryAttemptCount?: number;
   retryFinalResult?: string;
   retrySuppressedReason?: string;
+  retryOriginalFailure?: {
+    failure_category?: string;
+    failure_detail?: string;
+    failure_stage?: string;
+    retryable?: boolean;
+    user_action?: string;
+  };
   contextBudget?: {
     action: 'unmeasured' | 'within_budget' | 'blocked' | 'rollover';
     source: 'model_metadata' | 'known_model_family' | 'unknown';
@@ -1257,6 +1265,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
           : modelIdForTracking(usageAnalytics.agent_reported_model);
+        const runtimeVersions = getDetectedRuntimeVersions(run.agentId);
         for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
           design.analytics.capture({
             eventName: retryEvent.event,
@@ -1288,6 +1297,33 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             asked_user_question: runAskedUserQuestion(run.events),
             retry_attempt_count: run.retryAttemptCount ?? 0,
             retry_final_result: run.retryFinalResult ?? 'not_attempted',
+            ...(runtimeVersions?.agentCliVersion
+              ? { agent_cli_version: runtimeVersions.agentCliVersion }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionName
+              ? { runtime_companion_name: runtimeVersions.runtimeCompanionName }
+              : {}),
+            ...(runtimeVersions?.runtimeCompanionVersion
+              ? { runtime_companion_version: runtimeVersions.runtimeCompanionVersion }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_category
+              ? {
+                  retry_original_failure_category:
+                    run.retryOriginalFailure.failure_category,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_detail
+              ? {
+                  retry_original_failure_detail:
+                    run.retryOriginalFailure.failure_detail,
+                }
+              : {}),
+            ...(run.retryOriginalFailure?.failure_stage
+              ? {
+                  retry_original_failure_stage:
+                    run.retryOriginalFailure.failure_stage,
+                }
+              : {}),
             context_budget_action: run.contextBudget?.action ?? 'unmeasured',
             context_budget_source: run.contextBudget?.source ?? 'unknown',
             ...(run.contextBudget?.estimatedPromptTokens !== undefined

@@ -134,6 +134,10 @@ export interface RunSummary {
     truncated: boolean;
   };
   diagnostics?: unknown;
+  retryAttemptCount?: number;
+  retryFinalResult?: string;
+  retrySuppressedReason?: string;
+  retryOriginalFailure?: RunFailureClassification;
   contextBudget?: {
     action: string;
     source: string;
@@ -293,6 +297,11 @@ export interface RuntimeInfo {
   packaged?: boolean;
   /** Front-end carrier — `desktop` (Electron), `web` (browser), or unknown. */
   clientType?: 'desktop' | 'web' | 'unknown';
+  /** Exact CLI version observed by the daemon's bounded detection probe. */
+  agentCliVersion?: string;
+  /** Optional companion runtime used behind the selected CLI (AMR → OpenCode). */
+  runtimeCompanionName?: string;
+  runtimeCompanionVersion?: string;
 }
 
 export interface TurnInfo {
@@ -1521,9 +1530,24 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
     osRelease: ctx.runtime?.osRelease,
     arch: ctx.runtime?.arch,
     clientType: ctx.runtime?.clientType,
+    agentCliVersion: ctx.runtime?.agentCliVersion,
+    runtimeCompanionName: ctx.runtime?.runtimeCompanionName,
+    runtimeCompanionVersion: ctx.runtime?.runtimeCompanionVersion,
+    retryAttemptCount: ctx.run.retryAttemptCount,
+    retryFinalResult: ctx.run.retryFinalResult,
+    retrySuppressedReason: ctx.run.retrySuppressedReason,
+    retryOriginalFailureCategory:
+      ctx.run.retryOriginalFailure?.failure_category,
+    retryOriginalFailureDetail:
+      ctx.run.retryOriginalFailure?.failure_detail,
+    retryOriginalFailureStage:
+      ctx.run.retryOriginalFailure?.failure_stage,
     ...promptStackFlatMetadata,
     ...promptStackBlameMetadata,
   };
+
+  const observationVersion =
+    ctx.runtime?.agentCliVersion ?? ctx.runtime?.appVersion;
 
   // Generation-level model parameters mirror the Langfuse schema so the UI
   // shows them in the dedicated Model Parameters card and filters work.
@@ -1554,6 +1578,8 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         input: inputText,
         output: outputText,
         metadata: traceMetadata,
+        release: ctx.runtime?.appVersion,
+        version: observationVersion,
         timestamp: startTimeIso,
       },
     },
@@ -1571,6 +1597,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         output: outputText,
         level: success ? 'DEFAULT' : 'ERROR',
         statusMessage: ctx.run.error ?? undefined,
+        version: observationVersion,
         metadata: {
           status: ctx.run.status,
           messageId: ctx.message.messageId || undefined,
@@ -1606,6 +1633,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         output: outputText,
         level: success ? 'DEFAULT' : 'ERROR',
         statusMessage: ctx.run.error ?? undefined,
+        version: observationVersion,
         usage,
         metadata: {
           durationMs: ctx.eventsSummary.durationMs,
@@ -1636,6 +1664,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         output: outputText,
         level: 'ERROR',
         statusMessage: ctx.run.error ?? undefined,
+        version: observationVersion,
         metadata: {
           durationMs: ctx.eventsSummary.durationMs,
           cost_usd: costBreakdown.cost_usd,

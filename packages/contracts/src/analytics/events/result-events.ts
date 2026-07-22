@@ -369,6 +369,12 @@ export interface RunFinishedProps extends Omit<RunCreatedProps, 'area'> {
   retry_attempt_count?: number;
   retry_final_result?: TrackingRunRetryFinalResult;
   retry_suppressed_reason?: TrackingRunRetrySuppressedReason;
+  agent_cli_version?: string;
+  runtime_companion_name?: string;
+  runtime_companion_version?: string;
+  retry_original_failure_category?: TrackingRunFailureCategory;
+  retry_original_failure_detail?: TrackingRunFailureDetail;
+  retry_original_failure_stage?: TrackingRunFailureStage;
   context_budget_action?: TrackingContextBudgetAction;
   context_budget_source?: TrackingContextBudgetSource;
   estimated_prompt_tokens?: number;
