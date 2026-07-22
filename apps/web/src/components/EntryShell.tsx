@@ -1389,7 +1389,6 @@ export function EntryShell({
               ) : draftProjectsList.length === 0 ? (
                 <EntryBlankState
                   heading={t('entry.navDrafts')}
-                  title={t('entry.blankDraftsTitle')}
                   description={t('entry.blankDraftsDescription')}
                   actionLabel={t('entry.blankCreate')}
                   onCreate={() => startBlankProjectFromRail()}
@@ -1427,7 +1426,6 @@ export function EntryShell({
               ) : allProjectsList.length === 0 ? (
                 <EntryBlankState
                   heading={t('entry.navAllProjects')}
-                  title={t('entry.blankAllProjectsTitle')}
                   description={t('entry.blankAllProjectsDescription')}
                   actionLabel={t('entry.blankCreate')}
                   onCreate={() => startBlankProjectFromRail()}

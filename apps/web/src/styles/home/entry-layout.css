@@ -1274,6 +1274,10 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* Always reserve the scrollbar's width so switching between views/tabs with
+     different content heights (e.g. Community categories) can't toggle the
+     scrollbar and shift the centered content sideways — that read as a jitter. */
+  scrollbar-gutter: stable;
 }
 /* Frosted top edge: content scrolling up toward the (transparent) tab strip
    melts into a progressive blur instead of hard-clipping at the row
@@ -1341,11 +1345,13 @@
 }
 /* Uniform left/right gutters across the home view AND the wide sub-views
    (全部项目 / 草稿 / design-systems / …): the recent-projects grid and the
-   project lists all breathe away from the window edges by the same 48px, so
-   switching between 最近 and 全部项目 keeps the same side inset. */
+   project lists all breathe away from the window edges by the same 35px, so
+   switching between 最近 and 全部项目 keeps the same side inset. Trimmed from
+   48px so the content sits ~13px closer to the rail (measured left spacing
+   ~73px → ~60px). */
 .entry-main__inner {
-  padding-left: 48px;
-  padding-right: 48px;
+  padding-left: 35px;
+  padding-right: 35px;
 }
 @media (max-width: 900px) {
   .entry-main__inner {
@@ -2511,36 +2517,27 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
   gap: 12px;
-  padding: 72px 24px;
+  min-height: 56vh;
+  padding: 48px 24px;
   margin-top: 8px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg, 16px);
-  background: var(--bg-subtle);
+  /* No card surface — content sits directly on the page. */
+  background: transparent;
 }
-.entry-blank__icon {
-  width: 56px;
-  height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-soft);
-  color: #87ea5c;
-}
-.entry-blank__title {
-  margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-strong);
+.entry-blank__mark {
+  width: 168px;
+  height: auto;
+  display: block;
+  object-fit: contain;
 }
 .entry-blank__desc {
   margin: 0;
-  max-width: 360px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 .entry-blank__cta {
   display: inline-flex;
@@ -2550,8 +2547,8 @@
   padding: 10px 22px;
   border: 0;
   border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: #fff;
+  background: var(--text-strong);
+  color: var(--brand, #87ea5c);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;

@@ -16,12 +16,12 @@
   min-height: 100%;
   justify-content: center;
 }
-/* `.home-hero`'s own 281px top padding (below) is tuned for the OTHER
+/* `.home-hero`'s own 240px top padding (below) is tuned for the OTHER
    variant — hugging the top of the scroll column so a specific reference
    window's fold lines up with the recent-projects grid. `.home-view--centered`
    has no recent-projects grid to align to; it vertically centers the whole
    column instead via the `justify-content: center` above. Stacking the fixed
-   281px on top of that centering pushed the logo/title well below the
+   240px on top of that centering pushed the logo/title well below the
    viewport's true center, reading as an oversized blank band above it. Drop
    it back to match the bottom padding so the hero's own box is symmetric and
    the flex centering does all of the vertical balancing. */
@@ -49,11 +49,11 @@
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-6);
-  /* Top padding tuned so that at the reference working window (~1333×960)
-     the fold lands exactly on the second project-card row's image bottom
-     (304px left the fold cutting mid-image; -52px aligns it). The parent
-     still contributes ~16px above. */
-  padding: 281px 0 var(--spacing-4);
+  /* Was 281px (tuned to land the fold on the second project-card row at a
+     ~1333×960 reference window) — that read as a huge blank band above the
+     hero. 240px trims that band while keeping the hero comfortably clear of
+     the tab strip. */
+  padding: 240px 0 var(--spacing-4);
 }
 .home-hero__brand {
   position: relative;
@@ -494,7 +494,9 @@
   flex-direction: column;
   gap: var(--spacing-8);
   padding: var(--spacing-4) var(--spacing-4) var(--spacing-8);
-  background: var(--bg-subtle);
+  /* White grouping tray at 60% opacity (was the solid --bg-subtle gray) so the
+     footer reads as a soft translucent surface over the page wash. */
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
   transition: background-color var(--duration-faster, 100ms) var(--curve-easy-ease, ease);
   /* Borderless: the tinted surface alone provides the grouping; the inner
      input card keeps the only stroke. */
@@ -507,7 +509,9 @@
 /* While the composer is engaged (input focused) the grouping surface steps
    one level heavier on the neutral ladder so the active state reads. */
 .home-hero__composer-card:focus-within {
-  background: color-mix(in srgb, var(--bg-subtle) 70%, var(--bg-muted));
+  /* Engaged state: same white tray, a touch more opaque so the active step
+     still reads without reverting to gray. */
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 .home-hero__composer-card .home-hero__input-card,
 .home-hero__composer-card .home-hero__workdir-row {
@@ -1483,7 +1487,9 @@
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:hover,
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:focus-visible {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
+  /* Solid fill (matches the design-system picker beside it) — the previous
+     translucent mix read as a see-through smudge over the frosted footer. */
+  background: var(--bg-subtle);
   color: var(--text-strong);
 }
 /* The working-directory dropdown must float below its trigger and never
@@ -1501,8 +1507,11 @@
   left: 0;
   z-index: 90;
 }
+/* The working-dir menu is an absolute overlay — float it over the content
+   below (lift the card's stacking context) instead of reserving space with a
+   margin, which shoved 最近项目 down and back up (a jitter) on open/close. */
 .home-hero__composer-card:has(.home-hero__working-dir-picker [data-testid='working-dir-panel']) {
-  margin-bottom: calc(var(--spacing-68) + var(--spacing-12));
+  z-index: 40;
 }
 /* Persistent design-system picker — borderless trigger mirroring the
    working-directory picker so the two read as one row of leading accessories
