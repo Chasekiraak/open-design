@@ -834,15 +834,23 @@ export function EntryNavRail({
             >
               <Icon name="file" size={16} />
             </NavButton>
-            <NavButton
-              active={view === 'all-projects'}
-              ariaLabel={t('entry.navAllProjects')}
-              tooltip={t('workspaceSwitcher.allProjectsTooltip')}
-              onClick={() => selectView('all-projects')}
-              testId="entry-nav-all-projects"
-            >
-              <Icon name="grid" size={16} />
-            </NavButton>
+            {isTeam ? (
+              // All-projects is a TEAM-scoped grid (EntryShell.tsx feeds it from
+              // `teamProjects`, not the personal project list) — a personal
+              // workspace has no team catalog to show here at all. Rendering it
+              // unconditionally left the item clickable in a personal workspace,
+              // landing on a "还没有团队项目" empty state that names a concept
+              // (团队项目) the current workspace cannot have.
+              <NavButton
+                active={view === 'all-projects'}
+                ariaLabel={t('entry.navAllProjects')}
+                tooltip={t('workspaceSwitcher.allProjectsTooltip')}
+                onClick={() => selectView('all-projects')}
+                testId="entry-nav-all-projects"
+              >
+                <Icon name="grid" size={16} />
+              </NavButton>
+            ) : null}
             <NavButton
               active={view === 'design-systems'}
               ariaLabel={t('entry.navDesignSystems')}
