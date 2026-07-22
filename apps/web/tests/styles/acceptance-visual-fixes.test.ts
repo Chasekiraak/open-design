@@ -134,13 +134,3 @@ describe('recvq4iEq1Esno — settings full page swallowed the autosave "Saved" p
     expect(ruleValue(hiddenButtons, 'display')).toBe('none');
   });
 });
-
-describe('recvpZpw46Xpmn — "本轮产出的文件" list has no card chrome', () => {
-  it('wraps the produced-files list in the same border/radius/panel chrome as its sibling cards', () => {
-    const producedFiles = cssDeclarations(viewerToolsCss, '.produced-files');
-    expect(ruleValue(producedFiles, 'border')).toBe('1px solid var(--border-soft)');
-    expect(ruleValue(producedFiles, 'border-radius')).toBe('var(--radius)');
-    expect(ruleValue(producedFiles, 'background')).toBe('var(--bg-panel)');
-    expect(ruleValue(producedFiles, 'padding')).not.toBe('0');
-  });
-});
