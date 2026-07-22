@@ -189,29 +189,31 @@ function ConsentCard({ onShare, onDecline, sharingEnabled }: ConsentProps): JSX.
     <div className="settings-subsection">
       <div className="section-head">
         <div>
-          <h4>{t('settings.privacyConsentKicker')}</h4>
-          <p className="hint">{t('settings.privacyConsentLead')}</p>
+          <h4 className="privacy-consent-title">{t('settings.privacyConsentKicker')}</h4>
         </div>
       </div>
 
-      <dl className="settings-privacy-disclosure">
-        <div>
-          <dt>{t('settings.privacyMetrics')}</dt>
-          <dd>{t('settings.privacyMetricsHint')}</dd>
-        </div>
-        <div>
-          <dt>{t('settings.privacyContent')}</dt>
-          <dd>{t('settings.privacyContentHint')}</dd>
-        </div>
-      </dl>
+      <div className="privacy-consent-card">
+        <p className="privacy-consent-lead">{t('settings.privacyConsentLead')}</p>
 
-      <p className="hint">{t('settings.privacyConsentFooter')}</p>
+        <dl className="settings-privacy-disclosure">
+          <div>
+            <dt>{t('settings.privacyMetrics')}</dt>
+            <dd>{t('settings.privacyMetricsHint')}</dd>
+          </div>
+          <div>
+            <dt>{t('settings.privacyContent')}</dt>
+            <dd>{t('settings.privacyContentHint')}</dd>
+          </div>
+        </dl>
 
-      <div
-        className="privacy-consent-actions"
-        role="group"
-        aria-label={t('settings.privacyConsentKicker')}
-      >
+        <p className="hint">{t('settings.privacyConsentFooter')}</p>
+
+        <div
+          className="privacy-consent-actions"
+          role="group"
+          aria-label={t('settings.privacyConsentKicker')}
+        >
         <button
           type="button"
           className={`privacy-consent-action${sharingEnabled === false ? ' is-active' : ''}`}
@@ -228,6 +230,7 @@ function ConsentCard({ onShare, onDecline, sharingEnabled }: ConsentProps): JSX.
         >
           {t('settings.privacyConsentShare')}
         </button>
+        </div>
       </div>
     </div>
   );

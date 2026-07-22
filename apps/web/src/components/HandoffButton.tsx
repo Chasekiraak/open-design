@@ -772,19 +772,21 @@ export function HandoffButton({
             </section>
           ) : (
             <section className="handoff-menu-block" role="tabpanel">
-              <div className="handoff-framework-row" role="group" aria-label={t('handoff.framework')}>
+              <div className="handoff-framework-block" role="group" aria-label={t('handoff.framework')}>
                 <span className="handoff-framework-label">{t('handoff.framework')}</span>
-                {FRAMEWORKS.map((framework) => (
-                  <button
-                    key={framework.id}
-                    type="button"
-                    className={`handoff-framework-chip${framework.id === selectedFramework.id ? ' active' : ''}`}
-                    aria-pressed={framework.id === selectedFramework.id}
-                    onClick={() => chooseFramework(framework.id)}
-                  >
-                    {frameworkLabel(framework.id, t)}
-                  </button>
-                ))}
+                <div className="handoff-framework-grid">
+                  {FRAMEWORKS.map((framework) => (
+                    <button
+                      key={framework.id}
+                      type="button"
+                      className={`handoff-framework-chip${framework.id === selectedFramework.id ? ' active' : ''}`}
+                      aria-pressed={framework.id === selectedFramework.id}
+                      onClick={() => chooseFramework(framework.id)}
+                    >
+                      {frameworkLabel(framework.id, t)}
+                    </button>
+                  ))}
+                </div>
               </div>
               {availableCliTargets.length > 0 ? (
                 <div className="handoff-target-group">
