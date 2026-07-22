@@ -200,6 +200,22 @@ export function parseDaemonLogTail(logText: string): {
   return out;
 }
 
+// Reduce `syscall` to the bare operation token.
+//
+// Node does NOT guarantee this is only the operation name: a failed
+// child_process.spawn sets it to the whole invocation —
+// `spawn /Users/alice/.../tool`, or `spawn C:\Users\Alice\...` on Windows.
+// Forwarding it verbatim would put the local username and install path into a
+// safety event that is retained even for opted-out users, while every other
+// path this module sends is scrubbed. The operation is the entire analytic
+// value here (the path is already available, scrubbed, via error_message), so
+// keep the first token and scrub what survives as a second line of defence.
+function normalizeSyscall(syscall: string): string | null {
+  const token = syscall.trim().split(/\s+/, 1)[0] ?? "";
+  if (!token) return null;
+  return scrubUserPaths(token).slice(0, 40);
+}
+
 // Node's system-error triplet, read off the thrown object rather than its
 // message. `spawn UNKNOWN` (win32 CreateProcess refused) and friends carry the
 // only usable cause here; the message alone cannot separate them.
@@ -213,9 +229,12 @@ export function readErrnoFields(error: unknown): {
   }
   const e = error as NodeJS.ErrnoException;
   return {
-    code: typeof e.code === "string" && e.code.length > 0 ? e.code : null,
+    code: typeof e.code === "string" && e.code.length > 0 ? e.code.slice(0, 40) : null,
     errno: typeof e.errno === "number" ? e.errno : null,
-    syscall: typeof e.syscall === "string" && e.syscall.length > 0 ? e.syscall : null,
+    syscall:
+      typeof e.syscall === "string" && e.syscall.length > 0
+        ? normalizeSyscall(e.syscall)
+        : null,
   };
 }
 

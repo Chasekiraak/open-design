@@ -26,6 +26,7 @@ import {
   parseDaemonLogTail,
   reportStartupFailure,
   resolveStartupDistinctId,
+  readErrnoFields,
   scrubUserPaths,
 } from '../src/startup-telemetry.js';
 
@@ -603,5 +604,65 @@ SqliteError: database disk image is malformed
     const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
       .properties;
     expect(props.daemon_error).toBe('SqliteError: database disk image is malformed');
+  });
+});
+
+// Privacy guard for the errno triplet (review of PR #5956).
+//
+// Node does not guarantee `syscall` is only the operation name: a failed
+// child_process.spawn sets it to the whole invocation. Verified against real
+// Node behaviour — spawning a missing binary yields
+// `syscall === 'spawn /Users/<name>/.../tool'`. Forwarding that verbatim would
+// put the local username and install path into an event that is retained even
+// for opted-out users, while every other path this module sends is scrubbed.
+describe('errno triplet privacy', () => {
+  it('reduces a path-bearing POSIX syscall to the operation token', () => {
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      code: 'ENOENT',
+      errno: -2,
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    expect(readErrnoFields(err).syscall).toBe('spawn');
+  });
+
+  it('reduces a path-bearing Windows syscall to the operation token', () => {
+    const err = Object.assign(new Error('spawn UNKNOWN'), {
+      syscall: 'spawn C:\\Users\\Alice Smith\\AppData\\Open Design\\vela.exe',
+    });
+    expect(readErrnoFields(err).syscall).toBe('spawn');
+  });
+
+  it('emits no username anywhere in the payload for a path-bearing spawn failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      code: 'ENOENT',
+      errno: -2,
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    await reportStartupFailure(
+      {
+        error: err,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(init.body as string).not.toContain('alice');
+  });
+
+  it('classifies a spawn failure whose syscall carries a path', () => {
+    // The pre-normalization check compared the raw `syscall` to 'spawn', so a
+    // spawn error carrying a path fell through to `unknown` — the exact bucket
+    // this PR exists to drain.
+    const err = Object.assign(new Error('spawn /Users/alice/tools/vela ENOENT'), {
+      syscall: 'spawn /Users/alice/tools/vela',
+    });
+    expect(classifyStartupFailure(err, false).failureKind).toBe('spawn-failed');
   });
 });
