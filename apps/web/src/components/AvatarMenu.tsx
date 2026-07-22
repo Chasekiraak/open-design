@@ -291,6 +291,12 @@ export function AvatarMenu({
       : config.mode === 'daemon'
         ? currentModelLabel ?? currentModelId
         : null;
+  const hasSelectableAgentCatalog =
+    config.mode === 'daemon' &&
+    !!currentAgent?.available &&
+    (currentAgentModelOptions.length > 0 ||
+      (currentAgent.reasoningOptions?.length ?? 0) > 0);
+  const staticAgentModelLabel = currentModelLabel ?? currentModelId;
 
   return (
     <div className={`avatar-menu avatar-menu--${placement}`} ref={wrapRef}>
@@ -382,11 +388,7 @@ export function AvatarMenu({
 
           {config.mode === 'daemon' ? (
             <>
-              {currentAgent &&
-              currentAgent.available &&
-              ((currentAgent.models && currentAgent.models.length > 0) ||
-                (currentAgent.reasoningOptions &&
-                  currentAgent.reasoningOptions.length > 0)) ? (
+              {hasSelectableAgentCatalog && currentAgent ? (
                 <div className="avatar-model-section">
                   {currentAgent.models && currentAgent.models.length > 0 ? (
                     <div className="avatar-select-row">
@@ -471,6 +473,15 @@ export function AvatarMenu({
                       <div className="avatar-static-value">{currentReasoningLabel}</div>
                     </div>
                   ) : null}
+                </div>
+              ) : staticAgentModelLabel ? (
+                <div className="avatar-model-section">
+                  <div className="avatar-select-row">
+                    <span className="avatar-select-label">
+                      {t('avatar.modelLabel')}
+                    </span>
+                    <div className="avatar-static-value">{staticAgentModelLabel}</div>
+                  </div>
                 </div>
               ) : null}
             </>

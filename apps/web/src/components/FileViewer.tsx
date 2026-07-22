@@ -9161,9 +9161,11 @@ function HtmlViewer({
         const id = String(data.id || '');
         if (!id) return;
         const transform = String(data.transform || '');
-        void handleManualEditStyleChange(id, { transform }, 'Move element');
+        const dragStyles: Partial<ManualEditStyles> = { transform };
+        if (typeof data.display === 'string' && data.display) dragStyles.display = data.display;
+        void handleManualEditStyleChange(id, dragStyles, 'Move element');
         if (selectedManualEditTargetIdRef.current === id) {
-          setManualEditDraft((current) => ({ ...current, styles: { ...current.styles, transform } }));
+          setManualEditDraft((current) => ({ ...current, styles: { ...current.styles, ...dragStyles } }));
           setManualEditDraftDirty(true);
         }
         return;

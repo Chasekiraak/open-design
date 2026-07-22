@@ -37,11 +37,8 @@
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-6);
-  /* Top padding tuned so that at the reference working window (~1333×960)
-     the fold lands exactly on the second project-card row's image bottom
-     (304px left the fold cutting mid-image; -52px aligns it). The parent
-     still contributes ~16px above. */
-  padding: 281px 0 var(--spacing-4);
+  /* Trim the large blank band while keeping the hero clear of the tab strip. */
+  padding: 240px 0 var(--spacing-4);
 }
 .home-hero__brand {
   position: relative;
@@ -482,7 +479,7 @@
   flex-direction: column;
   gap: var(--spacing-8);
   padding: var(--spacing-4) var(--spacing-4) var(--spacing-8);
-  background: var(--bg-subtle);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
   transition: background-color var(--duration-faster, 100ms) var(--curve-easy-ease, ease);
   /* Borderless: the tinted surface alone provides the grouping; the inner
      input card keeps the only stroke. */
@@ -495,7 +492,7 @@
 /* While the composer is engaged (input focused) the grouping surface steps
    one level heavier on the neutral ladder so the active state reads. */
 .home-hero__composer-card:focus-within {
-  background: color-mix(in srgb, var(--bg-subtle) 70%, var(--bg-muted));
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 .home-hero__composer-card .home-hero__input-card,
 .home-hero__composer-card .home-hero__workdir-row {
@@ -1471,7 +1468,7 @@
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:hover,
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:focus-visible {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
+  background: var(--bg-subtle);
   color: var(--text-strong);
 }
 /* The working-directory dropdown must float below its trigger and never
@@ -2587,14 +2584,16 @@
    card button. The flex sizing lives on the cell; the card button fills it. */
 .home-hero__plugin-preset-cell {
   position: relative;
-  flex: 0 0 248px;
-  min-width: 0;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 96px;
+  max-width: 340px;
   display: flex;
   /* One source for the preview row's height: the preview box below pins itself
      to it, and the hover actions park against its bottom edge. They used to
      carry `top: 108px`, a number that silently encoded this height minus the
      button row. */
-  --preset-preview-h: 150px;
+  --preset-preview-h: 124px;
   --preset-action-h: 32px;
 }
 /* Hover overlay actions (use / remix) on the example cards — OUR functional
@@ -2683,12 +2682,12 @@
 .home-hero__plugin-preset {
   appearance: none;
   position: relative;
-  width: 100%;
+  width: auto;
   height: auto;
-  min-height: 184px;
+  min-height: 158px;
   min-width: 0;
   display: grid;
-  grid-template-rows: 150px minmax(0, auto);
+  grid-template-rows: var(--preset-preview-h) minmax(0, auto);
   gap: 8px;
   padding: 0;
   border: 1px solid var(--border);
@@ -2717,11 +2716,15 @@
 .home-hero__plugin-preset:not(:disabled):focus-visible,
 .home-hero__plugin-preset.is-active {
   outline: none;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
   background: color-mix(in srgb, var(--accent-tint) 32%, var(--bg-panel));
   color: var(--text-strong);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+
+.home-hero__plugin-preset.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }
 
 .home-hero__plugin-preset.is-pending {
@@ -2737,9 +2740,36 @@
   height: var(--preset-preview-h);
   min-height: var(--preset-preview-h);
   max-height: var(--preset-preview-h);
+  width: auto;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg-subtle);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.home-hero__plugin-preset-preview .plugins-home__preview--media,
+.home-hero__plugin-preset-preview .plugins-home__media {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-hero__plugin-preset-preview .plugins-home__media-img,
+.home-hero__plugin-preset-preview .plugins-home__media-video {
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+}
+
+.home-hero__plugin-preset-preview:has(.plugins-home__html),
+.home-hero__plugin-preset-preview:has(.plugins-home__text-surface) {
+  aspect-ratio: 2 / 1;
 }
 
 .home-hero__plugin-preset-check {
@@ -2757,8 +2787,7 @@
   box-shadow: var(--shadow-sm);
 }
 
-.home-hero__plugin-preset-preview .plugins-home__preview,
-.home-hero__plugin-preset-preview .plugins-home__media,
+.home-hero__plugin-preset-preview .plugins-home__preview:not(.plugins-home__preview--media),
 .home-hero__plugin-preset-preview .plugins-home__html,
 .home-hero__plugin-preset-preview .plugins-home__text-surface {
   width: 100%;
@@ -2791,7 +2820,7 @@
    cell, so the slide has no dark band and deck cards keep an identical card
    height + title-row height to prototype/HyperFrames/image tiles. */
 .home-hero__plugin-preset[data-od-mode="deck"] .home-hero__plugin-preset-preview {
-  aspect-ratio: auto;
+  aspect-ratio: 16 / 9;
   --deck-preview-scale: 0.166;
 }
 .home-hero__plugin-preset[data-od-mode="deck"] .plugins-home__html-frame {
@@ -2852,7 +2881,9 @@
 /* Row 2 of the preset grid: a small commercial-category kicker pill over the
    title (matches the Create-page card + the reference template galleries). */
 .home-hero__plugin-preset-meta {
-  min-width: 0;
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -2874,6 +2905,7 @@
   text-overflow: ellipsis;
 }
 .home-hero__plugin-preset-title {
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3002,14 +3034,12 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .home-hero__plugin-preset-cell {
-    flex-basis: 224px;
+    flex-basis: auto;
+    max-width: 300px;
+    --preset-preview-h: 112px;
   }
   .home-hero__plugin-preset {
-    min-height: 170px;
-    grid-template-rows: 136px minmax(0, auto);
-  }
-  .home-hero__plugin-preset-preview {
-    min-height: 136px;
+    min-height: 146px;
   }
   .home-hero__plugin-preset-preview .plugins-home__html-iframe {
     transform: scale(0.146);
@@ -3054,14 +3084,12 @@
     grid-template-columns: 1fr;
   }
   .home-hero__plugin-preset-cell {
-    flex-basis: 208px;
+    flex-basis: auto;
+    max-width: 280px;
+    --preset-preview-h: 104px;
   }
   .home-hero__plugin-preset {
-    min-height: 160px;
-    grid-template-rows: 126px minmax(0, auto);
-  }
-  .home-hero__plugin-preset-preview {
-    min-height: 126px;
+    min-height: 138px;
   }
   .home-hero__plugin-preset-preview .plugins-home__html-iframe {
     transform: scale(0.134);
@@ -3884,4 +3912,3 @@
   color: var(--text-faint);
   font-size: 12px;
 }
-

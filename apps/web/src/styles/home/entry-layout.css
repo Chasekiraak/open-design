@@ -4227,7 +4227,8 @@
   line-height: 1.4;
   color: var(--text);
 }
-.onboarding-view__memory-benefits li svg {
+.onboarding-view__memory-benefits li svg,
+.onboarding-view__memory-benefits li .od-icon {
   color: var(--accent);
 }
 
@@ -4664,13 +4665,15 @@
   background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
 }
 
-.onboarding-view__build-benefits svg {
+.onboarding-view__build-benefits svg,
+.onboarding-view__build-benefits .od-icon {
   grid-row: 1 / span 2;
   margin-top: 2px;
   color: var(--accent);
 }
 
 .onboarding-view__build-benefits strong {
+  grid-column: 2;
   min-width: 0;
   color: var(--text-strong);
   font-size: 13px;
@@ -4678,6 +4681,7 @@
 }
 
 .onboarding-view__build-benefits span {
+  grid-column: 2;
   min-width: 0;
   color: var(--text-muted);
   font-size: 13px;

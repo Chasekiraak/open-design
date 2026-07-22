@@ -314,6 +314,23 @@ describe('AvatarMenu', () => {
     expect(custom.getAttribute('aria-checked')).toBe('true');
   });
 
+  it('falls back to a static saved model when the active catalog is unavailable', () => {
+    renderMenu({
+      config: {
+        ...baseConfig,
+        agentModels: { codex: { model: 'custom-codex-model', reasoning: 'default' } },
+      },
+      agents: [{ ...codexAgent, models: [], reasoningOptions: [] }],
+    });
+
+    const menu = openMenu();
+    expect(menu.querySelector('[data-testid="avatar-model-list"]')).toBeNull();
+    expect(menu.querySelector('.avatar-static-value')?.textContent).toBe(
+      'custom-codex-model',
+    );
+    expect(screen.getByTestId('avatar-open-execution-settings')).toBeTruthy();
+  });
+
   it('routes plan-gated Open Design models to the plans page instead of selecting them', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
     const openSpy = vi.fn();

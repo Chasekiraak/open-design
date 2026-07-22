@@ -942,8 +942,32 @@
   background: transparent;
   box-shadow: none;
 }
+/* Chrome-style hairline separators between tabs: each tab after the first
+   draws a short divider centered in the 2px strip gap before it. Dividers
+   touching the active (or hovered / dragging) tab fade out so its pill reads
+   as one uninterrupted shape. */
 .workspace-shell .workspace-tab + .workspace-tab::before {
-  display: none;
+  content: '';
+  display: block;
+  position: absolute;
+  left: -1.5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 14px;
+  background: color-mix(in srgb, var(--border-strong) 52%, transparent);
+  pointer-events: none;
+  transition: opacity 100ms var(--ease-out);
+}
+.workspace-shell .workspace-tab.is-active::before,
+.workspace-shell .workspace-tab.is-active + .workspace-tab::before,
+.workspace-shell .workspace-tab:hover::before,
+.workspace-shell .workspace-tab:hover + .workspace-tab::before,
+.workspace-shell .workspace-tab:focus-within::before,
+.workspace-shell .workspace-tab:focus-within + .workspace-tab::before,
+.workspace-shell .workspace-tab.is-dragging::before,
+.workspace-shell .workspace-tab.is-dragging + .workspace-tab::before {
+  opacity: 0;
 }
 /* The pinned Home tab is fixed: it never shrinks with the project tabs and
    stays stuck to the left edge so it remains fully visible after the rest
@@ -2191,10 +2215,12 @@
 /* Hide the dropdown chevron (a RemixIcon <i>, not an <svg>) so only the agent
    mark shows. The old `svg:last-child` matched nothing — the leftover chevron
    became a second grid item that wrapped to a second row under the single
-   `1fr` column, pushing the mark up out of vertical center. */
+   `1fr` column, pushing the mark up out of vertical center.
+   !important because RemixIcon carries an inline `display: inline-flex`
+   style that otherwise beats any stylesheet rule. */
 .app .composer-row .avatar-agent-trigger > i:last-child,
 .chat-composer-fixed-layer .composer-row .avatar-agent-trigger > i:last-child {
-  display: none;
+  display: none !important;
 }
 /* When the selected-model readout is shown, drop the leading agent mark so the
    trigger reads as just the model name (icon-only mode, with no readout, keeps
@@ -2507,9 +2533,34 @@
 .app .ws-tab.design-files-tab.active {
   box-shadow: none;
 }
-/* Right-edge shadow only while tabs scroll beneath the sticky tab (overflow). */
-.app .ws-tabs-bar.is-overflowing .ws-tab.design-files-tab.active {
-  box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.12);
+/* Light separator between adjacent unselected tabs (Chrome tab-strip
+   pattern). Drawn by the trailing tab at the centre of the 6px gap so a
+   line only ever appears BETWEEN two tabs, and faded out whenever either
+   neighbour shows a pill background (active / hover / drag) so it never
+   abuts a pill. */
+.app .ws-tab + .ws-tab::before {
+  content: '';
+  position: absolute;
+  left: -3.5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  pointer-events: none;
+  transition: opacity 120ms var(--ease-out);
+}
+.app .ws-tab.active::before,
+.app .ws-tab:hover::before,
+.app .ws-tab.dragging::before,
+.app .ws-tab.drag-over-before::before,
+.app .ws-tab.drag-over-after::before,
+.app .ws-tab.active + .ws-tab::before,
+.app .ws-tab:hover + .ws-tab::before,
+.app .ws-tab.dragging + .ws-tab::before,
+.app .ws-tab.drag-over-before + .ws-tab::before,
+.app .ws-tab.drag-over-after + .ws-tab::before {
+  opacity: 0;
 }
 .app .ws-tab .tab-icon,
 .app .ws-tab.active .tab-icon {
@@ -3786,4 +3837,3 @@ body.od-quick-switcher-open .chat-composer-fixed-layer .composer-send:disabled {
    360px track plus the row-density overrides that came with it — was
    removed. Leaving the grid rule behind reserved an empty 360px column and
    the panel content stopped short of the panel edge. */
-

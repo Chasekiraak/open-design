@@ -861,7 +861,9 @@ export function RecentProjectsStrip({
                     toggleSelection(project.id);
                   }}
                 >
-                  <span aria-hidden>{selected ? '✓' : ''}</span>
+                  <span aria-hidden>
+                    {selected ? <Icon name="check" size={16} /> : null}
+                  </span>
                 </button>
               ) : null}
               <button

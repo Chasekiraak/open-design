@@ -446,6 +446,39 @@ describe('manual edit bridge target normalization', () => {
     dom.window.close();
   });
 
+  it('makes an inline element transformable and keeps live guides attached during drag', () => {
+    const posts: Array<{ type?: string; id?: string; transform?: string; display?: string }> = [];
+    const dom = new JSDOM(
+      `<style>span { display: inline; }</style><main data-od-source-path="path-0"><span data-od-source-path="path-0-0">Drag me</span></main>${buildManualEditBridge(true)}`,
+      { runScripts: 'dangerously', url: 'http://localhost' },
+    );
+    const label = dom.window.document.querySelector('span') as HTMLElement;
+    label.getBoundingClientRect = () => ({
+      x: 10, y: 20, width: 100, height: 24, top: 20, right: 110, bottom: 44, left: 10, toJSON: () => ({}),
+    } as DOMRect);
+    dom.window.parent.postMessage = ((message: unknown) => {
+      posts.push(message as { type?: string; id?: string; transform?: string; display?: string });
+    }) as typeof dom.window.parent.postMessage;
+
+    const pointer = (type: string, x: number, y: number) =>
+      label.dispatchEvent(new dom.window.MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true }));
+    pointer('pointerdown', 50, 30);
+    pointer('pointermove', 70, 42);
+
+    expect(label.style.display).toBe('inline-block');
+    expect(label.style.transform).toContain('translate(20px, 12px)');
+    const guideLayer = dom.window.document.querySelector('[data-od-edit-guides-layer]');
+    expect(guideLayer?.querySelectorAll('.od-edit-guide-line-reference').length).toBe(4);
+
+    pointer('pointerup', 70, 42);
+    expect(posts.find((message) => message.type === 'od-edit-drag-commit')).toMatchObject({
+      id: 'path-0-0',
+      display: 'inline-block',
+    });
+
+    dom.window.close();
+  });
+
   it('treats a sub-threshold press as a click, not a drag (no transform, no commit)', () => {
     const posts: Array<{ type?: string }> = [];
     const dom = new JSDOM(

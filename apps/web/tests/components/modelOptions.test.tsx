@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CUSTOM_MODEL_SENTINEL,
+  groupModelsByCompany,
   isCustomModel,
+  modelCompany,
   orderModelOptionsByAvailability,
   renderModelOptions,
   SearchableModelSelect,
@@ -99,6 +101,32 @@ describe('orderModelOptionsByAvailability', () => {
   });
 });
 
+describe('model company grouping', () => {
+  it('normalizes provider aliases into one company group', () => {
+    expect(modelCompany('gpt-5.4')).toEqual({ key: 'openai', name: 'OpenAI' });
+    expect(modelCompany('openai/o3')).toEqual({ key: 'openai', name: 'OpenAI' });
+    expect(modelCompany('claude-sonnet-4.6')).toEqual({ key: 'anthropic', name: 'Anthropic' });
+    expect(modelCompany('anthropic/claude-opus-4.6')).toEqual({
+      key: 'anthropic',
+      name: 'Anthropic',
+    });
+
+    expect(
+      groupModelsByCompany([
+        { id: 'gpt-5.4', label: 'GPT-5.4' },
+        { id: 'openai/o3', label: 'o3' },
+        { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+      ]).map((group) => ({
+        key: group.key,
+        models: group.options.map((option) => option.id),
+      })),
+    ).toEqual([
+      { key: 'openai', models: ['gpt-5.4', 'openai/o3'] },
+      { key: 'anthropic', models: ['claude-sonnet-4.6'] },
+    ]);
+  });
+});
+
 describe('SearchableModelSelect', () => {
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -167,6 +195,88 @@ describe('SearchableModelSelect', () => {
       expect(popover.style.bottom).toBe(`${window.innerHeight - 200 + 6}px`);
       expect(popover.style.maxHeight).toBe('114px');
     });
+  });
+
+  it('browses long cross-company catalogs without losing model metadata or locks', async () => {
+    const onChange = vi.fn();
+    const onDisabledOptionUpgrade = vi.fn();
+    render(
+      <SearchableModelSelect
+        models={[
+          { id: 'gpt-5.4', label: 'GPT-5.4', metadata: { capability: 'best_quality' } },
+          { id: 'openai/o3', label: 'o3' },
+          { id: 'openai/gpt-5-mini', label: 'GPT-5 mini' },
+          { id: 'openai/gpt-4.1', label: 'GPT-4.1' },
+          { id: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+          {
+            id: 'anthropic/claude-opus-4.6',
+            label: 'Claude Opus 4.6',
+            enabled: false,
+            metadata: { cost: 'very_high' },
+          },
+          { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5' },
+          { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
+        ]}
+        value="gpt-5.4"
+        onChange={onChange}
+        searchPlaceholder="Search models"
+        minSearchableOptions={4}
+        disabledOptionHint={(option) =>
+          option.enabled === false ? 'Upgrade to use' : null
+        }
+        onDisabledOptionUpgrade={onDisabledOptionUpgrade}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox'));
+
+    expect(await screen.findByRole('tab', { name: /OpenAI/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('option', { name: 'GPT-5.4' })).toHaveAccessibleDescription(
+      'Best Quality',
+    );
+    expect(screen.queryByRole('option', { name: 'Claude Opus 4.6' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Anthropic/ }));
+
+    const locked = await screen.findByRole('option', { name: 'Claude Opus 4.6' });
+    expect(locked).toHaveAccessibleDescription('Highest cost Upgrade to use');
+    fireEvent.click(screen.getByTestId('model-option-upgrade-lock'));
+    expect(onDisabledOptionUpgrade).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'anthropic/claude-opus-4.6' }),
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('clamps the wider grouped picker to its visible boundary', async () => {
+    render(
+      <SearchableModelSelect
+        models={[
+          ...Array.from({ length: 4 }, (_, index) => ({
+            id: `openai/gpt-${index}`,
+            label: `GPT ${index}`,
+          })),
+          ...Array.from({ length: 4 }, (_, index) => ({
+            id: `anthropic/claude-${index}`,
+            label: `Claude ${index}`,
+          })),
+        ]}
+        value="openai/gpt-0"
+        onChange={vi.fn()}
+        searchPlaceholder="Search models"
+        minSearchableOptions={4}
+        popoverTestId="grouped-model-popover"
+        getPopoverBoundary={() => ({ top: 8, right: 328, bottom: 700, left: 8 })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox'));
+
+    const popover = await screen.findByTestId('grouped-model-popover');
+    expect(popover.style.left).toBe('8px');
+    expect(popover.style.width).toBe('320px');
   });
 
   it('renders capability tag and cost metadata as option text', async () => {

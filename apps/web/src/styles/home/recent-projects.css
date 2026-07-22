@@ -216,12 +216,11 @@
 .recent-projects__row.is-selecting .recent-projects__card:hover {
   transform: none;
 }
+/* Design-system projects no longer draw a red outer border / ring — the card
+   reads like any other; the "Design System" tag alone marks the kind. */
 .recent-projects__card.is-design-system-project {
-  border-color: color-mix(in srgb, var(--red) 62%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--red) 42%, transparent);
-}
-.recent-projects__card.is-design-system-project:hover {
-  border-color: var(--red);
+  border-color: transparent;
+  box-shadow: none;
 }
 .recent-projects__card-thumb {
   aspect-ratio: 16 / 9;

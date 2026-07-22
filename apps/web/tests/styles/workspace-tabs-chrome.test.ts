@@ -5,6 +5,8 @@ const shellCss = readFileSync(new URL('../../src/styles/shell.css', import.meta.
 const routinesCss = readFileSync(new URL('../../src/styles/viewer/routines.css', import.meta.url), 'utf8');
 const composioCss = readFileSync(new URL('../../src/styles/viewer/composio.css', import.meta.url), 'utf8');
 const entryLayoutCss = readFileSync(new URL('../../src/styles/home/entry-layout.css', import.meta.url), 'utf8');
+const drawerCss = readFileSync(new URL('../../src/styles/workspace/drawer.css', import.meta.url), 'utf8');
+const designSystemFlowCss = readFileSync(new URL('../../src/styles/design-system-flow.css', import.meta.url), 'utf8');
 
 function cssDeclarations(css: string, selector: string): string {
   const blocks: string[] = [];
@@ -27,6 +29,24 @@ function ruleValue(block: string, property: string): string {
 }
 
 describe('workspace tabs chrome styles', () => {
+  it('lets project workspace tabs scroll together instead of pinning transparent tabs', () => {
+    const tab = cssDeclarations(drawerCss, '.ws-tab');
+    const designSystemTab = cssDeclarations(designSystemFlowCss, '.ws-tab.design-system-tab');
+
+    expect(ruleValue(tab, 'position')).toBe('relative');
+    expect(designSystemTab).not.toContain('position: sticky');
+    expect(drawerCss).not.toMatch(/\.ws-tab\.design-files-tab\s*\{[^}]*position:\s*sticky/s);
+    expect(designSystemFlowCss).not.toContain('--ds-system-tab-w');
+  });
+
+  it('draws separators only between inactive workspace tabs', () => {
+    const separator = cssDeclarations(routinesCss, '.app .ws-tab + .ws-tab::before');
+    const activeSeparator = cssDeclarations(routinesCss, '.app .ws-tab.active::before');
+
+    expect(ruleValue(separator, 'width')).toBe('1px');
+    expect(ruleValue(separator, 'pointer-events')).toBe('none');
+    expect(ruleValue(activeSeparator, 'opacity')).toBe('0');
+  });
   it('keeps only a small intentional inset before the first tab', () => {
     const chrome = cssDeclarations(shellCss, '.workspace-tabs-chrome.app-chrome-header');
     const traffic = cssDeclarations(shellCss, '.workspace-tabs-chrome .workspace-tabs-traffic');
@@ -282,6 +302,10 @@ describe('workspace tabs chrome styles', () => {
     const projectTab = cssDeclarations(routinesCss, '.workspace-shell .workspace-tab');
     const activeProjectTab = cssDeclarations(routinesCss, '.workspace-shell .workspace-tab.is-active');
     const tabSeparator = cssDeclarations(routinesCss, '.workspace-shell .workspace-tab + .workspace-tab::before');
+    const activeTabSeparator = cssDeclarations(
+      routinesCss,
+      '.workspace-shell .workspace-tab.is-active::before',
+    );
     const main = cssDeclarations(routinesCss, '.workspace-shell .workspace-tab__main');
     const popover = cssDeclarations(shellCss, '.workspace-tabs-popover');
     const presentOverlay = cssDeclarations(composioCss, '.present-overlay');
@@ -309,7 +333,8 @@ describe('workspace tabs chrome styles', () => {
     expect(projectStrip).not.toContain('overflow-x:');
     expect(ruleValue(sharedStrip, 'overflow-x')).toBe('auto');
     expect(ruleValue(sharedStrip, 'overflow-y')).toBe('hidden');
-    expect(ruleValue(tabSeparator, 'display')).toBe('none');
+    expect(ruleValue(tabSeparator, 'display')).toBe('block');
+    expect(ruleValue(activeTabSeparator, 'opacity')).toBe('0');
     expect(ruleValue(main, 'z-index')).toBe('2');
     expect(Number(ruleValue(popover, 'z-index'))).toBeGreaterThan(
       Number(ruleValue(presentOverlay, 'z-index')),
@@ -317,7 +342,6 @@ describe('workspace tabs chrome styles', () => {
     // #5517 drops the 380ms tab hover-preview card entirely — no component, no
     // stylesheet block. Guard the removal so it cannot creep back in.
     expect(shellCss).not.toContain('.workspace-tab-preview');
-    expect(routinesCss).not.toContain('.workspace-shell .workspace-tab.is-active::before');
     expect(routinesCss).not.toContain('.workspace-shell .workspace-tab.is-active::after');
   });
 

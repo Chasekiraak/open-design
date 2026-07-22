@@ -11,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import {
   DESIGN_FILES_TAB,
   FileWorkspace,
+  scrollWorkspaceTabIntoView,
   scrollWorkspaceTabsWithWheel,
 } from '../../src/components/FileWorkspace';
 import { I18nProvider } from '../../src/i18n';
@@ -2094,6 +2095,48 @@ describe('projectSplitClassName', () => {
       gridTemplateColumns: '512px 8px minmax(420px, 1fr)',
     });
     expect(projectSplitStyle(true, 512, 'minmax(420px, 1fr)')).toBeUndefined();
+  });
+});
+
+describe('scrollWorkspaceTabIntoView', () => {
+  function rect(left: number, right: number): DOMRect {
+    return {
+      x: left,
+      y: 0,
+      top: 0,
+      right,
+      bottom: 32,
+      left,
+      width: right - left,
+      height: 32,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  it('reveals tabs against the real scrollport edges without a sticky-tab offset', () => {
+    const tabBar = {
+      scrollLeft: 100,
+      getBoundingClientRect: () => rect(0, 200),
+    } as HTMLDivElement;
+    const leftTab = { getBoundingClientRect: () => rect(-40, 60) } as HTMLElement;
+    const rightTab = { getBoundingClientRect: () => rect(180, 280) } as HTMLElement;
+
+    scrollWorkspaceTabIntoView(tabBar, leftTab);
+    expect(tabBar.scrollLeft).toBe(60);
+
+    scrollWorkspaceTabIntoView(tabBar, rightTab);
+    expect(tabBar.scrollLeft).toBe(140);
+  });
+
+  it('leaves a fully visible tab in place', () => {
+    const tabBar = {
+      scrollLeft: 40,
+      getBoundingClientRect: () => rect(0, 200),
+    } as HTMLDivElement;
+    const tab = { getBoundingClientRect: () => rect(40, 140) } as HTMLElement;
+
+    scrollWorkspaceTabIntoView(tabBar, tab);
+    expect(tabBar.scrollLeft).toBe(40);
   });
 });
 

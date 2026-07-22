@@ -2713,6 +2713,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
 .settings-model-popover .model-select-searchable__option-label,
 .settings-model-popover .model-select-searchable__option-meta,
 .settings-model-popover .model-select-searchable__empty,
+.settings-model-popover .model-select-searchable__company,
 .settings-model-popover .model-select-searchable__input {
   font-size: 14px;
 }
@@ -2730,6 +2731,78 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  padding: 6px;
+}
+.model-select-searchable__body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  max-height: 280px;
+}
+.model-select-searchable__companies {
+  flex: 0 0 auto;
+  width: clamp(112px, 38%, 168px);
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+}
+.model-select-searchable__company {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.model-select-searchable__company:hover,
+.model-select-searchable__company:focus-visible,
+.model-select-searchable__company.is-active {
+  outline: none;
+  background: var(--bg-subtle);
+  color: var(--text-strong);
+}
+.model-select-searchable__company.is-active {
+  font-weight: 600;
+}
+.model-select-searchable__company-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-select-searchable__company-count {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 500;
+}
+.model-select-searchable__company.has-selected .model-select-searchable__company-name::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.model-select-searchable__models {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 6px;
 }
 .model-select-searchable__option {

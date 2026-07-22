@@ -2350,26 +2350,15 @@ a.ds-source-link-open:focus-visible {
 }
 
 
-/* Design-system project review workspace restored from PR #1719. */
+/* Design-system project review workspace restored from PR #1719. Like the
+   Design Files tab, this tab scrolls with the strip — no sticky pinning, so
+   overflowed tabs never slide underneath it. */
 .ws-tab.design-system-tab {
   font-weight: 500;
   color: var(--text);
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: var(--bg-panel);
-  box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.12);
 }
 .ws-tab.design-system-tab.active {
   background: var(--bg-subtle);
-}
-.workspace.has-design-system-tab .ws-tab.design-files-tab {
-  /* Stick exactly to the right edge of the sticky Design System tab. The width
-     is measured live (locale-proof) into --ds-system-tab-w by FileWorkspace; the
-     148px fallback only applies before the first measurement. The old hardcoded
-     148px over-shot the ~110px tab and left a visible gap between the two. */
-  left: var(--ds-system-tab-w, 148px);
-  z-index: 1;
 }
 
 .ws-tabs-actions { display: inline-flex; gap: 4px; align-items: center; }

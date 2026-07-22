@@ -90,11 +90,11 @@ describe('FileViewer manual edit regressions', () => {
   // The bridge posts this once a free drag-to-reposition passes the 4px
   // threshold and the pointer is released; the transform it carries is the
   // element's new translate().
-  async function dropManualEditDrag(id: string, transform: string) {
+  async function dropManualEditDrag(id: string, transform: string, display?: string) {
     const frame = await previewFrame();
     act(() => {
       window.dispatchEvent(new MessageEvent('message', {
-        data: { type: 'od-edit-drag-commit', id, transform },
+        data: { type: 'od-edit-drag-commit', id, transform, display },
         source: frame.contentWindow,
       }));
     });
@@ -509,7 +509,7 @@ describe('FileViewer manual edit regressions', () => {
     // Nothing is dirty before the drag, so no Reset is offered.
     expect(screen.queryByText('Reset')).toBeNull();
 
-    await dropManualEditDrag('hero', 'translate(12px, 8px)');
+    await dropManualEditDrag('hero', 'translate(12px, 8px)', 'inline-block');
 
     // The drop is a pending edit like any inspector change: nothing on disk yet,
     // but the panel is dirty so Reset/Save act on it.
@@ -528,6 +528,7 @@ describe('FileViewer manual edit regressions', () => {
     });
     const payload = JSON.parse(savedBodies[0]!) as { content: string };
     expect(payload.content).toContain('translate(12px, 8px)');
+    expect(payload.content).toContain('display: inline-block');
   });
 
   it('keeps a drag on an unselected element out of the open panel draft', async () => {
