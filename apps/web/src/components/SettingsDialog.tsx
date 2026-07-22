@@ -1616,56 +1616,6 @@ export function SettingsDialog({
   // permission bits exclude.
   const { context: workspaceContext } = useWorkspaceContext();
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
-  const [settingsSearch, setSettingsSearch] = useState('');
-  // Case-insensitive match of the settings-nav search against a nav item's
-  // title/subtitle *plus* the names of the controls that section owns.
-  //
-  // Matching titles alone made the box look dead: people search for the thing
-  // they want to change ("language", "语言", "API key", "theme"), which is a
-  // control *inside* a section rather than the section's own name, so every
-  // realistic query hid all eight entries and left a blank sidebar with no
-  // explanation (acceptance #33). The extra terms are pulled from strings the
-  // sections already render, so they stay translated in every locale for free.
-  const settingsSearchQuery = settingsSearch.trim().toLowerCase();
-  const settingsNavMatch = (...labels: string[]) =>
-    settingsSearchQuery === '' || labels.some((label) => label.toLowerCase().includes(settingsSearchQuery));
-  // Controls each section owns, in the user's own language. Reused strings
-  // only — adding a term here must never introduce an English-only literal,
-  // otherwise the search silently regresses to English-speakers-only.
-  const settingsNavTerms = {
-    execution: [
-      t('settings.envConfigure'), t('settings.localCli'), t('settings.modeApiMeta'),
-      t('settings.modeApi'), t('settings.apiKey'), t('settings.model'), t('settings.baseUrl'),
-      t('settings.modelPicker'),
-    ],
-    general: [
-      t('settings.general'), t('settings.generalHint'), t('settings.language'),
-      t('settings.languageHint'), t('settings.appearance'), t('settings.appearanceHint'),
-      t('settings.themeLight'), t('settings.themeDark'), t('settings.themeSystem'),
-      // General also owns the System preferences, pet and project-location
-      // blocks, so searching for any of them must surface the General item.
-      t('settings.systemPrefsTitle'), t('settings.systemPrefsHint'),
-      t('settings.notifyCompletionSound'), t('settings.notifyDesktop'),
-      t('pet.navTitle'), t('settings.projectLocations'),
-    ],
-    instructions: [t('settings.instructionsTitle'), t('settings.instructionsNavSub')],
-    memory: [t('settings.memory'), t('settings.memoryHint')],
-    media: [t('settings.mediaProviders'), 'Image / video / audio'],
-    integrations: [
-      t('settings.mcpServerTitle'), t('settings.mcpServerHint'), t('settings.mcpTitle'),
-      t('settings.mcpHint'),
-    ],
-    privacy: [
-      t('settings.privacy'), t('settings.privacyHint'), t('settings.privacyMetrics'),
-      t('settings.privacyContent'), t('settings.privacyDataDeletion'),
-    ],
-    about: [t('settings.about'), t('settings.aboutHint')],
-  } satisfies Record<string, string[]>;
-  // A query that matches nothing must say so. Silently emptying the rail is
-  // indistinguishable from a broken input, which is how #33 was reported.
-  const settingsNavHasResults =
-    settingsSearchQuery === ''
-    || Object.values(settingsNavTerms).some((terms) => settingsNavMatch(...terms));
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(true);
   // Scroll the right-hand content pane back to the top whenever the user
@@ -4191,22 +4141,12 @@ export function SettingsDialog({
                   <Icon name="arrow-left" size={15} />
                   <span>{t('settings.pageBackToHome')}</span>
                 </button>
-                <label className={`settings-page-search${settingsSearch.trim() ? ' has-text' : ''}`}>
-                  <Icon name="search" size={14} />
-                  <input
-                    type="search"
-                    placeholder={t('settings.pageSearchPlaceholder')}
-                    value={settingsSearch}
-                    onChange={(e) => setSettingsSearch(e.target.value)}
-                  />
-                </label>
               </div>
             ) : null}
             <button
               type="button"
               className={`settings-nav-item${activeSection === 'execution' ? ' active' : ''}`}
               onClick={() => setActiveSection('execution')}
-              hidden={!settingsNavMatch(...settingsNavTerms.execution)}
               data-testid="settings-nav-execution"
             >
               <Icon name="sliders" size={18} />
@@ -4219,7 +4159,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'general' ? ' active' : ''}`}
               onClick={() => setActiveSection('general')}
-              hidden={!settingsNavMatch(...settingsNavTerms.general)}
             >
               <Icon name="settings" size={18} />
               <span>
@@ -4231,7 +4170,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'instructions' ? ' active' : ''}`}
               onClick={() => setActiveSection('instructions')}
-              hidden={!settingsNavMatch(...settingsNavTerms.instructions)}
             >
               <Icon name="edit" size={18} />
               <span>
@@ -4243,7 +4181,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'memory' ? ' active' : ''}`}
               onClick={() => setActiveSection('memory')}
-              hidden={!settingsNavMatch(...settingsNavTerms.memory)}
             >
               <Icon name="brain" size={18} />
               <span>
@@ -4255,7 +4192,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'media' ? ' active' : ''}`}
               onClick={() => setActiveSection('media')}
-              hidden={!settingsNavMatch(...settingsNavTerms.media)}
             >
               <Icon name="image" size={18} />
               <span>
@@ -4267,7 +4203,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'integrations' ? ' active' : ''}`}
               onClick={() => setActiveSection('integrations')}
-              hidden={!settingsNavMatch(...settingsNavTerms.integrations)}
             >
               <Icon name="puzzle" size={18} />
               <span>
@@ -4279,7 +4214,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'privacy' ? ' active' : ''}`}
               onClick={() => setActiveSection('privacy')}
-              hidden={!settingsNavMatch(...settingsNavTerms.privacy)}
             >
               <Icon name="eye" size={18} />
               <span>
@@ -4291,7 +4225,6 @@ export function SettingsDialog({
               type="button"
               className={`settings-nav-item${activeSection === 'about' ? ' active' : ''}`}
               onClick={() => setActiveSection('about')}
-              hidden={!settingsNavMatch(...settingsNavTerms.about)}
             >
               <Icon name="settings" size={18} />
               <span>
@@ -4299,15 +4232,6 @@ export function SettingsDialog({
                 <small>{t('settings.aboutHint')}</small>
               </span>
             </button>
-            {settingsNavHasResults ? null : (
-              <p
-                className="settings-page-search-empty"
-                role="status"
-                data-testid="settings-nav-search-empty"
-              >
-                {t('settings.pageSearchNoResults', { query: settingsSearch.trim() })}
-              </p>
-            )}
           </aside>
           <div className="settings-content" ref={settingsContentRef}>
           {activeSection === 'execution' ? (

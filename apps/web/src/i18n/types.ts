@@ -469,7 +469,6 @@ export interface Dict {
   // Full-page Settings (`/settings`): sidebar nav head above the section list
   // (back-to-home link, decorative search field, personal group label).
   'settings.pageBackToHome': string;
-  'settings.pageSearchPlaceholder': string;
   'settings.pageNavGroupPersonal': string;
   'settings.amrModelUpgradeHint': string;
   'settings.amrLoginErrorCompact': string;
@@ -4810,7 +4809,6 @@ export interface Dict {
   'questions.uploadNeedsProject': string;
   'questions.uploadPartialFailed': string;
   'questions.uploadFailed': string;
-  'settings.pageSearchNoResults': string;
   'manualEdit.sectionImage': string;
   'manualEdit.sectionContent': string;
   'manualEdit.sectionPage': string;

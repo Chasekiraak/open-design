@@ -5045,7 +5045,6 @@ export const zhCN: Dict = {
   'settings.workspaceTeamSpaceHint': '团队的共享项目与可见性。',
   // Full-page Settings (`/settings`): sidebar nav head above the section list.
   'settings.pageBackToHome': '返回首页',
-  'settings.pageSearchPlaceholder': '搜索设置...',
   'settings.pageNavGroupPersonal': '个人',
   "newproj.startFromLabel": "起点",
   "newproj.startBlank": "空白",
@@ -5116,7 +5115,6 @@ export const zhCN: Dict = {
   'settings.mediaProviderSaveHint': '更改会随底部设置操作栏一起保存。',
   'settings.mediaProviderNoKeyRequired': '无需密钥',
   'settings.mediaProviderNoKeyHint': '该提供商使用本地登录或内置运行时。',
-  'settings.pageSearchNoResults': '没有与“{query}”匹配的设置。',
   'manualEdit.sectionImage': '图片',
   'manualEdit.sectionContent': '内容',
   'manualEdit.sectionPage': '页面',

@@ -5053,7 +5053,6 @@ export const zhTW: Dict = {
   'settings.workspaceTeamSpaceHint': '團隊的共享專案與可見性。',
   // Full-page Settings (`/settings`): sidebar nav head above the section list.
   'settings.pageBackToHome': '返回首頁',
-  'settings.pageSearchPlaceholder': '搜尋設定...',
   'settings.pageNavGroupPersonal': '個人',
   "newproj.startFromLabel": "起點",
   "newproj.startBlank": "空白",
@@ -5124,7 +5123,6 @@ export const zhTW: Dict = {
   'settings.mediaProviderSaveHint': '變更會隨底部設定操作欄一起儲存。',
   'settings.mediaProviderNoKeyRequired': '無需金鑰',
   'settings.mediaProviderNoKeyHint': '該提供商使用本地登入或內建執行環境。',
-  'settings.pageSearchNoResults': '沒有與「{query}」相符的設定。',
   'manualEdit.sectionImage': '圖片',
   'manualEdit.sectionContent': '內容',
   'manualEdit.sectionPage': '頁面',

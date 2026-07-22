@@ -4624,7 +4624,6 @@ export const de: Dict = {
   'settings.workspaceTeamSpaceHint': 'Shared projects and visibility for your team.',
   // Full-page Settings (`/settings`): sidebar nav head above the section list.
   'settings.pageBackToHome': 'Back to home',
-  'settings.pageSearchPlaceholder': 'Search settings...',
   'settings.pageNavGroupPersonal': 'Personal',
   'newproj.startFromLabel': 'Ausgangspunkt',
   'newproj.startBlank': 'Leer',
@@ -4659,7 +4658,6 @@ export const de: Dict = {
   'settings.mediaProviderSaveHint': 'Changes are saved with the Settings action bar.',
   'settings.mediaProviderNoKeyRequired': 'No key required',
   'settings.mediaProviderNoKeyHint': 'This provider uses a local login or bundled runtime.',
-  'settings.pageSearchNoResults': 'No settings match “{query}”.',
   'manualEdit.sectionImage': 'IMAGE',
   'manualEdit.sectionContent': 'CONTENT',
   'manualEdit.sectionPage': 'PAGE',

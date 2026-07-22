@@ -1938,14 +1938,20 @@ export function ExtensionsMarketplace({
                       placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'https://example.com/skill'}
                     />
                   </label>
+                  {/* Inside the content column, below the URL field. As a
+                      direct <article> child this button fell into the card
+                      grid's second row and rendered dangling outside the
+                      card (issue #110). */}
+                  <button
+                    type="button"
+                    className="plugin-marketplace__create-action"
+                    data-testid="plugin-create-import-url"
+                    disabled={createBusy !== null || createUrl.trim().length === 0}
+                    onClick={() => void handleCreateImportUrl()}
+                  >
+                    {createBusy === 'import' ? t('pluginsView.importing') : t('pluginsView.importAndUpload')}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  disabled={createBusy !== null || createUrl.trim().length === 0}
-                  onClick={() => void handleCreateImportUrl()}
-                >
-                  {createBusy === 'import' ? t('pluginsView.importing') : t('pluginsView.importAndUpload')}
-                </button>
               </article>
               <article>
                 <span className="plugin-marketplace__create-option-icon" aria-hidden>
@@ -1970,27 +1976,34 @@ export function ExtensionsMarketplace({
                       setCreateFolderFiles(Array.from(event.currentTarget.files ?? []))
                     }
                   />
-                  <button
-                    type="button"
-                    className="plugin-marketplace__folder-pick"
-                    disabled={createBusy !== null}
-                    onClick={() => createFolderInputRef.current?.click()}
-                  >
-                    <Icon name="folder" size={15} />
-                    {createFolderFiles.length > 0
-                      ? t('pluginsView.filesSelected', { count: createFolderFiles.length })
-                      : t('pluginsView.chooseFolder')}
-                  </button>
+                  {/* Folder picker + upload on one row inside the card, the
+                      demo's `folder-action-row` shape. The upload button as a
+                      direct <article> child fell into the card grid's second
+                      row and rendered dangling outside the card (issue #110). */}
+                  <div className="plugin-marketplace__folder-action-row">
+                    <button
+                      type="button"
+                      className="plugin-marketplace__folder-pick"
+                      disabled={createBusy !== null}
+                      onClick={() => createFolderInputRef.current?.click()}
+                    >
+                      <Icon name="folder" size={15} />
+                      {createFolderFiles.length > 0
+                        ? t('pluginsView.filesSelected', { count: createFolderFiles.length })
+                        : t('pluginsView.chooseFolder')}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="plugin-create-upload-folder"
+                      disabled={createBusy !== null || createFolderFiles.length === 0}
+                      onClick={() => void handleCreateUploadFolder()}
+                    >
+                      {createBusy === 'upload'
+                        ? t('pluginsView.uploading')
+                        : t('pluginsView.uploadKind', { kind: pluginKindLabel(createKind, t) })}
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={createBusy !== null || createFolderFiles.length === 0}
-                  onClick={() => void handleCreateUploadFolder()}
-                >
-                  {createBusy === 'upload'
-                    ? t('pluginsView.uploading')
-                    : t('pluginsView.uploadKind', { kind: pluginKindLabel(createKind, t) })}
-                </button>
               </article>
             </div>
           </section>

@@ -2811,12 +2811,18 @@
   opacity: 0.8;
 }
 
-/* Back link from the expanded runtime chooser to the cloud landing. */
+/* Back link from the expanded runtime chooser to the cloud landing.
+   `justify-self: start` is load-bearing: the onboarding panel is a grid whose
+   items stretch by default, and the global button primitive centers button
+   content — a stretched back link therefore floats its label mid-column
+   instead of sitting at the content column's left edge, above the panel
+   title (issue #138). */
 .onboarding-view__back-to-cloud {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   align-self: start;
+  justify-self: start;
   padding: 0;
   border: 0;
   background: transparent;
