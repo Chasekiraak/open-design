@@ -305,6 +305,12 @@ interface VelaConfigFileShape {
   profiles?: Record<string, VelaProfileShape>;
 }
 
+interface VelaProfileConfigSnapshot {
+  profile: string;
+  stored: VelaProfileShape | undefined;
+  configMtimeMs: number | null;
+}
+
 export function mergeVelaEnv(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
@@ -334,6 +340,20 @@ function readConfigFile(): VelaConfigFileShape | null {
   } catch {
     return null;
   }
+}
+
+function readVelaProfileConfigSnapshot(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): VelaProfileConfigSnapshot {
+  const mergedEnv = mergeVelaEnv(env, configuredEnv);
+  const profile = resolveAmrProfile(mergedEnv);
+  const file = readConfigFile();
+  return {
+    profile,
+    stored: file?.profiles?.[profile],
+    configMtimeMs: existsSync(amrConfigPath()) ? statSync(amrConfigPath()).mtimeMs : null,
+  };
 }
 
 export function readVelaLoginStatus(
@@ -541,30 +561,29 @@ export function readVelaControlApiContext(
       configMtimeMs: null,
     };
   }
-  const apiContext = readVelaApiContext(env, configuredEnv);
-  const file = readConfigFile();
-  const stored = file?.profiles?.[apiContext.profile];
+  const snapshot = readVelaProfileConfigSnapshot(env, configuredEnv);
+  const apiContext = readVelaApiContext(env, configuredEnv, snapshot);
+  const stored = snapshot.stored;
   const controlKey = stored?.controlKey?.trim() ?? '';
   if (!controlKey) return null;
   return {
     ...apiContext,
     controlKey,
     user: stored?.user ?? null,
-    configMtimeMs: existsSync(amrConfigPath()) ? statSync(amrConfigPath()).mtimeMs : null,
+    configMtimeMs: snapshot.configMtimeMs,
   };
 }
 
 export function readVelaApiContext(
   env: NodeJS.ProcessEnv = process.env,
   configuredEnv: Record<string, string> = {},
+  snapshot: VelaProfileConfigSnapshot = readVelaProfileConfigSnapshot(env, configuredEnv),
 ): VelaApiContext {
   const mergedEnv = mergeVelaEnv(env, configuredEnv);
-  const profile = resolveAmrProfile(mergedEnv);
-  const stored = readConfigFile()?.profiles?.[profile];
   return {
-    profile,
+    profile: snapshot.profile,
     apiUrl:
-      stored?.apiUrl?.trim()
+      snapshot.stored?.apiUrl?.trim()
       || mergedEnv.VELA_API_URL?.trim()
       || 'https://amr-api.open-design.ai',
   };
