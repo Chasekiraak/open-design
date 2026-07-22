@@ -7437,6 +7437,18 @@ function HtmlViewer({
   const templateExportResolvedRef = useRef(false);
   const screenshotInFlightRef = useRef(false);
   const imageExportInFlightRef = useRef(false);
+  // "Screenshot to chat" uploads the captured PNG into the project's own file
+  // tree (registry.ts: uploadProjectFiles lands it flat in the project root).
+  // The daemon's chokidar watcher sees that add like any other file change and
+  // pushes `file-changed`, which — via the live-reload effect below — force-
+  // reloads THIS SAME preview iframe a moment later even though the artifact
+  // itself never changed. Users saw that as a visible flash/jitter on every
+  // screenshot (issue: "「截图」也会有抖动"). Arm this timestamp right before
+  // the screenshot's annotation event goes out so the live-reload effect can
+  // recognize the incoming refresh as self-inflicted and skip the reload.
+  // 5s comfortably covers the upload round-trip + chokidar + SSE + the
+  // effect's own 180ms debounce (measured ~1.4s locally).
+  const suppressLiveReloadUntilRef = useRef(0);
   const [exportToast, setExportToast] = useState<ExportToastState | null>(null);
   const [shareLinkFeedback, setShareLinkFeedback] = useState<'copied' | 'failed' | null>(null);
   const [shareGuideToast, setShareGuideToast] = useState<string | null>(null);
@@ -8204,6 +8216,11 @@ function HtmlViewer({
     // when the mode closes (interactivePreviewModeActive flips) and applies
     // the now-current URL in one pass.
     if (interactivePreviewModeActive) return;
+    // Skip a refresh this viewer caused itself (screenshot-to-chat's own
+    // upload landing in the project folder) — see suppressLiveReloadUntilRef
+    // above. Reloading the live preview for a file-changed echo of our own
+    // unrelated attachment upload is exactly the flash users reported.
+    if (Date.now() < suppressLiveReloadUntilRef.current) return;
     if (needsPowered && useUrlLoadPreview && !powered.resolved) return;
     const refreshBasePreviewSrcUrl = usePoweredPreview && powered.url
       ? powered.url
@@ -11389,6 +11406,12 @@ function HtmlViewer({
           }
         },
       };
+      // The composer is about to upload `shot` into this project's file tree,
+      // which the chokidar watcher reports as an ordinary file change. Arm the
+      // self-inflicted-refresh guard now, before that upload even starts, so
+      // the live-reload effect ignores the `file-changed` echo instead of
+      // force-reloading this same preview out from under the user.
+      suppressLiveReloadUntilRef.current = Date.now() + 5000;
       window.dispatchEvent(new CustomEvent(ANNOTATION_EVENT, { detail }));
     } catch (err) {
       console.warn('[handleScreenshotToChat] failed:', err);
