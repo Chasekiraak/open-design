@@ -1,16 +1,17 @@
-// Wordmark badges for the account membership tier (free / plus / pro / max),
-// shown at the right end of the nav-rail account row in place of the dropdown
-// chevron. Strokes are normalized to currentColor so the badge follows the
-// surrounding icon color.
+// Wordmark badges for the account membership tier (free / plus / pro / max /
+// team), shown at the right end of the nav-rail account row in place of the
+// dropdown chevron. Strokes are normalized to currentColor so the badge
+// follows the surrounding icon color.
 
-export type PlanBadgeTier = 'free' | 'plus' | 'pro' | 'max';
+export type PlanBadgeTier = 'free' | 'plus' | 'pro' | 'max' | 'team';
 
-/** Maps a CreditsInfo tier label (e.g. "免费" / "Plus" / "Pro") to a badge. */
+/** Maps a CreditsInfo tier label (e.g. "免费" / "Plus" / "团队版") to a badge. */
 export function planBadgeTierForLabel(label: string): PlanBadgeTier | null {
   const normalized = label.toLowerCase();
   if (normalized.includes('plus')) return 'plus';
   if (normalized.includes('pro')) return 'pro';
   if (normalized.includes('max')) return 'max';
+  if (normalized.includes('team') || label.includes('团队')) return 'team';
   if (normalized.includes('free') || label.includes('免费')) return 'free';
   return null;
 }
@@ -20,6 +21,7 @@ const VIEW_BOX: Record<PlanBadgeTier, { width: number; height: number }> = {
   plus: { width: 114, height: 49 },
   pro: { width: 108, height: 49 },
   max: { width: 114, height: 49 },
+  team: { width: 136, height: 49 },
 };
 
 const PATHS: Record<PlanBadgeTier, string[]> = {
@@ -48,6 +50,13 @@ const PATHS: Record<PlanBadgeTier, string[]> = {
     'M71.5 37.5L75.4846 37.5L94.5923 11.5H98.5',
     'M2.5 47.5L2.5 11.5L6.92857 11.5L15.7857 36.4999L20.2143 36.5L29.0714 11.5L33.5 11.5L33.5 39.5',
     'M43.5 18.5L43.5 16.4999C43.5001 13.7385 45.7386 11.5 48.5 11.5H59.5C62.2614 11.5 64.5 13.7386 64.5 16.5V32.5C64.5 35.2614 62.2614 37.5 59.5 37.5H49.9613C46.3928 37.5 43.5 34.6072 43.5 31.0387C43.5 27.4703 46.3928 24.5775 49.9613 24.5775H58.5615',
+  ],
+  team: [
+    'M0 2.5H111.396C123.547 2.5 133.396 12.3497 133.396 24.5C133.396 36.6503 123.547 46.5 111.396 46.5H8.79169e-05',
+    'M12.3965 39.5L12.3965 3.50001',
+    'M116.396 39.5L116.396 11.5L113.254 11.5L106.968 36.4998L103.825 36.4999L97.5393 11.5L94.3965 11.5L94.3965 39.4999',
+    'M62.3965 18.5L62.3965 16.4999C62.3965 13.7385 64.6351 11.5 67.3965 11.5H78.3965C81.1579 11.5 83.3965 13.7386 83.3965 16.5V32.5C83.3965 35.2614 81.1579 37.5 78.3965 37.5H68.8578C65.2893 37.5 62.3965 34.6072 62.3965 31.0387C62.3965 27.4703 65.2893 24.5775 68.8578 24.5775H77.458',
+    'M48.1684 33.4208C45.6665 35.9237 42.6593 37.1752 39.1469 37.1752C35.6345 37.1752 32.6274 35.9237 30.1254 33.4208C27.6395 30.9017 26.3965 27.874 26.3965 24.3376C26.3965 20.8012 27.6395 17.7735 30.1254 15.2544C32.6274 12.7515 35.6345 11.5 39.1469 11.5C42.6593 11.5 45.6665 12.7515 48.1684 15.2544C50.6544 17.7735 51.8973 20.8012 51.8973 24.3376H39.1469',
   ],
 };
 
