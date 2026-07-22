@@ -313,6 +313,19 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
             candidate.version > highest.version ? candidate : highest,
           );
         }
+        // No scoped principal on the notification AND no remaining share
+        // principals for this project: every share has been removed, which
+        // is exactly the condition `requestTeamUnshare` uses to mark the
+        // project `unshared`. A file-watcher subscription is only torn down
+        // when a project is deleted locally (see collab-publish-watcher.ts
+        // `reconcile`), never on unshare, so a debounced `notifyChanged` can
+        // still land here well after the unshare completed. Publishing
+        // anyway would durably re-create the resource on the hub under an
+        // unscoped id for the round-trip it takes `onPublished`'s `unshared`
+        // guard to notice and unpublish it again — a real window in which a
+        // status read reports the just-unshared project as shared again.
+        // Refuse outright instead of publish-then-cleanup.
+        if (unshared.has(projectId)) return null;
       }
       return baseAdapter.publish({
         projectId,
