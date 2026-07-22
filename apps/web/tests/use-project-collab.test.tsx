@@ -194,6 +194,48 @@ describe('useProjectCollab', () => {
     expect(result.current.viewerOnly).toBe(false);
   });
 
+  it('stays read-only for a member after the owner unshares the project mid-session', async () => {
+    // A member (wm-member) has this project open while it is shared by
+    // wm-owner — `shared=true, isOwner=false` correctly renders read-only.
+    // The owner then moves it back to "仅自己": /collab/status starts
+    // reporting syncState: 'local_only' and ownerMemberId: null, the exact
+    // same shape a project that was NEVER shared reports. The gate's
+    // `shared && !isOwner` formula went straight to `false` on that
+    // transition — indistinguishable from "this has always been my own
+    // private project" — and unlocked full edit access for a member who
+    // just lost their read access entirely. Once a project is confirmed
+    // owned by someone else, losing "shared" must never flip this viewer to
+    // editable.
+    const member = makeContext({ role: 'member', workspaceMemberId: 'wm-member' });
+    let unshared = false;
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      let payload: unknown = { ok: true };
+      if (pathname.endsWith('/workspace/context')) payload = { context: member };
+      else if (pathname.endsWith('/presence/heartbeat')) payload = { present: [{ memberId: 'wm-member' }] };
+      else if (pathname.endsWith('/collab/status')) {
+        payload = unshared
+          ? { publishedVersion: null, syncState: 'local_only', ownerMemberId: null }
+          : { publishedVersion: 2, syncState: 'synced', ownerMemberId: 'wm-owner' };
+      }
+      return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+    }) as typeof fetch;
+    const { result } = renderHook(() => useProjectCollab('p1', { fetch: fetchImpl }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.viewerOnly).toBe(true);
+
+    unshared = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(result.current.viewerOnly).toBe(true);
+  });
+
   it('freezes even the project owner read-only when the workspace is locked', async () => {
     // Workspace-level gate: a locked workspace has canWriteSyncedFiles=false, so
     // everyone is read-only — including an owner who would otherwise be the single

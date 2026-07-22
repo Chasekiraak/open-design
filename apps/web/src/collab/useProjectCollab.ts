@@ -241,14 +241,34 @@ export function useProjectCollab(
   // or not loading is irrelevant here.
   const createdByViewerThisSession =
     Boolean(projectId) && projectIdsCreatedByViewerThisSession.has(projectId as string);
+  // Once `/collab/status` has EXPLICITLY confirmed this project belongs to
+  // someone else (shared && !isOwner), remember it for as long as this
+  // component stays mounted on this projectId. The owner unsharing later
+  // makes `/collab/status` regress to the exact same shape as a project that
+  // was NEVER shared (syncState: 'local_only', ownerMemberId: null) —
+  // `shared && !isOwner` alone cannot tell those two cases apart, and briefly
+  // unlocked full edit access (including sending chat messages) for a member
+  // who had just lost read access entirely. A project once confirmed to be
+  // someone else's must never look like the viewer's own personal project
+  // again, no matter what a later poll reports.
+  const confirmedOwnedBySomeoneElseRef = useRef<string | null>(null);
+  if (confirmedOwnedBySomeoneElseRef.current !== null && confirmedOwnedBySomeoneElseRef.current !== projectId) {
+    confirmedOwnedBySomeoneElseRef.current = null;
+  }
+  if (shared && !isOwner && projectId) {
+    confirmedOwnedBySomeoneElseRef.current = projectId;
+  }
+  const lostAccessAfterUnshare = confirmedOwnedBySomeoneElseRef.current === projectId && !isOwner;
   // The project-level (single-writer) gate. It defaults to "unknown" rather than
   // "read-only": a viewer the catalog already knows to be the owner, or who
   // created this project in the current session, is never frozen by it, which
   // removes the on-open flash. Everyone else still fails closed through the
-  // unknown window and whenever a confirmed status names a different owner.
+  // unknown window, whenever a confirmed status names a different owner, and
+  // permanently once this viewer has ever seen this project belong to someone
+  // else.
   const sharedReadOnly = knownOwnedByViewer || createdByViewerThisSession
     ? false
-    : (statusUnknown && !knownUnshared) || (shared && !isOwner);
+    : (statusUnknown && !knownUnshared) || (shared && !isOwner) || lostAccessAfterUnshare;
   const viewerOnly = workspaceContextReadOnly || workspaceReadOnly || sharedReadOnly;
 
   // Member content auto-sync (the last link): when a read-only member sees the
