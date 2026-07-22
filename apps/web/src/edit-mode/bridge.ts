@@ -170,7 +170,7 @@ export function buildManualEditBridge(enabled: boolean): string {
   var discoverySelector = ${JSON.stringify(MANUAL_EDIT_DISCOVERY_SELECTOR)};
   var hostNodeSelector = ${JSON.stringify(MANUAL_EDIT_HOST_NODE_SELECTOR)};
   var sourcePathAttr = ${JSON.stringify(MANUAL_EDIT_SOURCE_PATH_ATTR)};
-  var styleProps = ['fontFamily','fontSize','fontWeight','color','textAlign','lineHeight','letterSpacing','width','height','minHeight','gap','flexDirection','justifyContent','alignItems','backgroundColor','opacity','padding','paddingTop','paddingRight','paddingBottom','paddingLeft','margin','marginTop','marginRight','marginBottom','marginLeft','border','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle','borderColor','borderRadius','transform'];
+  var styleProps = ['fontFamily','fontSize','fontWeight','color','textAlign','lineHeight','letterSpacing','width','height','minHeight','gap','flexDirection','justifyContent','alignItems','backgroundColor','opacity','padding','paddingTop','paddingRight','paddingBottom','paddingLeft','margin','marginTop','marginRight','marginBottom','marginLeft','border','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','borderStyle','borderColor','borderRadius','transform','display'];
   function isHostNode(el){
     return !!(el && el.matches && el.matches(hostNodeSelector));
   }
@@ -1031,7 +1031,9 @@ export function buildManualEditBridge(enabled: boolean): string {
     ev.preventDefault();
     ev.stopPropagation();
     var transform = drag.el.style.transform || '';
-    window.parent.postMessage({ type: 'od-edit-drag-commit', id: drag.id, transform: transform }, '*');
+    var msg = { type: 'od-edit-drag-commit', id: drag.id, transform: transform };
+    if (drag.bumpedDisplay) msg.display = 'inline-block';
+    window.parent.postMessage(msg, '*');
   }, true);
   document.addEventListener('click', function(ev){
     if (!enabled) return;
@@ -1065,6 +1067,9 @@ export function buildManualEditBridge(enabled: boolean): string {
   }, true);
   document.addEventListener('pointerover', function(ev){
     if (!enabled) return;
+    // A drag in progress owns the overlay (selection chrome only); pointerover
+    // must not surface hover reference guides that would clutter the move.
+    if (dragPending && dragPending.started) return;
     // While editing, hovering must not retarget the inspector or surface a new
     // affordance — that's the other half of the #3646 instability. It should
     // still draw the selected-vs-hover spacing overlay, though.
@@ -1092,6 +1097,16 @@ export function buildManualEditBridge(enabled: boolean): string {
       var dy = ev.clientY - dragPending.startY;
       if (!dragPending.started && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
         dragPending.started = true;
+        // transform() has no effect on non-replaced inline elements (plain
+        // <span>/<a>), so bump those to inline-block once so the drag is
+        // visible; the change is persisted with the transform on commit.
+        try {
+          var disp = window.getComputedStyle(dragPending.el).display;
+          if (disp === 'inline') {
+            dragPending.el.style.display = 'inline-block';
+            dragPending.bumpedDisplay = true;
+          }
+        } catch (e) {}
         // Grabbing an unselected element selects it first, so the panel + the
         // selection chrome follow the element being moved.
         if (selectedTargetId !== dragPending.id) {
@@ -1101,7 +1116,17 @@ export function buildManualEditBridge(enabled: boolean): string {
       }
       if (dragPending.started) {
         dragPending.el.style.transform = composeTransform(dragPending.prefix, dragPending.baseTx + dx, dragPending.baseTy + dy);
-        renderSelectedChromeForCurrent();
+        // Live guides for the element being moved: its four edge lines + the
+        // selection box/handles, redrawn at the new position each frame.
+        if (guidesEnabled) {
+          var dragLayer = ensureGuidesLayer();
+          dragLayer.replaceChildren();
+          var dragTarget = targetFrom(dragPending.el, false);
+          renderReferenceGuides(dragLayer, dragTarget.rect);
+          renderSelectedChrome(dragLayer, dragTarget);
+        } else {
+          renderSelectedChromeForCurrent();
+        }
         ev.preventDefault();
       }
       return;

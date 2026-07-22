@@ -37,11 +37,11 @@
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-6);
-  /* Top padding tuned so that at the reference working window (~1333×960)
-     the fold lands exactly on the second project-card row's image bottom
-     (304px left the fold cutting mid-image; -52px aligns it). The parent
-     still contributes ~16px above. */
-  padding: 281px 0 var(--spacing-4);
+  /* Was 281px (tuned to land the fold on the second project-card row at a
+     ~1333×960 reference window) — that read as a huge blank band above the
+     hero. 240px trims that band while keeping the hero comfortably clear of
+     the tab strip. */
+  padding: 240px 0 var(--spacing-4);
 }
 .home-hero__brand {
   position: relative;
@@ -410,7 +410,9 @@
   flex-direction: column;
   gap: var(--spacing-8);
   padding: var(--spacing-4) var(--spacing-4) var(--spacing-8);
-  background: var(--bg-subtle);
+  /* White grouping tray at 60% opacity (was the solid --bg-subtle gray) so the
+     footer reads as a soft translucent surface over the page wash. */
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
   transition: background-color var(--duration-faster, 100ms) var(--curve-easy-ease, ease);
   /* Borderless: the tinted surface alone provides the grouping; the inner
      input card keeps the only stroke. */
@@ -423,7 +425,9 @@
 /* While the composer is engaged (input focused) the grouping surface steps
    one level heavier on the neutral ladder so the active state reads. */
 .home-hero__composer-card:focus-within {
-  background: color-mix(in srgb, var(--bg-subtle) 70%, var(--bg-muted));
+  /* Engaged state: same white tray, a touch more opaque so the active step
+     still reads without reverting to gray. */
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 .home-hero__composer-card .home-hero__input-card,
 .home-hero__composer-card .home-hero__workdir-row {
@@ -1389,7 +1393,9 @@
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:hover,
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:focus-visible {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
+  /* Solid fill (matches the design-system picker beside it) — the previous
+     translucent mix read as a see-through smudge over the frosted footer. */
+  background: var(--bg-subtle);
   color: var(--text-strong);
 }
 /* The working-directory dropdown must float below its trigger and never
@@ -2454,20 +2460,26 @@
    card button. The flex sizing lives on the cell; the card button fills it. */
 .home-hero__plugin-preset-cell {
   position: relative;
-  flex: 0 0 248px;
-  min-width: 0;
+  /* Width-adaptive: shrink-wrap to the card, whose width follows the preview's
+     aspect ratio at the fixed row height (was a fixed 248px). Clamp so extreme
+     aspect ratios stay readable. */
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 96px;
+  max-width: 340px;
   display: flex;
 }
 
 .home-hero__plugin-preset {
   appearance: none;
   position: relative;
-  width: 100%;
+  /* Auto width so the grid column sizes to the preview's intrinsic width. */
+  width: auto;
   height: auto;
-  min-height: 184px;
+  min-height: 158px;
   min-width: 0;
   display: grid;
-  grid-template-rows: 150px minmax(0, auto);
+  grid-template-rows: 124px minmax(0, auto);
   gap: 8px;
   padding: 0;
   border: 1px solid var(--border);
@@ -2496,11 +2508,16 @@
 .home-hero__plugin-preset:not(:disabled):focus-visible,
 .home-hero__plugin-preset.is-active {
   outline: none;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  /* Light hover border: only a hint of accent over the neutral border. */
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
   background: color-mix(in srgb, var(--accent-tint) 32%, var(--bg-panel));
   color: var(--text-strong);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+/* Selected keeps the firmer accent ring so it still reads above plain hover. */
+.home-hero__plugin-preset.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }
 
 .home-hero__plugin-preset.is-pending {
@@ -2510,15 +2527,50 @@
 .home-hero__plugin-preset-preview {
   position: relative;
   min-width: 0;
-  /* Pinned to the tile's 150px preview row: whatever the inner surface
-     renders (oversized media, iframes) clips here instead of spilling over
-     the title below. */
-  height: 150px;
-  min-height: 150px;
-  max-height: 150px;
+  /* Pinned to the tile's preview row: whatever the inner surface renders
+     (oversized media, iframes) clips here instead of spilling over the title
+     below. Shorter row trims the trailing whitespace on sparse wireframes.
+     Width is intrinsic (driven by the media's natural aspect at this height). */
+  width: auto;
+  height: 124px;
+  min-height: 124px;
+  max-height: 124px;
   overflow: hidden;
+  /* Center the (shrink-wrapped) media horizontally so when the card ends up
+     wider than the picture — a long title, or the min-width clamp on a narrow
+     portrait — the image sits centered instead of hugging the left edge. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg-subtle);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+/* Image / video previews render at natural aspect at the fixed row height, so
+   the whole chain (preview wrapper → media → img) shrink-wraps to the media
+   width — no crop, and the card width tracks the picture. `justify-content`
+   centers the image within the wrapper whenever the box ends up wider than the
+   picture (e.g. a title-widened card), so it never hugs the left edge. */
+.home-hero__plugin-preset-preview .plugins-home__preview--media,
+.home-hero__plugin-preset-preview .plugins-home__media {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-hero__plugin-preset-preview .plugins-home__media-img,
+.home-hero__plugin-preset-preview .plugins-home__media-video {
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+}
+/* Non-media previews (html iframe / deck / text) have no intrinsic width, so
+   pin a fixed aspect at the row height to keep a sensible card width. */
+.home-hero__plugin-preset-preview:has(.plugins-home__html),
+.home-hero__plugin-preset-preview:has(.plugins-home__text-surface) {
+  aspect-ratio: 2 / 1;
 }
 
 .home-hero__plugin-preset-check {
@@ -2536,8 +2588,10 @@
   box-shadow: var(--shadow-sm);
 }
 
-.home-hero__plugin-preset-preview .plugins-home__preview,
-.home-hero__plugin-preset-preview .plugins-home__media,
+/* Non-media surfaces fill the (aspect-ratio'd) preview box. Media is excluded
+   here — it shrink-wraps to its picture via the rule above so the card width
+   can track the image. */
+.home-hero__plugin-preset-preview .plugins-home__preview:not(.plugins-home__preview--media),
 .home-hero__plugin-preset-preview .plugins-home__html,
 .home-hero__plugin-preset-preview .plugins-home__text-surface {
   width: 100%;
@@ -2570,7 +2624,9 @@
    cell, so the slide has no dark band and deck cards keep an identical card
    height + title-row height to prototype/HyperFrames/image tiles. */
 .home-hero__plugin-preset[data-od-mode="deck"] .home-hero__plugin-preset-preview {
-  aspect-ratio: auto;
+  /* Decks are a fixed 16:9 stage — size the preview to that so the card width
+     matches the slide instead of collapsing to zero intrinsic width. */
+  aspect-ratio: 16 / 9;
 }
 .home-hero__plugin-preset[data-od-mode="deck"] .plugins-home__html-frame {
   display: flex;
@@ -2619,7 +2675,12 @@
 }
 
 .home-hero__plugin-preset-title {
-  min-width: 0;
+  /* width:0 + min-width:100% keeps the title from widening the (auto) card
+     column past the preview — it stretches to the card width and truncates
+     instead, so the card width stays governed by the picture. */
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2747,14 +2808,17 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .home-hero__plugin-preset-cell {
-    flex-basis: 224px;
+    flex-basis: auto;
+    max-width: 300px;
   }
   .home-hero__plugin-preset {
-    min-height: 170px;
-    grid-template-rows: 136px minmax(0, auto);
+    min-height: 146px;
+    grid-template-rows: 112px minmax(0, auto);
   }
   .home-hero__plugin-preset-preview {
-    min-height: 136px;
+    height: 112px;
+    min-height: 112px;
+    max-height: 112px;
   }
   .home-hero__plugin-preset-preview .plugins-home__html-iframe {
     transform: scale(0.146);
@@ -2799,14 +2863,17 @@
     grid-template-columns: 1fr;
   }
   .home-hero__plugin-preset-cell {
-    flex-basis: 208px;
+    flex-basis: auto;
+    max-width: 280px;
   }
   .home-hero__plugin-preset {
-    min-height: 160px;
-    grid-template-rows: 126px minmax(0, auto);
+    min-height: 138px;
+    grid-template-rows: 104px minmax(0, auto);
   }
   .home-hero__plugin-preset-preview {
-    min-height: 126px;
+    height: 104px;
+    min-height: 104px;
+    max-height: 104px;
   }
   .home-hero__plugin-preset-preview .plugins-home__html-iframe {
     transform: scale(0.134);

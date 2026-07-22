@@ -55,6 +55,60 @@ function matchesModelSearch(model: AgentModelOption, query: string): boolean {
   return haystack.includes(query);
 }
 
+// Canonical company/provider display names for the two-level model picker.
+// Keyed by the model id's leading token (before the first `-`, or before a
+// BYOK `provider/model` slash).
+const MODEL_COMPANY_NAMES: Record<string, string> = {
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  glm: 'GLM',
+  kimi: 'Kimi',
+  qwen: 'Qwen',
+  openai: 'OpenAI',
+  gpt: 'OpenAI',
+  o1: 'OpenAI',
+  o3: 'OpenAI',
+  grok: 'Grok',
+  llama: 'Llama',
+  mistral: 'Mistral',
+  doubao: 'Doubao',
+  minimax: 'MiniMax',
+  moonshot: 'Moonshot',
+};
+
+/** Company key + display name for a model id (deepseek-v4-flash → deepseek /
+ *  "DeepSeek"; openai/gpt-5 → openai / "OpenAI"). */
+export function modelCompany(id: string): { key: string; name: string } {
+  const slash = id.indexOf('/');
+  const key = (slash > 0 ? id.slice(0, slash) : id.split('-')[0] ?? id).toLowerCase();
+  const name = MODEL_COMPANY_NAMES[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : id);
+  return { key, name };
+}
+
+interface ModelCompanyGroup {
+  key: string;
+  name: string;
+  options: AgentModelOption[];
+}
+
+/** Group model options by company, preserving first-seen order. */
+export function groupModelsByCompany(options: AgentModelOption[]): ModelCompanyGroup[] {
+  const groups: ModelCompanyGroup[] = [];
+  const byKey = new Map<string, ModelCompanyGroup>();
+  for (const option of options) {
+    const { key, name } = modelCompany(option.id);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, name, options: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.options.push(option);
+  }
+  return groups;
+}
+
 interface SearchableModelSelectProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'value'> {
   models: AgentModelOption[];
@@ -124,6 +178,27 @@ export const SearchableModelSelect = forwardRef<
     );
   }, [allOptions, normalizedQuery, value]);
   const shouldShowSearch = allOptions.length >= minSearchableOptions;
+  // Two-level browse (companies left, models right) only pays off for a long
+  // cross-company list — the case worth "distinguishing companies". Small
+  // pickers (a couple of models, or a single provider) stay a flat list.
+  const allCompanyCount = useMemo(() => groupModelsByCompany(allOptions).length, [allOptions]);
+  const useTwoLevel = allOptions.length >= minSearchableOptions && allCompanyCount >= 2;
+  // Grouped from the (search-)filtered options.
+  const companyGroups = useMemo(() => groupModelsByCompany(filteredOptions), [filteredOptions]);
+  const selectedCompanyKey = value ? modelCompany(value).key : companyGroups[0]?.key ?? null;
+  const [hoverCompany, setHoverCompany] = useState<string | null>(null);
+  // Default the open flyout to the selected model's company (or the first),
+  // and keep it valid as the filtered group set changes.
+  const activeCompanyKey =
+    hoverCompany && companyGroups.some((g) => g.key === hoverCompany)
+      ? hoverCompany
+      : companyGroups.some((g) => g.key === selectedCompanyKey)
+        ? selectedCompanyKey
+        : companyGroups[0]?.key ?? null;
+  const activeCompany = companyGroups.find((g) => g.key === activeCompanyKey) ?? null;
+  useEffect(() => {
+    if (!open) setHoverCompany(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -260,37 +335,98 @@ export const SearchableModelSelect = forwardRef<
                   />
                 </div>
               ) : null}
-              <div
-                className="model-select-searchable__list"
-                id={listboxId}
-                role="listbox"
-                style={{
-                  maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
-                }}
-              >
-                {filteredOptions.map((option) => {
-                  const active = option.id === value;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      className={`model-select-searchable__option${active ? ' is-active' : ''}`}
-                      data-selected={active ? 'true' : undefined}
-                      onClick={() => {
-                        onChange(option.id);
-                        setOpen(false);
-                      }}
-                    >
-                      <span className="model-select-searchable__option-label">{option.label}</span>
-                    </button>
-                  );
-                })}
-                {filteredOptions.length === 0 ? (
-                  <div className="model-select-searchable__empty">No matching models</div>
-                ) : null}
-              </div>
+              {useTwoLevel ? (
+                /* Two-level browse: companies on the left, the hovered/selected
+                   company's models on the right. */
+                <div
+                  className="model-select-searchable__body"
+                  id={listboxId}
+                  role="listbox"
+                  style={{
+                    maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                  }}
+                >
+                  {companyGroups.length === 0 ? (
+                    <div className="model-select-searchable__empty">No matching models</div>
+                  ) : (
+                    <>
+                      <div className="model-select-searchable__companies">
+                        {companyGroups.map((group) => {
+                          const isActive = group.key === activeCompanyKey;
+                          const hasSelected = group.options.some((o) => o.id === value);
+                          return (
+                            <button
+                              key={group.key}
+                              type="button"
+                              className={`model-select-searchable__company${isActive ? ' is-active' : ''}${hasSelected ? ' has-selected' : ''}`}
+                              data-testid={`model-company-${group.key}`}
+                              onMouseEnter={() => setHoverCompany(group.key)}
+                              onFocus={() => setHoverCompany(group.key)}
+                              onClick={() => setHoverCompany(group.key)}
+                            >
+                              <span className="model-select-searchable__company-name">{group.name}</span>
+                              <span className="model-select-searchable__company-count" aria-hidden>{group.options.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="model-select-searchable__models" role="group">
+                        {(activeCompany?.options ?? []).map((option) => {
+                          const active = option.id === value;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              className={`model-select-searchable__option${active ? ' is-active' : ''}`}
+                              data-selected={active ? 'true' : undefined}
+                              onClick={() => {
+                                onChange(option.id);
+                                setOpen(false);
+                              }}
+                            >
+                              <span className="model-select-searchable__option-label">{option.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="model-select-searchable__list"
+                  id={listboxId}
+                  role="listbox"
+                  style={{
+                    maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                  }}
+                >
+                  {filteredOptions.map((option) => {
+                    const active = option.id === value;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        className={`model-select-searchable__option${active ? ' is-active' : ''}`}
+                        data-selected={active ? 'true' : undefined}
+                        onClick={() => {
+                          onChange(option.id);
+                          setOpen(false);
+                        }}
+                      >
+                        <span className="model-select-searchable__option-label">{option.label}</span>
+                      </button>
+                    );
+                  })}
+                  {filteredOptions.length === 0 ? (
+                    <div className="model-select-searchable__empty">No matching models</div>
+                  ) : null}
+                </div>
+              )}
             </div>,
             document.body,
           )

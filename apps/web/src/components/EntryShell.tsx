@@ -105,7 +105,6 @@ import { homeHeroChipLabel } from './home-hero/chip-labels';
 import type { PluginUseAction } from './plugins-home/useActions';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
-import { LanguageMenu } from './LanguageMenu';
 import type { IntegrationTab } from './integration-tabs';
 import { InlineModelSwitcher } from './InlineModelSwitcher';
 import {
@@ -712,41 +711,19 @@ export function EntryShell({
     setNewProjectOpen(true);
   }
 
-  async function openCommunityTemplateProject(templateId: string) {
+  function openCommunityTemplateProject(templateId: string) {
     const preset = resolveCommunityTemplatePreset(templateId);
-
-    const existing =
-      projects.find((project) => {
-        const demoPresetId =
-          (project.metadata as { demoPresetId?: unknown } | undefined)?.demoPresetId;
-        return demoPresetId === preset.id;
-      })
-      ?? projects.find((project) => project.name === preset.projectName);
-
-    if (existing) {
-      navigate({
-        kind: 'project',
-        projectId: existing.id,
-        conversationId: null,
-        fileName: preset.metadata.entryFile ?? null,
-      });
-      return;
-    }
-
-    const { project } = await createProject({
-      name: preset.projectName,
-      skillId: null,
-      designSystemId: null,
-      pendingPrompt: preset.prompt,
-      metadata: preset.metadata,
+    // Remix drops the template's prompt straight into the Home composer input
+    // (instead of silently creating a project), so the user can tweak it and
+    // send it themselves. Reuses the plain prompt-handoff path — no plugin
+    // context — which seeds the composer text and focuses it.
+    setHomePromptHandoff({
+      id: Date.now(),
+      source: 'marketplace-plugin-try',
+      focus: true,
+      prompt: preset.prompt,
     });
-    await writeProjectTextFile(project.id, 'index.html', preset.html);
-    navigate({
-      kind: 'project',
-      projectId: project.id,
-      conversationId: null,
-      fileName: 'index.html',
-    });
+    changeView('home');
   }
 
   // Empty-state CTA for brand-new users: skip the modal, create a blank
@@ -1190,7 +1167,7 @@ export function EntryShell({
             <div data-testid="entry-view-community" data-active={view === 'community' ? 'true' : 'false'} {...inactiveViewProps(view === 'community')}>
               <CommunityView
                 onRemixTemplate={(templateId) => {
-                  void openCommunityTemplateProject(templateId);
+                  openCommunityTemplateProject(templateId);
                 }}
               />
             </div>
@@ -2537,17 +2514,9 @@ function OnboardingView({
       : t('settings.onboardingContinue');
 
   // Connect step, default face: a minimal, centered Open Design Cloud sign-in
-  // landing. No stepper, no runtime cards — just the cloud CTA, a secondary
-  // link into the full runtime chooser, and a top-left language/theme bar.
+  // landing. No stepper, no runtime cards — just the cloud CTA and a secondary
+  // link into the full runtime chooser.
   if (step === 0 && connectExpanded === null) {
-    const activeTheme: AppTheme = config.theme ?? 'system';
-    const resolvedDark =
-      activeTheme === 'dark' ||
-      (activeTheme === 'system' &&
-        typeof window !== 'undefined' &&
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
-    const themeIcon: 'sun' | 'moon' = resolvedDark ? 'moon' : 'sun';
     const cloudBusy = amrLoginPending;
     const amrStatusResolving = !amrStatusResolved;
     return (
@@ -2555,18 +2524,6 @@ function OnboardingView({
         className="onboarding-view onboarding-view--cloud"
         aria-label={t('settings.welcomeTitle')}
       >
-        <div className="onboarding-cloud__topbar">
-          <LanguageMenu compact />
-          <button
-            type="button"
-            className="onboarding-cloud__theme"
-            aria-label={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            title={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            onClick={() => onThemeChange(resolvedDark ? 'light' : 'dark')}
-          >
-            <Icon name={themeIcon} size={25} />
-          </button>
-        </div>
         <div className="onboarding-cloud__center">
           <span
             className="onboarding-cloud__logo"

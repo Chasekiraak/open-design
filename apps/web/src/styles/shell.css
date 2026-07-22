@@ -893,8 +893,11 @@ html.od-radial-open .workspace-shell {
   right: 0;
 }
 .chrome-present-wrap .present-menu {
-  left: 0;
-  right: auto;
+  /* Open leftward (right-aligned to the present button). The button sits near
+     the right of the toolbar, so opening rightward pushed the menu past the
+     viewer's right edge and clipped it. */
+  right: 0;
+  left: auto;
 }
 .chrome-share-menu--unified .chrome-unified-popover {
   width: min(360px, calc(100vw - 32px));

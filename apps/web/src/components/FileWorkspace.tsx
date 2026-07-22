@@ -1799,15 +1799,6 @@ export function FileWorkspace({
     const measure = () => {
       frame = 0;
       setTabsOverflowing(tabBar.scrollWidth > tabBar.clientWidth + 1);
-      // Pin the sticky Design Files tab to the exact right edge of the sticky
-      // Design System tab (its real, locale-dependent width + the 2px flex gap),
-      // so the two read as adjacent instead of leaving a hardcoded-offset gap.
-      const systemTab = tabBar.querySelector<HTMLElement>('.ws-tab.design-system-tab');
-      if (systemTab) {
-        tabBar.style.setProperty('--ds-system-tab-w', `${Math.round(systemTab.offsetWidth) + 2}px`);
-      } else {
-        tabBar.style.removeProperty('--ds-system-tab-w');
-      }
     };
     const requestMeasure = () => {
       if (frame) window.cancelAnimationFrame(frame);

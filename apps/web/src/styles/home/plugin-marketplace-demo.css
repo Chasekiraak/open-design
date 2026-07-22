@@ -12,7 +12,10 @@
 }
 
 .community-template-view {
-  width: min(1560px, 100%);
+  /* Keep the header cohesive: at 1560px the space-between hero flung the search
+     far past the (sparsely filled) 3-col grid, so it read as detached/"lost".
+     A 980px column keeps the search anchored to the top-right of the content. */
+  width: min(980px, 100%);
   padding: 30px 28px 72px;
 }
 
