@@ -3924,6 +3924,11 @@ export function SettingsDialog({
                   popoverTestId={`settings-agent-model-popover-${selected.id}`}
                   minSearchableOptions={5}
                   popoverMinWidth={340}
+                  // Only AMR's catalog genuinely spans multiple model
+                  // vendors — every other agent's model list is one
+                  // provider's own raw ids, which the company heuristic
+                  // would otherwise split into misleading fake "companies".
+                  groupByCompany={selected.id === 'amr'}
                   models={modelsForSelect!}
                   onChange={(nextValue) => {
                     if (nextValue === CUSTOM_MODEL_SENTINEL) {

@@ -2714,6 +2714,9 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
      dropdown OPENED but rendered underneath the dialog, reading as "click
      does nothing". */
   z-index: 10500;
+  /* Wide enough for the two-level company + models layout even when the
+     trigger that anchors it is narrow. */
+  min-width: 380px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2749,6 +2752,75 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  padding: 6px;
+}
+/* Two-level browse layout: companies on the left, hovered company's models on
+   the right. */
+.model-select-searchable__body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  max-height: 280px;
+}
+.model-select-searchable__companies {
+  flex: 0 0 auto;
+  min-width: 148px;
+  max-width: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+}
+.model-select-searchable__company {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.model-select-searchable__company:hover {
+  background: var(--bg-subtle);
+}
+.model-select-searchable__company.is-active {
+  background: var(--bg-subtle);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.model-select-searchable__company-count {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 500;
+}
+/* The selected model's company gets the brand dot so you can find it at a
+   glance across the company list. */
+.model-select-searchable__company.has-selected .model-select-searchable__company-name::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--green, #00aa54);
+  vertical-align: middle;
+}
+.model-select-searchable__models {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 6px;
 }
 .model-select-searchable__option {

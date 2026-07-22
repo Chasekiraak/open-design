@@ -70,6 +70,60 @@ export function orderModelOptionsByAvailability(
   return [...enabled, ...disabled];
 }
 
+// Canonical company/provider display names for the two-level model picker.
+// Keyed by the model id's leading token (before the first `-`, or before a
+// BYOK `provider/model` slash).
+const MODEL_COMPANY_NAMES: Record<string, string> = {
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  glm: 'GLM',
+  kimi: 'Kimi',
+  qwen: 'Qwen',
+  openai: 'OpenAI',
+  gpt: 'OpenAI',
+  o1: 'OpenAI',
+  o3: 'OpenAI',
+  grok: 'Grok',
+  llama: 'Llama',
+  mistral: 'Mistral',
+  doubao: 'Doubao',
+  minimax: 'MiniMax',
+  moonshot: 'Moonshot',
+};
+
+/** Company key + display name for a model id (deepseek-v4-flash → deepseek /
+ *  "DeepSeek"; openai/gpt-5 → openai / "OpenAI"). */
+export function modelCompany(id: string): { key: string; name: string } {
+  const slash = id.indexOf('/');
+  const key = (slash > 0 ? id.slice(0, slash) : id.split('-')[0] ?? id).toLowerCase();
+  const name = MODEL_COMPANY_NAMES[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : id);
+  return { key, name };
+}
+
+interface ModelCompanyGroup {
+  key: string;
+  name: string;
+  options: AgentModelOption[];
+}
+
+/** Group model options by company, preserving first-seen order. */
+export function groupModelsByCompany(options: AgentModelOption[]): ModelCompanyGroup[] {
+  const groups: ModelCompanyGroup[] = [];
+  const byKey = new Map<string, ModelCompanyGroup>();
+  for (const option of options) {
+    const { key, name } = modelCompany(option.id);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, name, options: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.options.push(option);
+  }
+  return groups;
+}
+
 function matchesModelSearch(model: AgentModelOption, query: string): boolean {
   const haystack = `${model.id}\n${model.label}`.toLowerCase();
   return haystack.includes(query);
@@ -94,6 +148,17 @@ interface SearchableModelSelectProps
    * unaffected. Shared by InlineModelSwitcher, SettingsDialog, and AvatarMenu.
    */
   onDisabledOptionUpgrade?: (option: AgentModelOption) => void;
+  /**
+   * Opts into the two-level company/model browse (companies on the left,
+   * models on the right) once the list is long enough to benefit from it.
+   * Explicit opt-in rather than always-on: company identity is derived from
+   * the model id's leading token, which only carries real vendor meaning for
+   * a genuinely cross-provider catalog (AMR's). A single provider's own raw
+   * model ids (e.g. Codex's `o1`/`o3`/`o4-mini` alongside `gpt-*`) would
+   * otherwise get split into misleading fake "companies". Callers pass
+   * `groupByCompany={agent.id === 'amr'}` or similar.
+   */
+  groupByCompany?: boolean;
   minSearchableOptions?: number;
   popoverMinWidth?: number;
   getPopoverBoundary?: () => {
@@ -119,6 +184,7 @@ export const SearchableModelSelect = forwardRef<
     additionalOptions,
     disabledOptionHint,
     onDisabledOptionUpgrade,
+    groupByCompany = false,
     minSearchableOptions = 8,
     popoverMinWidth,
     getPopoverBoundary,
@@ -183,6 +249,29 @@ export const SearchableModelSelect = forwardRef<
     );
   }, [allOptions, normalizedQuery, value]);
   const shouldShowSearch = allOptions.length >= minSearchableOptions;
+  // Two-level browse (companies left, models right) only pays off for a long
+  // cross-company list — the case worth "distinguishing companies". Small
+  // pickers (a couple of models, or a single provider) stay a flat list, and
+  // callers that didn't opt in via `groupByCompany` always stay flat too.
+  const allCompanyCount = useMemo(() => groupModelsByCompany(allOptions).length, [allOptions]);
+  const useTwoLevel =
+    groupByCompany && allOptions.length >= minSearchableOptions && allCompanyCount >= 2;
+  // Grouped from the (search-)filtered options.
+  const companyGroups = useMemo(() => groupModelsByCompany(filteredOptions), [filteredOptions]);
+  const selectedCompanyKey = value ? modelCompany(value).key : companyGroups[0]?.key ?? null;
+  const [hoverCompany, setHoverCompany] = useState<string | null>(null);
+  // Default the open flyout to the selected model's company (or the first),
+  // and keep it valid as the filtered group set changes.
+  const activeCompanyKey =
+    hoverCompany && companyGroups.some((g) => g.key === hoverCompany)
+      ? hoverCompany
+      : companyGroups.some((g) => g.key === selectedCompanyKey)
+        ? selectedCompanyKey
+        : companyGroups[0]?.key ?? null;
+  const activeCompany = companyGroups.find((g) => g.key === activeCompanyKey) ?? null;
+  useEffect(() => {
+    if (!open) setHoverCompany(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -323,6 +412,117 @@ export const SearchableModelSelect = forwardRef<
     }
   }, [open]);
 
+  /** One option row — shared by the flat list and the two-level browse's
+   *  models pane, so cost-tier / capability-tag / upgrade-lock affordances
+   *  render identically in either layout. `index` only needs to be unique
+   *  within whichever list is currently mounted. */
+  function renderModelOption(option: AgentModelOption, index: number) {
+    const active = option.id === value;
+    const disabled = option.enabled === false;
+    const disabledHint = disabled ? disabledOptionHint?.(option) : null;
+    const showUpgradeLock = disabled && !!disabledHint && !!onDisabledOptionUpgrade;
+    const tag = getModelCapabilityTag(option);
+    const tagLabel = tag ? t(MODEL_CAPABILITY_TAG_LABEL_KEYS[tag]) : null;
+    const costTier = getModelCostTier(option);
+    const costLabel = costTier ? t(MODEL_COST_TIER_LABEL_KEYS[costTier]) : null;
+    const optionId = `${listboxId}-option-${index}`;
+    const optionLabelId = `${optionId}-label`;
+    const optionCostId = costLabel ? `${optionId}-cost` : undefined;
+    const optionTagId = tagLabel ? `${optionId}-tag` : undefined;
+    const optionDisabledId = disabledHint ? `${optionId}-disabled` : undefined;
+    const optionDescriptionIds = [optionCostId, optionTagId, optionDisabledId]
+      .filter(Boolean)
+      .join(' ') || undefined;
+    const optionContent = (
+      <span className="model-select-searchable__option-content">
+        <span className="model-select-searchable__option-copy">
+          <span className="model-select-searchable__option-label">
+            <span id={optionLabelId}>{option.label}</span>
+          </span>
+          {costLabel ? (
+            <span className="model-select-searchable__option-meta" id={optionCostId}>
+              {costLabel}
+            </span>
+          ) : null}
+          {disabledHint && !showUpgradeLock ? (
+            <span className="model-select-searchable__option-meta" id={optionDisabledId}>
+              {disabledHint}
+            </span>
+          ) : null}
+        </span>
+        {showUpgradeLock || tagLabel ? (
+          <span className="model-select-searchable__option-affordances">
+            {showUpgradeLock ? (
+              <button
+                type="button"
+                className="model-select-searchable__option-lock-inline od-tooltip"
+                data-testid="model-option-upgrade-lock"
+                id={optionDisabledId}
+                data-tooltip={disabledHint ?? undefined}
+                data-tooltip-placement="top"
+                title={disabledHint ?? undefined}
+                aria-label={disabledHint ?? undefined}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDisabledOptionUpgrade?.(option);
+                }}
+              >
+                <Icon name="lock" size={13} />
+              </button>
+            ) : null}
+            {tagLabel ? (
+              <span
+                className="model-select-searchable__option-badge"
+                data-tag={tag}
+                id={optionTagId}
+              >
+                {tagLabel}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+    );
+    if (showUpgradeLock) {
+      return (
+        <div
+          key={option.id}
+          role="option"
+          tabIndex={-1}
+          aria-selected={active}
+          aria-disabled="true"
+          aria-labelledby={optionLabelId}
+          aria-describedby={optionDescriptionIds}
+          className={`model-select-searchable__option${active ? ' is-active' : ''} is-disabled`}
+          data-selected={active ? 'true' : undefined}
+        >
+          {optionContent}
+        </div>
+      );
+    }
+    return (
+      <button
+        key={option.id}
+        type="button"
+        role="option"
+        aria-selected={active}
+        aria-disabled={disabled}
+        aria-labelledby={optionLabelId}
+        aria-describedby={optionDescriptionIds}
+        className={`model-select-searchable__option${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+        data-selected={active ? 'true' : undefined}
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          onChange(option.id);
+          setOpen(false);
+        }}
+      >
+        {optionContent}
+      </button>
+    );
+  }
+
   return (
     <div className={`model-select-searchable${open ? ' is-open' : ''}`} ref={wrapRef}>
       <button
@@ -399,135 +599,66 @@ export const SearchableModelSelect = forwardRef<
                   />
                 </div>
               ) : null}
-              <div
-                className="model-select-searchable__list"
-                id={listboxId}
-                role="listbox"
-                style={{
-                  maxHeight: `${Math.max(0, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
-                }}
-              >
-                {filteredOptions.map((option, index) => {
-                  const active = option.id === value;
-                  const disabled = option.enabled === false;
-                  const disabledHint = disabled ? disabledOptionHint?.(option) : null;
-                  const showUpgradeLock =
-                    disabled && !!disabledHint && !!onDisabledOptionUpgrade;
-                  const tag = getModelCapabilityTag(option);
-                  const tagLabel = tag
-                    ? t(MODEL_CAPABILITY_TAG_LABEL_KEYS[tag])
-                    : null;
-                  const costTier = getModelCostTier(option);
-                  const costLabel = costTier
-                    ? t(MODEL_COST_TIER_LABEL_KEYS[costTier])
-                    : null;
-                  const optionId = `${listboxId}-option-${index}`;
-                  const optionLabelId = `${optionId}-label`;
-                  const optionCostId = costLabel ? `${optionId}-cost` : undefined;
-                  const optionTagId = tagLabel ? `${optionId}-tag` : undefined;
-                  const optionDisabledId = disabledHint ? `${optionId}-disabled` : undefined;
-                  const optionDescriptionIds = [optionCostId, optionTagId, optionDisabledId]
-                    .filter(Boolean)
-                    .join(' ') || undefined;
-                  const optionContent = (
-                    <span className="model-select-searchable__option-content">
-                      <span className="model-select-searchable__option-copy">
-                        <span className="model-select-searchable__option-label">
-                          <span id={optionLabelId}>{option.label}</span>
-                        </span>
-                        {costLabel ? (
-                          <span
-                            className="model-select-searchable__option-meta"
-                            id={optionCostId}
-                          >
-                            {costLabel}
-                          </span>
-                        ) : null}
-                        {disabledHint && !showUpgradeLock ? (
-                          <span
-                            className="model-select-searchable__option-meta"
-                            id={optionDisabledId}
-                          >
-                            {disabledHint}
-                          </span>
-                        ) : null}
-                      </span>
-                      {showUpgradeLock || tagLabel ? (
-                        <span className="model-select-searchable__option-affordances">
-                          {showUpgradeLock ? (
+              {useTwoLevel ? (
+                /* Two-level browse: companies on the left, the hovered/selected
+                   company's models on the right. Each model keeps the same
+                   cost-tier / capability-tag / upgrade-lock affordances the
+                   flat list below renders. */
+                <div
+                  className="model-select-searchable__body"
+                  id={listboxId}
+                  role="listbox"
+                  style={{
+                    maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                  }}
+                >
+                  {companyGroups.length === 0 ? (
+                    <div className="model-select-searchable__empty">No matching models</div>
+                  ) : (
+                    <>
+                      <div className="model-select-searchable__companies">
+                        {companyGroups.map((group) => {
+                          const isActive = group.key === activeCompanyKey;
+                          const hasSelected = group.options.some((o) => o.id === value);
+                          return (
                             <button
+                              key={group.key}
                               type="button"
-                              className="model-select-searchable__option-lock-inline od-tooltip"
-                              data-testid="model-option-upgrade-lock"
-                              id={optionDisabledId}
-                              data-tooltip={disabledHint ?? undefined}
-                              data-tooltip-placement="top"
-                              title={disabledHint ?? undefined}
-                              aria-label={disabledHint ?? undefined}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onDisabledOptionUpgrade?.(option);
-                              }}
+                              className={`model-select-searchable__company${isActive ? ' is-active' : ''}${hasSelected ? ' has-selected' : ''}`}
+                              data-testid={`model-company-${group.key}`}
+                              onMouseEnter={() => setHoverCompany(group.key)}
+                              onFocus={() => setHoverCompany(group.key)}
+                              onClick={() => setHoverCompany(group.key)}
                             >
-                              <Icon name="lock" size={13} />
+                              <span className="model-select-searchable__company-name">{group.name}</span>
+                              <span className="model-select-searchable__company-count" aria-hidden>{group.options.length}</span>
                             </button>
-                          ) : null}
-                          {tagLabel ? (
-                            <span
-                              className="model-select-searchable__option-badge"
-                              data-tag={tag}
-                              id={optionTagId}
-                            >
-                              {tagLabel}
-                            </span>
-                          ) : null}
-                        </span>
-                      ) : null}
-                    </span>
-                  );
-                  if (showUpgradeLock) {
-                    return (
-                      <div
-                        key={option.id}
-                        role="option"
-                        tabIndex={-1}
-                        aria-selected={active}
-                        aria-disabled="true"
-                        aria-labelledby={optionLabelId}
-                        aria-describedby={optionDescriptionIds}
-                        className={`model-select-searchable__option${active ? ' is-active' : ''} is-disabled`}
-                        data-selected={active ? 'true' : undefined}
-                      >
-                        {optionContent}
+                          );
+                        })}
                       </div>
-                    );
-                  }
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      aria-disabled={disabled}
-                      aria-labelledby={optionLabelId}
-                      aria-describedby={optionDescriptionIds}
-                      className={`model-select-searchable__option${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
-                      data-selected={active ? 'true' : undefined}
-                      disabled={disabled}
-                      onClick={() => {
-                        if (disabled) return;
-                        onChange(option.id);
-                        setOpen(false);
-                      }}
-                    >
-                      {optionContent}
-                    </button>
-                  );
-                })}
-                {filteredOptions.length === 0 ? (
-                  <div className="model-select-searchable__empty">No matching models</div>
-                ) : null}
-              </div>
+                      <div className="model-select-searchable__models" role="group">
+                        {(activeCompany?.options ?? []).map((option, index) =>
+                          renderModelOption(option, index),
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="model-select-searchable__list"
+                  id={listboxId}
+                  role="listbox"
+                  style={{
+                    maxHeight: `${Math.max(0, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                  }}
+                >
+                  {filteredOptions.map((option, index) => renderModelOption(option, index))}
+                  {filteredOptions.length === 0 ? (
+                    <div className="model-select-searchable__empty">No matching models</div>
+                  ) : null}
+                </div>
+              )}
             </div>,
             document.body,
           )

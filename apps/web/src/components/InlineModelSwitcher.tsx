@@ -1175,6 +1175,12 @@ export function InlineModelSwitcher({
                     getPopoverBoundary={getModelPopoverBoundary}
                     aria-label={t('inlineSwitcher.modelLabel')}
                     models={inlineAgentModelOptions}
+                    // Only AMR's catalog genuinely spans multiple model
+                    // vendors — every other agent's model list is one
+                    // provider's own ids (o1/o3/o4-mini alongside gpt-*,
+                    // for instance), which the company heuristic would
+                    // otherwise split into misleading fake "companies".
+                    groupByCompany={currentAgent?.id === 'amr'}
                     value={currentModelId ?? ''}
                     onChange={(nextValue) => {
                       trackExecutionSettingsPopoverClick(analytics.track, {
