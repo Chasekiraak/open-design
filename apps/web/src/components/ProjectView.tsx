@@ -218,7 +218,6 @@ import { filterImplicitProducedFiles } from '../produced-files';
 import { AvatarMenu } from './AvatarMenu';
 import { EntrySettingsMenu } from './EntrySettingsMenu';
 import { MessageCenter } from './MessageCenter';
-import { HandoffButton } from './HandoffButton';
 import { Icon } from './Icon';
 import { localizePluginTitle } from './plugins-home/localization';
 import { DesignSystemPicker } from './DesignSystemPicker';
@@ -9036,16 +9035,9 @@ export function ProjectView({
           conversationId={activeConversationId}
           headerActions={(
             <>
-              <HandoffButton
-                projectId={project.id}
-                projectName={project.name}
-                projectDir={projectDetail.resolvedDir}
-                agents={agents}
-                artifactId={headerArtifact.artifact_id}
-                artifactKind={headerArtifact.artifact_kind}
-                metricsConsent={config.telemetry?.metrics === true}
-                installationId={config.installationId}
-              />
+              {/* Hand-off lives in the share popover's 发送到… tab (the #5517
+                  shape) — a second standalone trigger here duplicated it, so
+                  the top bar keeps only the message center and settings. */}
               <MessageCenter
                 onOpenNotificationSettings={() => onOpenSettings('notifications')}
               />
