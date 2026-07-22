@@ -483,3 +483,125 @@ describe('reportStartupFailure', () => {
     expect(props.native_module_size).toBeNull();
   });
 });
+
+// Attribution guards. Every input below is a VERBATIM field payload pulled from
+// the `packaged_runtime_failed` stream (7d window, 2026-07-22) while triaging
+// the weekly alert. Each one is a failure the event carried enough evidence to
+// name and reported as an opaque `unknown` / `null` anyway:
+//
+//   - 62 devices: daemon exited(code=1) with the log tail successfully read, but
+//     `parseDaemonLogTail` only ever matched `ERR_*`, so any daemon that died of
+//     something else (SQLite corruption, EPERM, a plain throw) reported
+//     error_code=null AND missing_module=null — evidence in hand, nothing
+//     extracted.
+//   - 21 devices: Windows CreateProcess failures whose Error carries
+//     code/errno/syscall as own properties. The event sent `.message` only and
+//     dropped the triplet, so `spawn UNKNOWN` could not be separated from any
+//     other opaque failure.
+//   - 149 devices: an Error with an empty `.message` AND no `.stack`, which fell
+//     through to error_message=null + error_stack=null + failure_kind=unknown —
+//     a total black hole with no way to count or name the residue.
+describe('startup-failure attribution', () => {
+  // Verbatim tail shape of a daemon that threw without an ERR_ code.
+  const NON_ERR_CODE_LOG = `[open-design daemon] starting namespace=release-stable-win
+SqliteError: database disk image is malformed
+    at Database.prepare (node:sqlite:214:9)
+[open-design packaged] exited app=daemon pid=8123 code=1 signal=none`;
+
+  it('names the daemon crash when the log tail carries no ERR_ code', () => {
+    const parsed = parseDaemonLogTail(NON_ERR_CODE_LOG);
+    expect(parsed.errorCode).toBeUndefined();
+    // The reason is right there in the tail; it must not be dropped.
+    expect(parsed.daemonError).toBe('SqliteError: database disk image is malformed');
+  });
+
+  it('still prefers the ERR_ code when the log has one', () => {
+    expect(parseDaemonLogTail(ISSUE_4638_LOG).errorCode).toBe('ERR_MODULE_NOT_FOUND');
+  });
+
+  it('classifies a Windows spawn failure instead of burying it in unknown', () => {
+    expect(classifyStartupFailure(new Error('spawn UNKNOWN'), false).failureKind).toBe(
+      'spawn-failed',
+    );
+  });
+
+  it('sends the Node errno triplet off the error object', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    // Exactly how Node shapes a failed CreateProcess on win32.
+    const spawnError = Object.assign(new Error('spawn UNKNOWN'), {
+      code: 'UNKNOWN',
+      errno: -4094,
+      syscall: 'spawn',
+    });
+    await reportStartupFailure(
+      {
+        error: spawnError,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable-win',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.sys_code).toBe('UNKNOWN');
+    expect(props.sys_errno).toBe(-4094);
+    expect(props.sys_syscall).toBe('spawn');
+    expect(props.failure_kind).toBe('spawn-failed');
+  });
+
+  it('never reports a null error_message for an Error that carries none', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    // The 149-device black hole: instanceof Error, name 'Error', no message, no
+    // stack. Whatever we send must be non-null so the residue stays countable.
+    const empty = new Error('');
+    delete (empty as { stack?: string }).stack;
+    await reportStartupFailure(
+      {
+        error: empty,
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable-win',
+        source: 'packaged',
+      },
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.error_message).not.toBeNull();
+    expect(String(props.error_message)).toContain('Error');
+  });
+
+  it('surfaces the parsed daemon error on the emitted event', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('ok'));
+    await reportStartupFailure(
+      {
+        error: new Error(DAEMON_EXIT_MESSAGE),
+        isPathAccess: false,
+        posthogKey: 'phc_test',
+        posthogHost: null,
+        distinctId: 'd',
+        appVersion: '0.15.1',
+        namespace: 'release-stable',
+        source: 'packaged',
+      },
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        readLogTail: async () => NON_ERR_CODE_LOG,
+      },
+    );
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const props = (JSON.parse(init.body as string) as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.daemon_error).toBe('SqliteError: database disk image is malformed');
+  });
+});
