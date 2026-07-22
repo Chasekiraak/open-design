@@ -195,6 +195,8 @@ type SpawnInstallerHelper = (
 
 export type DeferredInstallerLaunchInput = {
   appPid: number;
+  /** Stable namespace root inherited by the installer helper process. */
+  cwd: string;
   installerPath: string;
   root: string;
   timeoutMs: number;
@@ -1806,7 +1808,7 @@ async function launchMacInstallerAfterQuit(
     const child = deps.spawnDetached(
       "/bin/sh",
       [scriptPath, input.appPid.toString(), input.installerPath, timeoutSeconds],
-      { detached: true, stdio: "ignore", windowsHide: true },
+      { cwd: input.cwd, detached: true, stdio: "ignore", windowsHide: true },
     );
     child.unref();
     return "";
@@ -1851,7 +1853,7 @@ async function launchWindowsInstallerAfterQuit(
         "-LogPath",
         logPath,
       ],
-      { detached: true, stdio: "ignore", windowsHide: true },
+      { cwd: input.cwd, detached: true, stdio: "ignore", windowsHide: true },
     );
     child.unref();
     return "";
@@ -3226,6 +3228,7 @@ export function createDesktopUpdater(
     if (config.platform !== "darwin" && config.platform !== "win32") return await openPath(resolvedDownload);
     return await launchInstallerAfterQuit({
       appPid: processPid,
+      cwd: config.runtimeBase,
       installerPath: resolvedDownload,
       root: updateRoot,
       timeoutMs: config.platform === "win32" ? WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS : MAC_DEFERRED_INSTALLER_TIMEOUT_MS,
