@@ -1037,6 +1037,69 @@ export function updateWorkspaceProject(db: SqliteDb, workspaceId: string, projec
   return getWorkspaceProject(db, workspaceId, projectId);
 }
 
+/**
+ * Update a project's `workspace_projects` row by project alone, reassigning
+ * `workspace_id` to whatever the caller passes — the one case where the row's
+ * CURRENT workspace is allowed to differ from the workspace this event is
+ * asserting.
+ *
+ * `updateWorkspaceProject` requires the caller to already know the row's
+ * current `workspace_id` (its lookup and its `WHERE` both key on it), which is
+ * right for callers acting on a row they just read. It is wrong for a remote
+ * team-share notification: the local row can predate the share (a personal
+ * draft the user made before ever joining the team it just got shared into),
+ * so it sits under an unrelated, stale `workspace_id`. Asking
+ * `updateWorkspaceProject(db, newWorkspaceId, ...)` in that case finds nothing
+ * — same shape of mistake `getWorkspaceProjectByProjectId`'s own doc comment
+ * warns about — and the row is silently never migrated: visibility and
+ * sync_state stay frozen at whatever they were, so the project never starts
+ * pulling the sharer's updates.
+ */
+export function rebindWorkspaceProject(db: SqliteDb, projectId: string, patch: DbRow) {
+  const existing = getWorkspaceProjectByProjectId(db, projectId);
+  if (!existing) return null;
+  const workspaceId = typeof patch.workspaceId === 'string' ? patch.workspaceId : existing.workspaceId;
+  const next: DbRow = {
+    ...existing,
+    ...patch,
+    workspaceId,
+    resourceHubResourceId: patch.resourceHubResourceId === undefined
+      ? existing.resourceHubResourceId
+      : patch.resourceHubResourceId,
+    cloudTombstonedAt: patch.cloudTombstonedAt === undefined
+      ? existing.cloudTombstonedAt
+      : patch.cloudTombstonedAt,
+    updatedAt: typeof patch.updatedAt === 'number' ? patch.updatedAt : Date.now(),
+  };
+  db.prepare(
+    `UPDATE workspace_projects
+        SET workspace_id = ?,
+            visibility = ?,
+            resource_state = ?,
+            created_by_workspace_member_id = ?,
+            updated_by_workspace_member_id = ?,
+            resource_hub_resource_id = ?,
+            cloud_tombstoned_at = ?,
+            sync_state = ?,
+            version = ?,
+            updated_at = ?
+      WHERE project_id = ?`,
+  ).run(
+    workspaceId,
+    next.visibility,
+    next.resourceState,
+    next.createdByWorkspaceMemberId ?? null,
+    next.updatedByWorkspaceMemberId ?? null,
+    next.resourceHubResourceId ?? null,
+    next.cloudTombstonedAt ?? null,
+    next.syncState ?? null,
+    next.version ?? 1,
+    next.updatedAt,
+    projectId,
+  );
+  return getWorkspaceProjectByProjectId(db, projectId);
+}
+
 export function deleteWorkspaceProject(db: SqliteDb, workspaceId: string, projectId: string): void {
   db.prepare(
     `DELETE FROM workspace_projects

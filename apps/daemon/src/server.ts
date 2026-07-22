@@ -572,6 +572,7 @@ import {
   updatePreviewCommentStatus,
   updateProject,
   updateWorkspaceProject,
+  rebindWorkspaceProject,
   updateRoutine,
   updateRoutineRun,
   clearAgentSession,
@@ -2807,7 +2808,12 @@ export async function startServer({
           cloudTombstonedAt: Date.now(),
           syncState: 'local_only',
         };
-    updateWorkspaceProject(db, workspaceId, input.projectId, patch);
+    // `rebindWorkspaceProject`, not `updateWorkspaceProject`: the row this
+    // event is about can predate the share — a personal draft the user made
+    // before ever joining the team it just got shared into — so it sits under
+    // an unrelated, stale workspace_id. Asking for an update scoped to the
+    // NEW workspaceId would find nothing and silently never migrate it.
+    rebindWorkspaceProject(db, input.projectId, { ...patch, workspaceId });
   }
   const collab = createCollabRuntime({
     workspaceContext,
