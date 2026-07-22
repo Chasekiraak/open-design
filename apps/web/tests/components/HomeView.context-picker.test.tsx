@@ -356,9 +356,9 @@ describe('HomeView context picker', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('home-hero-active-skill')).toBeTruthy();
-      // Round-4 skin: the cleared template pill shows the gray "Template"
+      // Round-4 skin: the cleared template pill shows the gray creation-type
       // kicker instead of a "None" placeholder label.
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Template');
+      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Creation type');
       expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('Slide deck');
     });
 

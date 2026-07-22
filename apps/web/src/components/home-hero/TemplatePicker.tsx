@@ -192,8 +192,7 @@ export function TemplatePicker({
       >
         {/* With a selection the pill reads as `[template icon] Wireframe`:
             the leading icon IS the selected template's own icon and the gray
-            "Template" kicker drops away. At rest it stays `[grid] Template
-            None`. */}
+            creation-type kicker drops away. */}
         <span
           className="home-hero__footer-option-icon home-hero__footer-option-icon--compact"
           aria-hidden

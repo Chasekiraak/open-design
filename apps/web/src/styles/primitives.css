@@ -58,7 +58,7 @@ button.ghost:hover:not(:disabled) { background: var(--bg-subtle); border-color: 
 button.ghost:active:not(:disabled) { background: var(--bg-muted); }
 /*
  * Transient success state for ghost buttons. Used by the Media
- * Providers "Reload from daemon" button after a successful reload —
+ * Providers "Refresh providers" button after a successful refresh —
  * the button briefly turns green with a check icon for ~2s then snaps
  * back to its idle treatment, replacing what used to be a permanent
  * success paragraph under the section header. Reusable on any
