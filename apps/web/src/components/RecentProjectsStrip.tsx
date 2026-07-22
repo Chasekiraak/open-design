@@ -861,7 +861,19 @@ export function RecentProjectsStrip({
                     toggleSelection(project.id);
                   }}
                 >
-                  <span aria-hidden>{selected ? '✓' : ''}</span>
+                  <span aria-hidden>
+                    {selected ? (
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        width={16}
+                        height={16}
+                        style={{ display: 'block' }}
+                      >
+                        <path d="M9.9997 15.1709L19.1921 5.97852L20.6063 7.39273L9.9997 17.9993L3.63574 11.6354L5.04996 10.2212L9.9997 15.1709Z" />
+                      </svg>
+                    ) : null}
+                  </span>
                 </button>
               ) : null}
               <button
@@ -1149,7 +1161,11 @@ export function RecentProjectsStrip({
             <button type="button" onClick={() => setMoveTarget(null)}>
               {t('designs.renameCancel')}
             </button>
-            <button type="button" className="primary" onClick={commitMove}>
+            <button
+              type="button"
+              className={`primary${moveTarget.action === 'to-team' ? ' recent-projects__move-confirm' : ''}`}
+              onClick={commitMove}
+            >
               {moveTarget.action === 'to-team'
                 ? t('recentProjects.confirmMoveToTeam')
                 : t('recentProjects.confirmMoveToPersonal')}
@@ -1185,7 +1201,7 @@ export function RecentProjectsStrip({
             </button>
             <button
               type="button"
-              className="primary"
+              className={`primary${bulkMoveAction === 'to-team' ? ' recent-projects__move-confirm' : ''}`}
               onClick={() => void commitBulkMove(bulkMoveAction)}
             >
               {bulkMoveAction === 'to-team'

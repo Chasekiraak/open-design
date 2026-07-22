@@ -619,7 +619,11 @@
   top: calc(100% + 6px);
   right: 0;
   z-index: var(--viewer-action-menu-z);
-  min-width: 168px;
+  /* Size to the widest item (labels + any description) up to a cap, then wrap —
+     so a longer hint line isn't clipped by a fixed menu width. */
+  min-width: 200px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -649,6 +653,8 @@
   gap: 10px;
   width: 100%;
   color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .present-menu button:hover { background: var(--bg-subtle); border-color: transparent; }
 .present-icon {

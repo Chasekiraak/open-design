@@ -392,6 +392,12 @@
 }
 .recent-projects__card-sep {
   color: var(--text-muted);
+  flex: 0 0 auto;
+}
+/* "转入团队空间" confirm button: green label on the dark filled button to read
+   as the positive, forward action (2 classes out-specifies button.primary). */
+.recent-projects__move-confirm.primary {
+  color: var(--brand);
 }
 .recent-projects__card-status {
   display: inline-flex;

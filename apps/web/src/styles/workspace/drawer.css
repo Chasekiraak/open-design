@@ -1654,6 +1654,9 @@
 }
 
 .ws-tab {
+  /* Positioning context for the inter-tab separator (::before, see the
+     .app overrides in viewer/routines.css). */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1812,32 +1815,10 @@
 }
 .ws-tab-close:hover { background: var(--border); color: var(--text); }
 
-.ws-tab.design-files-tab {
-  /* Pin the Design Files entry to the left edge of the horizontally
-     scrollable tab strip so the user always has a way back to the file
-     list even when many tabs overflow. Without sticky positioning,
-     Design Files sits at flex index 0 and scrolls off the left edge
-     once the strip is wide enough to require horizontal scrolling.
-     Issue #775. */
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: transparent;
-}
-.ws-tab.design-files-tab.active {
-  background: var(--bg-subtle);
-  box-shadow: none;
-}
-/* Right-edge shadow signals the visual separation ONLY when other tabs
-   actually scroll beneath the sticky Design Files tab. Without overflow
-   there is nothing underneath, so an unconditional shadow just reads as a
-   stray dark smudge clipping the tab's right edge. */
-.ws-tabs-bar.is-overflowing .ws-tab.design-files-tab {
-  box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.12);
-}
-.ws-tabs-bar.is-overflowing .ws-tab.design-files-tab.active {
-  box-shadow: 4px 0 6px -4px rgba(0, 0, 0, 0.12);
-}
+/* The Design Files tab scrolls with the strip like any other tab. It was
+   previously pinned with position: sticky (issue #775), but its transparent
+   background let overflowed tabs slide THROUGH it, rendering both on top of
+   each other. */
 
 .page-creator-backdrop {
   position: fixed;
