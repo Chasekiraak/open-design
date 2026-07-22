@@ -1,5 +1,6 @@
 import type { Express, Response } from 'express';
 import { PROJECT_EXPORT_MANIFEST_SCHEMA, isExportFormat } from '@open-design/contracts';
+import type { ApiErrorCode } from '@open-design/contracts';
 import nodePath from 'node:path';
 import os from 'node:os';
 import { readFile, rm } from 'node:fs/promises';
@@ -33,9 +34,20 @@ import { parseOrchestratorWorkspace } from './workspace-contract.js';
  * 43 devices classified by string matching. Pass the real code through so the
  * classification is structural.
  */
-function desktopRendererErrorCode(err: unknown): string {
+const FORWARDABLE_SIDECAR_CODES = new Set<ApiErrorCode>([
+  'SIDECAR_UNKNOWN_MESSAGE',
+  'SIDECAR_INVALID_MESSAGE',
+]);
+
+function desktopRendererErrorCode(err: unknown): ApiErrorCode {
   const code = (err as { code?: unknown } | null | undefined)?.code;
-  return typeof code === 'string' && code.length > 0 ? code : 'UPSTREAM_UNAVAILABLE';
+  // Only forward codes that are declared in ApiErrorCode. The injected
+  // `ctx.http.sendApiError` is typed `(...args: any[]) => any`, so an
+  // undeclared code would compile and reach the wire while every
+  // ApiErrorCode-typed handler on the web side silently failed to match it.
+  return typeof code === 'string' && FORWARDABLE_SIDECAR_CODES.has(code as ApiErrorCode)
+    ? (code as ApiErrorCode)
+    : 'UPSTREAM_UNAVAILABLE';
 }
 
 export interface RegisterImportRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'ids' | 'paths' | 'imports' | 'auth' | 'projectStore' | 'conversations' | 'projectFiles' | 'validation'> {}
