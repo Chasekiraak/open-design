@@ -15,6 +15,7 @@
  * a real upstream source — do not add anything that can't be linked.
  */
 
+// Catalogue of 50 curated Codex design plugins.
 export const AWESOME_REPO_URL = 'https://github.com/nexu-io/codex-design';
 export const OD_DOWNLOAD_URL = '/download/';
 export const OD_GUIDE_HREF = '/agents/codex-design/';
