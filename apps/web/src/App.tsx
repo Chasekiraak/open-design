@@ -205,7 +205,22 @@ function sameAgentModelChoice(
   right: AgentModelChoice | undefined,
 ): boolean {
   return (left?.model ?? null) === (right?.model ?? null)
-    && (left?.reasoning ?? null) === (right?.reasoning ?? null);
+    && (left?.reasoning ?? null) === (right?.reasoning ?? null)
+    && (left?.serviceTier ?? null) === (right?.serviceTier ?? null);
+}
+
+export function mergeAgentModelChoice(
+  previous: AgentModelChoice | undefined,
+  next: { model?: string; reasoning?: string; serviceTier?: string },
+): AgentModelChoice {
+  const merged = { ...(previous ?? {}), ...next };
+  if (
+    Object.prototype.hasOwnProperty.call(next, 'serviceTier') &&
+    next.serviceTier === undefined
+  ) {
+    delete merged.serviceTier;
+  }
+  return merged;
 }
 
 function clearStaleAmrModelChoiceOnProfileChange(
@@ -1387,10 +1402,10 @@ function AppInner() {
   );
 
   const handleAgentModelChange = useCallback(
-    (agentId: string, choice: { model?: string; reasoning?: string }) => {
+    (agentId: string, choice: { model?: string; reasoning?: string; serviceTier?: string }) => {
       const current = latestPersistedConfigRef.current;
       const prev = current.agentModels?.[agentId] ?? {};
-      const merged = { ...prev, ...choice };
+      const merged = mergeAgentModelChoice(prev, choice);
       const nextAgentModels = {
         ...(current.agentModels ?? {}),
         [agentId]: merged,

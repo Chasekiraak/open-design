@@ -190,6 +190,7 @@ import {
   detectAgents,
   getAgentDef,
   isKnownModel,
+  isKnownServiceTier,
   openDesignAmrTraceEnv,
   applyAgentLaunchEnv,
   resolveAgentLaunch,
@@ -203,6 +204,7 @@ import {
   rememberLiveModels,
   resolveDefaultModelFromOptions,
   resolveModelForAgent,
+  resolveModelForServiceTier,
 } from './runtimes/models.js';
 import {
   compactTranscriptForSessionRollover,
@@ -2953,6 +2955,7 @@ export async function startServer({
     testAgentConnection,
     getAgentDef,
     isKnownModel,
+    isKnownServiceTier,
     sanitizeCustomModel,
   };
   const critiqueDeps = {
@@ -4296,6 +4299,7 @@ export async function startServer({
       commentAttachments = [],
       model,
       reasoning,
+      serviceTier,
       locale,
       research,
       context,
@@ -4320,6 +4324,7 @@ export async function startServer({
     if (typeof telemetryPrompt === 'string') run.userPrompt = telemetryPrompt;
     if (typeof model === 'string' && model) run.model = model;
     if (typeof reasoning === 'string' && reasoning) run.reasoning = reasoning;
+    if (typeof serviceTier === 'string' && serviceTier) run.serviceTier = serviceTier;
     if (typeof skillId === 'string' && skillId) run.skillId = skillId;
     if (typeof designSystemId === 'string' && designSystemId)
       run.designSystemId = designSystemId;
@@ -4904,8 +4909,10 @@ export async function startServer({
     // the upstream session's own configured default; omitted models may still
     // resolve to an available fallback below.
     let configuredAgentEnv = {};
+    let appConfigForRun = null;
     try {
       const appConfig = await readAppConfig(RUNTIME_DATA_DIR);
+      appConfigForRun = appConfig;
       configuredAgentEnv = agentCliEnvForAgent(appConfig.agentCliEnv, def.id);
     } catch {
       configuredAgentEnv = {};
@@ -4917,13 +4924,17 @@ export async function startServer({
           ...configuredAgentEnv,
         })
       : null;
+    const configuredModel =
+      typeof appConfigForRun?.agentModels?.[def.id]?.model === 'string'
+        ? appConfigForRun.agentModels[def.id].model
+        : null;
     let safeModel = resolveModelForAgent(
       def,
       typeof model === 'string'
         ? isKnownModel(def, model, requestedLiveModelScope)
           ? model
           : sanitizeCustomModel(model)
-        : null,
+        : configuredModel,
       process.env,
       requestedLiveModelScope,
     );
@@ -4936,7 +4947,22 @@ export async function startServer({
       typeof reasoning === 'string' && Array.isArray(def.reasoningOptions)
         ? (def.reasoningOptions.find((r) => r.id === reasoning)?.id ?? null)
         : null;
-    const agentOptions = { model: safeModel, reasoning: safeReasoning };
+    safeModel = resolveModelForServiceTier(
+      def,
+      safeModel,
+      typeof serviceTier === 'string' ? serviceTier : null,
+      requestedLiveModelScope,
+    );
+    const safeServiceTier =
+      typeof serviceTier === 'string' &&
+      isKnownServiceTier(def, safeModel, serviceTier, requestedLiveModelScope)
+        ? serviceTier
+        : null;
+    const agentOptions = {
+      model: safeModel,
+      reasoning: safeReasoning,
+      serviceTier: safeServiceTier,
+    };
     const agentLaunch = resolveAgentLaunch(def, configuredAgentEnv);
     const resolvedBin = agentLaunch.selectedPath;
     if (def.id === 'amr' && resolvedBin && agentLaunch.launchPath) {
@@ -6600,6 +6626,7 @@ export async function startServer({
       cwd,
       model: safeModel,
       reasoning: safeReasoning,
+      serviceTier: safeServiceTier,
       toolTokenExpiresAt: toolTokenGrant?.expiresAt ?? null,
     });
     noteAgentActivity();
@@ -8468,6 +8495,7 @@ export async function startServer({
       designSystemId: orbitDesignSystemId,
       model: modelPrefs.model ?? null,
       reasoning: modelPrefs.reasoning ?? null,
+      serviceTier: modelPrefs.serviceTier ?? null,
       message: prompt,
       systemPrompt: [
         renderOrbitTemplateSystemPrompt(template),
@@ -8784,6 +8812,7 @@ export async function startServer({
         context: routineContext,
         model: modelPrefs.model ?? null,
         reasoning: modelPrefs.reasoning ?? null,
+        serviceTier: modelPrefs.serviceTier ?? null,
         message: routine.prompt,
         systemPrompt: [
           `You are running an unattended scheduled routine named "${routine.name}".`,
@@ -8977,6 +9006,7 @@ export async function startServer({
     chat: { startChatRun },
     agents: agentDeps,
     critique: critiqueDeps,
+    appConfig: { readAppConfig },
     validation: validationDeps,
     lifecycle: { isDaemonShuttingDown: () => daemonShuttingDown },
     telemetry: { reportFinalizedMessage, reportFeedback },

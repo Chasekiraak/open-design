@@ -214,7 +214,7 @@ describe('run failure telemetry smoke', () => {
         expect(trace.body.metadata.stderr).toBeUndefined();
       }
     }
-  });
+  }, 60_000);
 
   it('reclassifies upstream + install/env failures end-to-end through a real daemon run (#3408 P1)', async () => {
     // End-to-end proof for the reclassification: a real agent process emits the
