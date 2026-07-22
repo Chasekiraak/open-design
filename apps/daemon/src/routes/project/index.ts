@@ -5032,7 +5032,7 @@ export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUp
   const { sendApiError } = ctx.http;
   const { handleProjectUpload } = ctx.uploads;
   const { PROJECTS_DIR } = ctx.paths;
-  const { getProject } = ctx.projectStore;
+  const { getProject, getWorkspaceProject } = ctx.projectStore;
   const { readProjectFile } = ctx.projectFiles;
   const { fs } = ctx.node;
 
@@ -5042,6 +5042,23 @@ export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUp
     async (req, res) => {
       try {
         const incoming = Array.isArray(req.files) ? req.files : [];
+        const cleanupRejectedUpload = () => {
+          for (const f of incoming) {
+            if (f?.path) fs.promises.unlink(f.path).catch(() => {});
+          }
+        };
+        if (!enforceWorkspaceProjectMutation(
+          req,
+          res,
+          sendApiError,
+          getWorkspaceProject,
+          db,
+          req.params.id,
+          'writeFiles',
+        )) {
+          cleanupRejectedUpload();
+          return;
+        }
         // Subfolder the upload targeted (sanitized, forward-slash, '' for root),
         // stashed by the multer destination resolver. Prepend it so callers
         // get the file's true project-relative path, not just its basename.

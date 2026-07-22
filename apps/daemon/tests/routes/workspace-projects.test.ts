@@ -636,6 +636,20 @@ describe('workspace project routes', () => {
     });
     expect(writeResp.status).toBe(403);
 
+    // The multi-file batch route (chat composer paste/drop/picker) is a
+    // separate handler from the single-file POST above and used to carry no
+    // enforceWorkspaceProjectMutation call at all — not even the ctx-present
+    // path this whole test exercises for its siblings.
+    const uploadForm = new FormData();
+    uploadForm.append('files', new Blob(['blocked'], { type: 'text/plain' }), 'blocked-upload.txt');
+    const { 'content-type': _uploadContentType, ...uploadHeaders } = readOnlyHeaders;
+    const uploadResp = await fetch(`${baseUrl}/api/projects/${projectId}/upload`, {
+      method: 'POST',
+      headers: uploadHeaders,
+      body: uploadForm,
+    });
+    expect(uploadResp.status).toBe(403);
+
     const folderCreateResp = await fetch(`${baseUrl}/api/projects/${projectId}/folders`, {
       method: 'POST',
       headers: readOnlyHeaders,
@@ -725,6 +739,16 @@ describe('workspace project routes', () => {
       body: JSON.stringify({ name: 'locked.txt', content: 'locked' }),
     });
     expect(writeResp.status).toBe(403);
+
+    const uploadForm = new FormData();
+    uploadForm.append('files', new Blob(['locked'], { type: 'text/plain' }), 'locked-upload.txt');
+    const { 'content-type': _uploadContentType, ...uploadHeaders } = lockedHeaders;
+    const uploadResp = await fetch(`${baseUrl}/api/projects/${projectId}/upload`, {
+      method: 'POST',
+      headers: uploadHeaders,
+      body: uploadForm,
+    });
+    expect(uploadResp.status).toBe(403);
   });
 
   it('rejects member batch-delete for unknown legacy ownership and allows privileged delete', async () => {
