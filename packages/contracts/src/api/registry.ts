@@ -5,6 +5,10 @@ export type ModelCapability = 'standard' | 'advanced' | 'best_quality';
 export interface ModelMetadata {
   cost?: ModelCost;
   capability?: ModelCapability;
+  /** Maximum combined input/output context reported by the model catalog. */
+  contextWindowTokens?: number;
+  /** Maximum output allowance reported by the model catalog. */
+  maxOutputTokens?: number;
 }
 
 export interface AgentModelOption {

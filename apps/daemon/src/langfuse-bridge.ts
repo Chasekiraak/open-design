@@ -106,6 +106,20 @@ interface DaemonRunRecord {
   retryFinalResult?: string;
   retrySuppressedReason?: string;
   retryOriginalFailure?: RunFailureClassification;
+  contextBudget?: {
+    action: string;
+    source: string;
+    estimatedPromptTokens: number;
+    contextWindowTokens?: number;
+    reservedOutputTokens?: number;
+    inputBudgetTokens?: number;
+    budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
+  };
 }
 
 interface TraceSafeManifestResult {
@@ -1105,6 +1119,7 @@ export async function reportRunCompletedFromDaemon(
         ...(run.retryOriginalFailure
           ? { retryOriginalFailure: run.retryOriginalFailure }
           : {}),
+        ...(run.contextBudget ? { contextBudget: run.contextBudget } : {}),
       },
       message: {
         messageId: run.assistantMessageId ?? '',

@@ -45,6 +45,19 @@ export function getRememberedLiveModels(agentId: string, scope?: string | null):
   return liveModelOrder.get(liveModelCacheKey(agentId, scope)) ?? [];
 }
 
+export function getKnownModelOption(
+  def: RuntimeAgentDef,
+  modelId: string | null | undefined,
+  scope?: string | null,
+): RuntimeModelOption | null {
+  if (!modelId) return null;
+  const live = getRememberedLiveModels(def.id, scope).find(
+    (model) => model.id === modelId,
+  );
+  if (live) return live;
+  return def.fallbackModels.find((model) => model.id === modelId) ?? null;
+}
+
 export function preferFreshLiveModels(
   freshModels: RuntimeModelOption[],
   rememberedModels: RuntimeModelOption[],

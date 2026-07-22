@@ -178,6 +178,21 @@ interface ChatRun {
     retryable?: boolean;
     user_action?: string;
   };
+  contextBudget?: {
+    action: 'unmeasured' | 'within_budget' | 'blocked' | 'rollover';
+    source: 'model_metadata' | 'known_model_family' | 'unknown';
+    estimatedPromptTokens: number;
+    contextWindowTokens?: number;
+    reservedOutputTokens?: number;
+    safetyMarginTokens?: number;
+    inputBudgetTokens?: number;
+    budgetRatio?: number;
+    priorSessionInputTokens?: number;
+    projectedInputTokens?: number;
+    rolloverThresholdTokens?: number;
+    compactedPromptTokens?: number;
+    omittedTranscriptMessageBlocks?: number;
+  };
   artifactOutcome?: {
     artifactCount: number;
     artifactsCreated?: number;
@@ -1308,6 +1323,38 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
                   retry_original_failure_stage:
                     run.retryOriginalFailure.failure_stage,
                 }
+              : {}),
+            context_budget_action: run.contextBudget?.action ?? 'unmeasured',
+            context_budget_source: run.contextBudget?.source ?? 'unknown',
+            ...(run.contextBudget?.estimatedPromptTokens !== undefined
+              ? { estimated_prompt_tokens: run.contextBudget.estimatedPromptTokens }
+              : {}),
+            ...(run.contextBudget?.contextWindowTokens !== undefined
+              ? { context_window_tokens: run.contextBudget.contextWindowTokens }
+              : {}),
+            ...(run.contextBudget?.reservedOutputTokens !== undefined
+              ? { reserved_output_tokens: run.contextBudget.reservedOutputTokens }
+              : {}),
+            ...(run.contextBudget?.inputBudgetTokens !== undefined
+              ? { input_budget_tokens: run.contextBudget.inputBudgetTokens }
+              : {}),
+            ...(run.contextBudget?.budgetRatio !== undefined
+              ? { context_budget_ratio: run.contextBudget.budgetRatio }
+              : {}),
+            ...(run.contextBudget?.priorSessionInputTokens !== undefined
+              ? { prior_session_input_tokens: run.contextBudget.priorSessionInputTokens }
+              : {}),
+            ...(run.contextBudget?.projectedInputTokens !== undefined
+              ? { projected_session_input_tokens: run.contextBudget.projectedInputTokens }
+              : {}),
+            ...(run.contextBudget?.rolloverThresholdTokens !== undefined
+              ? { rollover_threshold_tokens: run.contextBudget.rolloverThresholdTokens }
+              : {}),
+            ...(run.contextBudget?.compactedPromptTokens !== undefined
+              ? { compacted_prompt_tokens: run.contextBudget.compactedPromptTokens }
+              : {}),
+            ...(run.contextBudget?.omittedTranscriptMessageBlocks !== undefined
+              ? { omitted_transcript_message_blocks: run.contextBudget.omittedTranscriptMessageBlocks }
               : {}),
             ...(run.retrySuppressedReason
               ? { retry_suppressed_reason: run.retrySuppressedReason }
