@@ -630,13 +630,13 @@ describe('FileViewer srcDoc reload — prevSourceBeforeReloadRef race conditions
     });
 
     // --- KEY ASSERTION ---
-    // The stale snapshot must NOT be restored.  A normal failed load with no
-    // active Reload click must show the loading indicator, not old content.
+    // The stale snapshot must NOT be restored. Revisiting a file that loaded
+    // earlier deliberately skips the loading skeleton, but its old iframe must
+    // still stay empty after the new read fails.
     // On the buggy branch the leaked ref satisfies the identity check and
     // setSource(snap.source) is called, surfacing "V1-CONTENT" instead of the
-    // skeleton.
-    expect(screen.getByRole('status', { name: 'Loading…' })).toBeInTheDocument();
-    expect(screen.queryByTestId('artifact-preview-frame')).toBeNull();
+    // empty preview.
+    expect(screen.getByTestId('artifact-preview-frame')).toHaveAttribute('srcdoc', '');
 
     // Also confirm the stale HTML is not present anywhere in the rendered DOM.
     expect(screen.queryByText(/V1-CONTENT/)).toBeNull();
@@ -880,8 +880,9 @@ describe('FileViewer srcDoc reload — prevSourceBeforeReloadRef race conditions
     // On the buggy build: the ref was left armed by the canceled-fetch path
     // (B's .then() never ran), the identity check passes (A===A), and
     // setSource(snap.source) wrongly surfaces "A-V1-CONTENT" in the srcdoc.
-    expect(screen.getByRole('status', { name: 'Loading…' })).toBeInTheDocument();
-    expect(screen.queryByTestId('artifact-preview-frame')).toBeNull();
+    // Revisiting A does not flash the loading skeleton, so the invariant here
+    // is that the iframe stays empty and its stale content does not return.
+    expect(screen.getByTestId('artifact-preview-frame')).toHaveAttribute('srcdoc', '');
     expect(screen.queryByText(/A-V1-CONTENT/)).toBeNull();
 
     // Drain deferred fetches so they don't leak into subsequent tests.

@@ -347,6 +347,12 @@ describe('FileWorkspace design-system project surface', () => {
     const events: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url === '/api/plugins') {
         return new Response(JSON.stringify([]), {
           status: 200,
@@ -472,6 +478,12 @@ describe('FileWorkspace design-system project surface', () => {
     const events: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url === '/api/plugins') {
         return new Response(JSON.stringify([]), {
           status: 200,
@@ -566,6 +578,12 @@ describe('FileWorkspace design-system project surface', () => {
     });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/api/workspace/context') {
+        return new Response(JSON.stringify({ context: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url === '/api/plugins') {
         return new Response(JSON.stringify([]), {
           status: 200,

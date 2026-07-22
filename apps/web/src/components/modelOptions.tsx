@@ -245,10 +245,15 @@ export const SearchableModelSelect = forwardRef<
     );
   }, [allOptions, normalizedQuery, value]);
   const shouldShowSearch = allOptions.length >= minSearchableOptions;
-  const allCompanyGroups = useMemo(() => groupModelsByCompany(allOptions), [allOptions]);
+  const allCompanyGroups = useMemo(
+    () => groupModelsByCompany(allOptions.filter((option) => option.id !== CUSTOM_MODEL_SENTINEL)),
+    [allOptions],
+  );
   const useTwoLevel = shouldShowSearch && allCompanyGroups.length >= 2;
   const companyGroups = useMemo(
-    () => groupModelsByCompany(filteredOptions),
+    () => groupModelsByCompany(
+      filteredOptions.filter((option) => option.id !== CUSTOM_MODEL_SENTINEL),
+    ),
     [filteredOptions],
   );
   const selectedCompanyKey = value ? modelCompany(value).key : null;
@@ -275,6 +280,14 @@ export const SearchableModelSelect = forwardRef<
         : companyGroups[0]?.key ?? null;
   const activeCompany =
     companyGroups.find((group) => group.key === activeCompanyKey) ?? null;
+  const activeCompanyOptionIds = new Set(
+    activeCompany?.options.map((option) => option.id) ?? [],
+  );
+  const supplementalOptions = filteredOptions.filter(
+    (option) =>
+      option.id === CUSTOM_MODEL_SENTINEL ||
+      (normalizedQuery !== '' && option.id === value && !activeCompanyOptionIds.has(option.id)),
+  );
 
   useEffect(() => {
     if (!open) setFocusedCompanyKey(null);
@@ -684,7 +697,7 @@ export const SearchableModelSelect = forwardRef<
                         role="listbox"
                         aria-label={activeCompany?.name}
                       >
-                        {(activeCompany?.options ?? []).map((option) =>
+                        {[...(activeCompany?.options ?? []), ...supplementalOptions].map((option) =>
                           renderModelOption(option, filteredOptions.indexOf(option))
                         )}
                       </div>

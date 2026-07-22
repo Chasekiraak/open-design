@@ -605,6 +605,8 @@ function AppInner() {
   const [composioConfigLoading, setComposioConfigLoading] = useState(true);
   const route = useRoute();
   const workspaceProjectView = workspaceProjectListViewForRoute(route);
+  const effectiveWorkspaceProjectView = workspaceContext ? workspaceProjectView : undefined;
+  const projectScopeRefreshMountedRef = useRef(false);
   // Read-only mirror for the boot effect. The boot pass needs to know which
   // project list to seed, but it must NOT restart when that answer changes:
   // see the "boot is a one-shot" note on the bootstrap effect below. A
@@ -1306,10 +1308,17 @@ function AppInner() {
   }, [beginProjectListRequest, listCurrentWorkspaceProjects, reconcileFetchedProjects, workspaceProjectView]);
 
   useEffect(() => {
+    // Bootstrap already reads this exact scope on mount. Only re-list after
+    // the resolved workspace identity or a workspace-specific route changes;
+    // local navigation does not alter the unscoped project catalogue.
+    if (!projectScopeRefreshMountedRef.current) {
+      projectScopeRefreshMountedRef.current = true;
+      return;
+    }
     let cancelled = false;
     const request = beginProjectListRequest();
     setProjectsLoading(true);
-    void listCurrentWorkspaceProjects({ workspaceView: workspaceProjectView })
+    void listCurrentWorkspaceProjects({ workspaceView: effectiveWorkspaceProjectView })
       .then((list) => {
         if (cancelled) return;
         reconcileFetchedProjects(list, request);
@@ -1323,9 +1332,9 @@ function AppInner() {
   }, [
     workspaceContext?.workspaceId,
     beginProjectListRequest,
+    effectiveWorkspaceProjectView,
     listCurrentWorkspaceProjects,
     reconcileFetchedProjects,
-    workspaceProjectView,
   ]);
 
   const refreshDesignSystems = useCallback(async () => {
@@ -1921,7 +1930,15 @@ function AppInner() {
       sourceProjectId: string,
       input: { name?: string; pendingPrompt?: string },
     ) => {
-      const result = await createDesignSystemProjectFromProject(sourceProjectId, input);
+      // Carry the active workspace identity — same reasoning as
+      // handleDeleteProject: without it enforceWorkspaceProjectMutation
+      // treats the request as a legacy pre-workspace caller and skips its
+      // ownership check entirely.
+      const result = await createDesignSystemProjectFromProject(
+        sourceProjectId,
+        input,
+        workspaceContextRef.current,
+      );
       try {
         window.sessionStorage.setItem(`od:auto-send-first:${result.project.id}`, '1');
       } catch {
@@ -1946,7 +1963,8 @@ function AppInner() {
 
   const handleDuplicateProject = useCallback(
     async (sourceProjectId: string, input: { name?: string } = {}) => {
-      const result = await duplicateProject(sourceProjectId, input);
+      // Same reasoning as handleDeleteProject / handleCreateDesignSystemFromProject.
+      const result = await duplicateProject(sourceProjectId, input, workspaceContextRef.current);
       rememberLocalProject(result.project.id);
       setProjects((curr) => [
         result.project,

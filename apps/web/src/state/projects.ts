@@ -224,11 +224,15 @@ export async function createProject(input: {
 export async function createDesignSystemProjectFromProject(
   projectId: string,
   input: { name?: string; pendingPrompt?: string } = {},
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<CreateDesignSystemProjectFromProjectResponse> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/design-system-copy`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     });
     if (!resp.ok) {
@@ -260,11 +264,15 @@ export async function createDesignSystemProjectFromProject(
 export async function duplicateProject(
   projectId: string,
   input: { name?: string } = {},
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<DuplicateProjectResponse> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/duplicate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     });
     if (!resp.ok) {

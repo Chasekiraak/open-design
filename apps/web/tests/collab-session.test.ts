@@ -46,10 +46,10 @@ describe('resolveCollabSession', () => {
     expect(decision.member).toBeNull();
   });
 
-  it('is off for a personal workspace (only team workspaces are shared)', () => {
+  it('runs for an active personal workspace that can later invite seats', () => {
     const decision = resolveCollabSession(ctx({ workspaceType: 'personal' }));
-    expect(decision.enabled).toBe(false);
-    expect(decision.reason).toBe('personal-workspace');
+    expect(decision.enabled).toBe(true);
+    expect(decision.reason).toBe('ok');
   });
 
   it('is off for a removed member', () => {

@@ -29,17 +29,6 @@ import { useIframeKeepAlivePool } from '../../src/components/IframeKeepAlivePool
 
 const evictProjectMock = vi.fn();
 const evictMatchingMock = vi.fn();
-const useRouteMock = vi.fn(() => ({
-  kind: 'project' as const,
-  projectId: 'project-1',
-  conversationId: null,
-  fileName: null,
-}));
-
-vi.mock('../../src/router', () => ({
-  navigate: vi.fn(),
-  useRoute: () => useRouteMock(),
-}));
 
 vi.mock('../../src/components/IframeKeepAlivePool', async () => {
   const actual = await vi.importActual<typeof import('../../src/components/IframeKeepAlivePool')>(

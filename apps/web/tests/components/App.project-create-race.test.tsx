@@ -776,7 +776,7 @@ describe('App project creation routing', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Fresh project' }));
 
     await waitFor(() => {
-      expect(mockedDeleteProject).toHaveBeenCalledWith('project-new');
+      expect(mockedDeleteProject).toHaveBeenCalledWith('project-new', null);
       expect(screen.queryByTestId('entry-project-project-new')).toBeNull();
     });
 

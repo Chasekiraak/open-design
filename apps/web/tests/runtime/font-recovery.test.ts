@@ -108,4 +108,12 @@ describe('installFontRecovery', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(added).toHaveLength(0);
   });
+
+  it('is a no-op when the document has no FontFaceSet implementation', async () => {
+    const cancel = installFontRecovery({} as Document);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    cancel();
+  });
 });

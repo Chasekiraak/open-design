@@ -23,7 +23,9 @@ import type {
   RestoreProjectFileVersionResponse,
   SocialShareRequest,
   SocialShareResponse,
+  WorkspaceCollabContext,
 } from '@open-design/contracts';
+import { workspaceProjectHeaders } from '../state/projects';
 import type {
   AgentInfo,
   AppVersionInfo,
@@ -1427,10 +1429,14 @@ export async function deployProjectFile(
 export async function publishProjectFilePublic(
   projectId: string,
   fileName: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WebPublicProjectFileResponse> {
   const resp = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
+    },
   );
   if (!resp.ok) {
     const payload = (await resp.json().catch(() => null)) as
@@ -1450,10 +1456,13 @@ export async function publishProjectFilePublic(
 export async function fetchProjectFilePublicPublication(
   projectId: string,
   fileName: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<WebPublicProjectFileResponse | null> {
-  const resp = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`,
-  );
+  const url =
+    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`;
+  const resp = workspaceContext
+    ? await fetch(url, { headers: workspaceProjectHeaders(workspaceContext) })
+    : await fetch(url);
   if (!resp.ok) {
     const payload = (await resp.json().catch(() => null)) as
       | { error?: { message?: string } | string; message?: string }
@@ -1474,12 +1483,16 @@ export async function unpublishProjectFilePublic(
   projectId: string,
   fileName: string,
   slug: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ ok: true; slug: string; fileName: string }> {
   const resp = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileName)}/publish-public`,
     {
       method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify({ slug }),
     },
   );
