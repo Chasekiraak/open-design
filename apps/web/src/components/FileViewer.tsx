@@ -5,6 +5,7 @@ import { APP_CHROME_FILE_ACTIONS_ID, APP_CHROME_FILE_ACTIONS_SELECTOR } from './
 import {
   buildSocialSharePayload,
   OPEN_DESIGN_GITHUB_REPO_URL,
+  workspaceContextHasTeamIdentity,
   type CollabCloudMemberDirectoryEntry,
   type CollabMemberRole,
   type AgentInfo,
@@ -5878,7 +5879,7 @@ function ReactComponentViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
-    void fetchProjectFilePublicPublication(projectId, file.name)
+    void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
         if (
@@ -5911,7 +5912,7 @@ function ReactComponentViewer({
     setPublishLinkFeedback(null);
     setPublishFailureKey(null);
     try {
-      const response = await publishProjectFilePublic(requestProjectId, requestFileName);
+      const response = await publishProjectFilePublic(requestProjectId, requestFileName, workspaceContext);
       const current = publicFileIdentityRef.current;
       if (
         publicFileRequestSeqRef.current !== requestSeq ||
@@ -5943,7 +5944,7 @@ function ReactComponentViewer({
     setPublishLinkFeedback(null);
     setPublishFailureKey(null);
     try {
-      await unpublishProjectFilePublic(requestProjectId, requestFileName, requestSlug);
+      await unpublishProjectFilePublic(requestProjectId, requestFileName, requestSlug, workspaceContext);
       const current = publicFileIdentityRef.current;
       if (
         publicFileRequestSeqRef.current !== requestSeq ||
@@ -6111,6 +6112,16 @@ function ReactComponentViewer({
                     </div>
                     {unifiedActionTab === 'share' ? (
                       <div className="chrome-unified-panel chrome-unified-panel--share">
+                        {/* Sharing a project INTO a workspace needs a team on the other
+                            end — a personal workspace has none, so `setWorkspaceShareAccess`
+                            (moveWorkspaceProject → visibility: 'team') always fails there
+                            (recvq5bM78HWCE: card rendered, click showed a failure toast).
+                            `workspaceContextHasTeamIdentity` is the same predicate the
+                            daemon's `teamShareRefusalFor` enforces server-side — this must
+                            not be the wider `workspaceContextHasWorkspaceIdentity` gate the
+                            public single-file publish card below uses; that one is
+                            deliberately workspace-agnostic. */}
+                        {workspaceContextHasTeamIdentity(workspaceContext) ? (
                         <div className="chrome-share-card">
                           <div className="chrome-share-card__header">
                             <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
@@ -6173,6 +6184,7 @@ function ReactComponentViewer({
                             ) : null}
                           </div>
                         </div>
+                        ) : null}
                         {canPublishPublic ? (
                         <div className="chrome-share-card">
                           <div className="chrome-share-card__header">
@@ -6903,7 +6915,7 @@ function HtmlViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
-    void fetchProjectFilePublicPublication(projectId, file.name)
+    void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
         if (
@@ -6936,7 +6948,7 @@ function HtmlViewer({
     setPublishLinkFeedback(null);
     setPublishFailureKey(null);
     try {
-      const response = await publishProjectFilePublic(requestProjectId, requestFileName);
+      const response = await publishProjectFilePublic(requestProjectId, requestFileName, workspaceContext);
       const current = publicFileIdentityRef.current;
       if (
         publicFileRequestSeqRef.current !== requestSeq ||
@@ -6968,7 +6980,7 @@ function HtmlViewer({
     setPublishLinkFeedback(null);
     setPublishFailureKey(null);
     try {
-      await unpublishProjectFilePublic(requestProjectId, requestFileName, requestSlug);
+      await unpublishProjectFilePublic(requestProjectId, requestFileName, requestSlug, workspaceContext);
       const current = publicFileIdentityRef.current;
       if (
         publicFileRequestSeqRef.current !== requestSeq ||
@@ -12699,12 +12711,20 @@ function HtmlViewer({
             <button
               type="button"
               className={`chrome-action chrome-action-secondary chrome-action-icon od-tooltip${versionModalOpen ? ' is-active' : ''}`}
-              disabled={source === null || viewerOnly}
+              // Browsing history is a read action, not an edit — a viewer-only
+              // shared project should open this exactly like it already opens
+              // Present (recvq56vFjQKfT). `FileVersionManagerModal` already
+              // disables its own Restore button on `viewerOnly` (see
+              // `restoreDisabled` below); gating the ENTRY POINT on the same
+              // flag was the actual bug, and this button disagreed with the
+              // equivalent "more" menu item just below, which never had this
+              // gate.
+              disabled={source === null}
               aria-label={t('fileViewer.versions.entry')}
               aria-expanded={Boolean(versionModalOpen)}
-              data-tooltip={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
+              data-tooltip={t('fileViewer.versions.entryFull')}
               data-tooltip-placement="bottom"
-              title={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
+              title={t('fileViewer.versions.entryFull')}
               onClick={() => {
                 // The version history is a floating panel now, not a modal, so
                 // the toolbar icon is a toggle: a second click dismisses it.
@@ -12762,6 +12782,9 @@ function HtmlViewer({
                     </div>
                     {unifiedActionTab === 'share' && rawCanShare ? (
                       <div className="chrome-unified-panel chrome-unified-panel--share">
+                      {/* Team-only, same as ReactComponentViewer's copy of this card above —
+                          see the comment there (recvq5bM78HWCE). */}
+                      {workspaceContextHasTeamIdentity(workspaceContext) ? (
                       <div className="chrome-share-card">
                         <div className="chrome-share-card__header">
                           <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
@@ -12824,6 +12847,7 @@ function HtmlViewer({
                           ) : null}
                         </div>
                       </div>
+                      ) : null}
                       {canPublishPublic ? (
                       <div className="chrome-share-card">
                         <div className="chrome-share-card__header">
@@ -13676,7 +13700,11 @@ function HtmlViewer({
         </div>,
         document.body,
       ) : null}
-      {versionModalOpen && versioningAvailable && !viewerOnly && typeof document !== 'undefined' ? (
+      {/* No `!viewerOnly` here: the modal already fails closed on the one
+          write action it hosts — `restoreDisabled` includes `viewerOnly` —
+          so re-blocking the whole panel only stopped a read-only viewer from
+          BROWSING versions (recvq56vFjQKfT). */}
+      {versionModalOpen && versioningAvailable && typeof document !== 'undefined' ? (
         <FileVersionManagerModal
           projectId={projectId}
           projectKind={projectKind}
