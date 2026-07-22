@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyPlugin,
   contributeGeneratedPluginToOpenDesign,
+  createDesignSystemProjectFromProject,
   createProject,
   createPluginShareProject,
   deleteProject,
+  duplicateProject,
   importClaudeDesignZip,
   importFolderProject,
   installGeneratedPluginFolder,
@@ -205,6 +207,88 @@ describe('deleteProject', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(null, { status: 403 })));
 
     await expect(deleteProject('someone-elses-project', personalWorkspaceContext())).resolves.toBe(false);
+  });
+});
+
+// Same gap as deleteProject, found while auditing every client caller of a
+// daemon route behind enforceWorkspaceProjectMutation: duplicate and
+// design-system-copy sent no workspace headers either, so both bypassed the
+// daemon's cross-workspace ownership check the exact same way.
+describe('duplicateProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers so the daemon can enforce ownership', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({ project: { id: 'dup-1' }, conversationId: 'conv-1', copiedFiles: [] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await duplicateProject('leaked-team-project', {}, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/leaked-team-project/duplicate',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({ project: { id: 'dup-1' }, conversationId: 'conv-1', copiedFiles: [] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await duplicateProject('local-only-project');
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+describe('createDesignSystemProjectFromProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers so the daemon can enforce ownership', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          project: { id: 'ds-1' },
+          conversationId: 'conv-1',
+          designSystemId: 'ds-sys-1',
+          copiedFiles: [],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createDesignSystemProjectFromProject('leaked-team-project', {}, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/leaked-team-project/design-system-copy',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
   });
 });
 

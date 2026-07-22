@@ -1921,7 +1921,15 @@ function AppInner() {
       sourceProjectId: string,
       input: { name?: string; pendingPrompt?: string },
     ) => {
-      const result = await createDesignSystemProjectFromProject(sourceProjectId, input);
+      // Carry the active workspace identity — same reasoning as
+      // handleDeleteProject: without it enforceWorkspaceProjectMutation
+      // treats the request as a legacy pre-workspace caller and skips its
+      // ownership check entirely.
+      const result = await createDesignSystemProjectFromProject(
+        sourceProjectId,
+        input,
+        workspaceContextRef.current,
+      );
       try {
         window.sessionStorage.setItem(`od:auto-send-first:${result.project.id}`, '1');
       } catch {
@@ -1946,7 +1954,8 @@ function AppInner() {
 
   const handleDuplicateProject = useCallback(
     async (sourceProjectId: string, input: { name?: string } = {}) => {
-      const result = await duplicateProject(sourceProjectId, input);
+      // Same reasoning as handleDeleteProject / handleCreateDesignSystemFromProject.
+      const result = await duplicateProject(sourceProjectId, input, workspaceContextRef.current);
       rememberLocalProject(result.project.id);
       setProjects((curr) => [
         result.project,
