@@ -322,6 +322,17 @@ describe("packaged smoke workflow", () => {
     expect(validate).toContain("windows_tools_pack_payload_tests");
   });
 
+  it("[P2] retries Playwright installation only for E2E Vitest", async () => {
+    const workflow = await readFile(ciWorkflowPath, "utf8");
+    const e2eVitest = sectionBetween(workflow, "  e2e_vitest:", "  playwright_critical:");
+    const playwrightCritical = sectionBetween(workflow, "  playwright_critical:", "  ui_p0:");
+
+    expect(e2eVitest).toContain("for attempt in 1 2 3");
+    expect(e2eVitest).toContain("Playwright install failed on attempt $attempt");
+    expect(e2eVitest).toContain('sleep "$((attempt * 5))"');
+    expect(playwrightCritical).not.toContain("for attempt in 1 2 3");
+  });
+
   it("[P2] limits manual blob guard checks to changed files against main", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     const blobGuard = sectionBetween(workflow, "  static_gate:", "  preflight:");

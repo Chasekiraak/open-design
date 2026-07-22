@@ -381,7 +381,18 @@ jobs:
         uses: ./.github/actions/setup-playwright
         with:
           package-json-path: e2e/package.json
-          install-command: pnpm -C e2e exec playwright install --with-deps chromium
+          install-command: |
+            for attempt in 1 2 3; do
+              if pnpm -C e2e exec playwright install --with-deps chromium; then
+                exit 0
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Playwright install failed after $attempt attempts." >&2
+                exit 1
+              fi
+              echo "Playwright install failed on attempt $attempt; retrying after $((attempt * 5))s." >&2
+              sleep "$((attempt * 5))"
+            done
           runner-labels: ${{ toJSON(fromJSON(needs.runners.outputs.runs_on).js_hot) }}
 
       - name: Prebuild workspace type declarations
