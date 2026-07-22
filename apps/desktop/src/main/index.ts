@@ -156,7 +156,6 @@ export type DesktopMainOptions = {
   discoverDaemonUrl?: () => Promise<string | null>;
   preloadPath?: string;
   windowTitle?: string;
-  onExternalShow?: () => Promise<void> | void;
   onDesktopReady?: (controls: { show(): void }) => void;
   /**
    * Optional pre-created splash window. The packaged entry creates it before
