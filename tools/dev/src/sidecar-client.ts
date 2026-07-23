@@ -13,7 +13,7 @@ export type AppRuntimeLookup = {
   namespace: string;
 };
 
-export const DESKTOP_STARTUP_TIMEOUT_MS = 90_000;
+export const DESKTOP_STARTUP_TIMEOUT_MS = 180_000;
 
 export type DesktopRuntimeWaitDeps = {
   inspect?: typeof inspectDesktopRuntime;
