@@ -68,6 +68,7 @@ export function CloudSignInTip() {
     const result = await startVelaLogin();
     if (cancelledRef.current || !mountedRef.current) return;
     if (!result.ok && !result.alreadyRunning) {
+      console.error('[amr-login] startVelaLogin failed', result);
       setState('error');
       return;
     }
@@ -90,6 +91,7 @@ export function CloudSignInTip() {
         // alreadyRunning instead of spawning a fresh one, so no new browser
         // tab ever opens. Mirrors AmrLoginPill / InlineModelSwitcher / EntryShell.
         if (outcome === 'timed-out') void cancelVelaLogin();
+        console.error('[amr-login] poll did not reach a signed-in status', { outcome, next });
         setState('error');
         return;
       }

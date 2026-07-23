@@ -375,6 +375,7 @@ export function AmrLoginPill({
           );
         } else {
           resolveAmrAuthTracking(analytics.track, 'failed', 'login_stopped');
+          console.error('[amr-login] poll loop stopped without a terminal status', { outcome });
         }
         loginStartedAtRef.current = null;
         loginPendingRef.current = false;
@@ -477,6 +478,7 @@ export function AmrLoginPill({
       const result = await startVelaLogin(attribution, odDeviceId);
       if (!result.ok && !result.alreadyRunning) {
         resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed');
+        console.error('[amr-login] startVelaLogin failed', result);
         loginStartedAtRef.current = null;
         loginPendingRef.current = false;
         setPending(null);
@@ -509,6 +511,7 @@ export function AmrLoginPill({
       loginStartedAtRef.current = null;
       loginPendingRef.current = false;
       if (!result.ok) {
+        console.error('[amr-login] cancelVelaLogin failed', result);
         setPending(null);
         setErrorMessage(t('settings.amrLoginErrorCompact'));
         return;
@@ -541,6 +544,7 @@ export function AmrLoginPill({
       loginPendingRef.current = false;
       setPending(null);
       if (!result.ok) {
+        console.error('[amr-login] velaLogout failed', result);
         setErrorMessage(t('settings.amrLoginErrorCompact'));
         return;
       }

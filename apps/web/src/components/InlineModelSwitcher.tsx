@@ -292,11 +292,13 @@ export function InlineModelSwitcher({
         stopAmrPolling();
         if (outcome === 'timed-out') {
           resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout');
+          console.error('[amr-login] poll timed out waiting for a signed-in status');
           void cancelVelaLogin().then(() =>
             notifyAmrLoginStatusChanged('login-canceled'),
           );
         } else {
           resolveAmrAuthTracking(analytics.track, 'failed', 'login_stopped');
+          console.error('[amr-login] poll loop stopped without a terminal status');
         }
         amrLoginStartedAtRef.current = null;
         setAmrLoginPending(false);
@@ -324,6 +326,7 @@ export function InlineModelSwitcher({
     const result = await startVelaLogin(attribution, odDeviceId);
     if (!result.ok && !result.alreadyRunning) {
       resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed');
+      console.error('[amr-login] startVelaLogin failed', result);
       amrLoginStartedAtRef.current = null;
       setAmrLoginPending(false);
       setAmrLoginError(result.error || t('settings.amrLoginErrorCompact'));

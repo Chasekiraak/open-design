@@ -2400,6 +2400,7 @@ function OnboardingView({
           const cancelResult = await cancelVelaLogin();
           closeAmrActivationWindowBestEffort();
           if (!cancelResult.ok) {
+            console.error('[amr-login] cancelVelaLogin failed', cancelResult);
             setAmrLoginError(t('settings.amrLoginErrorCompact'));
             return;
           }
@@ -2409,6 +2410,7 @@ function OnboardingView({
       }
       if (!loginResult.ok && !loginResult.alreadyRunning) {
         resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed');
+        console.error('[amr-login] startVelaLogin failed', loginResult);
         setAmrLoginError(loginResult.error || t('settings.amrLoginErrorCompact'));
         return;
       }
@@ -2436,6 +2438,7 @@ function OnboardingView({
     closeAmrActivationWindowBestEffort();
     setAmrLoginCancelPending(false);
     if (!result.ok) {
+      console.error('[amr-login] cancelVelaLogin failed', result);
       setAmrLoginError(t('settings.amrLoginErrorCompact'));
       return;
     }
@@ -2471,9 +2474,11 @@ function OnboardingView({
       if (outcome === 'stopped' || outcome === 'timed-out') {
         if (outcome === 'timed-out') {
           resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout');
+          console.error('[amr-login] poll timed out waiting for a signed-in status', { nextStatus });
           void cancelVelaLogin();
         } else {
           resolveAmrAuthTracking(analytics.track, 'failed', 'login_stopped');
+          console.error('[amr-login] poll loop stopped without a terminal status', { nextStatus });
         }
         setAmrLoginError(t('settings.amrLoginErrorCompact'));
         return false;
