@@ -1106,6 +1106,14 @@ jobs:
           OD_BETA_WINDOWS_SIGN_CERT_SHA1: ${{ steps.sign_probe.outputs.thumbprint }}
           OD_PACKAGED_E2E_WIN_UPDATE_METADATA_URL: ${{ inputs.win_x64_update_metadata_url }}
           OD_PACKAGED_E2E_WIN_UPDATE_VERSION: ${{ inputs.win_x64_update_target_version }}
+          # Bake the AMR profile (tools-pack reads OPEN_DESIGN_AMR_PROFILE) so a
+          # feature-test dispatch produces a packaged app that targets the
+          # amr-feature backend and enables the workspace-team transport. Empty =
+          # default (prod) — the normal beta pipeline is unaffected. Mirrors the
+          # mac_arm64 build step above; this was missing here, so every win_x64
+          # dogfood build silently fell back to prod and could not sign in to a
+          # feature-test AMR environment.
+          OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}\release-build\win_x64" | Out-Null
@@ -1122,6 +1130,8 @@ jobs:
         id: win_tools_pack_build_retry
         if: ${{ steps.win_tools_pack_build.outcome == 'failure' }}
         shell: pwsh
+        env:
+          OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
           $ErrorActionPreference = "Stop"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "${{ runner.temp }}\tools-pack-cache"
