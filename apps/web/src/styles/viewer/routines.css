@@ -942,13 +942,34 @@
   background: transparent;
   box-shadow: none;
 }
-/* #5517's Chrome-style hairline separators for this top-chrome desktop-window
-   tab strip were tried and reverted (test recvp... guards the removal — see
-   workspace-tabs-chrome.test.ts "keeps workspace tabs compact and centered in
-   the top chrome"); this strip's tabs stay separator-free. The in-project
-   workspace tab strip (.ws-tab, below) keeps the separator instead. */
+/* Chrome-style hairline separators between tabs, matching #5517: each tab
+   after the first draws a short divider centered in the 2px strip gap before
+   it. Dividers touching the active (or hovered / dragging) tab fade out so
+   its pill reads as one uninterrupted shape. A prior pass here removed this
+   to "stay separator-free" — that reading was wrong, not a real product
+   decision; #5517's own tab strip has always drawn this divider. */
 .workspace-shell .workspace-tab + .workspace-tab::before {
-  display: none;
+  content: '';
+  display: block;
+  position: absolute;
+  left: -1.5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 14px;
+  background: color-mix(in srgb, var(--border-strong) 52%, transparent);
+  pointer-events: none;
+  transition: opacity 100ms var(--ease-out);
+}
+.workspace-shell .workspace-tab.is-active::before,
+.workspace-shell .workspace-tab.is-active + .workspace-tab::before,
+.workspace-shell .workspace-tab:hover::before,
+.workspace-shell .workspace-tab:hover + .workspace-tab::before,
+.workspace-shell .workspace-tab:focus-within::before,
+.workspace-shell .workspace-tab:focus-within + .workspace-tab::before,
+.workspace-shell .workspace-tab.is-dragging::before,
+.workspace-shell .workspace-tab.is-dragging + .workspace-tab::before {
+  opacity: 0;
 }
 /* The pinned Home tab is fixed: it never shrinks with the project tabs and
    stays stuck to the left edge so it remains fully visible after the rest

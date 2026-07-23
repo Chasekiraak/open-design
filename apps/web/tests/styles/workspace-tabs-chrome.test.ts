@@ -309,7 +309,14 @@ describe('workspace tabs chrome styles', () => {
     expect(projectStrip).not.toContain('overflow-x:');
     expect(ruleValue(sharedStrip, 'overflow-x')).toBe('auto');
     expect(ruleValue(sharedStrip, 'overflow-y')).toBe('hidden');
-    expect(ruleValue(tabSeparator, 'display')).toBe('none');
+    // Chrome-style hairline separators, matching #5517: drawn between tabs,
+    // faded out on the active/hover/dragging tab so its pill reads as one
+    // uninterrupted shape rather than a display:none removal.
+    expect(ruleValue(tabSeparator, 'display')).toBe('block');
+    expect(ruleValue(tabSeparator, 'width')).toBe('1px');
+    expect(cssDeclarations(routinesCss, '.workspace-shell .workspace-tab.is-active::before')).toContain(
+      'opacity: 0',
+    );
     expect(ruleValue(main, 'z-index')).toBe('2');
     expect(Number(ruleValue(popover, 'z-index'))).toBeGreaterThan(
       Number(ruleValue(presentOverlay, 'z-index')),
@@ -317,7 +324,6 @@ describe('workspace tabs chrome styles', () => {
     // #5517 drops the 380ms tab hover-preview card entirely — no component, no
     // stylesheet block. Guard the removal so it cannot creep back in.
     expect(shellCss).not.toContain('.workspace-tab-preview');
-    expect(routinesCss).not.toContain('.workspace-shell .workspace-tab.is-active::before');
     expect(routinesCss).not.toContain('.workspace-shell .workspace-tab.is-active::after');
   });
 
