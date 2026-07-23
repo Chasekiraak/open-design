@@ -503,7 +503,7 @@ async function collectTestLayoutViolations(directory: string): Promise<string[]>
 
 async function checkScriptsTestFree(): Promise<boolean> {
   const scriptsFiles = await collectRepositoryFiles(path.join(repoRoot, "scripts"), testLayoutSkippedDirectories);
-  const violations = scriptsFiles.filter((file) => /\.test\.(?:tsx?|jsx?|mjs|cjs)$/.test(file));
+  const violations = scriptsFiles.filter(isScriptTestFile);
 
   if (violations.length > 0) {
     console.error(
@@ -517,6 +517,10 @@ async function checkScriptsTestFree(): Promise<boolean> {
 
   console.log("Scripts test-free check passed: no test files under root scripts/.");
   return true;
+}
+
+export function isScriptTestFile(repositoryPath: string): boolean {
+  return /\.test\.[^/]+$/.test(repositoryPath);
 }
 
 async function checkTestLayout(): Promise<boolean> {
