@@ -2223,31 +2223,12 @@ export function FileWorkspace({
   // Browser-style tab bar: when the active tab changes (open from a chat
   // file chip, switch via Cmd+P, etc.), scroll it into view so the user
   // can always see what they have selected even when the strip overflows.
-  // The Pages switcher is already sticky-pinned, so we only scroll
-  // for real workspace tabs. Issue #775.
   useEffect(() => {
-    if (activeTab === DESIGN_FILES_TAB || activeTab === DESIGN_SYSTEM_TAB) return;
     const tabBar = tabsBarRef.current;
     if (!tabBar) return;
     const el = tabBar.querySelector<HTMLElement>('.ws-tab.active');
     if (!el) return;
-    // The Design Files tab is sticky-pinned to the scrollport's left
-    // edge, so a naive scrollIntoView
-    // with inline: 'nearest' would slide a leftward-jumped active tab
-    // flush with that edge and leave it hidden underneath the sticky
-    // tab. Compute scrollLeft manually instead, treating the sticky
-    // tab's right edge as the effective visible-left boundary.
-    const tabRect = el.getBoundingClientRect();
-    const barRect = tabBar.getBoundingClientRect();
-    const stickyEl = tabBar.querySelector<HTMLElement>('.ws-tab.design-files-tab');
-    const stickyWidth = stickyEl ? stickyEl.getBoundingClientRect().width : 0;
-    const visibleLeft = barRect.left + stickyWidth;
-    const visibleRight = barRect.right;
-    if (tabRect.left < visibleLeft) {
-      tabBar.scrollLeft += tabRect.left - visibleLeft;
-    } else if (tabRect.right > visibleRight) {
-      tabBar.scrollLeft += tabRect.right - visibleRight;
-    }
+    scrollWorkspaceTabIntoView(tabBar, el);
   }, [activeTab]);
 
   // Browser-style shortcuts for the high-frequency Design Files workspace
@@ -7694,6 +7675,19 @@ function tabDropEdgeFromEvent(event: ReactDragEvent<HTMLDivElement>): TabDropEdg
 function arraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
+}
+
+export function scrollWorkspaceTabIntoView(
+  tabBar: Pick<HTMLDivElement, 'getBoundingClientRect' | 'scrollLeft'>,
+  tab: Pick<HTMLElement, 'getBoundingClientRect'>,
+) {
+  const tabRect = tab.getBoundingClientRect();
+  const barRect = tabBar.getBoundingClientRect();
+  if (tabRect.left < barRect.left) {
+    tabBar.scrollLeft += tabRect.left - barRect.left;
+  } else if (tabRect.right > barRect.right) {
+    tabBar.scrollLeft += tabRect.right - barRect.right;
+  }
 }
 
 export function scrollWorkspaceTabsWithWheel(
