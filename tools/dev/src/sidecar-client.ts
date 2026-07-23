@@ -90,8 +90,14 @@ export async function waitForDesktopRuntime(
   const startedAt = now();
   while (now() - startedAt < timeoutMs) {
     const snapshot = await inspect(runtime, 800);
-    if (snapshot != null) return snapshot;
+    if (
+      snapshot?.state === "running" &&
+      snapshot.url != null &&
+      snapshot.windowVisible === true
+    ) {
+      return snapshot;
+    }
     await sleep(150);
   }
-  throw new Error("desktop did not expose status in time");
+  throw new Error("desktop did not expose a visible window in time");
 }
