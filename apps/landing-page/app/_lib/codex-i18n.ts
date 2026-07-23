@@ -69,9 +69,6 @@ export interface CodexCopy {
   readonly detailTraction: string;
   readonly detailRepo: string;
   readonly detailStars: string;
-  readonly detailForks: string;
-  readonly detailContributors: string;
-  readonly detailUpdated: string;
 
   /* Install module. Shell commands live in the data, never in these strings. */
   readonly installHeading: string;
@@ -138,9 +135,6 @@ const en: CodexCopy = {
   detailTraction: 'Traction',
   detailRepo: 'Source repo',
   detailStars: 'Stars',
-  detailForks: 'Forks',
-  detailContributors: 'Contributors',
-  detailUpdated: 'Last updated',
 
   installHeading: 'How to install',
   installRunInCodex: 'Run this inside Codex.',

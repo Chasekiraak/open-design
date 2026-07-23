@@ -1766,20 +1766,14 @@ body.sub-page {
   grid-template-columns: repeat(4, 1fr);
   gap: 18px;
 }
-/* The detail page's "more skills" row holds 3 items — keep it 3-up. */
-.codex-related .codex-skill-grid {
-  grid-template-columns: repeat(3, 1fr);
-}
 @media (max-width: 1080px) {
   .codex-skill-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 760px) {
-  .codex-skill-grid,
-  .codex-related .codex-skill-grid { grid-template-columns: repeat(2, 1fr); }
+  .codex-skill-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 480px) {
-  .codex-skill-grid,
-  .codex-related .codex-skill-grid { grid-template-columns: 1fr; }
+  .codex-skill-grid { grid-template-columns: 1fr; }
 }
 
 /* Featured curated collection banner (Codex design) on the hub —

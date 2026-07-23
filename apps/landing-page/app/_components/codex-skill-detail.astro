@@ -16,7 +16,6 @@
 import Layout from './sub-page-layout.astro';
 import { getPluginsCopy } from '../_lib/plugins-i18n';
 import { getCodexCopy, categoryLabel, skillCopy } from '../_lib/codex-i18n';
-import { getRepoStats, formatCount } from '../_lib/codex-repo-stats';
 import { localeFromPath, localizedHref } from '../i18n';
 import {
   CODEX_SKILLS,
@@ -32,16 +31,15 @@ interface Props {
 }
 const { skill } = Astro.props as Props;
 
+/** 24010 -> '24.0K'. */
+function formatStars(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+}
+
 const locale = localeFromPath(Astro.url.pathname);
 const pcopy = getPluginsCopy(locale);
 const cc = getCodexCopy(locale);
 const sc = skillCopy(cc, skill.slug);
-const repoStats = getRepoStats(skill.repo);
-// `source.label` is "<repo> · <path>"; the card shows the repo as its title, so
-// the sub-line only needs the path part.
-const sourcePath = skill.source.label.startsWith(`${skill.repo} · `)
-  ? skill.source.label.slice(skill.repo.length + 3)
-  : skill.source.label;
 const href = (path: string) => localizedHref(path, locale);
 
 // Four fills the 4-up grid exactly, so the row never ends ragged.
@@ -150,24 +148,12 @@ const jsonLd = [
               <span class="k">{cc.detailSource}</span>
               <span class="v"><a href={skill.source.url} target="_blank" rel="noopener">{skill.repo} ↗</a></span>
             </div>
-            {(skill.stars ?? repoStats?.stars) && (
+            {skill.stars && (
               <div class="dbcard-stats">
                 <div>
-                  <span class="n">{formatCount(skill.stars ?? repoStats!.stars)}</span>
+                  <span class="n">{formatStars(skill.stars)}</span>
                   <span class="k">{cc.detailStars}</span>
                 </div>
-                {repoStats && (
-                  <div>
-                    <span class="n">{formatCount(repoStats.forks)}</span>
-                    <span class="k">{cc.detailForks}</span>
-                  </div>
-                )}
-                {repoStats && repoStats.contributors !== null && (
-                  <div>
-                    <span class="n">{formatCount(repoStats.contributors)}</span>
-                    <span class="k">{cc.detailContributors}</span>
-                  </div>
-                )}
               </div>
             )}
             <div>
@@ -182,12 +168,6 @@ const jsonLd = [
               <span class="k">{cc.detailLicense}</span>
               <span class="v"><a href={skill.license.url} target="_blank" rel="noopener">{skill.license.label} ↗</a></span>
             </div>
-            {repoStats && (
-              <div>
-                <span class="k">{cc.detailUpdated}</span>
-                <span class="v">{repoStats.pushedAt.slice(0, 10)}</span>
-              </div>
-            )}
             <div>
               <span class="k">{cc.detailTags}</span>
               <ul class="dbsnapbar-tags">
