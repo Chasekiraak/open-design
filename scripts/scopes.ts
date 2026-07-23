@@ -620,7 +620,15 @@ function changedMergeGroupFiles(): string[] {
     "--jq",
     "(.files // [])[] | .filename",
   ]);
-  return stdout.split(/\r?\n/).filter(Boolean);
+  const files = stdout.split(/\r?\n/).filter(Boolean);
+  // The compare API caps the complete comparison at 300 files, and only the
+  // first page contains the files array. Exactly 300 names therefore cannot
+  // prove that the resolution is complete; fail closed before a future
+  // certain-confidence rule can trust a truncated merge-group union diff.
+  if (files.length >= 300) {
+    throw new Error("merge_group compare result reached GitHub's 300-file ceiling");
+  }
+  return files;
 }
 
 function runGh(args: string[]): string {

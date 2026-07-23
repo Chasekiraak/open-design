@@ -440,6 +440,16 @@ test("merge_group changed-file resolution failure fails open to the full plan", 
   }
 });
 
+test("merge_group compare result at GitHub's 300-file ceiling fails open to the full plan", () => {
+  const files = Array.from({ length: 300 }, (_, index) => `docs/changed-${index}.md`);
+  const run = runScopes("print", { eventName: "merge_group" }, files);
+  try {
+    assertPlan(JSON.parse(run.stdout) as Record<string, unknown>, FULL_PLAN);
+  } finally {
+    run.cleanup();
+  }
+});
+
 test("pull_request changed-file resolution failure still fails the run", () => {
   assert.throws(() => {
     const run = runScopes("print", PR, ["README.md"], { OD_SCOPES_STUB_FAIL: "1" });
