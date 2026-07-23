@@ -613,6 +613,18 @@ function AppInner() {
   // workspace changes, so nothing is lost by the boot pass not reacting.
   const workspaceProjectViewRef = useRef(workspaceProjectView);
   workspaceProjectViewRef.current = workspaceProjectView;
+  // `listCurrentWorkspaceProjects` already collapses `workspaceView` to
+  // `undefined` when there is no resolved `workspaceContext` (see its
+  // `context ? options?.workspaceView ?? 'recent' : undefined` above), so the
+  // request it sends never actually varies by home tab outside a workspace.
+  // But the raw route-derived `workspaceProjectView` still changes string
+  // value on every 最近/全部/草稿 tab switch, and that alone is enough to
+  // re-run the effect below (dependency arrays compare the value passed in,
+  // not what the callback does with it) — re-fetching the identical list on
+  // every click. Mirror the callback's own collapse here so the effect's
+  // dependency is stable outside a workspace, matching the fetch it triggers.
+  const effectiveWorkspaceProjectView = workspaceContext ? workspaceProjectView : undefined;
+  const projectScopeRefreshMountedRef = useRef(false);
   const analytics = useAnalytics();
 
   // Single-flight guard for `/api/agents?stream=1`: beginning a new request
@@ -1307,10 +1319,17 @@ function AppInner() {
   }, [beginProjectListRequest, listCurrentWorkspaceProjects, reconcileFetchedProjects, workspaceProjectView]);
 
   useEffect(() => {
+    // Bootstrap already reads this exact scope on mount. Only re-list after
+    // the resolved workspace identity or a workspace-specific route changes;
+    // local navigation does not alter the unscoped project catalogue.
+    if (!projectScopeRefreshMountedRef.current) {
+      projectScopeRefreshMountedRef.current = true;
+      return;
+    }
     let cancelled = false;
     const request = beginProjectListRequest();
     setProjectsLoading(true);
-    void listCurrentWorkspaceProjects({ workspaceView: workspaceProjectView })
+    void listCurrentWorkspaceProjects({ workspaceView: effectiveWorkspaceProjectView })
       .then((list) => {
         if (cancelled) return;
         reconcileFetchedProjects(list, request);
@@ -1324,9 +1343,9 @@ function AppInner() {
   }, [
     workspaceContext?.workspaceId,
     beginProjectListRequest,
+    effectiveWorkspaceProjectView,
     listCurrentWorkspaceProjects,
     reconcileFetchedProjects,
-    workspaceProjectView,
   ]);
 
   const refreshDesignSystems = useCallback(async () => {
