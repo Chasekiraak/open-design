@@ -1341,6 +1341,45 @@ describe('collab sync routes', () => {
     expect(store.projects.get('shared-1')?.name).toBe('共享项目');
   });
 
+  it('notifies notifyFilesChanged after a successful pull, so an open FileViewer refreshes without depending on chokidar surviving the pull\'s directory-replace (recvq6CIesNvWZ)', async () => {
+    const store = fakeProjectStore();
+    const notifyFilesChanged = vi.fn();
+    const api = await startSyncServer(undefined, {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      notifyFilesChanged,
+    });
+
+    await api.json('/api/projects/shared-notify/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/shared-notify/collab/status', null);
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
+    const pull = await api.json('/api/projects/shared-notify/collab/pull', { method: 'POST' });
+    expect(pull.status).toBe(200);
+    expect(notifyFilesChanged).toHaveBeenCalledTimes(1);
+    expect(notifyFilesChanged).toHaveBeenCalledWith('shared-notify');
+  });
+
+  it('does not call notifyFilesChanged when the pulled project fails to register locally', async () => {
+    const notifyFilesChanged = vi.fn();
+    const api = await startSyncServer(undefined, {
+      projectStore: {
+        get: () => null,
+        has: () => false,
+        register: () => {
+          throw new Error('project store unavailable');
+        },
+      },
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      notifyFilesChanged,
+    });
+
+    await api.json('/api/projects/shared-notify-fail/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/shared-notify-fail/collab/status', null);
+    const pull = await api.json('/api/projects/shared-notify-fail/collab/pull', { method: 'POST' });
+    expect(pull.status).toBe(502);
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
+  });
+
   it('prefers the hub project name and metadata when registering a pulled project', async () => {
     const store = fakeProjectStore();
     const api = await startSyncServer(undefined, {

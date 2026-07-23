@@ -3230,6 +3230,13 @@ export async function startServer({
       updateProject(db, projectId, { metadata });
     },
     onTeamShareStateChanged: persistWorkspaceProjectVisibility,
+    // See `notifyFilesChanged`'s doc comment on RegisterCollabSyncRoutesDeps
+    // (recvq6CIesNvWZ): a pull's directory-replace can silently orphan the
+    // project's chokidar watcher, so a successful pull notifies any open
+    // FileViewer directly over the existing `file-changed` SSE channel
+    // instead of depending on the watcher having survived the swap.
+    notifyFilesChanged: (projectId: string) =>
+      emitProjectEvent(projectId, { type: 'file-changed', path: '', kind: 'change' }),
     // Resolve the owner's display name + role from the collab-cloud directory so
     // /collab/status can hand the client a named "shared project" banner.
     ...(collabCloud

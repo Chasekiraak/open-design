@@ -1286,6 +1286,38 @@ function injectSandboxShim(doc: string): string {
   }
   tryShim('localStorage');
   tryShim('sessionStorage');
+  // A <base href> pointing at the artifact's real /raw/ URL (injectBaseHref,
+  // below) is what lets relative asset paths resolve inside this opaque
+  // srcDoc document. That same base is what breaks history.pushState /
+  // replaceState: a bare-hash call like replaceState(null, '', '#/3') — the
+  // exact pattern generated decks use for their own slide routing — resolves
+  // against the <base> into a real http(s) URL, and the browser throws
+  // SecurityError because the DOCUMENT's own origin is the opaque "null" of
+  // about:srcdoc, which can never match a concrete origin. A deck whose own
+  // navigation function calls replaceState before it finishes updating the
+  // slide DOM (ordering varies by generated template) aborts mid-navigation
+  // on that throw, leaving the main canvas blank until a manual reload —
+  // the thumbnail rail is unaffected because it does not run the deck's
+  // script per-thumbnail. Wrap both methods so that failure degrades to a
+  // no-op instead of interrupting the caller: the iframe's address bar was
+  // never visible to the user anyway, so losing the hash update here is
+  // invisible.
+  function shimHistoryMethod(name){
+    try {
+      var h = window.history;
+      var original = h && h[name];
+      if (typeof original !== 'function') return;
+      h[name] = function(state, title, url){
+        try {
+          return original.call(h, state, title, url);
+        } catch (_) {
+          return undefined;
+        }
+      };
+    } catch (_) {}
+  }
+  shimHistoryMethod('pushState');
+  shimHistoryMethod('replaceState');
   document.addEventListener('click', (e) => {
     if (!e.target || !(e.target instanceof Element)) return;
     var link = e.target.closest('a[href]');

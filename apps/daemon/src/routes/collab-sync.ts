@@ -76,6 +76,24 @@ export interface RegisterCollabSyncRoutesDeps {
     ownerMemberId?: string | null;
     updatedByMemberId?: string | null;
   }) => void;
+  /**
+   * Notify any live `/api/projects/:id/events` SSE subscribers that this
+   * project's files changed on disk. Called after a successful
+   * `POST /collab/pull` materializes new content.
+   *
+   * This is NOT redundant with the project's chokidar watcher: the `vela
+   * resource pull` transport materializes a pulled project by replacing its
+   * ENTIRE directory (a fresh inode every pull, confirmed via `stat` across
+   * repeated pulls against a live resource-hub project) rather than updating
+   * files in place. A chokidar watch established before that swap keeps
+   * watching the OLD (now-orphaned) directory handle and silently stops
+   * firing — so the member's own currently-open FileViewer tab never saw
+   * `file-changed`, even though `/collab/status` and the file's bytes on disk
+   * were both already correct (recvq6CIesNvWZ). Firing this explicit signal
+   * right after the pull we know just landed sidesteps the swap entirely
+   * instead of depending on chokidar surviving it.
+   */
+  notifyFilesChanged?: (projectId: string) => void;
 }
 
 const SYNC_INTENT_EVENTS: ReadonlySet<ProjectSyncIntentEvent> = new Set([
@@ -338,6 +356,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     resolveSharedProject,
     markTeamProjectRevoked,
     resolveOwnerDisplayName,
+    notifyFilesChanged,
   } = deps;
   const readManifest = deps.readManifest ?? readProjectManifest;
 
@@ -751,6 +770,13 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
         console.warn('[od] failed to register pulled team project:', error);
         return res.status(502).json({ error: 'TEAM_PROJECT_PULL_REGISTER_UNAVAILABLE' });
       }
+      // The pull already materialized new bytes on disk at this point —
+      // notify now rather than relying on the project's chokidar watcher,
+      // which the pull's directory-replace can silently orphan (see
+      // `notifyFilesChanged`'s doc comment). A currently-open FileViewer tab
+      // for this project refreshes on the same `file-changed` path a real
+      // local edit would take.
+      notifyFilesChanged?.(projectId);
     }
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
