@@ -2193,13 +2193,16 @@
   box-shadow: none;
   outline: none;
 }
-/* Hide the dropdown chevron (a RemixIcon <i>, not an <svg>) so only the agent
-   mark shows. The old `svg:last-child` matched nothing — the leftover chevron
-   became a second grid item that wrapped to a second row under the single
-   `1fr` column, pushing the mark up out of vertical center. */
-.app .composer-row .avatar-agent-trigger > i:last-child,
-.chat-composer-fixed-layer .composer-row .avatar-agent-trigger > i:last-child {
-  display: none;
+/* Hide the dropdown chevron so only the agent mark / model name shows. The
+   chevron is RemixIcon's trailing glyph — this app renders Remix glyphs as
+   inline `<svg>` rather than the icon font (packaged `od://` documents can't
+   load `url()` fonts, see RemixIcon.tsx), and that `<svg>` carries an inline
+   `display: inline-block` style. Inline styles beat any non-`!important`
+   stylesheet rule, so plain `display: none` here was a silent no-op — the
+   chevron rendered right next to the model name. */
+.app .composer-row .avatar-agent-trigger > svg:last-child,
+.chat-composer-fixed-layer .composer-row .avatar-agent-trigger > svg:last-child {
+  display: none !important;
 }
 /* When the selected-model readout is shown, drop the leading agent mark so the
    trigger reads as just the model name (icon-only mode, with no readout, keeps
