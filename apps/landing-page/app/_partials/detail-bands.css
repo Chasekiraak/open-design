@@ -154,10 +154,13 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+/* Column flow rather than a fixed track count: the card carries whatever
+   stats the catalogue entry has, today just the star count. */
 .dbcard-stats {
   display: grid !important;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: 28px;
   padding: 16px 0;
   border-block: 1px solid var(--line);
 }
