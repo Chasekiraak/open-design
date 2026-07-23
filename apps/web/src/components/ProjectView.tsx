@@ -217,7 +217,6 @@ import { historyWithApiAttachmentContext } from '../api-attachment-context';
 import { filterImplicitProducedFiles } from '../produced-files';
 import { AvatarMenu } from './AvatarMenu';
 import { EntrySettingsMenu } from './EntrySettingsMenu';
-import { MessageCenter } from './MessageCenter';
 import { Icon } from './Icon';
 import { localizePluginTitle } from './plugins-home/localization';
 import { DesignSystemPicker } from './DesignSystemPicker';
@@ -9054,10 +9053,9 @@ export function ProjectView({
             <>
               {/* Hand-off lives in the share popover's 发送到… tab (the #5517
                   shape) — a second standalone trigger here duplicated it, so
-                  the top bar keeps only the message center and settings. */}
-              <MessageCenter
-                onOpenNotificationSettings={() => onOpenSettings('notifications')}
-              />
+                  the top bar keeps only settings. Message center is a
+                  Home-only entry point (recvqaeVCLVzNp) — it must not also
+                  surface inside a project's toolbar. */}
               <EntrySettingsMenu
                 config={config}
                 onThemeChange={handleThemeChange}

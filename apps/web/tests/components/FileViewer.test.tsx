@@ -3516,6 +3516,38 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.queryByText('Share project in workspace')).toBeNull();
   });
 
+  // recvqae3pK5hyx: the empty state added for the "neither card can render"
+  // case (recvq6W8GX8NaH) was gated on `!canPublishPublic` too, so a signed-in
+  // personal workspace — which DOES get the public-publish card above — fell
+  // through both conditions and showed nothing at all where the team-share
+  // hint belongs: the dogfood report's exact screenshot (one working option,
+  // an unexplained blank area under it). The hint must show regardless of
+  // canPublishPublic, with wording that does not contradict the publish card
+  // sitting right above it.
+  it('still hints at team sharing for a personal workspace that can already publish', async () => {
+    stubFetchWithWorkspaceContext({
+      ...teamWorkspaceContext(),
+      workspaceType: 'personal',
+      teamId: undefined,
+      workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-1',
+    });
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={publicPublishFile()}
+        liveHtml="<html><body><h1>Hello</h1></body></html>"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /share/i }));
+    expect(await screen.findByRole('tab', { name: /share/i })).toBeTruthy();
+    await screen.findByText('Publish this file for everyone');
+    // Must NOT claim "nothing to share yet" — the publish card right above
+    // already offers something.
+    expect(screen.queryByText('Nothing to share yet')).toBeNull();
+    expect(await screen.findByText('No team to share with yet')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /create team/i })).toBeTruthy();
+  });
+
   // The team-workspace side of the same rule: the card must still render
   // there — "separates deploy sharing actions from download actions" above
   // already pins this, this test names the invariant directly.

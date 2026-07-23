@@ -6254,12 +6254,25 @@ function ReactComponentViewer({
                           )}
                         </div>
                         ) : null}
-                        {!workspaceContextHasTeamIdentity(workspaceContext) && !canPublishPublic ? (
+                        {/* Team-only, same as HtmlViewer's copy of this card below — see
+                            the comment there (recvqae3pK5hyx). This must NOT also require
+                            `!canPublishPublic`: a signed-in personal workspace gets the
+                            public-publish card above but never a team, so gating this on
+                            BOTH being absent left it silently blank right under a working
+                            card — the dogfood report's "missing option, blank area" shot.
+                            Swap in the narrower title when the publish card already
+                            answered "is there anything to share" so the two cards don't
+                            contradict each other. */}
+                        {!workspaceContextHasTeamIdentity(workspaceContext) ? (
                           <div className="chrome-share-card chrome-share-card--empty">
                             <div className="chrome-share-card__header">
                               <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
                               <span className="share-menu-text">
-                                <span>{t('fileViewer.shareEmptyStateTitle')}</span>
+                                <span>
+                                  {canPublishPublic
+                                    ? t('fileViewer.shareTeamMissingTitle')
+                                    : t('fileViewer.shareEmptyStateTitle')}
+                                </span>
                                 <small>{t('fileViewer.shareEmptyStateDescription')}</small>
                               </span>
                             </div>
@@ -12972,22 +12985,35 @@ function HtmlViewer({
                         )}
                       </div>
                       ) : null}
-                      {/* Neither card above has anything to show for a
-                          personal/free account with no team identity and no
-                          public-publish entitlement — the tab was still
-                          reachable (rawCanShare is broader than either card's
-                          own gate), so leaving this blank read as broken
-                          rather than "nothing to share yet". Point at the
-                          same B console create-team flow the entry rail's
-                          workspace switcher uses; render plain text instead
-                          of a dead link when B has not given us a console
-                          URL to send them to. */}
-                      {!workspaceContextHasTeamIdentity(workspaceContext) && !canPublishPublic ? (
+                      {/* recvqae3pK5hyx: the team-share card above is gated on
+                          workspaceContextHasTeamIdentity alone — a personal/free
+                          account (or signed-out session) never gets it. This used
+                          to ALSO require `!canPublishPublic`, on the premise that
+                          the tab was only worth explaining when neither card could
+                          render. But a signed-in personal workspace DOES get the
+                          public-publish card above (canPublishPublic only needs a
+                          workspace, not a team), so that guard left this section
+                          silently blank right under a working "Publish file" card
+                          — exactly the dogfood report's screenshot: one option
+                          visible, an unexplained empty area where team sharing
+                          should be. Show the hint whenever there is no team,
+                          regardless of whether publish is available, and swap in
+                          the narrower title when the publish card already answered
+                          "is there anything to share" so the two don't contradict
+                          each other. Point at the same B console create-team flow
+                          the entry rail's workspace switcher uses; render plain
+                          text instead of a dead link when B has not given us a
+                          console URL to send them to. */}
+                      {!workspaceContextHasTeamIdentity(workspaceContext) ? (
                         <div className="chrome-share-card chrome-share-card--empty">
                           <div className="chrome-share-card__header">
                             <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
                             <span className="share-menu-text">
-                              <span>{t('fileViewer.shareEmptyStateTitle')}</span>
+                              <span>
+                                {canPublishPublic
+                                  ? t('fileViewer.shareTeamMissingTitle')
+                                  : t('fileViewer.shareEmptyStateTitle')}
+                              </span>
                               <small>{t('fileViewer.shareEmptyStateDescription')}</small>
                             </span>
                           </div>

@@ -18,7 +18,6 @@ import type {
   DesignSystemsTemplatesModalSurfaceViewProps,
   AssistantFeedbackReasonPanelSurfaceViewProps,
   QuestionsFormSurfaceViewProps,
-  PreviewRunStatusSurfaceViewProps,
   // ui_click
   HomeNavClickProps,
   HelpPopoverClickProps,
@@ -255,13 +254,6 @@ export function trackAssistantFeedbackReasonPanelSurfaceView(
 export function trackRunFailedToastSurfaceView(
   track: Track,
   props: RunFailedToastSurfaceViewProps,
-): void {
-  send(track, 'surface_view', props);
-}
-
-export function trackPreviewRunStatusSurfaceView(
-  track: Track,
-  props: PreviewRunStatusSurfaceViewProps,
 ): void {
   send(track, 'surface_view', props);
 }

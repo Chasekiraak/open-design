@@ -1210,6 +1210,50 @@ describe('AssistantMessage recovered produced files', () => {
     expect(screen.queryByTestId('file-ops-summary')).toBeNull();
   });
 
+  it('never shows the tool-op summary and the produced-files block at once (P0 recvqaerXd82bE)', () => {
+    // A turn that both writes a file via a tracked tool call AND mentions an
+    // older, already-existing file in its prose recovers that older file into
+    // `displayedProduced` too. Before the fix this rendered two stacked panels
+    // that both read "Files from this turn" — one scoped to the tool call,
+    // one to the wider recovered set — which reads to users as a duplicate,
+    // untrustworthy render rather than two different pieces of information.
+    const content = '已创建 index.html，基于更早的 [logo.svg](logo.svg)。';
+    render(
+      <AssistantMessage
+        message={baseMessage({
+          content,
+          events: [
+            { kind: 'text', text: content } as ChatMessage['events'][number],
+            {
+              kind: 'tool_use',
+              id: 'tool-1',
+              name: 'Write',
+              input: { file_path: 'index.html' },
+            } as ChatMessage['events'][number],
+          ],
+          producedFiles: [],
+        })}
+        streaming={false}
+        projectId="proj-1"
+        projectFiles={[
+          {
+            name: 'logo.svg',
+            path: 'logo.svg',
+            size: 2048,
+            mtime: 1700000005,
+            kind: 'image',
+            mime: 'image/svg+xml',
+          } as ProjectFile,
+        ]}
+      />,
+    );
+
+    const hasFileOpsSummary = !!screen.queryByTestId('file-ops-summary');
+    const hasProducedFiles = !!document.querySelector('.produced-files');
+    expect(hasFileOpsSummary).toBe(true);
+    expect(hasProducedFiles).toBe(false);
+  });
+
   it('shows project files mentioned as plain filenames in the assistant summary', () => {
     const content = '文件列表：\n- browser-war-deck-outline.md';
     render(

@@ -3768,20 +3768,24 @@ function StagedRunContexts({
         const canPreview = a.kind === 'image' && Boolean(projectId);
         const imageUrl = canPreview ? projectRawUrl(projectId!, a.path) : null;
         return (
-          <div key={a.path} className={`staged-chip staged-${a.kind}`}>
+          <div
+            key={a.path}
+            className={`staged-chip staged-${a.kind}${canPreview && imageUrl ? ' staged-chip--image-file' : ''}`}
+          >
             <span className="staged-order" aria-label={`Attachment ${index + 1}`}>
               {index + 1}
             </span>
             {canPreview && imageUrl ? (
+              // Mirrors the home composer's image chips: thumbnail only, the
+              // filename lives in the tooltip / aria-label.
               <button
                 type="button"
                 className="staged-preview-trigger"
                 onClick={() => setPreview(a)}
-                title={a.path}
+                title={a.name}
                 aria-label={`Preview ${a.name}`}
               >
                 <img src={imageUrl} alt="" aria-hidden />
-                <span className="staged-name">{a.name}</span>
               </button>
             ) : (
               <>

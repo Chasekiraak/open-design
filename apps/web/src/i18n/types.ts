@@ -3602,12 +3602,6 @@ export interface Dict {
   'workspace.terminalReconnecting': string;
   'workspace.terminalStartFailed': string;
   'workspace.terminalRestart': string;
-  'previewRunStatus.analyzing': string;
-  'previewRunStatus.generating': string;
-  'previewRunStatus.verifying': string;
-  'previewRunStatus.succeeded': string;
-  'previewRunStatus.failed': string;
-  'previewRunStatus.elapsed': string;
   'designFiles.title': string;
   'designFiles.upload': string;
   'designFiles.pasteText': string;
@@ -4028,6 +4022,10 @@ export interface Dict {
   'fileViewer.shareEmptyStateTitle': string;
   'fileViewer.shareEmptyStateDescription': string;
   'fileViewer.shareEmptyStateCreateTeam': string;
+  /** Same empty-state card as `shareEmptyStateTitle`, used instead of it when the
+   *  public-publish card above already answered "is there anything to share" —
+   *  avoids the two cards contradicting each other (recvqae3pK5hyx). */
+  'fileViewer.shareTeamMissingTitle': string;
   /** @deprecated Orphaned: the public-file gate is no longer team-scoped.
    *  `fileViewer.publishFileRequiresWorkspace` replaced it. */
   'fileViewer.publishFileRequiresTeam': string;

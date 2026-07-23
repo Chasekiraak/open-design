@@ -54,10 +54,14 @@ export function isSourceMappableManualEditElement(el: Element): boolean {
  * an `<li>`, a `<td>`, or an `<h4>` editable, exactly like a `<p>`.
  *
  * Elements with element children (even inline ones like `<strong>`/`<a>`) are
- * deliberately NOT text leaves: `applyManualEditPatch` rejects a `set-text`
- * patch whenever the target `hasElementChildren`, so offering a caret there
- * would let the user type and then fail to persist. Those stay containers
- * (style-only) until the patcher can persist nested markup.
+ * deliberately NOT text leaves. `applyManualEditPatch` can persist a flat
+ * text edit through nested markup when exactly one descendant text node
+ * carries the visible text (an icon `<span>` beside a label being the common
+ * case), but it still refuses whenever that target is ambiguous — so
+ * classifying every container as a text leaf would let the user type over
+ * genuinely mixed inline content (e.g. `<p><strong>Nested</strong> copy</p>`)
+ * and then fail to persist. Those stay containers (style-only) until caret
+ * availability itself is worth broadening beyond this per-kind allowlist.
  */
 export function manualEditElementIsTextLeaf(el: Element): boolean {
   const text = (el.textContent || '').trim();

@@ -1005,7 +1005,17 @@ function AssistantMessageImpl({
             onRequestOpenFile={onRequestOpenFile}
           />
         ) : null}
-        {!streaming && displayedProduced.length > 0 && projectId ? (
+        {/* Exactly one "files from this turn" panel per message. When the
+            turn tracked explicit write/edit tool calls, FileOpsSummary above
+            already covers it; ProducedFiles is the fallback surface (with
+            Download) for turns that produced/recovered files without any
+            tracked tool call. Rendering both at once — which happened when a
+            message had real tool ops AND additional recovered files from its
+            prose — showed two panels with the identical "Files from this
+            turn" header and different file counts, reported as a P0 (Feishu
+            recvqaerXd82bE). See AssistantMessage.test.tsx "never shows the
+            tool-op summary and the produced-files block at once". */}
+        {summaryArtifactOps.length === 0 && !streaming && displayedProduced.length > 0 && projectId ? (
           <ProducedFiles
             files={displayedProduced}
             projectId={projectId}
