@@ -103,8 +103,10 @@ const updaterPopupExpression = `
   (() => {
     const popup = document.querySelector('[data-testid="updater-popup"]');
     const button = document.querySelector('[data-testid="updater-install-button"]');
+    const reinstallLink = document.querySelector('[data-testid="updater-reinstall-learn-more"]');
     return {
       installButtonVisible: button instanceof HTMLButtonElement && !button.disabled,
+      reinstallLinkVisible: reinstallLink instanceof HTMLElement,
       text: popup?.textContent?.trim() ?? null,
       title: popup?.querySelector('h2')?.textContent?.trim() ?? null,
       visible: popup instanceof HTMLElement,
@@ -232,6 +234,12 @@ type MacInspectResult = {
       dryRun?: boolean;
       path: string;
     };
+    reinstall?: {
+      installedVersion?: string;
+      minVersion?: string;
+      reason: string;
+      url?: string;
+    };
     state: string;
   };
   launcher: LauncherSnapshot;
@@ -313,6 +321,7 @@ type PayloadRuntimeAcceptance = {
 
 type UpdaterPopupEvalValue = {
   installButtonVisible: boolean;
+  reinstallLinkVisible: boolean;
   text: string | null;
   title: string | null;
   visible: boolean;
@@ -321,6 +330,14 @@ type UpdaterPopupEvalValue = {
 type UpdaterClickEvalValue = {
   clicked: boolean;
   reason?: string;
+};
+
+type UpdaterRecoverySummary = {
+  cleared: NonNullable<MacInspectResult['update']>;
+  downloadedBeforeClear: NonNullable<MacInspectResult['update']>;
+  dryRunInstall: MacInspectResult['update'] | null;
+  popup: UpdaterPopupEvalValue;
+  recovered: NonNullable<MacInspectResult['update']>;
 };
 
 // The redesigned connect step exposes the two alternative runtimes as
@@ -357,11 +374,14 @@ macDescribe('packaged mac runtime smoke', () => {
     const report = await createPackagedSmokeReport('mac');
     const updateEnv = captureUpdateEnv();
     let payloadFixture: ToolsServeUpdaterFixture | null = null;
+    let recoveryFixture: ToolsServeUpdaterFixture | null = null;
+    let recoveryPayloadPath: string | null = null;
     let logs: LogsResult | { skipped: true } = { skipped: true };
     let popup: UpdaterPopupEvalValue | { skipped: true } = { skipped: true };
     let updateInstall: NonNullable<MacInspectResult['update']> | { skipped: true } = { skipped: true };
     let updateStatus: NonNullable<MacInspectResult['update']> | { skipped: true } = { skipped: true };
     let payloadRuntime: PayloadRuntimeAcceptance | { skipped: true } = { skipped: true };
+    let updaterRecovery: UpdaterRecoverySummary | { skipped: true } = { skipped: true };
     let upgradePersistence: UpgradePersistenceSeed | { skipped: true } = { skipped: true };
     let passed = false;
     try {
@@ -384,6 +404,7 @@ macDescribe('packaged mac runtime smoke', () => {
           assertToolsServeFixtureEnabled('mac', updateFixture);
           const localPayload = await resolveLocalPayloadUpdateFixture();
           expectedPayloadUpdateVersion = localPayload.targetVersion;
+          recoveryPayloadPath = localPayload.payloadPath;
           payloadFixture = await startToolsServeUpdaterFixture({
             channel: updateScenario.channel,
             payloadPath: localPayload.payloadPath,
@@ -551,6 +572,96 @@ macDescribe('packaged mac runtime smoke', () => {
           identity,
           pptx,
         };
+
+        // Same-version reinstall + clear-cache recovery (mirrors the Windows
+        // lane's runSameVersionUpdaterRecoveryAcceptance): the physical outer
+        // is still the base install while the running payload is already at
+        // the target version, so only an installed-outer-aware floor can
+        // offer this installer reinstall. macOS has no silent DMG install to
+        // execute, so the installer open is asserted in dry-run mode instead
+        // of the Windows NSIS transaction.
+        if (recoveryPayloadPath != null) {
+          await payloadFixture?.close().catch((error: unknown) => {
+            console.error('failed to close payload update fixture before recovery', error);
+          });
+          payloadFixture = null;
+          recoveryFixture = await startToolsServeUpdaterFixture({
+            channel: updateScenario.channel,
+            controlLauncherVersionMin: updaterVersion,
+            controlLauncherVersionUrl: 'https://example.test/updater-recovery',
+            payloadPath: recoveryPayloadPath,
+            platform: 'mac',
+            version: updaterVersion,
+            workspaceRoot,
+          });
+          applyPackagedUpdateEnv(process.env, updateScenario, recoveryFixture.info.metadataUrl, { openDryRun: true });
+
+          const recoveryStop = await runToolsPackJson<MacStopResult>('stop');
+          started = false;
+          expect(recoveryStop.status).not.toBe('partial');
+          const recoveryStart = await runToolsPackJson<MacStartResult>('start');
+          started = true;
+          expect(recoveryStart.source).toBe('installed');
+          await waitForHealthyDesktopVersion(updaterVersion, coldIdentity.pid);
+
+          const reinstallReady = await waitForUpdaterStatus(
+            (inspect) =>
+              inspect.update?.state === 'downloaded' &&
+              inspect.update.artifact?.type === 'dmg' &&
+              inspect.update.availableVersion === updaterVersion,
+            'same-version reinstall downloaded',
+          );
+          if (reinstallReady.update == null) throw new Error('same-version reinstall did not return updater status');
+          expect(reinstallReady.update.currentVersion).toBe(updaterVersion);
+          expect(reinstallReady.update.reinstall).toEqual({
+            installedVersion: updateScenario.expectedCurrentVersion,
+            minVersion: updaterVersion,
+            reason: 'outer-below-min',
+            url: 'https://example.test/updater-recovery',
+          });
+
+          const reinstallPopup = await openReadyUpdaterPrompt(updaterVersion);
+          expect(reinstallPopup.visible).toBe(true);
+          expect(reinstallPopup.installButtonVisible).toBe(true);
+          expect(reinstallPopup.reinstallLinkVisible).toBe(true);
+
+          const clearedInspect = await runToolsPackJson<MacInspectResult>('inspect', ['--update-action', 'clear-cache']);
+          if (clearedInspect.update == null) throw new Error('clear-cache did not return updater status');
+          expect(clearedInspect.update.state).toBe('idle');
+          expect(clearedInspect.update.downloadPath).toBeUndefined();
+          expect(clearedInspect.update.installResult).toBeUndefined();
+          expect(clearedInspect.update.reinstall).toBeUndefined();
+          // Retained launcher versions must survive a manual clear.
+          expect(clearedInspect.launcher.active).toEqual(reinstallReady.launcher.active);
+          expect(clearedInspect.launcher.lastSuccessful).toEqual(reinstallReady.launcher.lastSuccessful);
+
+          // Recovery: an explicit re-check re-derives the reinstall offer and
+          // re-downloads the installer artifact from the clean slate.
+          await runToolsPackJson<MacInspectResult>('inspect', ['--update-action', 'check']);
+          const recovered = await waitForUpdaterStatus(
+            (inspect) =>
+              inspect.update?.state === 'downloaded' &&
+              inspect.update.artifact?.type === 'dmg' &&
+              inspect.update.reinstall != null,
+            'post-clear reinstall recovery',
+          );
+          if (recovered.update == null) throw new Error('post-clear recovery did not return updater status');
+
+          const dryRunInstall = await runToolsPackJson<MacInspectResult>('inspect', ['--update-action', 'install']);
+          expect(dryRunInstall.update?.installResult?.dryRun).toBe(true);
+
+          // Leave a pristine updater behind for the final stop/uninstall.
+          const resetInspect = await runToolsPackJson<MacInspectResult>('inspect', ['--update-action', 'clear-cache']);
+          expect(resetInspect.update?.state).toBe('idle');
+
+          updaterRecovery = {
+            cleared: clearedInspect.update,
+            downloadedBeforeClear: reinstallReady.update,
+            dryRunInstall: dryRunInstall.update ?? null,
+            popup: reinstallPopup,
+            recovered: recovered.update,
+          };
+        }
       }
 
       await mkdir(dirname(screenshotPath), { recursive: true });
@@ -603,6 +714,7 @@ macDescribe('packaged mac runtime smoke', () => {
           status: updateStatus,
           install: updateInstall,
         },
+        updaterRecovery,
         upgradePersistence,
       });
       passed = true;
@@ -610,6 +722,9 @@ macDescribe('packaged mac runtime smoke', () => {
       restoreUpdateEnv(updateEnv);
       await payloadFixture?.close().catch((error: unknown) => {
         console.error('failed to close payload update fixture', error);
+      });
+      await recoveryFixture?.close().catch((error: unknown) => {
+        console.error('failed to close updater recovery fixture', error);
       });
       if (!passed) {
         await printPackagedLogs().catch((error: unknown) => {
@@ -625,7 +740,7 @@ macDescribe('packaged mac runtime smoke', () => {
         installedAppPath = null;
       }
     }
-  }, 240_000);
+  }, 360_000);
 });
 
 macOnboardingDescribe('packaged mac onboarding AMR smoke', () => {
@@ -2445,6 +2560,7 @@ function asUpdaterPopupEvalValue(value: unknown): UpdaterPopupEvalValue | null {
   if (!isRecord(value)) return null;
   if (typeof value.visible !== 'boolean') return null;
   if (typeof value.installButtonVisible !== 'boolean') return null;
+  if (typeof value.reinstallLinkVisible !== 'boolean') return null;
   if (value.title != null && typeof value.title !== 'string') return null;
   if (value.text != null && typeof value.text !== 'string') return null;
   return value as UpdaterPopupEvalValue;
