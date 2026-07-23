@@ -253,6 +253,21 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     }),
   },
   {
+    name: "pull_request script-contract test change runs e2e Vitest",
+    context: PR,
+    files: ["e2e/tests/scripts/guard.test.ts"],
+    expected: expectedPlan({
+      ciMode: "hot",
+      scopes: [
+        "daemon_tests_required",
+        "web_tests_required",
+        "ui_critical_validation_required",
+        "workspace_validation_required",
+      ],
+      runs: ["run_e2e_vitest", "run_playwright_critical", "run_web_workspace_tests"],
+    }),
+  },
+  {
     // Weird-but-current: a markdown file under skills/ triggers daemon+web tests
     // through the runtime-content prefix, while its .md extension exempts it from
     // arming the ui-critical fallback. workspace_validation is then re-derived

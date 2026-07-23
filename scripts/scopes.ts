@@ -178,6 +178,14 @@ export const scopeRules: readonly ScopeRule[] = [
     confidence: "medium",
   },
   {
+    id: "script-contract-tests",
+    match: {
+      prefixes: ["e2e/tests/scripts/"],
+    },
+    effects: ["daemon_tests_required", "web_tests_required"],
+    confidence: "medium",
+  },
+  {
     id: "tools-dev-sources",
     match: {
       prefixes: ["tools/dev/", "packages/platform/", "packages/sidecar/", "packages/sidecar-proto/"],
