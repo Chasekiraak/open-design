@@ -374,4 +374,42 @@ describe("release workflows", () => {
     expect(stablePrepare).toContain('setOutput("run_prepublish_jobs"');
     expect(stablePrepare).toContain('setOutput("publish_side_effects_enabled"');
   });
+
+  it("passes launcher version floor repo vars through to metadata publish and verify verbatim", async () => {
+    const [beta, betaSelfHosted, preview, prerelease, stable] = await Promise.all([
+      readFile(new URL("../../../.github/workflows/release-beta.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/workflows/release-beta-s.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/workflows/release-preview.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/workflows/release-prerelease.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/workflows/release-stable.yml", import.meta.url), "utf8"),
+    ]);
+
+    const passthrough = (suffix: string): string[] => [
+      `RELEASE_LAUNCHER_VERSION_MIN_${suffix}: \${{ vars.RELEASE_LAUNCHER_VERSION_MIN_${suffix} }}`,
+      `RELEASE_LAUNCHER_VERSION_MIN_URL_${suffix}: \${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_${suffix} }}`,
+    ];
+
+    // Each channel workflow forwards its own repo-vars pair plus the STABLE
+    // fallback pair verbatim; channel policy (pair-level stable fallback,
+    // format/https/floor validation) lives only in
+    // tools/release/src/storage/launcher-version-floor.ts, never in YAML.
+    const lanes: Array<{ minSteps: number; suffix: string; workflow: string }> = [
+      { minSteps: 2, suffix: "BETA", workflow: beta },
+      { minSteps: 1, suffix: "BETAS", workflow: betaSelfHosted },
+      { minSteps: 2, suffix: "PREVIEW", workflow: preview },
+      { minSteps: 2, suffix: "PRERELEASE", workflow: prerelease },
+    ];
+    for (const lane of lanes) {
+      for (const key of [...passthrough(lane.suffix), ...passthrough("STABLE")]) {
+        // publish-metadata always carries the pair; lanes with a
+        // verify-metadata step must carry it there too.
+        expect(countOccurrences(lane.workflow, key)).toBeGreaterThanOrEqual(lane.minSteps);
+      }
+      expect(lane.workflow).not.toContain(`vars.RELEASE_LAUNCHER_VERSION_MIN_${lane.suffix} ||`);
+    }
+    for (const key of passthrough("STABLE")) {
+      expect(countOccurrences(stable, key)).toBeGreaterThanOrEqual(2);
+    }
+    expect(stable).not.toContain("vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE ||");
+  });
 });

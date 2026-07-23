@@ -1,4 +1,8 @@
 import { optional, required } from "./common.ts";
+import {
+  assertLauncherVersionFloorSatisfiable,
+  resolveLauncherVersionFloor,
+} from "./launcher-version-floor.ts";
 import { releaseChannelDescriptor } from "@open-design/release";
 import { readFile } from "node:fs/promises";
 import { parseReleaseNotePublication, releaseNoteMetadataFromPublication } from "../release-note/publication.ts";
@@ -38,25 +42,27 @@ if (metadata[versionField] !== releaseVersion) {
   throw new Error(`metadata ${versionField} mismatch: expected ${releaseVersion}, got ${String(metadata[versionField])}`);
 }
 
-// The published control.launcher.version block must match the operator input
-// exactly; unknown fields would otherwise pass silently.
-const expectedLauncherVersionMin = optional("RELEASE_LAUNCHER_VERSION_MIN");
-const expectedLauncherVersionUrl = optional("RELEASE_LAUNCHER_VERSION_MIN_URL");
+// The published control.launcher.version block must match the channel policy
+// resolved from the same repo-vars pairs the publish step consumed; unknown
+// fields would otherwise pass silently.
+const expectedLauncherVersionFloor = resolveLauncherVersionFloor(releaseChannel);
+if (expectedLauncherVersionFloor != null) {
+  assertLauncherVersionFloorSatisfiable(expectedLauncherVersionFloor, releaseVersion);
+}
 const publishedControlVersion = metadata.control?.launcher?.version;
-if (expectedLauncherVersionMin.length === 0) {
+if (expectedLauncherVersionFloor == null) {
   if (publishedControlVersion != null) {
     throw new Error("metadata unexpectedly contains a control.launcher.version block");
   }
 } else {
-  if (publishedControlVersion?.min !== expectedLauncherVersionMin) {
+  if (publishedControlVersion?.min !== expectedLauncherVersionFloor.min) {
     throw new Error(
-      `metadata control.launcher.version.min mismatch: expected ${expectedLauncherVersionMin}, got ${String(publishedControlVersion?.min)}`,
+      `metadata control.launcher.version.min mismatch: expected ${expectedLauncherVersionFloor.min}, got ${String(publishedControlVersion?.min)}`,
     );
   }
-  const expectedUrl = expectedLauncherVersionUrl.length > 0 ? expectedLauncherVersionUrl : undefined;
-  if (publishedControlVersion.url !== expectedUrl) {
+  if (publishedControlVersion.url !== expectedLauncherVersionFloor.url) {
     throw new Error(
-      `metadata control.launcher.version.url mismatch: expected ${String(expectedUrl)}, got ${String(publishedControlVersion.url)}`,
+      `metadata control.launcher.version.url mismatch: expected ${String(expectedLauncherVersionFloor.url)}, got ${String(publishedControlVersion.url)}`,
     );
   }
 }

@@ -141,16 +141,17 @@ describe("shared release metadata publisher", () => {
           WIN_X64_RESULT: "success",
           ...(channel === "beta" ? { RELEASE_LATEST_CAS_REQUIRED: "true" } : {}),
           // The launcher version floor rides through publish + verify on one
-          // channel; the others must publish without a control block.
+          // channel via its channel-suffixed repo-vars pair; the others must
+          // publish without a control block (their pairs and the stable
+          // fallback pair stay unset).
+          RELEASE_LAUNCHER_VERSION_MIN_STABLE: "",
+          RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE: "",
           ...(channel === "beta"
             ? {
-                RELEASE_LAUNCHER_VERSION_MIN: "1.2.3-beta.4",
-                RELEASE_LAUNCHER_VERSION_MIN_URL: "https://example.test/reinstall-help",
+                RELEASE_LAUNCHER_VERSION_MIN_BETA: "1.2.3-beta.4",
+                RELEASE_LAUNCHER_VERSION_MIN_URL_BETA: "https://example.test/reinstall-help",
               }
-            : {
-                RELEASE_LAUNCHER_VERSION_MIN: "",
-                RELEASE_LAUNCHER_VERSION_MIN_URL: "",
-              }),
+            : {}),
         };
         await runNode(["--experimental-strip-types", "tools/release/src/release-note/prepare.ts"], {
           cwd: repoRoot,
@@ -254,7 +255,7 @@ describe("shared release metadata publisher", () => {
       env: {
         ...process.env,
         RELEASE_CHANNEL: "beta",
-        RELEASE_LAUNCHER_VERSION_MIN: "9.9.9",
+        RELEASE_LAUNCHER_VERSION_MIN_BETA: "9.9.9",
         RELEASE_MANIFEST_DIR: root,
         RELEASE_METADATA_DIR: root,
         RELEASE_OUTPUTS_PATH: join(root, "outputs.json"),
