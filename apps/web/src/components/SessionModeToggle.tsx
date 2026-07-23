@@ -9,57 +9,40 @@ interface Props {
   disabled?: boolean;
 }
 
-type CostLevel = 'low' | 'medium' | 'high';
-
-// Filled segments in the usage meter, per tier (out of 3).
-const COST_FILLED: Record<CostLevel, number> = { low: 1, medium: 2, high: 3 };
-
 const MODE_META: Array<{
   mode: ChatSessionMode;
   icon: 'comment' | 'file' | 'sparkles';
-  cost: CostLevel;
   labelKey: ModeCopyKey;
   titleKey: ModeCopyKey;
   summaryKey: ModeCopyKey;
   solvesKey: ModeCopyKey;
-  costKey: ModeCopyKey;
-  costNoteKey: ModeCopyKey;
   queryKeys: [ModeCopyKey, ModeCopyKey, ModeCopyKey];
 }> = [
   {
     mode: 'chat',
     icon: 'comment',
-    cost: 'low',
     labelKey: 'chat.mode.chat.label',
     titleKey: 'chat.mode.chat.title',
     summaryKey: 'chat.mode.chat.summary',
     solvesKey: 'chat.mode.chat.solves',
-    costKey: 'chat.mode.chat.cost',
-    costNoteKey: 'chat.mode.chat.costNote',
     queryKeys: ['chat.mode.chat.query1', 'chat.mode.chat.query2', 'chat.mode.chat.query3'],
   },
   {
     mode: 'plan',
     icon: 'file',
-    cost: 'medium',
     labelKey: 'chat.mode.plan.label',
     titleKey: 'chat.mode.plan.title',
     summaryKey: 'chat.mode.plan.summary',
     solvesKey: 'chat.mode.plan.solves',
-    costKey: 'chat.mode.plan.cost',
-    costNoteKey: 'chat.mode.plan.costNote',
     queryKeys: ['chat.mode.plan.query1', 'chat.mode.plan.query2', 'chat.mode.plan.query3'],
   },
   {
     mode: 'design',
     icon: 'sparkles',
-    cost: 'high',
     labelKey: 'chat.mode.design.label',
     titleKey: 'chat.mode.design.title',
     summaryKey: 'chat.mode.design.summary',
     solvesKey: 'chat.mode.design.solves',
-    costKey: 'chat.mode.design.cost',
-    costNoteKey: 'chat.mode.design.costNote',
     queryKeys: ['chat.mode.design.query1', 'chat.mode.design.query2', 'chat.mode.design.query3'],
   },
 ];
@@ -69,8 +52,6 @@ type ModeCopyKey =
   | 'chat.mode.chat.title'
   | 'chat.mode.chat.summary'
   | 'chat.mode.chat.solves'
-  | 'chat.mode.chat.cost'
-  | 'chat.mode.chat.costNote'
   | 'chat.mode.chat.query1'
   | 'chat.mode.chat.query2'
   | 'chat.mode.chat.query3'
@@ -78,8 +59,6 @@ type ModeCopyKey =
   | 'chat.mode.plan.title'
   | 'chat.mode.plan.summary'
   | 'chat.mode.plan.solves'
-  | 'chat.mode.plan.cost'
-  | 'chat.mode.plan.costNote'
   | 'chat.mode.plan.query1'
   | 'chat.mode.plan.query2'
   | 'chat.mode.plan.query3'
@@ -87,8 +66,6 @@ type ModeCopyKey =
   | 'chat.mode.design.title'
   | 'chat.mode.design.summary'
   | 'chat.mode.design.solves'
-  | 'chat.mode.design.cost'
-  | 'chat.mode.design.costNote'
   | 'chat.mode.design.query1'
   | 'chat.mode.design.query2'
   | 'chat.mode.design.query3';
@@ -96,52 +73,17 @@ type ModeCopyKey =
 interface ModeView {
   mode: ChatSessionMode;
   icon: 'comment' | 'file' | 'sparkles';
-  cost: CostLevel;
   label: string;
   title: string;
   summary: string;
   solves: string;
-  costLabel: string;
-  costNote: string;
   queries: string[];
-}
-
-// Signal-bar style usage meter: how much a run in this mode typically costs,
-// so the user has an expectation before switching. `aria-hidden` because the
-// adjacent text label already carries the meaning.
-function ModeCostTag({
-  cost,
-  label,
-  variant,
-  ariaLabel,
-}: {
-  cost: CostLevel;
-  label: string;
-  variant: 'menu' | 'card';
-  ariaLabel?: string;
-}) {
-  const filled = COST_FILLED[cost];
-  return (
-    <span
-      className={`session-mode-cost session-mode-cost--${cost} session-mode-cost--${variant}`}
-      role={ariaLabel ? 'img' : undefined}
-      aria-label={ariaLabel}
-    >
-      <span className="session-mode-cost__meter" aria-hidden={ariaLabel ? undefined : true}>
-        {[0, 1, 2].map((index) => (
-          <span key={index} className={`session-mode-cost__bar${index < filled ? ' is-on' : ''}`} />
-        ))}
-      </span>
-      <span className="session-mode-cost__label">{label}</span>
-    </span>
-  );
 }
 
 function ModeDescriptionCard({
   item,
   bestForLabel,
   tryLabel,
-  costLabel,
   className,
   id,
   role,
@@ -150,7 +92,6 @@ function ModeDescriptionCard({
   item: ModeView;
   bestForLabel: string;
   tryLabel: string;
-  costLabel: string;
   className: string;
   id?: string;
   role?: 'tooltip';
@@ -171,18 +112,8 @@ function ModeDescriptionCard({
           <div className="session-mode-card__title">{item.title}</div>
           <div className="session-mode-card__label">{item.label}</div>
         </div>
-        <ModeCostTag
-          cost={item.cost}
-          label={item.costLabel}
-          variant="card"
-          ariaLabel={`${costLabel}: ${item.costLabel}`}
-        />
       </div>
       <p className="session-mode-card__summary">{item.summary}</p>
-      <div className="session-mode-card__section">
-        <div className="session-mode-card__section-label">{costLabel}</div>
-        <p className="session-mode-card__section-text">{item.costNote}</p>
-      </div>
       <div className="session-mode-card__section">
         <div className="session-mode-card__section-label">{bestForLabel}</div>
         <p className="session-mode-card__section-text">{item.solves}</p>
@@ -211,13 +142,12 @@ export function SessionModeToggle({ mode, onChange, disabled = false }: Props) {
   const modes = MODE_META.map<ModeView>((item) => ({
     mode: item.mode,
     icon: item.icon,
-    cost: item.cost,
-    label: t(item.labelKey),
+    // “Create” expresses the job the user is asking OD to do; execution
+    // intensity belongs to the system and should not compete with this choice.
+    label: item.mode === 'design' ? t('common.create') : t(item.labelKey),
     title: t(item.titleKey),
     summary: t(item.summaryKey),
     solves: t(item.solvesKey),
-    costLabel: t(item.costKey),
-    costNote: t(item.costNoteKey),
     queries: item.queryKeys.map((queryKey) => t(queryKey)),
   }));
   const active = modes.find((item) => item.mode === mode) ?? modes.find((item) => item.mode === 'design') ?? modes[0]!;
@@ -333,7 +263,6 @@ export function SessionModeToggle({ mode, onChange, disabled = false }: Props) {
                   >
                     <Icon name={item.icon} size={13} />
                     <span className="session-mode-toggle__label">{item.label}</span>
-                    <ModeCostTag cost={item.cost} label={item.costLabel} variant="menu" />
                     <span className="session-mode-toggle__check" aria-hidden>
                       {itemActive ? <Icon name="check" size={13} /> : null}
                     </span>
@@ -347,7 +276,6 @@ export function SessionModeToggle({ mode, onChange, disabled = false }: Props) {
               item={preview}
               bestForLabel={t('chat.mode.cardBestFor')}
               tryLabel={t('chat.mode.cardTry')}
-              costLabel={t('chat.mode.cardCost')}
               className="session-mode-toggle__popover-card"
               id={cardId}
               role="tooltip"

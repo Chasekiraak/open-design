@@ -71,6 +71,21 @@ function WebCloneArt() {
   );
 }
 
+function LandingPageArt() {
+  // A composed marketing page: a high-contrast hero, body copy and CTA. This
+  // is intentionally distinct from WebCloneArt's transfer arrow so users can
+  // tell “create from a brief” apart from “reproduce this URL” at a glance.
+  return (
+    <Frame>
+      <rect x="15" y="7" width="42" height="50" rx="4" stroke={INK} strokeWidth="2" />
+      <rect x="21" y="14" width="30" height="11" rx="2" fill={ACCENT} fillOpacity="0.9" />
+      <rect x="21" y="30" width="22" height="3" rx="1.5" fill={INK} fillOpacity="0.48" />
+      <rect x="21" y="37" width="29" height="3" rx="1.5" fill={INK} fillOpacity="0.32" />
+      <rect x="21" y="45" width="15" height="6" rx="3" fill={ACCENT} fillOpacity="0.78" />
+    </Frame>
+  );
+}
+
 function WireframeArt() {
   // Lo-fi greybox screen: a dashed frame (the wireframe tell) over placeholder
   // blocks and an accent CTA placeholder.
@@ -205,6 +220,7 @@ function AudioArt() {
 const ART_BY_CHIP: Record<string, () => ReactElement> = {
   prototype: PrototypeArt,
   'web-clone': WebCloneArt,
+  'landing-page': LandingPageArt,
   wireframe: WireframeArt,
   mobile: MobileArt,
   deck: DeckArt,

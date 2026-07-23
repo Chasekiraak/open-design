@@ -57,6 +57,30 @@
   color: var(--text-strong);
   text-align: center;
 }
+.home-hero__capability-word {
+  appearance: none;
+  margin: 0;
+  padding: 0 0.12em;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  animation: home-hero-capability-enter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  transition: color 140ms cubic-bezier(0.23, 1, 0.32, 1), border-color 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.home-hero__capability-word:hover,
+.home-hero__capability-word:focus-visible {
+  outline: none;
+  color: color-mix(in srgb, var(--accent) 78%, var(--text-strong));
+  border-bottom-color: var(--accent);
+}
+@keyframes home-hero-capability-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .home-hero__subtitle {
   margin: 0;
   color: var(--text-muted);
@@ -72,6 +96,33 @@
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--bg-subtle);
+}
+.home-hero__mode-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(640px, calc(100vw - 32px));
+  margin: -3px auto 0;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-tint) 52%, var(--bg-panel));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  animation: home-hero-capability-enter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.home-hero__mode-suggestion-action,
+.home-hero__mode-suggestion-dismiss {
+  min-height: 26px;
+}
+.home-hero__mode-suggestion-action {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+.home-hero__mode-suggestion-dismiss {
+  flex: 0 0 auto;
 }
 /* ---------- Output-type tab bar ----------
    Sits below the input card, Manus-style: the selected creation mode
@@ -2811,6 +2862,25 @@
   line-height: 1.3;
   text-align: center;
 }
+.home-hero__template-recommendation {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+.home-hero__template-recommendation-label,
+.home-hero__recommendation-badge {
+  color: var(--accent);
+  font-weight: 680;
+}
+.home-hero__template-recommendation-secondary {
+  color: var(--text-faint);
+}
 .home-hero__blank-project {
   appearance: none;
   display: inline-flex;
@@ -2941,6 +3011,28 @@
 .home-hero__scenario-card.home-hero__type-tab.is-active {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
+.home-hero__scenario-card.home-hero__type-tab.is-recommended {
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent), var(--shadow-sm);
+  animation: home-hero-recommendation-enter 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.home-hero__scenario-card.home-hero__type-tab.is-secondary-recommended {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.home-hero__recommendation-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-tint) 76%, var(--bg-panel));
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+@keyframes home-hero-recommendation-enter {
+  from { opacity: 0.5; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .home-hero__scenario-card-art {
   display: flex;
@@ -2986,10 +3078,61 @@
   white-space: normal;
 }
 
+.home-hero__context-starter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: min(100%, 760px);
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--bg-subtle));
+}
+.home-hero__context-kicker {
+  padding-right: 3px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.home-hero__context-action {
+  min-height: 28px;
+  padding: 3px 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.home-hero__context-action svg {
+  color: var(--accent);
+}
+.home-hero__context-summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.home-hero__more-examples {
+  width: 100%;
+  margin-top: 8px;
+}
+.home-hero__more-examples > summary {
+  width: fit-content;
+  margin: 0 auto 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.home-hero__more-examples[open] > summary {
+  color: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .home-hero__scenario-card.home-hero__type-tab,
-  .home-hero__scenario-art-svg {
+  .home-hero__scenario-art-svg,
+  .home-hero__capability-word,
+  .home-hero__scenario-card.home-hero__type-tab.is-recommended,
+  .home-hero__mode-suggestion {
     transition: none;
+    animation: none;
   }
 }
 

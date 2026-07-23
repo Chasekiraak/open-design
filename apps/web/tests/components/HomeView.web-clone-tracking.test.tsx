@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 //
 // Web-clone example-card analytics (埋点文档 row 116, element=example_prompt).
-// The Website-clone examples are plain text prompt cards (no embedded HTML / no
-// Remix — dropped to avoid reproducing copyrighted site markup). Picking one must
-// still fire a home chat_composer ui_click with chip_id=web-clone so the
-// site-clone funnel entry is tracked, complementing the created project's
-// project_kind=web_clone on project_create_result.
+// The source-first Website-clone examples are plain fill-only prompt cards. A
+// click must still fire a home chat_composer ui_click with chip_id=web-clone,
+// complementing the created project's project_kind=web_clone result.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -104,74 +102,34 @@ afterEach(() => {
 });
 
 describe('web-clone example-card tracking', () => {
-  it('renders the Website-clone examples as text prompt cards (no plugin preview / no remix)', async () => {
+  it('renders the Website-clone examples as fill-only text prompt cards', async () => {
     writeHomeGuideStage('done');
     stubPlugins();
     renderHome();
 
     fireEvent.click(await screen.findByTestId('home-hero-rail-web-clone'));
-    // Text prompt cards (site variant: logo tile + bare domain), not plugin cards.
     const textCards = await screen.findAllByTestId('home-hero-prompt-example');
-    expect(textCards.length).toBeGreaterThan(0);
+    expect(textCards).toHaveLength(3);
     expect(screen.queryByTestId('home-hero-plugin-presets')).toBeNull();
-    // No remix/duplicate affordance on the web-clone rail.
     expect(document.querySelector('[data-testid^="home-hero-plugin-preset-duplicate"]')).toBeNull();
-    // Site cards show the bare domain (e.g. open-design.ai), not the raw prompt line.
-    expect(textCards.some((c) => (c.textContent ?? '').includes('open-design.ai'))).toBe(true);
-    expect(textCards.every((c) => !(c.textContent ?? '').includes('https://'))).toBe(true);
-    expect(document.querySelector('.home-hero__prompt-example--site')).not.toBeNull();
+    expect(textCards.map((card) => card.textContent)).toEqual([
+      'Recreate this website’s page structure and visual style.',
+      'Use this website as visual reference and create a new page for my product.',
+      'Recreate the page modules from the uploaded screenshot.',
+    ]);
+    expect(document.querySelector('.home-hero__prompt-example--site')).toBeNull();
   });
 
-  // Contract lock: the shipped Website-clone example set is intentionally
-  // narrowed to the first-party Open Design site to avoid shipping third-party
-  // brand copies. Assert the exact count + domain so the rail can't silently
-  // drift back to the old multi-site set without updating this contract.
-  it('resolves exactly the contracted Open Design Website-clone site card', async () => {
+  it('shows the remaining Website-clone ideas behind More examples', async () => {
     writeHomeGuideStage('done');
     stubPlugins();
     renderHome();
 
     fireEvent.click(await screen.findByTestId('home-hero-rail-web-clone'));
-    const siteCards = await screen.findAllByTestId('home-hero-prompt-example');
-    const domains = siteCards.map((c) => (c.textContent ?? '').trim());
-    expect(domains).toEqual(['open-design.ai']);
-    // Every card must be the site variant (favicon tile + bare domain).
-    expect(
-      siteCards.every((c) => c.classList.contains('home-hero__prompt-example--site')),
-    ).toBe(true);
-  });
-
-  it('renders the contracted Open Design site card with a local eager logo', async () => {
-    writeHomeGuideStage('done');
-    stubPlugins();
-    renderHome();
-
-    fireEvent.click(await screen.findByTestId('home-hero-rail-web-clone'));
-    const siteCard = (await screen.findAllByTestId('home-hero-prompt-example'))[0]!;
-    const logo = siteCard.querySelector<HTMLImageElement>('.home-hero__site-badge img');
-    expect(logo?.getAttribute('src')).toBe('/logo.svg');
-    expect(logo?.getAttribute('loading')).toBe('eager');
-    expect(logo?.getAttribute('fetchpriority')).toBe('high');
-  });
-
-  it('falls back when the local Open Design site card logo cannot load', async () => {
-    writeHomeGuideStage('done');
-    stubPlugins();
-    renderHome();
-
-    fireEvent.click(await screen.findByTestId('home-hero-rail-web-clone'));
-    const siteCard = (await screen.findAllByTestId('home-hero-prompt-example'))[0]!;
-    const localLogo = siteCard.querySelector<HTMLImageElement>('.home-hero__site-badge img');
-    expect(localLogo?.getAttribute('src')).toBe('/logo.svg');
-
-    fireEvent.error(localLogo!);
-    const remoteFallback = siteCard.querySelector<HTMLImageElement>('.home-hero__site-badge img');
-    expect(remoteFallback?.getAttribute('src')).toBe(
-      'https://www.google.com/s2/favicons?sz=128&domain=open-design.ai',
+    const moreExamples = screen.getByText('More examples');
+    expect(moreExamples.closest('details')?.textContent).toContain(
+      'Turn this existing site into a responsive reference implementation.',
     );
-
-    fireEvent.error(remoteFallback!);
-    expect(siteCard.querySelector('.home-hero__site-monogram')?.textContent).toBe('O');
   });
 
   it('fires element=example_prompt with chip_id=web-clone when a text example is picked', async () => {

@@ -127,8 +127,8 @@ export const HOME_HERO_CHIPS: ReadonlyArray<HomeHeroChip> = [
     label: 'Website clone',
     icon: 'globe',
     group: 'create',
-    description: 'Recreate an existing website',
-    hint: 'Paste a site URL and recreate its structure, visuals, and interactions from real source evidence.',
+    description: 'Clone or reference an existing URL',
+    hint: 'Paste an existing site URL to recreate it, or use it as visual reference for a new page.',
     // Website reproduction is its own creation workflow (start from a target
     // URL, source-first recon, preserve real structure/assets), so it binds
     // the bundled `example-web-clone` skill instead of the blank prototype
@@ -142,6 +142,32 @@ export const HOME_HERO_CHIPS: ReadonlyArray<HomeHeroChip> = [
       projectMetadata: {
         kind: 'prototype',
         intent: 'web-clone',
+      },
+    },
+  },
+  {
+    id: 'landing-page',
+    label: 'Landing page',
+    icon: 'layout',
+    group: 'create',
+    description: 'Product, campaign & brand pages',
+    hint: 'Create a product, campaign, or brand landing page from a brief, design system, assets, or visual references.',
+    // A landing page is a zero-to-one web creation flow. It deliberately uses
+    // the prototype seed rather than the source-first Website clone scenario:
+    // a URL may be useful reference, but it is not a required starting point.
+    action: {
+      kind: 'apply-scenario',
+      pluginId: 'example-web-prototype',
+      projectKind: 'prototype',
+      inputs: {
+        artifactKind: 'landing page',
+        audience: 'site visitors',
+        fidelity: 'high-fidelity',
+      },
+      projectMetadata: {
+        kind: 'prototype',
+        fidelity: 'high-fidelity',
+        includeLandingPage: true,
       },
     },
   },
@@ -390,6 +416,7 @@ export function chipsForGroup(group: ChipGroup): HomeHeroChip[] {
 // entries (see `orderedCreateChips`).
 export const CREATE_RAIL_ORDER = [
   'web-clone',
+  'landing-page',
   'deck',
   'prototype',
   'wireframe',

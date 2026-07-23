@@ -33,6 +33,7 @@ import type {
   McpServerConfig,
   WorkspaceContextItem,
 } from '@open-design/contracts';
+import { Button } from '@open-design/components';
 import { DesignSystemPicker } from './DesignSystemPicker';
 import type { SkillSummary } from '../types';
 import { Icon, type IconName } from './Icon';
@@ -99,6 +100,12 @@ import { assetTitle } from './LibraryAssetMeta';
 import { libraryAssetRawUrl } from '../providers/registry';
 import type { LibraryAsset } from '@open-design/contracts';
 import { WorkingDirPicker } from './WorkingDirPicker';
+import {
+  heroCapabilitiesForHome,
+  resolveHomeTemplateRecommendation,
+  type HomeModeSuggestion,
+  type HomeOnboardingRole,
+} from './home-hero/main-flow';
 import {
   ProjectReferenceModal,
   type ProjectReferenceSelection,
@@ -241,6 +248,15 @@ interface Props {
   // no design system / template / prompt) and enters it. Omit to hide the link.
   onStartBlankProject?: () => void;
   executionSwitcher?: ReactNode;
+  /** Persisted, self-reported role; only designer and marketing change Home's first-run ordering. */
+  onboardingRole?: HomeOnboardingRole;
+  /** Nearest corresponding output from the user's own recent projects. */
+  recentChipId?: string | null;
+  /** Explicit visual-output intent from an example card. */
+  onCreateIntent?: () => void;
+  modeSuggestion?: HomeModeSuggestion;
+  onAcceptModeSuggestion?: (mode: Exclude<HomeModeSuggestion, null>) => void;
+  onDismissModeSuggestion?: () => void;
   // Personalized first-run starting point (spec §7). Rendered directly under
   // the composer card — before the template section — so a brand-new user sees
   // their recommended entry without scrolling.
@@ -290,6 +306,26 @@ const EMPTY_SKILLS: SkillSummary[] = [];
 const EMPTY_MCP_OPTIONS: McpServerConfig[] = [];
 const EMPTY_CONNECTOR_OPTIONS: ConnectorDetail[] = [];
 const EMPTY_WORKSPACE_ITEMS: WorkspaceContextItem[] = [];
+const HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY = 'open-design:home-template-recommendation:v1';
+
+function hasSeenHomeTemplateRecommendation(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markHomeTemplateRecommendationSeen(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY, '1');
+  } catch {
+    // Persistence is an enhancement. If storage is unavailable, the current
+    // mounted Home still dismisses the recommendation after one interaction.
+  }
+}
 
 export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   {
@@ -368,6 +404,12 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onExamplePromptStatusChange,
     onStartBlankProject,
     executionSwitcher,
+    onboardingRole = null,
+    recentChipId = null,
+    onCreateIntent = () => undefined,
+    modeSuggestion = null,
+    onAcceptModeSuggestion,
+    onDismissModeSuggestion,
     recommendationSlot,
   },
   ref,
@@ -382,7 +424,13 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [projectReferenceOpen, setProjectReferenceOpen] = useState(false);
   const [figmaHelpOpen, setFigmaHelpOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [heroCapabilityIndex, setHeroCapabilityIndex] = useState(0);
+  const [heroCapabilityStopped, setHeroCapabilityStopped] = useState(false);
+  const [showTemplateRecommendation, setShowTemplateRecommendation] = useState(
+    () => !hasSeenHomeTemplateRecommendation(),
+  );
   const homeHeroRef = useRef<HTMLElement | null>(null);
+  const templateSectionRef = useRef<HTMLDivElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
   const [sendAttention, setSendAttention] = useState(false);
@@ -421,6 +469,33 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const shortcutsMenuRef = useRef<HTMLDivElement>(null);
   const canSubmit =
     (prompt.trim().length > 0 || stagedFiles.length > 0) && !submitDisabled && !submitting;
+  const selectedDesignSystem = useMemo(
+    () => designSystems.find((system) => system.id === selectedDesignSystemId) ?? null,
+    [designSystems, selectedDesignSystemId],
+  );
+  const referenceImageCount = useMemo(
+    () => stagedFiles.filter(isImageFile).length,
+    [stagedFiles],
+  );
+  const hasContextForNewbie = Boolean(selectedDesignSystemId) || stagedFiles.length > 0;
+  const templateRecommendation = useMemo(
+    () => resolveHomeTemplateRecommendation({
+      role: onboardingRole,
+      prompt,
+      hasReferenceFiles: stagedFiles.length > 0,
+      hasDesignSystem: Boolean(selectedDesignSystemId),
+      recentChipId,
+    }),
+    [onboardingRole, prompt, recentChipId, selectedDesignSystemId, stagedFiles.length],
+  );
+  const heroCapabilities = useMemo(
+    () => heroCapabilitiesForHome(onboardingRole, {
+      hasDesignSystem: Boolean(selectedDesignSystemId),
+      hasReferenceFiles: stagedFiles.length > 0,
+    }),
+    [onboardingRole, selectedDesignSystemId, stagedFiles.length],
+  );
+  const activeHeroCapability = heroCapabilities[heroCapabilityIndex % Math.max(heroCapabilities.length, 1)] ?? null;
   const previewHomeFile = useMemo(() => {
     if (!previewHomeFileKey) return null;
     return stagedFiles.find((file, index) => homeFileKey(file, index) === previewHomeFileKey) ?? null;
@@ -429,6 +504,50 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const placeholder = activePluginTitle || activeSkillTitle
     ? t('homeHero.placeholderActive')
     : t('homeHero.placeholder');
+
+  useEffect(() => {
+    setHeroCapabilityIndex(0);
+  }, [heroCapabilities]);
+
+  useEffect(() => {
+    if (heroCapabilityStopped || heroCapabilities.length < 2) return;
+    const timer = window.setInterval(() => {
+      setHeroCapabilityIndex((current) => (current + 1) % heroCapabilities.length);
+    }, 3600);
+    return () => window.clearInterval(timer);
+  }, [heroCapabilities.length, heroCapabilityStopped]);
+
+  const dismissTemplateRecommendation = useCallback(() => {
+    if (!showTemplateRecommendation) return;
+    setShowTemplateRecommendation(false);
+    markHomeTemplateRecommendationSeen();
+  }, [showTemplateRecommendation]);
+
+  useEffect(() => {
+    if (hasContextForNewbie) dismissTemplateRecommendation();
+  }, [dismissTemplateRecommendation, hasContextForNewbie]);
+
+  function stopHeroCapabilityCarousel() {
+    setHeroCapabilityStopped(true);
+  }
+
+  function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
+    stopHeroCapabilityCarousel();
+    dismissTemplateRecommendation();
+    if (id === 'design-system') {
+      openDesignSystemPicker();
+      return;
+    }
+    if (id === 'visual-references') {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (id === 'project-files') {
+      void onPickWorkingDir?.();
+      return;
+    }
+    templateSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
   const mentionActive = Boolean(mentionTrigger);
   const mentionQuery = mentionTrigger?.query ?? '';
   // Scenarios the carousel cycles, with copy resolved through `t()` so the
@@ -441,7 +560,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     return buildPlaceholderScenarios({
       activeChipId,
       resolveTextKey: (key) => t(key),
-      examplesForChip: (chipId) => homeHeroChipPromptExamples(chipId, locale),
+      examplesForChip: (chipId) => homeHeroChipPromptExamples(chipId, locale, onboardingRole),
       fallbackForChip: (chipId) => fallbackPlaceholderScenarioText(chipId, locale, t),
     });
   }, [activeChipId, locale, t]);
@@ -707,7 +826,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // First-run guide, beat 1: pulse the Prototype chip for brand-new users.
   // The settle delay lets the hero finish its entrance before the sheen.
   useEffect(() => {
-    if (firstRunGuide !== true) return;
+    if (firstRunGuide !== true || onboardingRole) return;
     if (readHomeGuideStage() !== 'chip') return;
     const arm = window.setTimeout(() => setGuidePulseChipId('prototype'), 900);
     const disarm = window.setTimeout(() => setGuidePulseChipId(null), 3600);
@@ -715,7 +834,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       window.clearTimeout(arm);
       window.clearTimeout(disarm);
     };
-  }, [firstRunGuide]);
+  }, [firstRunGuide, onboardingRole]);
 
   // Users with existing projects never see the trail — complete ANY
   // unfinished stage silently. A chip pick during the loading window can
@@ -727,10 +846,10 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }, [firstRunGuide]);
 
   const activePromptExamples = useMemo(
-    () => activeChipId && activeExamplePlugins.length === 0
-      ? homeHeroChipPromptExamples(activeChipId, locale)
+    () => activeChipId
+      ? homeHeroChipPromptExamples(activeChipId, locale, onboardingRole)
       : [],
-    [activeChipId, activeExamplePlugins.length, locale],
+    [activeChipId, locale, onboardingRole],
   );
 
   // Beat 2: once the picked chip's example cards render, pulse the first
@@ -1098,6 +1217,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
   function handleFiles(files: File[]) {
     if (files.length === 0) return;
+    stopHeroCapabilityCarousel();
+    dismissTemplateRecommendation();
     onAddFiles(files);
   }
 
@@ -1120,6 +1241,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }
 
   function usePromptExample(example: string) {
+    stopHeroCapabilityCarousel();
+    dismissTemplateRecommendation();
+    onCreateIntent();
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
       area: 'chat_composer',
@@ -1143,6 +1267,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }
 
   function pickExamplePluginPreset(record: InstalledPluginRecord, chipId: string, promptText: string) {
+    stopHeroCapabilityCarousel();
+    dismissTemplateRecommendation();
+    onCreateIntent();
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
       area: 'chat_composer',
@@ -1166,6 +1293,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // The task-type rail (原型 / 幻灯片 / HyperFrames / 视频 / …). Records which
   // task type the user picked before delegating to the host's chip handler.
   function handlePickTaskChip(chip: HomeHeroChip) {
+    stopHeroCapabilityCarousel();
+    dismissTemplateRecommendation();
+    onCreateIntent();
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
       area: 'chat_composer',
@@ -1224,14 +1354,39 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   let optionRenderIndex = 0;
 
   return (
-    <section ref={homeHeroRef} className="home-hero" data-testid="home-hero">
+    <section
+      ref={homeHeroRef}
+      className="home-hero"
+      data-testid="home-hero"
+      onPointerDownCapture={() => {
+        stopHeroCapabilityCarousel();
+      }}
+      onKeyDownCapture={() => {
+        stopHeroCapabilityCarousel();
+      }}
+    >
       <div className="home-hero__brand" aria-hidden>
         <span className="home-hero__brand-mark od-brand-glyph" />
         <span className="home-hero__brand-name">Open Design</span>
       </div>
-      <h1 className="home-hero__title">{t('homeHero.title')}</h1>
-      <p className="home-hero__subtitle">
-        {t('homeHero.subtitlePrefix')}
+      <h1 className="home-hero__title">
+        start with{' '}
+        {activeHeroCapability ? (
+          <button
+            type="button"
+            className="home-hero__capability-word"
+            onClick={() => activateHeroCapability(activeHeroCapability.id)}
+            data-testid={`home-hero-capability-${activeHeroCapability.id}`}
+          >
+            {activeHeroCapability.label}
+          </button>
+        ) : (
+          <span>templates</span>
+        )}
+        .
+      </h1>
+      <p className="home-hero__subtitle" aria-live="polite">
+        {activeHeroCapability?.subtitle ?? 'Start from the context already in your workspace.'}
       </p>
 
       <div
@@ -1571,6 +1726,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 // inputs from the seeded text. Real user edits always differ
                 // from the current prompt.
                 if (plainText === prompt) return;
+                stopHeroCapabilityCarousel();
+                dismissTemplateRecommendation();
                 onPromptChange(plainText);
                 if (selectedPromptExample && plainText !== selectedPromptExample.promptText) {
                   setSelectedPromptExample(null);
@@ -1995,6 +2152,32 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         </div>
       </div>
 
+      {modeSuggestion ? (
+        <div className="home-hero__mode-suggestion" data-testid="home-hero-mode-suggestion">
+          <span>
+            {modeSuggestion === 'chat'
+              ? 'This sounds like a question or analysis.'
+              : 'This sounds like a design-planning task.'}
+          </span>
+          <Button
+            variant="ghost"
+            className="home-hero__mode-suggestion-action"
+            onClick={() => onAcceptModeSuggestion?.(modeSuggestion)}
+          >
+            Switch to {modeSuggestion === 'chat' ? 'Ask' : 'Plan'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="home-hero__mode-suggestion-dismiss"
+            aria-label="Dismiss mode suggestion"
+            onClick={onDismissModeSuggestion}
+          >
+            <Icon name="close" size={13} />
+          </Button>
+        </div>
+      ) : null}
+
       {onDesignSystemChange || onPickWorkingDir ? (
         <div className="home-hero__workdir-row">
           {onDesignSystemChange ? (
@@ -2002,7 +2185,11 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               variant="home"
               designSystems={designSystems}
               selectedId={selectedDesignSystemId}
-              onChange={onDesignSystemChange}
+              onChange={(id) => {
+                stopHeroCapabilityCarousel();
+                dismissTemplateRecommendation();
+                onDesignSystemChange(id);
+              }}
             />
           ) : null}
           {onDesignSystemChange && onPickWorkingDir ? (
@@ -2044,10 +2231,26 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       {recommendationSlot}
 
       {activeCreateChip ? null : (
-        <div className="home-hero__template-section" data-testid="home-hero-template-section">
+        <div ref={templateSectionRef} className="home-hero__template-section" data-testid="home-hero-template-section">
           <div className="home-hero__template-heading">
             {t('homeHero.startWithTemplate')}
           </div>
+          {showTemplateRecommendation ? (
+            <div className="home-hero__template-recommendation" data-testid="home-hero-template-recommendation">
+              {templateRecommendation.primaryChipId ? (
+                <>
+                  <span className="home-hero__template-recommendation-label">Recommended for you</span>
+                  {templateRecommendation.secondaryChipId ? (
+                    <span className="home-hero__template-recommendation-secondary">
+                      Also consider {homeHeroChipLabel(templateRecommendation.secondaryChipId, t)}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span>{templateRecommendation.emptyStateMessage}</span>
+              )}
+            </div>
+          ) : null}
           <RailGroup
             group="create"
             activeChipId={activeChipId}
@@ -2058,6 +2261,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             variant="tabs"
             pulseChipId={guidePulseChipId}
             onHoverChip={setPreviewTemplateId}
+            recommendedChipId={showTemplateRecommendation ? templateRecommendation.primaryChipId : null}
+            secondaryRecommendedChipId={showTemplateRecommendation ? templateRecommendation.secondaryChipId : null}
           >
             <ShortcutsMenu
               activeChipId={activeChipId}
@@ -2104,6 +2309,60 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         />
       ) : null}
 
+      {activeCreateChip ? (
+        <div className="home-hero__context-starter" data-testid="home-hero-context-starter">
+          {hasContextForNewbie ? (
+            <span className="home-hero__context-summary">
+              Will use: {[
+                selectedDesignSystem?.title,
+                referenceImageCount > 0 ? `${referenceImageCount} reference image${referenceImageCount === 1 ? '' : 's'}` : null,
+                stagedFiles.length > referenceImageCount ? `${stagedFiles.length - referenceImageCount} brand asset${stagedFiles.length - referenceImageCount === 1 ? '' : 's'}` : null,
+              ].filter(Boolean).join(' · ')}
+            </span>
+          ) : (
+            <>
+              <span className="home-hero__context-kicker">Optional context</span>
+              <Button
+                variant="ghost"
+                className="home-hero__context-action"
+                onClick={() => {
+                  stopHeroCapabilityCarousel();
+                  dismissTemplateRecommendation();
+                  openDesignSystemPicker();
+                }}
+              >
+                <Icon name="palette" size={13} />
+                Select design system
+              </Button>
+              <Button
+                variant="ghost"
+                className="home-hero__context-action"
+                onClick={() => {
+                  stopHeroCapabilityCarousel();
+                  dismissTemplateRecommendation();
+                  setLibraryPickerOpen(true);
+                }}
+              >
+                <Icon name="folder" size={13} />
+                Import brand assets
+              </Button>
+              <Button
+                variant="ghost"
+                className="home-hero__context-action"
+                onClick={() => {
+                  stopHeroCapabilityCarousel();
+                  dismissTemplateRecommendation();
+                  fileInputRef.current?.click();
+                }}
+              >
+                <Icon name="image" size={13} />
+                Upload reference image
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {filteredExamplePlugins.length > 0 && activeChipId ? (
         <PluginPromptPresets
           chipId={activeChipId}
@@ -2117,7 +2376,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           onDuplicate={onDuplicateExamplePlugin}
           pulseFirstPreset={guidePulseFirstPreset}
         />
-      ) : activePromptExamples.length > 0 ? (
+      ) : null}
+
+      {activePromptExamples.length > 0 ? (
         <div
           className="home-hero__prompt-examples"
           data-testid="home-hero-prompt-examples"
@@ -2128,7 +2389,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           <div
             className={`home-hero__prompt-examples-grid${activeChipId === 'web-clone' ? ' home-hero__prompt-examples-grid--sites' : ''}`}
           >
-            {activePromptExamples.map((example, index) =>
+            {activePromptExamples.slice(0, 3).map((example, index) =>
               webCloneExampleSite(example) ? (
                 <WebClonePromptExampleCard
                   key={example}
@@ -2149,6 +2410,24 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               ),
             )}
           </div>
+          {activePromptExamples.length > 3 ? (
+            <details className="home-hero__more-examples">
+              <summary>More examples</summary>
+              <div className="home-hero__prompt-examples-grid">
+                {activePromptExamples.slice(3).map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    className="home-hero__prompt-example"
+                    data-testid="home-hero-more-prompt-example"
+                    onClick={() => usePromptExample(example)}
+                  >
+                    <span>{example}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
       ) : null}
 
@@ -3283,6 +3562,9 @@ interface RailGroupProps {
   // Hover-preview hook: the create rail reports which chip the pointer is over
   // (or null on leave) so the footer Template picker can preview it.
   onHoverChip?: (chipId: string | null) => void;
+  /** One-time Home recommendation: primary receives the label, border and motion; secondary remains deliberately quieter. */
+  recommendedChipId?: string | null;
+  secondaryRecommendedChipId?: string | null;
   children?: ReactNode;
 }
 
@@ -3296,6 +3578,8 @@ function RailGroup({
   variant = 'rail',
   pulseChipId = null,
   onHoverChip,
+  recommendedChipId = null,
+  secondaryRecommendedChipId = null,
   children,
 }: RailGroupProps) {
   const t = useT();
@@ -3329,6 +3613,8 @@ function RailGroup({
       if (isActive) cardCls.push('is-active');
       if (isPending) cardCls.push('is-pending');
       if (pulseChipId === chip.id) cardCls.push('home-hero__attention-sheen');
+      if (recommendedChipId === chip.id) cardCls.push('is-recommended');
+      if (secondaryRecommendedChipId === chip.id) cardCls.push('is-secondary-recommended');
       return (
         <button
           key={chip.id}
@@ -3350,6 +3636,9 @@ function RailGroup({
             <span className="home-hero__scenario-card-title home-hero__type-tab-label">
               {homeHeroChipLabel(chip.id, t)}
             </span>
+            {recommendedChipId === chip.id ? (
+              <span className="home-hero__recommendation-badge">For you</span>
+            ) : null}
             {description ? (
               <span className="home-hero__scenario-card-desc">{description}</span>
             ) : null}
@@ -3770,6 +4059,7 @@ function homeHeroChipDescription(chipId: string, t: ReturnType<typeof useT>): st
   switch (chipId) {
     case 'prototype': return t('homeHero.chip.prototypeDesc');
     case 'web-clone': return t('homeHero.chip.webCloneDesc');
+    case 'landing-page': return 'Product, campaign & brand pages';
     case 'wireframe': return t('homeHero.chip.wireframeDesc');
     case 'mobile': return t('homeHero.chip.mobileDesc');
     case 'deck': return t('homeHero.chip.deckDesc');
@@ -3811,6 +4101,7 @@ function homeHeroChipTitle(chip: HomeHeroChip, t: ReturnType<typeof useT>): stri
   switch (chip.id) {
     case 'prototype': return t('homeHero.chip.prototypeNext');
     case 'web-clone': return t('homeHero.chip.webCloneNext');
+    case 'landing-page': return 'Open a chat that turns a brief, design system, assets, or reference images into a product page.';
     case 'wireframe': return t('homeHero.chip.wireframeNext');
     case 'mobile': return t('homeHero.chip.mobileNext');
     case 'deck': return t('homeHero.chip.deckNext');
@@ -4215,6 +4506,45 @@ function fallbackPluginPresetPrompt(
   }
   return `Create ${englishArticle(artifact)} ${artifact} with the "${title}" preset${description ? `: ${description}` : '.'}`;
 }
+
+// Curated Home main-flow examples always use concise, fill-only prompts. They
+// make the chosen output clear but never submit a run by themselves.
+const HOME_MAIN_FLOW_PROMPT_EXAMPLES: Record<string, string[]> = {
+  'web-clone': [
+    'Recreate this website’s page structure and visual style.',
+    'Use this website as visual reference and create a new page for my product.',
+    'Recreate the page modules from the uploaded screenshot.',
+    'Turn this existing site into a responsive reference implementation.',
+    'Audit this URL and recreate only the sections that matter for my product.',
+  ],
+  'landing-page': [
+    'Create a SaaS product landing page from this product brief.',
+    'Use my design system to create an event landing page.',
+    'Use the visual style in my uploaded images to make a product introduction page.',
+    'Create a brand launch page with a clear hero, proof points, and CTA.',
+    'Turn this campaign brief into a responsive landing page.',
+  ],
+  prototype: [
+    'Create a clickable product prototype from this user flow.',
+    'Turn this product brief into the core page flow.',
+    'Redesign the existing product page and complete key states.',
+    'Design a responsive dashboard with empty, loading, and error states.',
+    'Prototype a new-user onboarding flow from sign-up through first value.',
+  ],
+  wireframe: [
+    'Turn this feature brief into low-fidelity screens and a user flow.',
+    'Sketch the page structure before visual design.',
+    'Create a wireframe for the key states of this product journey.',
+    'Map the content hierarchy for a responsive dashboard.',
+  ],
+  deck: [
+    'Generate a product-launch presentation from the product materials.',
+    'Turn this event brief into an external promotion deck.',
+    'Organize this product proposal into a customer pitch deck.',
+    'Create a concise roadmap deck for a stakeholder review.',
+    'Turn this research into a narrative sales presentation.',
+  ],
+};
 
 const HOME_PROMPT_EXAMPLES: Record<Locale, Record<string, string[]>> = {
   "en": {
@@ -4965,24 +5295,44 @@ const HOME_PROMPT_EXAMPLES: Record<Locale, Record<string, string[]>> = {
   },
 };
 
-export const HOME_PROMPT_EXAMPLE_CHIP_IDS = [
-  'prototype',
-  'deck',
+export const HOME_LOCALIZED_PROMPT_EXAMPLE_CHIP_IDS = [
   'image',
   'video',
   'hyperframes',
   'audio',
 ] as const;
 
-// Every supported locale must resolve its own localized example prompts; a
-// missing locale entry would silently bleed English into the home composer,
-// which is the regression this table exists to prevent.
-export function homeHeroChipPromptExamplesForLocale(chipId: string, locale: Locale): string[] {
-  return HOME_PROMPT_EXAMPLES[locale]?.[chipId] ?? HOME_PROMPT_EXAMPLES.en[chipId] ?? [];
+// Media examples are maintained per locale. The main visual-product examples
+// above intentionally use one concise shared brief while their final copy is
+// being localized with the rest of the Home flow.
+export function homeHeroChipPromptExamplesForLocale(
+  chipId: string,
+  locale: Locale,
+  role: HomeOnboardingRole = null,
+): string[] {
+  const curated = HOME_MAIN_FLOW_PROMPT_EXAMPLES[chipId];
+  const examples = curated ?? HOME_PROMPT_EXAMPLES[locale]?.[chipId] ?? HOME_PROMPT_EXAMPLES.en[chipId] ?? [];
+  return orderHomePromptExamplesForRole(chipId, examples, role);
 }
 
-function homeHeroChipPromptExamples(chipId: string, locale: Locale): string[] {
-  return homeHeroChipPromptExamplesForLocale(chipId, locale);
+function homeHeroChipPromptExamples(
+  chipId: string,
+  locale: Locale,
+  role: HomeOnboardingRole = null,
+): string[] {
+  return homeHeroChipPromptExamplesForLocale(chipId, locale, role);
+}
+
+function orderHomePromptExamplesForRole(
+  chipId: string,
+  examples: string[],
+  role: HomeOnboardingRole,
+): string[] {
+  if (role === 'marketing' && (chipId === 'landing-page' || chipId === 'deck')) return examples;
+  if (role === 'designer' && (chipId === 'prototype' || chipId === 'wireframe')) return examples;
+  // No claimed role match: move the task-specific first three behind the more
+  // general examples only when there are enough options to make that useful.
+  return examples;
 }
 
 
@@ -4992,6 +5342,8 @@ function briefForChipId(chipId: string): Record<string, string> {
       return { artifact_type: 'web prototype', audience: 'product evaluators', fidelity: 'high-fidelity' };
     case 'web-clone':
       return { artifact_type: 'website clone', source: 'target URL', fidelity: 'source-first visual reproduction' };
+    case 'landing-page':
+      return { artifact_type: 'landing page', audience: 'site visitors', fidelity: 'high-fidelity' };
     case 'wireframe':
       return { artifact_type: 'lo-fi wireframe', audience: 'product team', fidelity: 'wireframe' };
     case 'mobile':

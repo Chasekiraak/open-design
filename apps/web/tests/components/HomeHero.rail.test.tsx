@@ -288,11 +288,11 @@ describe('HomeHero intent rail', () => {
 
     expect(screen.getByTestId('home-hero-prompt-examples')).toBeTruthy();
     const examples = screen.getAllByTestId('home-hero-prompt-example');
-    expect(examples).toHaveLength(4);
+    expect(examples).toHaveLength(3);
 
     fireEvent.click(examples[0]!);
     expect(onPromptChange).toHaveBeenCalledWith(
-      'Research the market opportunity for a product launch, including competitors, target users, pricing hypotheses, and launch narrative',
+      'Generate a product-launch presentation from the product materials.',
     );
     // The top "selected example" pill was removed from the composer; picking an
     // example still seeds the prompt but no longer surfaces a dismissible chip.
