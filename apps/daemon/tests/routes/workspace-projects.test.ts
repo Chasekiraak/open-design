@@ -1627,6 +1627,7 @@ function workspaceProjectRouteDeps({
       listWorkspaceProjectBindings: () => new Map([[projectId, workspaceId]]),
       listWorkspaceProjects: () => [workspaceRow],
       updateWorkspaceProject: updateWorkspaceProject ?? noop,
+      rebindWorkspaceProject: noop,
     },
     projectFiles: {
       writeProjectFile: noop,

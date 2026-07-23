@@ -892,7 +892,7 @@ export function listWorkspaceProjects(db: SqliteDb, workspaceId: string) {
          FROM workspace_projects wp
          JOIN projects p ON p.id = wp.project_id
         WHERE wp.workspace_id = ?
-        ORDER BY p.updated_at DESC`,
+        ORDER BY MAX(p.updated_at, wp.updated_at) DESC`,
     )
     .all(workspaceId) as DbRow[];
 }

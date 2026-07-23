@@ -1460,6 +1460,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     listWorkspaceProjectBindings,
     listWorkspaceProjects,
     updateWorkspaceProject,
+    rebindWorkspaceProject,
     deleteWorkspaceProject,
     countWorkspaceProjectRefs,
   } = ctx.projectStore;
@@ -1516,6 +1517,13 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     } catch {
       metadata = undefined;
     }
+    // A move/rename/share-visibility change touches only the workspace_projects
+    // row, not the project's own content (projects.updated_at) — but it is real,
+    // recent activity on this project from the user's point of view. Report the
+    // later of the two so the "最近更新" label matches the sort order above
+    // (ORDER BY MAX(p.updated_at, wp.updated_at)), instead of a card that jumps
+    // to the top of the list while still showing a stale "18 hours ago".
+    const lastActivityAt = Math.max(row.updatedAt, row.workspaceUpdatedAt ?? 0);
     const project = {
       id: row.id,
       name: row.name,
@@ -1526,7 +1534,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       appliedPluginSnapshotId: row.appliedPluginSnapshotId ?? undefined,
       customInstructions: row.customInstructions ?? undefined,
       createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+      updatedAt: lastActivityAt,
       // Carried on the nested project too, so a client that unwraps the summary
       // into a plain Project keeps the binding instead of dropping it.
       workspaceId: row.workspaceId ?? null,
@@ -1555,7 +1563,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         ? { pendingSyncIntent: pendingSyncIntent(project.id, row.workspaceId, row.workspaceVisibility) }
         : {}),
       createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+      updatedAt: lastActivityAt,
       metadata,
       project,
     };
@@ -1575,6 +1583,17 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   function accessForRemoteTeamProject(remote: VelaTeamProjectRecord, ctx: WorkspaceProjectContext) {
     const frozen = remote.access.frozen || isWorkspaceLocked(ctx);
     const canView = remote.access.canView && !frozen && ctx.memberStatus === 'active';
+    // `remote.access.canEdit` alone is not enough to grant local mutation: it
+    // can be true for reasons that do not make THIS member the owner (a team
+    // admin's blanket edit grant, a generic per-project flag, etc.), and
+    // treating "can view something I don't own yet" as "adopt it and make it
+    // mine" is exactly the ownership-invention the adoption red line above
+    // forbids — a member discovering a teammate's shared project must stay
+    // read-only regardless of canEdit. Require this member to BE the project's
+    // owner too; only then is honoring canEdit "this member's own project,
+    // whose local row is stale" rather than "assign ownership to a reader".
+    const isOwner = remote.ownerMemberId === ctx.workspaceMemberId;
+    const canMutate = canView && remote.access.canEdit && isOwner;
     const disabledReason = frozen
       ? isWorkspaceLocked(ctx)
         ? 'workspace_locked'
@@ -1584,14 +1603,14 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         : 'permission_denied';
     return {
       canOpen: canView,
-      canRename: false,
-      canDelete: false,
-      canDuplicate: false,
+      canRename: canMutate,
+      canDelete: canMutate,
+      canDuplicate: canMutate,
       canMoveToTeam: false,
       canMoveToPersonal: false,
       canExport: canView,
       canSendTo: canView,
-      canRestoreVersion: false,
+      canRestoreVersion: canMutate,
       ...(disabledReason ? { disabledReason } : {}),
     };
   }
@@ -1670,6 +1689,76 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     // performed under a different principal still suppresses its own row.
     return remote.ownerMemberId === ctx.workspaceMemberId && tombstoned.projectIds.has(remote.projectId);
   }
+  /**
+   * Reconcile a project's local `workspace_projects` row against what B's team
+   * catalog says about THIS member's access to it, in both directions.
+   *
+   * `listRemoteTeamProjectSummaries` below only reaches a project when its
+   * local row (if any) has no `resourceHubResourceId` match to the catalog
+   * entry — i.e. a row that predates this project's current team binding (an
+   * orphaned local draft that happens to share a project id with something
+   * later shared into this exact team, e.g. old test data, or a device that
+   * never ran the adoption flow). `accessForRemoteTeamProject` already derives
+   * the DISPLAYED capabilities from `remote.access.canEdit`; without this, the
+   * ENFORCED ones would keep reading the stale local row instead — which is
+   * exactly backwards in either direction:
+   *   - `canEdit: true` but the local row is missing/mismatched: the listing
+   *     would show a normal-looking, "editable" project whose every save 403s,
+   *     because `enforceWorkspaceProjectMutation` never finds a matching row.
+   *   - `canEdit: false` but a stale local row happens to already sit under
+   *     THIS workspace with THIS member recorded as its creator (a rarer, but
+   *     real, coincidence — e.g. a locally-created draft that was never
+   *     shared, then this project id got reused by an unrelated team share):
+   *     the local row would grant a save the remote side has already revoked.
+   * Only ever writes a row that visibly disagrees with B; a project this
+   * function never inspects (already correctly bound, resourceId matches) is
+   * untouched, and its access still comes solely from the local row as before.
+   */
+  function reconcileLocalRowWithRemoteTeamAccess(remote: VelaTeamProjectRecord, ctx: WorkspaceProjectContext): void {
+    const existing = getWorkspaceProjectByProjectId(db, remote.projectId);
+    // Ownership match required, same reasoning as accessForRemoteTeamProject
+    // above: never rebind a row to make a reader look like this project's
+    // creator just because B's generic canEdit happens to read true for them.
+    const isOwner = remote.ownerMemberId === ctx.workspaceMemberId;
+    const canEdit = remote.access.canEdit && remote.access.canView && !remote.access.frozen && isOwner;
+    if (canEdit) {
+      const alreadyCorrect = existing
+        && existing.workspaceId === ctx.workspaceId
+        && existing.visibility === 'team'
+        && existing.createdByWorkspaceMemberId === ctx.workspaceMemberId
+        && existing.resourceHubResourceId === remote.resourceId;
+      if (alreadyCorrect) return;
+      rebindWorkspaceProject(db, remote.projectId, {
+        workspaceId: ctx.workspaceId,
+        visibility: 'team',
+        resourceState: 'active',
+        createdByWorkspaceMemberId: ctx.workspaceMemberId,
+        updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+        resourceHubResourceId: remote.resourceId,
+        cloudTombstonedAt: null,
+        syncState: 'synced',
+      });
+      return;
+    }
+    // canEdit: false. Only ever tighten a row that currently claims THIS
+    // workspace + THIS member as a team-writable binding for THIS project — a
+    // row bound anywhere else (including a genuinely different, unrelated
+    // local draft) is not this function's business and is left alone.
+    const wronglyPermissive = existing
+      && existing.workspaceId === ctx.workspaceId
+      && existing.visibility === 'team'
+      && existing.createdByWorkspaceMemberId === ctx.workspaceMemberId;
+    if (!wronglyPermissive) return;
+    rebindWorkspaceProject(db, remote.projectId, {
+      workspaceId: ctx.workspaceId,
+      visibility: 'team',
+      resourceState: remote.access.frozen ? 'frozen' : 'active',
+      createdByWorkspaceMemberId: null,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      resourceHubResourceId: remote.resourceId,
+      syncState: 'synced',
+    });
+  }
   async function listRemoteTeamProjectSummaries(localRows: any[], ctx: WorkspaceProjectContext) {
     if (!teamProjectCatalog) return [];
     const localResourceIds = new Set(localRows.map((row) => row.resourceHubResourceId).filter(Boolean));
@@ -1681,10 +1770,21 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       throw new TeamProjectCatalogListError(error);
     }
     const seenResourceIds = new Set<string>();
-    return remoteProjects
+    const candidates = remoteProjects
       .filter((project) => project.access.canView)
       .filter((project) => !localResourceIds.has(project.resourceId))
-      .filter((project) => !remoteTeamProjectWasUnsharedLocally(project, tombstoned, ctx))
+      .filter((project) => !remoteTeamProjectWasUnsharedLocally(project, tombstoned, ctx));
+    for (const project of candidates) {
+      try {
+        reconcileLocalRowWithRemoteTeamAccess(project, ctx);
+      } catch (error) {
+        // Best-effort: a reconciliation failure must not break the list itself
+        // (the client still gets a correct-enough READ from accessForRemoteTeamProject
+        // below; only the next SAVE would still need a retry).
+        console.error('[team-projects] failed to reconcile local row with remote access', error);
+      }
+    }
+    return candidates
       .filter((project) => {
         if (seenResourceIds.has(project.resourceId)) return false;
         seenResourceIds.add(project.resourceId);

@@ -4034,6 +4034,7 @@ export async function startServer({
     ensureWorkspaceProject,
     listWorkspaceProjects,
     updateWorkspaceProject,
+    rebindWorkspaceProject,
     deleteWorkspaceProject,
     countWorkspaceProjectRefs,
     insertProject,
