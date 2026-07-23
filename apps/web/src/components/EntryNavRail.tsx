@@ -920,7 +920,23 @@ export function EntryNavRail({
       ) : null}
       </div>
 
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <InviteDialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        canAssignRoles={canInviteMembers}
+        availableSeats={context?.seatSummary?.availableSeats}
+        onUpgrade={
+          workspaceSettingsUrl
+            ? () => {
+                window.open(
+                  teamConsoleUrl(workspaceSettingsUrl, 'upgrade'),
+                  '_blank',
+                  'noopener,noreferrer',
+                );
+              }
+            : undefined
+        }
+      />
     </nav>
   );
 }
