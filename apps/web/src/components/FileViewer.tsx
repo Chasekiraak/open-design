@@ -6192,13 +6192,19 @@ function ReactComponentViewer({
                               onClick={() => setShareAccessMenuOpen((v) => !v)}
                             >
                               <span className="share-menu-icon">
+                                {/* recvqaVLC3MNaQ: switching access showed nothing but a
+                                    disabled button — a spinner reads as "in progress"
+                                    where a bare disabled state reads as broken/unresponsive. */}
                                 <RemixIcon
                                   name={
-                                    shareAccess === 'private'
-                                      ? 'lock-line'
-                                      : 'team-line'
+                                    shareAccessBusy
+                                      ? 'loader-4-line'
+                                      : shareAccess === 'private'
+                                        ? 'lock-line'
+                                        : 'team-line'
                                   }
                                   size={16}
+                                  className={shareAccessBusy ? 'icon-spin' : undefined}
                                 />
                               </span>
                               <span>
@@ -12956,13 +12962,18 @@ function HtmlViewer({
                             onClick={() => setShareAccessMenuOpen((v) => !v)}
                           >
                             <span className="share-menu-icon">
+                              {/* recvqaVLC3MNaQ: same spinner-over-disabled fix as the
+                                  ReactComponentViewer copy of this card above. */}
                               <RemixIcon
                                 name={
-                                  shareAccess === 'private'
-                                    ? 'lock-line'
-                                    : 'team-line'
+                                  shareAccessBusy
+                                    ? 'loader-4-line'
+                                    : shareAccess === 'private'
+                                      ? 'lock-line'
+                                      : 'team-line'
                                 }
                                 size={16}
+                                className={shareAccessBusy ? 'icon-spin' : undefined}
                               />
                             </span>
                             <span>
