@@ -82,6 +82,10 @@ type GitHubEvent = {
   pull_request?: {
     number?: number;
   };
+  merge_group?: {
+    base_sha?: string;
+    head_sha?: string;
+  };
   inputs?: {
     ci_mode?: string;
   };
@@ -395,8 +399,13 @@ function everyScopeArmed(): ScopeOutputs {
 function createRunPlan(
   outputs: ScopeOutputs,
   ciMode: CiMode,
+  // `ci_mode` is a reported label; `fullLanes` is what actually forces every
+  // lane on. They only diverge in the merge queue, which reports "full" but
+  // derives its lanes from the certain-threshold evaluation so promoted rules
+  // can actually skip work there.
+  fullLanes: boolean = ciMode === "full",
 ): Omit<ScopePlan, keyof ScopeOutputs | "ui_p0_matrix" | "visual_matrix"> {
-  const isFull = ciMode === "full";
+  const isFull = fullLanes;
   const runUiP0 = isFull || outputs.ui_p0_validation_required;
 
   return {
@@ -412,10 +421,10 @@ function createRunPlan(
   };
 }
 
-function buildScopePlan(outputs: ScopeOutputs, ciMode: CiMode): ScopePlan {
+function buildScopePlan(outputs: ScopeOutputs, ciMode: CiMode, fullLanes?: boolean): ScopePlan {
   return {
     ...outputs,
-    ...createRunPlan(outputs, ciMode),
+    ...createRunPlan(outputs, ciMode, fullLanes ?? ciMode === "full"),
     ui_p0_matrix: JSON.stringify(uiP0CiMatrix),
     visual_matrix: JSON.stringify(visualCiMatrix),
   };
@@ -493,29 +502,71 @@ function createEnvScopePlan(): PlanWithTrace {
 
   if (eventName === "pull_request") {
     return evaluateChangedFilesPlan(eventName, changedPullRequestFiles(), {
-      deriveWorkspaceValidationFromTestScopes: true,
+      threshold: "medium",
+      ciMode: "hot",
+      evaluate: { deriveWorkspaceValidationFromTestScopes: true },
     });
   }
 
   if (eventName === "workflow_dispatch" && resolveManualCiMode() === "hot") {
     return evaluateChangedFilesPlan(`${eventName}:hot`, changedManualFiles(), {
-      deriveWorkspaceValidationFromTestScopes: false,
+      threshold: "medium",
+      ciMode: "hot",
+      evaluate: { deriveWorkspaceValidationFromTestScopes: false },
     });
   }
 
-  // merge_group, workflow_dispatch full, and any unknown event stay fail-closed:
-  // trust nothing, arm everything.
+  if (eventName === "merge_group") {
+    // The merge queue evaluates the whole queued group's union diff at the
+    // "certain" threshold. While the certain rule set is empty every file
+    // escalates and the plan stays full, so this path is behavior-preserving;
+    // its trace's ifTrustAll shadow column is the evidence stream for future
+    // promotions. Resolution anomalies fail open to the full plan: queue
+    // throughput must never depend on this evaluation succeeding.
+    let files: string[];
+    try {
+      files = changedMergeGroupFiles();
+    } catch (error) {
+      console.error(`::warning::merge_group changed-file resolution failed; falling back to the full plan: ${String(error)}`);
+      const plan = buildScopePlan(everyScopeArmed(), "full");
+      return { plan, trace: buildEverythingTrace("merge_group:resolution-error", plan) };
+    }
+    if (files.length === 0) {
+      const plan = buildScopePlan(everyScopeArmed(), "full");
+      return { plan, trace: buildEverythingTrace("merge_group:empty-resolution", plan) };
+    }
+    return evaluateChangedFilesPlan(eventName, files, {
+      threshold: "certain",
+      ciMode: "full",
+      fullLanes: false,
+      evaluate: { deriveWorkspaceValidationFromTestScopes: true },
+    });
+  }
+
+  // workflow_dispatch full and any unknown event stay fail-closed: trust
+  // nothing, arm everything.
   const plan = buildScopePlan(everyScopeArmed(), "full");
   return { plan, trace: buildEverythingTrace(eventName, plan) };
 }
 
-function evaluateChangedFilesPlan(source: string, files: readonly string[], options: EvaluateOptions): PlanWithTrace {
-  const threshold: TrustThreshold = "medium";
-  const evaluation = evaluateScopeOutputs(files, threshold, options);
-  const plan = buildScopePlan(evaluation.outputs, "hot");
-  const trustAll = evaluateScopeOutputs(files, "medium", options);
-  const trustAllPlan = buildScopePlan(trustAll.outputs, "hot");
-  return { plan, trace: buildTrace(source, threshold, evaluation, plan, trustAllPlan) };
+type ChangedFilesPlanOptions = {
+  threshold: TrustThreshold;
+  ciMode: CiMode;
+  fullLanes?: boolean;
+  evaluate: EvaluateOptions;
+};
+
+function evaluateChangedFilesPlan(
+  source: string,
+  files: readonly string[],
+  options: ChangedFilesPlanOptions,
+): PlanWithTrace {
+  const fullLanes = options.fullLanes ?? options.ciMode === "full";
+  const evaluation = evaluateScopeOutputs(files, options.threshold, options.evaluate);
+  const plan = buildScopePlan(evaluation.outputs, options.ciMode, fullLanes);
+  const trustAll = evaluateScopeOutputs(files, "medium", options.evaluate);
+  const trustAllPlan = buildScopePlan(trustAll.outputs, options.ciMode, fullLanes);
+  return { plan, trace: buildTrace(source, options.threshold, evaluation, plan, trustAllPlan) };
 }
 
 function resolveManualCiMode(): CiMode {
@@ -538,6 +589,8 @@ function changedPullRequestFiles(): string[] {
   return stdout.split(/\r?\n/).filter(Boolean);
 }
 
+// Removed files stay in every changed-file resolution on purpose: deleting a
+// runtime source file must trigger the same validation scopes as editing it.
 function changedManualFiles(): string[] {
   const repository = requiredEnv("GITHUB_REPOSITORY");
   const sha = requiredEnv("GITHUB_SHA");
@@ -546,7 +599,26 @@ function changedManualFiles(): string[] {
     "--paginate",
     `repos/${repository}/compare/main...${sha}`,
     "--jq",
-    '(.files // [])[] | select(.status != "removed") | .filename',
+    "(.files // [])[] | .filename",
+  ]);
+  return stdout.split(/\r?\n/).filter(Boolean);
+}
+
+function changedMergeGroupFiles(): string[] {
+  const repository = requiredEnv("GITHUB_REPOSITORY");
+  const event = JSON.parse(readFileSync(requiredEnv("GITHUB_EVENT_PATH"), "utf8")) as GitHubEvent;
+  const baseSha = event.merge_group?.base_sha;
+  const headSha = event.merge_group?.head_sha;
+  if (baseSha == null || baseSha.length === 0 || headSha == null || headSha.length === 0) {
+    throw new Error("merge_group event payload did not include merge_group.base_sha and merge_group.head_sha");
+  }
+
+  const stdout = runGh([
+    "api",
+    "--paginate",
+    `repos/${repository}/compare/${baseSha}...${headSha}`,
+    "--jq",
+    "(.files // [])[] | .filename",
   ]);
   return stdout.split(/\r?\n/).filter(Boolean);
 }
@@ -645,14 +717,13 @@ function createCliScopePlan(args: readonly string[]): PlanWithTrace {
     const plan = buildScopePlan(everyScopeArmed(), "full");
     return { plan, trace: buildEverythingTrace("cli:full", plan) };
   }
-  const threshold: TrustThreshold = parsed.context === "merge-queue" ? "certain" : "medium";
-  const options: EvaluateOptions = { deriveWorkspaceValidationFromTestScopes: parsed.context === "pr" };
-  const ciMode: CiMode = parsed.context === "merge-queue" ? "full" : "hot";
-  const evaluation = evaluateScopeOutputs(parsed.files, threshold, options);
-  const plan = buildScopePlan(evaluation.outputs, ciMode);
-  const trustAll = evaluateScopeOutputs(parsed.files, "medium", options);
-  const trustAllPlan = buildScopePlan(trustAll.outputs, ciMode);
-  return { plan, trace: buildTrace(`cli:${parsed.context}`, threshold, evaluation, plan, trustAllPlan) };
+  const isQueue = parsed.context === "merge-queue";
+  return evaluateChangedFilesPlan(`cli:${parsed.context}`, parsed.files, {
+    threshold: isQueue ? "certain" : "medium",
+    ciMode: isQueue ? "full" : "hot",
+    ...(isQueue ? { fullLanes: false } : {}),
+    evaluate: { deriveWorkspaceValidationFromTestScopes: true },
+  });
 }
 
 function printRules(): void {

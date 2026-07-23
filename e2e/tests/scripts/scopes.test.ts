@@ -27,6 +27,10 @@ const GH_STUB_SOURCE = `if (process.argv[2] !== "api") {
   console.error("gh-stub expected an \\"api\\" invocation, got: " + process.argv.slice(2).join(" "));
   process.exit(1);
 }
+if (process.env.OD_SCOPES_STUB_FAIL === "1") {
+  console.error("gh-stub simulated API failure");
+  process.exit(1);
+}
 const files = process.env.OD_SCOPES_STUB_FILES ?? "";
 for (const line of files.split("\\n")) {
   if (line.length > 0) console.log(line);
@@ -68,7 +72,7 @@ function runScopes(
   command: string,
   context: EventContext,
   files: readonly string[],
-  extraArgs: readonly string[] = [],
+  extraEnv: NodeJS.ProcessEnv = {},
 ): { stdout: string; outputPath: string; cleanup: () => void } {
   const workDir = mkdtempSync(path.join(tmpdir(), "scopes-test-"));
   const eventPath = path.join(workDir, "event.json");
@@ -82,7 +86,12 @@ function runScopes(
       ? { pull_request: { number: 4321 } }
       : context.eventName === "workflow_dispatch"
         ? { inputs: { ci_mode: context.ciMode } }
-        : {};
+        : {
+            merge_group: {
+              base_sha: "1111111111111111111111111111111111111111",
+              head_sha: "2222222222222222222222222222222222222222",
+            },
+          };
   writeFileSync(eventPath, JSON.stringify(payload));
 
   const env: NodeJS.ProcessEnv = {
@@ -97,13 +106,14 @@ function runScopes(
     GITHUB_STEP_SUMMARY: "",
     OPEN_DESIGN_GH_NODE_SCRIPT: ghStubPath,
     OD_SCOPES_STUB_FILES: files.join("\n"),
+    ...extraEnv,
   };
 
-  const stdout = execFileSync(
-    process.execPath,
-    ["--experimental-strip-types", scopesScript, command, ...extraArgs],
-    { cwd: repoRoot, env, encoding: "utf8" },
-  );
+  const stdout = execFileSync(process.execPath, ["--experimental-strip-types", scopesScript, command], {
+    cwd: repoRoot,
+    env,
+    encoding: "utf8",
+  });
 
   return { stdout, outputPath, cleanup: () => rmSync(workDir, { recursive: true, force: true }) };
 }
@@ -391,9 +401,26 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     expected: FULL_PLAN,
   },
   {
-    name: "merge_group runs everything",
+    // Empty union-diff resolution is treated as an anomaly and fails open.
+    name: "merge_group with an empty resolution runs everything",
     context: { eventName: "merge_group" },
     files: [],
+    expected: FULL_PLAN,
+  },
+  {
+    // While the certain rule set is empty, every queued file sits below the
+    // merge-queue trust threshold and escalates: the queue stays full. The
+    // first certain-rule promotion is the deliberate behavior change that
+    // makes this case diverge.
+    name: "merge_group docs-only group still runs everything at the certain threshold",
+    context: { eventName: "merge_group" },
+    files: ["README.md", "docs/architecture.md"],
+    expected: FULL_PLAN,
+  },
+  {
+    name: "merge_group mixed group runs everything at the certain threshold",
+    context: { eventName: "merge_group" },
+    files: ["apps/web/src/x.ts", "tools/pack/src/y.ts"],
     expected: FULL_PLAN,
   },
 ];
@@ -403,6 +430,22 @@ for (const goldenCase of GOLDEN_CASES) {
     assertPlan(printPlan(goldenCase.context, goldenCase.files), goldenCase.expected);
   });
 }
+
+test("merge_group changed-file resolution failure fails open to the full plan", () => {
+  const run = runScopes("print", { eventName: "merge_group" }, ["README.md"], { OD_SCOPES_STUB_FAIL: "1" });
+  try {
+    assertPlan(JSON.parse(run.stdout) as Record<string, unknown>, FULL_PLAN);
+  } finally {
+    run.cleanup();
+  }
+});
+
+test("pull_request changed-file resolution failure still fails the run", () => {
+  assert.throws(() => {
+    const run = runScopes("print", PR, ["README.md"], { OD_SCOPES_STUB_FAIL: "1" });
+    run.cleanup();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Unit layer: rule-table invariants and evaluator semantics, imported directly.
