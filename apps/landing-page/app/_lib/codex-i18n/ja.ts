@@ -8,17 +8,16 @@ export const ja: CodexCopyOverride = {
   collectionEyebrow: 'キュレーションコレクション',
   collectionHeading: 'Codex に「本物の UI」を作らせるデザインプラグイン',
   collectionLede:
-    'OpenAI Codex は動くコードを書く。ただ放っておけば、無難なフォント、平凡な余白、中央寄せの Helvetica に落ち着く。ここに集めたのは Codex にセンスを与えるプラグイン、つまりスキル、Figma パイプライン、デザインシステムのルール。ひとつだけ入れてもいいし、Open Design の中でまとめて動かしてもいい。',
+    'OpenAI Codex は動くコードを書く。ただ放っておけば、無難なフォント、平凡な余白、中央寄せの Helvetica に落ち着く。ここに集めたのは Codex にセンスを与えるプラグイン、つまり美意識のスキルとデザインシステムのルール。ひとつだけ入れてもいいし、Open Design の中でまとめて動かしてもいい。',
   collectionStats: [
-    { value: '6', label: '主要プラグイン' },
-    { value: '3', label: 'デザインワークフロー' },
+    { value: '50', label: '厳選プラグイン' },
+    { value: '13', label: '提供元リポジトリ' },
     { value: 'オープン', label: 'ソース、すべて検証済み' },
   ],
   collectionIntro:
-    '以下のプラグインはすべて実在し、出典にリンクしています。役割は 3 つ。コードを書く前に美的判断を決めること、Figma とコードを橋渡しすること、そして自社のデザインシステムをエージェントが従うルールに落とし込むことです。',
+    '以下のプラグインはすべて実在し、出典にリンクしています。役割は 2 つ。コードを書く前に美的判断を決めること、そして自社のデザインシステムをエージェントが従うルールに落とし込むことです。',
   collectionCategoryBlurbs: [
     '1 行もコードを書かないうちに、Codex のデフォルトの美的判断を上書きする。',
-    '実際の Figma デザインを読み取り、ほぼ製品品質のフロントエンドコードに変換する。',
     'トークンとコンポーネントを、Codex が勝手に発明せず従うルールに変える。',
   ],
   collectionCloserHeading: 'セットアップは飛ばして、Open Design の中で Codex とデザインする',
@@ -26,7 +25,6 @@ export const ja: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design は、Codex を包み込むように動くオープンソースのエージェントネイティブなデザインワークスペースです。デザインシステム、スキル、テンプレートの一貫性を保つので、エージェントが仕上げた成果物はあなたのものになります。',
   categoryFrontend: 'フロントエンド & UI',
-  categoryFigmaToCode: 'Figma → コード',
   categoryDesignSystems: 'デザインシステム',
   ctaDownload: 'Open Design をダウンロード',
   ctaStarList: 'リストに Star を付ける',

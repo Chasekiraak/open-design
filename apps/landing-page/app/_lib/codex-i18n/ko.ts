@@ -8,17 +8,16 @@ export const ko: CodexCopyOverride = {
   collectionEyebrow: '엄선한 컬렉션',
   collectionHeading: 'Codex가 진짜 쓸 만한 UI를 내놓게 만드는 디자인 플러그인',
   collectionLede:
-    'OpenAI Codex는 돌아가는 코드를 짭니다. 다만 그냥 두면 무난한 폰트, 평범한 여백, 가운데 정렬된 Helvetica로 흘러가죠. 여기 모은 것은 Codex에 안목을 심어 주는 플러그인 모음입니다. 스킬, Figma 파이프라인, 디자인 시스템 규칙까지. 하나만 설치해도 되고, Open Design 안에서 전부 돌려도 됩니다.',
+    'OpenAI Codex는 돌아가는 코드를 짭니다. 다만 그냥 두면 무난한 폰트, 평범한 여백, 가운데 정렬된 Helvetica로 흘러가죠. 여기 모은 것은 Codex에 안목을 심어 주는 플러그인 모음입니다. 미감을 잡아 주는 스킬과 디자인 시스템 규칙까지. 하나만 설치해도 되고, Open Design 안에서 전부 돌려도 됩니다.',
   collectionStats: [
-    { value: '6', label: '대표 플러그인' },
-    { value: '3', label: '디자인 워크플로' },
+    { value: '50', label: '엄선한 플러그인' },
+    { value: '13', label: '출처 저장소' },
     { value: '오픈소스', label: '전부 검증 완료' },
   ],
   collectionIntro:
-    '아래 플러그인은 모두 실재하며 각각 출처로 연결됩니다. 하는 일은 크게 셋입니다. 코드를 쓰기 전에 미감의 기준을 세우고, Figma와 코드 사이를 잇고, 여러분의 디자인 시스템을 에이전트가 따르는 규칙으로 못 박습니다.',
+    '아래 플러그인은 모두 실재하며 각각 출처로 연결됩니다. 하는 일은 크게 둘입니다. 코드를 쓰기 전에 미감의 기준을 세우고, 여러분의 디자인 시스템을 에이전트가 따르는 규칙으로 못 박습니다.',
   collectionCategoryBlurbs: [
     '코드 한 줄이 나오기 전에 Codex의 기본 미감 판단을 덮어씁니다.',
-    '실제 Figma 디자인을 읽어 프로덕션에 가까운 프런트엔드 코드로 옮깁니다.',
     '토큰과 컴포넌트를 Codex가 지어내는 대신 따르는 규칙으로 바꿉니다.',
   ],
   collectionCloserHeading: '세팅은 건너뛰세요. Open Design 안에서 Codex와 디자인하기',
@@ -26,7 +25,6 @@ export const ko: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design은 Codex를 감싸고 도는 오픈소스 에이전트 네이티브 디자인 워크스페이스입니다. 시스템과 스킬, 템플릿을 일관되게 지켜 주므로 에이전트가 내놓는 결과물은 온전히 여러분의 것입니다.',
   categoryFrontend: '프런트엔드 & UI',
-  categoryFigmaToCode: 'Figma → 코드',
   categoryDesignSystems: '디자인 시스템',
   ctaDownload: 'Open Design 다운로드',
   ctaStarList: '목록에 Star 남기기',

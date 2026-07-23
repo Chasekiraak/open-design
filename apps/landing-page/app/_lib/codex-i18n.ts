@@ -40,7 +40,6 @@ export interface CodexCopy {
 
   /* Category names, shown as card labels and in the "why these" strip. */
   readonly categoryFrontend: string;
-  readonly categoryFigmaToCode: string;
   readonly categoryDesignSystems: string;
 
   /* Shared chrome. */
@@ -108,7 +107,6 @@ const en: CodexCopy = {
     'Open Design is the open-source, agent-native design workspace that runs around Codex. It keeps your systems, skills and templates consistent, so the agent ships work you own.',
 
   categoryFrontend: 'Frontend & UI',
-  categoryFigmaToCode: 'Figma → Code',
   categoryDesignSystems: 'Design Systems',
 
   ctaDownload: 'Download Open Design',
@@ -218,8 +216,6 @@ export function categoryLabel(copy: CodexCopy, category: CodexSkillCategory): st
   switch (category) {
     case 'Frontend & UI':
       return copy.categoryFrontend;
-    case 'Figma → Code':
-      return copy.categoryFigmaToCode;
     case 'Design Systems':
       return copy.categoryDesignSystems;
   }

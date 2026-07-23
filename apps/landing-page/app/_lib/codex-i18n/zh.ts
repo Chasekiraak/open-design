@@ -8,17 +8,16 @@ export const zh: CodexCopyOverride = {
   collectionEyebrow: '精选合集',
   collectionHeading: '让 Codex 真正做出好界面的设计插件',
   collectionLede:
-    'OpenAI Codex 能写出跑得起来的代码。但没人管它的时候，它只会挑最保险的字体、最平庸的间距，再把 Helvetica 往中间一放。这里精选的插件专门给它补审美：Skill、Figma 流水线、设计系统规则。挑一个装，或者在 Open Design 里全跑起来。',
+    'OpenAI Codex 能写出跑得起来的代码。但没人管它的时候，它只会挑最保险的字体、最平庸的间距，再把 Helvetica 往中间一放。这里精选的插件专门给它补审美：审美类 Skill 和设计系统规则。挑一个装，或者在 Open Design 里全跑起来。',
   collectionStats: [
-    { value: '6', label: '个旗舰插件' },
-    { value: '3', label: '类设计工作流' },
+    { value: '50', label: '个精选插件' },
+    { value: '13', label: '个来源仓库' },
     { value: '开源', label: '且全部可溯源验证' },
   ],
   collectionIntro:
-    '下面每个插件都真实存在，并附上源地址。它们各司其职，分成三类：在写代码之前先定下审美、打通 Figma 与代码、把你的设计系统变成 Agent 必须遵守的规则。',
+    '下面每个插件都真实存在，并附上源地址。它们各司其职，分成两类：在写代码之前先定下审美、把你的设计系统变成 Agent 必须遵守的规则。',
   collectionCategoryBlurbs: [
     '在写下第一行代码之前，就把 Codex 的默认审美判断改掉。',
-    '读懂真实的 Figma 稿，直接产出接近生产可用的前端代码。',
     '把你的 token 和组件变成规则，让 Codex 照着做，而不是自己瞎编。',
   ],
   collectionCloserHeading: '省掉配置，在 Open Design 里用 Codex 做设计',
@@ -26,7 +25,6 @@ export const zh: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design 是围绕 Codex 运转的开源、Agent 原生设计工作空间。它让你的设计系统、Skill 和模板始终保持一致，Agent 交付的成果真正属于你。',
   categoryFrontend: '前端与 UI',
-  categoryFigmaToCode: 'Figma → 代码',
   categoryDesignSystems: '设计系统',
   ctaDownload: '下载 Open Design',
   ctaStarList: '给这份清单点 Star',

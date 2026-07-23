@@ -8,17 +8,16 @@ export const it: CodexCopyOverride = {
   collectionEyebrow: 'Raccolta curata',
   collectionHeading: 'I plugin di design che fanno spedire UI vere a Codex',
   collectionLede:
-    'OpenAI Codex scrive codice funzionante. Lasciato a sé stesso ripiega su font sicuri, spaziature medie e Helvetica centrato. Questi sono i plugin che gli danno gusto: skill, pipeline Figma e regole di design system. Installane uno, oppure usali tutti dentro Open Design.',
+    'OpenAI Codex scrive codice funzionante. Lasciato a sé stesso ripiega su font sicuri, spaziature medie e Helvetica centrato. Questi sono i plugin che gli danno gusto: skill estetiche e regole di design system. Installane uno, oppure usali tutti dentro Open Design.',
   collectionStats: [
-    { value: '6', label: 'plugin di punta' },
-    { value: '3', label: 'flussi di lavoro di design' },
+    { value: '50', label: 'plugin selezionati' },
+    { value: '13', label: 'repo di origine' },
     { value: 'Open', label: 'source e verificati' },
   ],
   collectionIntro:
-    'Ogni plugin qui sotto è reale e rimanda alla propria fonte. Fanno tre lavori: definire il gusto estetico prima del codice, fare da ponte tra Figma e codice, e trasformare il tuo design system in regole che l’agente rispetta.',
+    'Ogni plugin qui sotto è reale e rimanda alla propria fonte. Fanno due lavori: definire il gusto estetico prima del codice e trasformare il tuo design system in regole che l’agente rispetta.',
   collectionCategoryBlurbs: [
     'Scavalca le scelte estetiche predefinite di Codex prima che venga scritta una sola riga.',
-    'Legge un design Figma reale e lo trasforma in codice frontend quasi pronto per la produzione.',
     'Trasforma token e componenti in regole che Codex segue invece di inventare.',
   ],
   collectionCloserHeading: 'Salta il setup. Progetta con Codex dentro Open Design',
@@ -26,7 +25,6 @@ export const it: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design è il design workspace open source e agent-native che lavora attorno a Codex. Tiene coerenti sistemi, skill e template, così l’agente consegna lavoro che ti appartiene.',
   categoryFrontend: 'Frontend e UI',
-  categoryFigmaToCode: 'Figma → Codice',
   categoryDesignSystems: 'Design system',
   ctaDownload: 'Scarica Open Design',
   ctaStarList: 'Metti una star alla lista',

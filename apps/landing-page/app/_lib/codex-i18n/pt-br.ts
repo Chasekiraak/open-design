@@ -8,17 +8,16 @@ export const ptBr: CodexCopyOverride = {
   collectionEyebrow: 'Coleção curada',
   collectionHeading: 'Os plugins de design que fazem o Codex entregar UI de verdade',
   collectionLede:
-    'O OpenAI Codex escreve código que funciona. Sozinho, ele cai nas fontes de sempre, no espaçamento mediano e no Helvetica centralizado. Estes são os plugins que dão bom gosto a ele: skills, pipelines de Figma e regras de design system. Instale um ou rode todos dentro do Open Design.',
+    'O OpenAI Codex escreve código que funciona. Sozinho, ele cai nas fontes de sempre, no espaçamento mediano e no Helvetica centralizado. Estes são os plugins que dão bom gosto a ele: skills de estética e regras de design system. Instale um ou rode todos dentro do Open Design.',
   collectionStats: [
-    { value: '6', label: 'plugins de destaque' },
-    { value: '3', label: 'fluxos de design' },
+    { value: '50', label: 'plugins selecionados' },
+    { value: '13', label: 'repositórios de origem' },
     { value: 'Aberto', label: 'e verificado' },
   ],
   collectionIntro:
-    'Todo plugin abaixo é real e leva até a sua fonte. Eles cumprem três funções: definir o gosto estético antes do código, ligar Figma e código, e transformar seu design system em regras que o agente obedece.',
+    'Todo plugin abaixo é real e leva até a sua fonte. Eles cumprem duas funções: definir o gosto estético antes do código e transformar seu design system em regras que o agente obedece.',
   collectionCategoryBlurbs: [
     'Substitua as decisões estéticas padrão do Codex antes que uma única linha seja escrita.',
-    'Leia um design real no Figma e transforme-o em código de frontend quase pronto para produção.',
     'Transforme seus tokens e componentes em regras que o Codex segue em vez de inventar.',
   ],
   collectionCloserHeading: 'Pule a configuração. Projete com o Codex dentro do Open Design',
@@ -26,7 +25,6 @@ export const ptBr: CodexCopyOverride = {
   collectionCloserBody:
     'O Open Design é o workspace de design open source e agent-native que roda em volta do Codex. Ele mantém seus sistemas, skills e templates consistentes, então o agente entrega um trabalho que é seu.',
   categoryFrontend: 'Frontend & UI',
-  categoryFigmaToCode: 'Figma → Código',
   categoryDesignSystems: 'Design Systems',
   ctaDownload: 'Baixar o Open Design',
   ctaStarList: 'Dar estrela na lista',

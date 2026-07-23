@@ -103,11 +103,11 @@ const jsonLd = [
     <section class="dbband" aria-label={cc.collectionHeading}>
       <div class="dbin">
         <div class="codex-filter" role="group" aria-label={cc.collectionHeading}>
-          <button class="codex-chip is-on" data-filter="all" type="button">
+          <button class="codex-chip is-on" data-filter="all" type="button" aria-pressed="true">
             {cc.filterAll} <span class="codex-chip-n">{CODEX_SKILLS.length}</span>
           </button>
           {c.categories.map((cat) => (
-            <button class="codex-chip" data-filter={cat.key} type="button">
+            <button class="codex-chip" data-filter={cat.key} type="button" aria-pressed="false">
               {categoryLabel(cc, cat.key)}
               <span class="codex-chip-n">{CODEX_SKILLS.filter((s) => s.category === cat.key).length}</span>
             </button>
@@ -169,7 +169,11 @@ const jsonLd = [
         if (!btn) return;
         var f = btn.getAttribute('data-filter');
         bar.querySelectorAll('.codex-chip').forEach(function (b) {
-          b.classList.toggle('is-on', b === btn);
+          var on = b === btn;
+          b.classList.toggle('is-on', on);
+          // Keep the announced state with the visual one, or a screen reader
+          // hears plain buttons and cannot tell which filter is active.
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
         cards.forEach(function (c) {
           c.hidden = f !== 'all' && c.getAttribute('data-cat') !== f;

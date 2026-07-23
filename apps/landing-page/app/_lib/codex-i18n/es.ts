@@ -8,17 +8,16 @@ export const es: CodexCopyOverride = {
   collectionEyebrow: 'Colección curada',
   collectionHeading: 'Los plugins de diseño que hacen que Codex entregue UI de verdad',
   collectionLede:
-    'OpenAI Codex escribe código que funciona. Por su cuenta recurre a tipografías seguras, espaciados del montón y Helvetica centrada. Estos plugins le dan criterio: skills, flujos con Figma y reglas de sistema de diseño. Instala uno, o ejecútalos todos dentro de Open Design.',
+    'OpenAI Codex escribe código que funciona. Por su cuenta recurre a tipografías seguras, espaciados del montón y Helvetica centrada. Estos plugins le dan criterio: skills de estética y reglas de sistema de diseño. Instala uno, o ejecútalos todos dentro de Open Design.',
   collectionStats: [
-    { value: '6', label: 'plugins insignia' },
-    { value: '3', label: 'flujos de diseño' },
+    { value: '50', label: 'plugins seleccionados' },
+    { value: '13', label: 'repos de origen' },
     { value: 'Código', label: 'abierto y verificado' },
   ],
   collectionIntro:
-    'Cada plugin de esta lista es real y enlaza a su fuente. Todos cumplen uno de tres trabajos: fijar el criterio estético antes del código, tender el puente entre Figma y el código, y convertir tu sistema de diseño en reglas que el agente respeta.',
+    'Cada plugin de esta lista es real y enlaza a su fuente. Todos cumplen uno de dos trabajos: fijar el criterio estético antes del código y convertir tu sistema de diseño en reglas que el agente respeta.',
   collectionCategoryBlurbs: [
     'Anula las decisiones estéticas por defecto de Codex antes de escribir una sola línea.',
-    'Lee un diseño real de Figma y lo convierte en código frontend casi listo para producción.',
     'Convierte tus tokens y componentes en reglas que Codex sigue en lugar de improvisar.',
   ],
   collectionCloserHeading: 'Sáltate la configuración: diseña con Codex dentro de Open Design',
@@ -26,7 +25,6 @@ export const es: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design es el espacio de trabajo de diseño de código abierto y nativo para agentes que envuelve a Codex. Mantiene coherentes tus sistemas, skills y plantillas para que el agente entregue trabajo que es tuyo.',
   categoryFrontend: 'Frontend y UI',
-  categoryFigmaToCode: 'Figma → Código',
   categoryDesignSystems: 'Sistemas de diseño',
   ctaDownload: 'Descargar Open Design',
   ctaStarList: 'Dar una estrella a la lista',

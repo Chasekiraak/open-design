@@ -20,7 +20,7 @@ export const AWESOME_REPO_URL = 'https://github.com/nexu-io/codex-design';
 export const OD_DOWNLOAD_URL = '/download/';
 export const OD_GUIDE_HREF = '/agents/codex-design/';
 
-export type CodexSkillCategory = 'Frontend & UI' | 'Figma → Code' | 'Design Systems';
+export type CodexSkillCategory = 'Frontend & UI' | 'Design Systems';
 
 export interface CodexSkillLink {
   readonly label: string;
@@ -111,22 +111,18 @@ export interface CodexCollection {
 export const CODEX_COLLECTION: CodexCollection = {
   eyebrow: 'Codex design',
   heading: 'The design plugins that make Codex ship real UI',
-  lede: 'OpenAI Codex writes working code. Left alone it defaults to safe fonts, average spacing, and centered Helvetica. These are the plugins that give it taste: skills, Figma pipelines, and design-system rules. Install one, or run all of them inside Open Design.',
+  lede: 'OpenAI Codex writes working code. Left alone it defaults to safe fonts, average spacing, and centered Helvetica. These are the plugins that give it taste: aesthetic skills and design-system rules. Install one, or run all of them inside Open Design.',
   stats: [
     { value: '50', label: 'curated plugins' },
     { value: '13', label: 'source repos' },
     { value: 'Open', label: 'source & verified' },
   ],
   intro:
-    'Every plugin below is real and links to its source. They fall into three jobs: set aesthetic taste before code, bridge Figma and code, and lock your design system into rules the agent obeys.',
+    'Every plugin below is real and links to its source. They fall into two jobs: set aesthetic taste before code, and lock your design system into rules the agent obeys.',
   categories: [
     {
       key: 'Frontend & UI',
       blurb: 'Override Codex’s default aesthetic decisions before a single line is written.',
-    },
-    {
-      key: 'Figma → Code',
-      blurb: 'Read a real Figma design and turn it into near-production frontend code.',
     },
     {
       key: 'Design Systems',
@@ -226,7 +222,7 @@ export const CODEX_SKILLS: readonly CodexSkill[] = [
   {
     slug: 'image-to-code',
     name: 'image-to-code',
-    category: 'Figma → Code',
+    category: 'Frontend & UI',
     badge: 'Leonxlnx',
     stars: 65936,
     tagline: 'Generates design images first, analyzes them, then builds matching frontend code.',

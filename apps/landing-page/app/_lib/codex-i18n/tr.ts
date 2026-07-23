@@ -8,17 +8,16 @@ export const tr: CodexCopyOverride = {
   collectionEyebrow: 'Küratörlü koleksiyon',
   collectionHeading: 'Codex’e gerçek arayüz çıkarttıran tasarım eklentileri',
   collectionLede:
-    'OpenAI Codex çalışan kod yazar. Kendi haline bırakılırsa güvenli fontlara, ortalama boşluklara ve ortalanmış Helvetica’ya kaçar. Ona zevk kazandıran eklentiler bunlar: skill’ler, Figma hatları ve tasarım sistemi kuralları. Birini kurun ya da hepsini Open Design içinde çalıştırın.',
+    'OpenAI Codex çalışan kod yazar. Kendi haline bırakılırsa güvenli fontlara, ortalama boşluklara ve ortalanmış Helvetica’ya kaçar. Ona zevk kazandıran eklentiler bunlar: estetik skill’ler ve tasarım sistemi kuralları. Birini kurun ya da hepsini Open Design içinde çalıştırın.',
   collectionStats: [
-    { value: '6', label: 'amiral gemisi eklenti' },
-    { value: '3', label: 'tasarım iş akışı' },
+    { value: '50', label: 'seçilmiş eklenti' },
+    { value: '13', label: 'kaynak repo' },
     { value: 'Açık', label: 'kaynak & doğrulanmış' },
   ],
   collectionIntro:
-    'Aşağıdaki her eklenti gerçek ve kaynağına bağlantı veriyor. Üç işi görüyorlar: kod yazılmadan önce estetik zevki belirlemek, Figma ile kod arasında köprü kurmak ve tasarım sisteminizi ajanın uyduğu kurallara dönüştürmek.',
+    'Aşağıdaki her eklenti gerçek ve kaynağına bağlantı veriyor. İki işi görüyorlar: kod yazılmadan önce estetik zevki belirlemek ve tasarım sisteminizi ajanın uyduğu kurallara dönüştürmek.',
   collectionCategoryBlurbs: [
     'Tek satır kod yazılmadan önce Codex’in varsayılan estetik kararlarını geçersiz kılın.',
-    'Gerçek bir Figma tasarımını okuyup neredeyse üretime hazır arayüz koduna çevirin.',
     'Token’larınızı ve bileşenlerinizi, Codex’in uydurmak yerine uyduğu kurallara dönüştürün.',
   ],
   collectionCloserHeading: 'Kurulumu atlayın: Codex ile Open Design içinde tasarlayın',
@@ -26,7 +25,6 @@ export const tr: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design, Codex’in etrafında çalışan açık kaynaklı, agent-native tasarım çalışma alanıdır. Sistemlerinizi, skill’lerinizi ve şablonlarınızı tutarlı tutar; ajan da sahibi olduğunuz işi çıkarır.',
   categoryFrontend: 'Frontend & Arayüz',
-  categoryFigmaToCode: 'Figma → Kod',
   categoryDesignSystems: 'Tasarım Sistemleri',
   ctaDownload: 'Open Design’ı indir',
   ctaStarList: 'Listeye yıldız ver',

@@ -8,17 +8,16 @@ export const de: CodexCopyOverride = {
   collectionEyebrow: 'Kuratierte Sammlung',
   collectionHeading: 'Die Design-Plugins, mit denen Codex echtes UI liefert',
   collectionLede:
-    'OpenAI Codex schreibt funktionierenden Code. Sich selbst überlassen landet er bei sicheren Fonts, mittelmäßigen Abständen und zentrierter Helvetica. Diese Plugins geben ihm Geschmack: Skills, Figma-Pipelines und Design-System-Regeln. Installiere eins davon, oder nutze alle in Open Design.',
+    'OpenAI Codex schreibt funktionierenden Code. Sich selbst überlassen landet er bei sicheren Fonts, mittelmäßigen Abständen und zentrierter Helvetica. Diese Plugins geben ihm Geschmack: ästhetische Skills und Design-System-Regeln. Installiere eins davon, oder nutze alle in Open Design.',
   collectionStats: [
-    { value: '6', label: 'Flaggschiff-Plugins' },
-    { value: '3', label: 'Design-Workflows' },
+    { value: '50', label: 'kuratierte Plugins' },
+    { value: '13', label: 'Quell-Repos' },
     { value: 'Open', label: 'Source & geprüft' },
   ],
   collectionIntro:
-    'Jedes Plugin hier unten existiert wirklich und verlinkt auf seine Quelle. Sie erledigen drei Aufgaben: ästhetischen Geschmack setzen, bevor Code entsteht, Figma und Code verbinden und dein Design-System in Regeln gießen, an die sich der Agent hält.',
+    'Jedes Plugin hier unten existiert wirklich und verlinkt auf seine Quelle. Sie erledigen zwei Aufgaben: ästhetischen Geschmack setzen, bevor Code entsteht, und dein Design-System in Regeln gießen, an die sich der Agent hält.',
   collectionCategoryBlurbs: [
     'Überschreibe die ästhetischen Standardentscheidungen von Codex, bevor die erste Zeile fällt.',
-    'Ein echtes Figma-Design lesen und in nahezu produktionsreifen Frontend-Code übersetzen.',
     'Mach aus deinen Tokens und Komponenten Regeln, denen Codex folgt, statt zu improvisieren.',
   ],
   collectionCloserHeading: 'Spar dir das Setup. Designe mit Codex in Open Design',
@@ -26,7 +25,6 @@ export const de: CodexCopyOverride = {
   collectionCloserBody:
     'Open Design ist der quelloffene, agent-native Design-Workspace rund um Codex. Er hält Systeme, Skills und Templates konsistent, damit der Agent Arbeit liefert, die dir gehört.',
   categoryFrontend: 'Frontend & UI',
-  categoryFigmaToCode: 'Figma → Code',
   categoryDesignSystems: 'Design-Systeme',
   ctaDownload: 'Open Design herunterladen',
   ctaStarList: 'Liste mit einem Star versehen',
