@@ -821,6 +821,7 @@ describe("desktop updater", () => {
     const launcherLaunchPath = join(root, "installed", "Open Design Beta.exe");
     const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
     let extractCount = 0;
+    const relaunchInputs: Array<{ delegated?: { generation: number; version: string } }> = [];
     try {
       await mkdir(join(root, "installed"), { recursive: true });
       await writeFile(launcherLaunchPath, "");
@@ -841,6 +842,7 @@ describe("desktop updater", () => {
           ...updaterEnv(fixture.metadataUrl, "win32"),
           [DESKTOP_UPDATE_ENV.CHANNEL]: DESKTOP_UPDATE_CHANNELS.BETA,
           [DESKTOP_UPDATE_ENV.CURRENT_VERSION]: "1.0.0-beta.1",
+          [DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]: "0",
         },
         launcherLaunchPath,
         launcherRoot: root,
@@ -851,6 +853,10 @@ describe("desktop updater", () => {
         extractLauncherPayloadArchive: async ({ destinationRoot }) => {
           extractCount += 1;
           await writeLauncherPayloadFixture(destinationRoot, "1.0.0-beta.2");
+        },
+        launchAppAfterQuit: async (input) => {
+          relaunchInputs.push(input);
+          return { helperLogPath: join(root, "updates", "helpers", "relaunch.log") };
         },
         logger,
         removeLauncherPayloadRoot: failLauncherPayloadRemovalForVersion("1.0.0-beta.0"),
@@ -871,6 +877,15 @@ describe("desktop updater", () => {
         active: { generation: 2, version: "1.0.0-beta.2" },
         lastSuccessful: { generation: 1, version: "1.0.0-beta.1" },
       });
+      // Activation pre-arms the launch attempt and hands the relaunch the
+      // delegated pointer: a payload that dies before its own bookkeeping
+      // still leaves rollback evidence, while the healthy payload recognizes
+      // the pre-armed attempt as its own launch in progress.
+      expect(JSON.parse(await readFile(launcherPaths.attemptsPath, "utf8"))).toMatchObject({
+        generation: 2,
+        version: "1.0.0-beta.2",
+      });
+      expect(relaunchInputs[0]?.delegated).toEqual({ generation: 2, version: "1.0.0-beta.2" });
       const cleanup = JSON.parse(await readFile(launcherPaths.cleanupPath, "utf8")) as {
         versions: Array<{ error?: { code?: string; message?: string }; state: string; version: string }>;
       };

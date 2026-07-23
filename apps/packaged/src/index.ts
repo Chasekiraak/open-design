@@ -7,6 +7,7 @@ import {
 } from "@open-design/sidecar-proto";
 import {
   parseLauncherAfterQuitArgs,
+  parseLauncherDelegatedArgs,
   parseLauncherHandoffResumeArgs,
 } from "@open-design/launcher-proto";
 import {
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
   const config = await readPackagedConfig();
   const afterQuit = parseLauncherAfterQuitArgs(process.argv.slice(1));
   const handoffResume = parseLauncherHandoffResumeArgs(process.argv.slice(1));
+  const delegated = parseLauncherDelegatedArgs(process.argv.slice(1));
   const argvStamp = readProcessStamp(process.argv.slice(1), OPEN_DESIGN_SIDECAR_CONTRACT);
   const namespace = argvStamp?.namespace ?? config.namespace;
   const namespaceConfig = namespace === config.namespace ? config : { ...config, namespace };
@@ -134,6 +136,7 @@ async function main(): Promise<void> {
   }
   const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);
   const launcherRuntime = await resolvePackagedLauncherRuntime(namespaceConfig, initialPaths, {
+    delegated,
     resume: handoffResume,
   });
   if (await launchPackagedPayloadDesktop(launcherRuntime, stamp)) {

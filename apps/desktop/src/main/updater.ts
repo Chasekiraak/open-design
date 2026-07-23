@@ -28,6 +28,7 @@ import {
 import {
   LAUNCHER_SCHEMA_VERSION,
   buildLauncherAfterQuitArgs,
+  buildLauncherDelegatedArgs,
   compareLauncherVersions,
   resolveLauncherPaths,
   resolveLauncherVersionPaths,
@@ -209,6 +210,12 @@ export type DeferredAppLaunchInput = {
   appPid: number;
   /** Stable namespace root inherited by the next payload process. */
   cwd: string;
+  /**
+   * Pointer the activation pre-armed attempt.json for; passed to the spawned
+   * payload as `--od-launcher-delegated-*` so it recognizes that attempt as
+   * its own launch in progress rather than a previous failure.
+   */
+  delegated?: { generation: number; version: string };
   launchPath: string;
   root: string;
   timeoutMs: number;
@@ -1552,6 +1559,19 @@ async function activatePreparedLauncherPayloadRelease(input: {
     updatedAt: input.now().toISOString(),
   };
   await writeJson(input.config.launcherRuntimePath, nextRuntime);
+  // Pre-arm the launch attempt for the activated pointer: the relaunched
+  // payload carries the matching delegated pointer and treats this attempt as
+  // its own launch in progress, while a payload that dies before reaching its
+  // own bookkeeping leaves the attempt behind as rollback evidence for the
+  // next cold start.
+  await writeJson(launcherPaths.attemptsPath, {
+    channel: input.config.channel,
+    generation: nextActive.generation,
+    namespace: input.config.namespace,
+    schemaVersion: LAUNCHER_SCHEMA_VERSION,
+    startedAt: input.now().toISOString(),
+    version: nextActive.version,
+  } satisfies LauncherAttemptDescriptor);
   if (retryFailedGeneration) {
     await rm(launcherPaths.handoffPath, { force: true });
   }
@@ -1969,7 +1989,10 @@ async function launchPayloadAppAfterQuit(
   try {
     const child = deps.spawnDetached(
       input.launchPath,
-      buildLauncherAfterQuitArgs({ targetPid: input.appPid, timeoutMs: input.timeoutMs }),
+      [
+        ...buildLauncherAfterQuitArgs({ targetPid: input.appPid, timeoutMs: input.timeoutMs }),
+        ...(input.delegated == null ? [] : buildLauncherDelegatedArgs(input.delegated)),
+      ],
       { cwd: input.cwd, detached: true, stdio: "ignore", windowsHide: true },
     );
     await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -3454,6 +3477,7 @@ export function createDesktopUpdater(
   async function requestPayloadRelaunch(
     updateRoot: string,
     launchPath: string,
+    delegated?: { generation: number; version: string },
   ): Promise<DeferredLaunchResult & { launchPath?: string }> {
     if (config.openDryRun) return {};
     if (config.platform !== "darwin" && config.platform !== "win32") return {};
@@ -3469,6 +3493,7 @@ export function createDesktopUpdater(
     const result = await launchAppAfterQuit({
       appPid: processPid,
       cwd: config.runtimeBase,
+      ...(delegated == null ? {} : { delegated }),
       launchPath,
       root: updateRoot,
       timeoutMs: config.platform === "win32" ? WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS : MAC_DEFERRED_INSTALLER_TIMEOUT_MS,
@@ -3530,7 +3555,11 @@ export function createDesktopUpdater(
           now,
           removeLauncherPayloadRoot,
         });
-        const relaunch = await requestPayloadRelaunch(opened.root.realRoot, activation.launchPath);
+        const relaunch = await requestPayloadRelaunch(
+          opened.root.realRoot,
+          activation.launchPath,
+          activation.runtime.active ?? undefined,
+        );
         if (relaunch.error != null && relaunch.error.length > 0) {
           await markInstallObservationOpenFailed(observation, now().toISOString());
           return setState(DESKTOP_UPDATE_STATES.ERROR, createError("payload-relaunch-failed", relaunch.error));
