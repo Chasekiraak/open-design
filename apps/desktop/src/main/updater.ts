@@ -3021,18 +3021,34 @@ export function createDesktopUpdater(
         restoredMetadata.installFrozen === true ||
         restoredMetadata.installResult != null
       );
-    if (clearedAppliedRelease) {
+    // A payload install records the promised relaunch version in
+    // installResult.activeVersion. If this process is running an OLDER
+    // version, that relaunch never stuck — the payload crashed and the
+    // launcher rolled back. The freeze and stale install result must not
+    // survive, or every future check on the rolled-back install would be a
+    // frozen no-op; the downloaded release itself stays verified and
+    // user-actionable.
+    const staleRelaunchFreeze =
+      !clearedAppliedRelease &&
+      restoredMetadata.installResult?.activeVersion != null &&
+      compareVersions(restoredMetadata.installResult.activeVersion, config.currentVersion) > 0;
+    if (clearedAppliedRelease || staleRelaunchFreeze) {
       await writeStoreMetadata(opened.root, {
         ...restoredMetadata,
-        active: undefined,
+        ...(clearedAppliedRelease ? { active: undefined } : {}),
         incoming: undefined,
         installFrozen: undefined,
         installResult: undefined,
         version: STORE_METADATA_VERSION,
       });
+      if (staleRelaunchFreeze) {
+        logUpdateEvent("restore-cleared-stale-relaunch-freeze", {
+          promisedVersion: restoredMetadata.installResult?.activeVersion,
+        });
+      }
     }
-    installFrozen = clearedAppliedRelease ? false : restoredMetadata.installFrozen === true;
-    installResult = clearedAppliedRelease ? undefined : restoredMetadata.installResult;
+    installFrozen = clearedAppliedRelease || staleRelaunchFreeze ? false : restoredMetadata.installFrozen === true;
+    installResult = clearedAppliedRelease || staleRelaunchFreeze ? undefined : restoredMetadata.installResult;
     lastCheckedAt = restoredMetadata.lastCheckedAt;
     metadata = activeRelease?.ref.metadata ?? null;
     candidate = null;

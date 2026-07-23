@@ -3594,6 +3594,88 @@ describe("desktop updater", () => {
     }
   });
 
+  it("clears a stale payload install freeze when the promised relaunch never became the running version", async () => {
+    // A payload install records installResult.activeVersion and freezes the
+    // updater awaiting the relaunch. If the payload crashed and the launcher
+    // rolled back, the app restarts on the OLD version: the freeze is then
+    // stale, and keeping it would silence every future check on the
+    // rolled-back install. The downloaded release itself stays actionable.
+    const root = makeRoot();
+    const fixture = await createUpdaterFixture({
+      channel: "beta",
+      includePayload: true,
+      payloadBody: "open design rollback freeze payload fixture",
+      platform: "win",
+      version: "1.0.0-beta.2",
+    });
+    const launcherPaths = resolveLauncherPaths({
+      channel: "beta",
+      namespace: "release-beta-win",
+      root,
+    });
+    const launcherLaunchPath = join(root, "installed", "Open Design Beta.exe");
+    try {
+      await mkdir(join(root, "installed"), { recursive: true });
+      await writeFile(launcherLaunchPath, "");
+      await mkdir(launcherPaths.stateRoot, { recursive: true });
+      await writeFile(launcherPaths.runtimePath, `${JSON.stringify({
+        active: { generation: 0, version: "1.0.0-beta.1" },
+        channel: "beta",
+        lastSuccessful: { generation: 0, version: "1.0.0-beta.1" },
+        namespace: "release-beta-win",
+        schemaVersion: LAUNCHER_SCHEMA_VERSION,
+      })}\n`);
+      const updaterInput = {
+        arch: "x64",
+        currentVersion: "1.0.0-beta.1",
+        downloadRoot: join(root, "updates"),
+        env: {
+          ...updaterEnv(fixture.metadataUrl, "win32"),
+          [DESKTOP_UPDATE_ENV.CHANNEL]: DESKTOP_UPDATE_CHANNELS.BETA,
+          [DESKTOP_UPDATE_ENV.CURRENT_VERSION]: "1.0.0-beta.1",
+          [DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]: "0",
+        },
+        launcherLaunchPath,
+        launcherRoot: root,
+        launcherRuntimePath: launcherPaths.runtimePath,
+        namespace: "release-beta-win",
+        source: SIDECAR_SOURCES.PACKAGED,
+      } as const;
+      const updaterDeps = {
+        extractLauncherPayloadArchive: async ({ destinationRoot }: { destinationRoot: string }) => {
+          await writeLauncherPayloadFixture(destinationRoot, "1.0.0-beta.2");
+        },
+        launchAppAfterQuit: async () => ({ helperLogPath: join(root, "updates", "helpers", "relaunch.log") }),
+      };
+      const updater = createDesktopUpdater(updaterInput, updaterDeps);
+      const checked = await updater.checkForUpdates();
+      expect(checked.state).toBe(DESKTOP_UPDATE_STATES.DOWNLOADED);
+      const installed = await updater.installUpdate();
+      expect(installed.installResult?.activeVersion).toBe("1.0.0-beta.2");
+
+      // Relaunch crashed; the launcher rolled back; the app restarts still on
+      // 1.0.0-beta.1. The stale freeze must not survive the restore.
+      const restarted = createDesktopUpdater(updaterInput, updaterDeps);
+      const restored = await restarted.status();
+
+      expect(restored.installResult).toBeUndefined();
+      expect(restored.state).toBe(DESKTOP_UPDATE_STATES.DOWNLOADED);
+      expect(restored.downloadPath).toEqual(expect.any(String));
+      const store = JSON.parse(await readFile(join(root, "updates", "metadata.json"), "utf8")) as Record<string, unknown>;
+      expect(store.installFrozen).not.toBe(true);
+      expect(store.installResult).toBeUndefined();
+
+      // Checks are alive again: the updater re-derives the offer instead of
+      // returning the frozen snapshot.
+      const rechecked = await restarted.checkForUpdates();
+      expect(rechecked.state).toBe(DESKTOP_UPDATE_STATES.DOWNLOADED);
+      expect(rechecked.installResult).toBeUndefined();
+    } finally {
+      await fixture.close();
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("clears interrupted incoming downloads on cold start instead of surfacing a store error", async () => {
     const root = makeRoot();
     const fixture = await createUpdaterFixture({ platform: "win" });
