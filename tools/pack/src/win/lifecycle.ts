@@ -182,7 +182,7 @@ export async function installPackedWinApp(config: ToolPackConfig): Promise<WinIn
   } else {
     await measureLifecycleStep(lifecycleTimings, "pre-install remove install dir", async () => removeTree(registeredPaths.installDir));
   }
-  await measureLifecycleStep(lifecycleTimings, "ensure install parent", async () => mkdir(dirname(paths.installDir), { recursive: true }));
+  await measureLifecycleStep(lifecycleTimings, "ensure install directory", async () => mkdir(paths.installDir, { recursive: true }));
   await measureLifecycleStep(lifecycleTimings, "nsis install", async () => runTimed(paths.installTimingPath, "install", async () => {
     await invokeNsis(paths, paths.setupPath, installArgs(config, paths), "install");
   }));

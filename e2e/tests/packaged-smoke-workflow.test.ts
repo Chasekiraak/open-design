@@ -2555,6 +2555,16 @@ process.stdin.on("end", () => {
     expect(winBuildScript).not.toContain("corepack");
     expect(winBuildScript).not.toContain("pnpm install");
   });
+
+  it("resolves the generated Windows update fixture outside the measured build child scope", async () => {
+    const winBuildScript = await readFile(releaseBetaWindowsBuildScriptPath, "utf8");
+
+    expect(winBuildScript).toMatch(
+      /Measure-Step "tools-pack win build update fixture" \{[\s\S]*?\r?\n    \}\r?\n    \$updateBuild = Get-Content -LiteralPath \$fixtureJsonPath -Raw \| ConvertFrom-Json\r?\n    \$localUpdateArtifactPath = \[string\]\$updateBuild\.installerPath/,
+    );
+    expect(winBuildScript).toContain('$env:OD_PACKAGED_E2E_WIN_UPDATE_FIXTURE = "tools-serve"');
+    expect(winBuildScript).toContain("$env:OD_PACKAGED_E2E_WIN_UPDATE_ARTIFACT_PATH = $localUpdateArtifactPath");
+  });
 });
 
 function expectChannelWorkflowNamespaces(

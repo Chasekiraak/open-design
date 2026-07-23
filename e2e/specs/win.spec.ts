@@ -47,6 +47,16 @@ const installIdentity = resolvePackagedWinInstallIdentity({ namespace, releaseVe
 
 const outputNamespaceRoot = join(toolsPackDir, 'out', 'win', 'namespaces', namespace);
 const runtimeNamespaceRoot = join(toolsPackDir, 'runtime', 'win', 'namespaces', namespace);
+const launcherNamespaceRoot = join(
+  toolsPackDir,
+  'runtime',
+  'win',
+  'launcher',
+  'channels',
+  updateScenario.channel,
+  'namespaces',
+  namespace,
+);
 const screenshotPath = join(toolsPackDir, 'screenshots', `${namespace}.png`);
 const preUpdateScreenshotPath = join(toolsPackDir, 'screenshots', `${namespace}-before-update.png`);
 const readinessExpression = `
@@ -541,10 +551,7 @@ winDescribe('packaged windows runtime smoke', () => {
       }
       await measureSmokeStep(timings, 'pre-clean uninstall', async () => {
         await runToolsPackJson<WinUninstallResult>('uninstall', ['--remove-product-user-data']).catch(() => null);
-        await resetPackagedRuntimeNamespaceRoot(runtimeNamespaceRoot);
-        await resetPackagedRuntimeNamespaceRoot(
-          join(toolsPackDir, 'runtime', 'win', 'launcher', 'channels', updateScenario.channel, 'namespaces', namespace),
-        );
+        await resetPackagedUpdaterNamespaceRoots();
       });
 
       const install = await measureSmokeStep(timings, 'install', async () => runToolsPackJson<WinInstallResult>('install'));
@@ -909,7 +916,7 @@ winDescribe('packaged windows runtime smoke', () => {
       const targetVersion = localUpdate.targetVersion;
 
       await runToolsPackJson<WinUninstallResult>('uninstall', ['--remove-product-user-data']).catch(() => null);
-      await resetPackagedRuntimeNamespaceRoot(runtimeNamespaceRoot);
+      await resetPackagedUpdaterNamespaceRoots();
       await runToolsPackJson<WinInstallResult>('install');
       cleanupInstalled = true;
       await seedPackagedOnboardingComplete();
@@ -998,12 +1005,13 @@ winDescribe('packaged windows runtime smoke', () => {
       const targetVersion = localUpdate.targetVersion;
 
       await runToolsPackJson<WinUninstallResult>('uninstall', ['--remove-product-user-data']).catch(() => null);
-      await resetPackagedRuntimeNamespaceRoot(runtimeNamespaceRoot);
+      await resetPackagedUpdaterNamespaceRoots();
       const install = await runToolsPackJson<WinInstallResult>('install');
       cleanupInstalled = true;
       await seedPackagedOnboardingComplete();
 
-      const sevenZipExe = join(install.installDir, 'resources', 'bin', '7z.exe');
+      const sevenZipExe = join(install.installDir, 'resources', 'open-design', 'bin', '7z.exe');
+      expect((await stat(sevenZipExe)).isFile()).toBe(true);
       const corruptPayloadPath = await buildCorruptedWinPayloadFixture(
         localUpdate.payloadPath,
         corruptWorkDir,
@@ -2301,7 +2309,7 @@ async function printUpdaterHelperLogs(): Promise<void> {
 }
 
 async function printLauncherRuntimeSnapshot(): Promise<void> {
-  const runtimePath = join(toolsPackDir, 'runtime', 'win', 'launcher', 'channels', updateScenario.channel, 'namespaces', namespace, 'runtime.json');
+  const runtimePath = join(launcherNamespaceRoot, 'runtime.json');
   const content = await readFile(runtimePath, 'utf8').catch(() => null);
   console.error(`[launcher-runtime] ${runtimePath}`);
   console.error(content?.trim() ?? '(missing)');
@@ -2541,6 +2549,13 @@ function normalizePathForComparison(filePath: string): string {
 
 async function resetPackagedRuntimeNamespaceRoot(namespaceRoot: string): Promise<void> {
   await rm(namespaceRoot, { force: true, recursive: true });
+}
+
+async function resetPackagedUpdaterNamespaceRoots(): Promise<void> {
+  await Promise.all([
+    resetPackagedRuntimeNamespaceRoot(runtimeNamespaceRoot),
+    resetPackagedRuntimeNamespaceRoot(launcherNamespaceRoot),
+  ]);
 }
 
 // Reset every per-namespace runtime state directory before a fresh-onboarding
