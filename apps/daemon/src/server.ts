@@ -2769,6 +2769,10 @@ export async function startServer({
     createWorkspaceContextProviderFromEnv(process.env, {
       getActiveWorkspaceId: () => activeWorkspace.get(),
       setLocalSelection: (workspaceId: string) => activeWorkspace.set(workspaceId),
+      // Only called after the membership directory CONFIRMS the pinned
+      // workspace is gone (removed member / deleted workspace) — never on a
+      // mere B outage. See resolvePinnedWorkspace in vela-workspace-context.ts.
+      clearLocalSelection: () => activeWorkspace.clear(),
     }),
   );
   function persistWorkspaceProjectSyncState(

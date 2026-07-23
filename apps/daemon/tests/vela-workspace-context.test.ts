@@ -261,3 +261,184 @@ describe('createVelaWorkspaceContextProvider explicit local scope', () => {
     expect(directoryCalls.length).toBe(1);
   });
 });
+
+// recvqbbQ4yljNC: a member removed from a team workspace stayed pinned to it
+// forever. `current()` must tell apart "the directory CONFIRMS the pin is
+// gone" (safe to clear + fall back) from "B could not be asked right now"
+// (must NOT touch the pin — a network blip must never evict an online user).
+describe('createVelaWorkspaceContextProvider — stale pin recovery', () => {
+  const DIRECTORY_WITHOUT_TEAM = {
+    items: [
+      {
+        workspaceId: 'ws-personal-1',
+        workspaceName: 'Personal',
+        workspaceType: 'personal',
+        workspaceMemberId: 'wm-p1',
+        role: 'owner',
+        memberStatus: 'active',
+        lifecycleState: 'active',
+      },
+    ],
+  };
+  const DIRECTORY_TEAM_MEMBER_REMOVED = {
+    items: [
+      {
+        workspaceId: 'ws-team-1',
+        workspaceName: 'Team',
+        workspaceType: 'team',
+        workspaceMemberId: 'wm-1',
+        role: 'member',
+        memberStatus: 'removed',
+        lifecycleState: 'active',
+      },
+      {
+        workspaceId: 'ws-personal-1',
+        workspaceName: 'Personal',
+        workspaceType: 'personal',
+        workspaceMemberId: 'wm-p1',
+        role: 'owner',
+        memberStatus: 'active',
+        lifecycleState: 'active',
+      },
+    ],
+  };
+
+  /** A stateful local-pin double: `clearLocalSelection`/`setLocalSelection`
+   *  mutate the SAME backing value `getActiveWorkspaceId` reads, exactly like
+   *  the real `ActiveWorkspaceSelectionStore` — so a clear takes effect for
+   *  the very same `current()` call's fallback pick, not just the next one. */
+  function statefulPin(initial: string | undefined) {
+    let value = initial;
+    const setCalls: string[] = [];
+    const clearCalls: number[] = [];
+    return {
+      getActiveWorkspaceId: () => value,
+      setLocalSelection: (id: string) => {
+        value = id;
+        setCalls.push(id);
+      },
+      clearLocalSelection: () => {
+        value = undefined;
+        clearCalls.push(1);
+      },
+      setCalls,
+      clearCalls,
+    };
+  }
+
+  function scriptedFetch(handlers: { current?: () => Response; directory?: () => Response }) {
+    const fetchImpl = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const u = String(url);
+      if (u.includes('/workspaces/current') && method === 'GET' && handlers.current) return handlers.current();
+      if (u.endsWith('/api/v1/workspaces') && method === 'GET' && handlers.directory) return handlers.directory();
+      throw new Error(`unexpected fetch ${method} ${u}`);
+    }) as unknown as typeof fetch;
+    return fetchImpl;
+  }
+
+  it('RED→GREEN: clears the pin and falls back to personal when the workspace vanished from the directory', async () => {
+    const pin = statefulPin('ws-team-1');
+    const fetchImpl = scriptedFetch({
+      // B also refuses this pinned scope now (not a 401 — the vela session
+      // itself is still fine, just this workspace is no longer usable).
+      current: () => jsonResponse(403, { error: 'membership_not_found' }),
+      directory: () => jsonResponse(200, DIRECTORY_WITHOUT_TEAM),
+    });
+    const provider = createVelaWorkspaceContextProvider({
+      fetch: fetchImpl,
+      readSession: () => SESSION,
+      getActiveWorkspaceId: pin.getActiveWorkspaceId,
+      setLocalSelection: pin.setLocalSelection,
+      clearLocalSelection: pin.clearLocalSelection,
+    });
+
+    const context = await provider.current({});
+
+    // Before the fix this returned null forever (the front end reads a null
+    // context as "signed out"), even though the user still has a usable
+    // personal workspace.
+    expect(context).not.toBeNull();
+    expect(context?.workspaceId).toBe('ws-personal-1');
+    expect(context?.workspaceType).toBe('personal');
+    expect(pin.clearCalls.length).toBe(1);
+    expect(pin.setCalls).toEqual(['ws-personal-1']);
+    expect(pin.getActiveWorkspaceId()).toBe('ws-personal-1');
+  });
+
+  it('RED→GREEN: clears the pin when the membership is listed but no longer active', async () => {
+    const pin = statefulPin('ws-team-1');
+    const fetchImpl = scriptedFetch({
+      current: () => jsonResponse(403, { error: 'membership_not_found' }),
+      directory: () => jsonResponse(200, DIRECTORY_TEAM_MEMBER_REMOVED),
+    });
+    const provider = createVelaWorkspaceContextProvider({
+      fetch: fetchImpl,
+      readSession: () => SESSION,
+      getActiveWorkspaceId: pin.getActiveWorkspaceId,
+      setLocalSelection: pin.setLocalSelection,
+      clearLocalSelection: pin.clearLocalSelection,
+    });
+
+    const context = await provider.current({});
+
+    expect(context?.workspaceId).toBe('ws-personal-1');
+    expect(pin.clearCalls.length).toBe(1);
+    expect(pin.setCalls).toEqual(['ws-personal-1']);
+  });
+
+  it('does NOT clear the pin when the directory request fails (network error) — preserve on B outage', async () => {
+    const pin = statefulPin('ws-team-1');
+    const fetchImpl = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const u = String(url);
+      if (u.includes('/workspaces/current') && method === 'GET') {
+        return jsonResponse(403, { error: 'membership_not_found' });
+      }
+      if (u.endsWith('/api/v1/workspaces') && method === 'GET') {
+        throw new Error('network down');
+      }
+      throw new Error(`unexpected fetch ${method} ${u}`);
+    }) as unknown as typeof fetch;
+    const provider = createVelaWorkspaceContextProvider({
+      fetch: fetchImpl,
+      readSession: () => SESSION,
+      getActiveWorkspaceId: pin.getActiveWorkspaceId,
+      setLocalSelection: pin.setLocalSelection,
+      clearLocalSelection: pin.clearLocalSelection,
+    });
+
+    const context = await provider.current({});
+
+    // A transient B outage degrades to null for this one read, exactly like
+    // the existing network-error contract — but the pin itself must survive
+    // untouched so the NEXT successful poll can still recover the real
+    // workspace instead of having already been evicted to a fallback.
+    expect(context).toBeNull();
+    expect(pin.clearCalls.length).toBe(0);
+    expect(pin.setCalls.length).toBe(0);
+    expect(pin.getActiveWorkspaceId()).toBe('ws-team-1');
+  });
+
+  it('does NOT clear the pin when the directory request itself returns a non-2xx', async () => {
+    const pin = statefulPin('ws-team-1');
+    const fetchImpl = scriptedFetch({
+      current: () => jsonResponse(403, { error: 'membership_not_found' }),
+      directory: () => jsonResponse(500, { error: 'internal' }),
+    });
+    const provider = createVelaWorkspaceContextProvider({
+      fetch: fetchImpl,
+      readSession: () => SESSION,
+      getActiveWorkspaceId: pin.getActiveWorkspaceId,
+      setLocalSelection: pin.setLocalSelection,
+      clearLocalSelection: pin.clearLocalSelection,
+    });
+
+    const context = await provider.current({});
+
+    expect(context).toBeNull();
+    expect(pin.clearCalls.length).toBe(0);
+    expect(pin.setCalls.length).toBe(0);
+    expect(pin.getActiveWorkspaceId()).toBe('ws-team-1');
+  });
+});

@@ -211,6 +211,33 @@
 .workspace-toast-anchor .od-toast.leaving {
   animation: none;
 }
+/* Design systems tab (home/entry surface, not the project viewer) reuses the
+   same fix: a bare `.od-toast` centers on the full 100vw, so once the nav
+   rail's width shifts the entry content column right, the toast drifts onto
+   the design-system preview's first card instead of floating over the
+   content area (recvqaZAbIdfz1). `.entry-main--scroll` (entry-layout.css) is
+   already `position: relative` and is the tab's scroll pane, so anchoring
+   there — same shape as `.workspace-toast-anchor` above — centers the toast
+   on that column and keeps it pinned near its bottom regardless of the
+   pane's own scroll position. */
+.design-systems-toast-anchor {
+  position: absolute;
+  inset: auto 24px 24px;
+  display: flex;
+  justify-content: center;
+  z-index: 60;
+  pointer-events: none;
+}
+.design-systems-toast-anchor .od-toast {
+  position: relative;
+  inset: auto;
+  transform: none;
+  animation: none;
+  pointer-events: auto;
+}
+.design-systems-toast-anchor .od-toast.leaving {
+  animation: none;
+}
 .od-toast.tone-success {
   border: 1px solid color-mix(in srgb, var(--success, #2da44e) 42%, var(--border));
   background: color-mix(in srgb, var(--success, #2da44e) 14%, var(--bg));

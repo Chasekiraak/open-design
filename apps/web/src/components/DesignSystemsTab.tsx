@@ -730,13 +730,21 @@ export function DesignSystemsTab({
   return (
     <>
       {actionToast ? (
-        <Toast
-          message={actionToast.message}
-          tone={actionToast.tone}
-          ttlMs={actionToast.tone === 'loading' ? 60000 : 2600}
-          role={actionToast.tone === 'error' ? 'alert' : 'status'}
-          onDismiss={() => setActionToast(null)}
-        />
+        // Anchored to the entry shell's scroll pane (see
+        // .design-systems-toast-anchor in styles/viewer/routines.css) instead
+        // of the bare `.od-toast` viewport-fixed centering — otherwise the
+        // toast centers on the full 100vw and drifts onto the design-system
+        // preview's first card whenever the nav rail's width shifts the
+        // content column right (recvqaZAbIdfz1).
+        <div className="design-systems-toast-anchor">
+          <Toast
+            message={actionToast.message}
+            tone={actionToast.tone}
+            ttlMs={actionToast.tone === 'loading' ? 60000 : 2600}
+            role={actionToast.tone === 'error' ? 'alert' : 'status'}
+            onDismiss={() => setActionToast(null)}
+          />
+        </div>
       ) : null}
       {/* #5517 page header: title left, create action right — the create
           button leaves the sidebar so the list column starts at the tabs. */}

@@ -69,6 +69,13 @@ interface VelaWorkspaceContextOptions {
    * explicit-workspace handoff only a deliberate user switch PUTs current.
    */
   setLocalSelection?: (workspaceId: string) => void | Promise<void>;
+  /**
+   * Purge a CONFIRMED-stale local pin: the membership directory was
+   * successfully read and no longer lists this workspace as an active
+   * membership (removed member, or the workspace itself is gone). Never
+   * called on a merely unreachable B — see `resolvePinnedWorkspace` below.
+   */
+  clearLocalSelection?: () => void | Promise<void>;
   timeoutMs?: number;
 }
 
@@ -234,6 +241,21 @@ export function createVelaWorkspaceContextProvider(
     }
   }
 
+  /** Pick the best default membership out of an already-fetched directory list. */
+  function selectDefaultCandidate(
+    items: WorkspaceDirectoryItem[],
+    preferredId: string | undefined,
+  ): WorkspaceDirectoryItem | undefined {
+    const candidates = items.filter(
+      (item) => item.memberStatus === 'active' && item.lifecycleState === 'active',
+    );
+    return (
+      (preferredId ? candidates.find((item) => item.workspaceId === preferredId) : undefined) ??
+      candidates.find((item) => item.workspaceType === 'personal') ??
+      candidates[0]
+    );
+  }
+
   /**
    * Fresh-account default pick. B's workspace selection is server-side state
    * and a new account has NO current workspace, so every workspace-scoped
@@ -243,24 +265,21 @@ export function createVelaWorkspaceContextProvider(
    * it locally only. It never PUTs B's Active Workspace (handoff rule: only a
    * deliberate user switch may), with a failure cooldown so the poller can't
    * hammer the directory.
+   *
+   * `prefetched` lets a caller that already fetched the directory this same
+   * tick (`resolvePinnedWorkspace`, right after confirming the old pin is
+   * gone) reuse that result instead of round-tripping B a second time.
    */
   async function pickDefaultWorkspace(
     session: VelaSession,
+    prefetched?: WorkspaceDirectoryFetchResult,
   ): Promise<WorkspaceDirectoryItem | null> {
     if (Date.now() - lastBootstrapFailureAt < BOOTSTRAP_FAILURE_COOLDOWN_MS) return null;
-    const items = await listVelaWorkspaceDirectory({
-      fetch: fetchImpl,
-      readSession: () => session,
-      timeoutMs,
-    });
-    const candidates = items.filter(
-      (item) => item.memberStatus === 'active' && item.lifecycleState === 'active',
-    );
+    const result =
+      prefetched ??
+      (await fetchVelaWorkspaceDirectory({ fetch: fetchImpl, readSession: () => session, timeoutMs }));
     const preferredId = options.getActiveWorkspaceId?.()?.trim();
-    const pick =
-      (preferredId ? candidates.find((item) => item.workspaceId === preferredId) : undefined) ??
-      candidates.find((item) => item.workspaceType === 'personal') ??
-      candidates[0];
+    const pick = selectDefaultCandidate(result.items, preferredId);
     if (!pick) {
       lastBootstrapFailureAt = Date.now();
       return null;
@@ -268,23 +287,56 @@ export function createVelaWorkspaceContextProvider(
     return pick;
   }
 
-  /** Resolve the pinned workspace from the membership directory (fail-closed). */
-  async function contextFromDirectory(
+  /**
+   * Resolve the LOCALLY pinned workspace against the membership directory.
+   * This is the ONLY place that may clear a bad pin, and it must tell apart
+   * two very different situations behind `contextFromDirectory` returning
+   * null before this fix — B genuinely confirming the membership is gone,
+   * vs. B simply being unreachable for this one request:
+   *
+   *  - The directory request itself FAILS (network error, timeout, non-2xx)
+   *    → B did not answer, so nothing was confirmed. The pin is left exactly
+   *    as-is and this resolves to null, matching the existing degrade-to-
+   *    single-player behavior for one poll tick. A momentary B outage must
+   *    never evict an online user from their current workspace.
+   *  - The directory request SUCCEEDS and the pinned workspace IS listed
+   *    with an active membership → synthesize its context; the pin is
+   *    correct and stays untouched.
+   *  - The directory request SUCCEEDS and the pinned workspace is ABSENT (or
+   *    listed with a non-active membership / deleted lifecycle) → this is a
+   *    CONFIRMED removal. The stale pin is cleared and this same call falls
+   *    through to the same local-default bootstrap a fresh account gets
+   *    (personal workspace first), so the very next context read already
+   *    recovers to a workspace the user can actually use — instead of
+   *    `current()` returning null forever, which the web client reads as
+   *    "signed out" (recvqbbQ4yljNC: member removed from a team could not
+   *    log back into ANY workspace, including personal).
+   */
+  async function resolvePinnedWorkspace(
     session: VelaSession,
     workspaceId: string,
   ): Promise<WorkspaceCollabContext | null> {
-    const items = await listVelaWorkspaceDirectory({
+    const result = await fetchVelaWorkspaceDirectory({
       fetch: fetchImpl,
       readSession: () => session,
       timeoutMs,
     });
-    const item = items.find(
+    if (!result.ok) return null; // B unreachable — preserve the pin, confirm nothing.
+    const item = result.items.find(
       (entry) =>
         entry.workspaceId === workspaceId &&
         entry.memberStatus === 'active' &&
         entry.lifecycleState !== 'deleted',
     );
-    return item ? synthesizeContext(item) : null;
+    if (item) return synthesizeContext(item);
+    // Confirmed stale: the directory answered and this workspace no longer
+    // has the caller as an active member. Purge the pin before anything else
+    // reads it, then recover exactly like the fresh-account bootstrap.
+    await options.clearLocalSelection?.();
+    const fallback = await pickDefaultWorkspace(session, result);
+    if (!fallback) return null;
+    await options.setLocalSelection?.(fallback.workspaceId);
+    return synthesizeContext(fallback);
   }
 
   return {
@@ -312,7 +364,7 @@ export function createVelaWorkspaceContextProvider(
           if (localSelection) {
             // Server disagrees with the pinned scope → synthesize from the
             // membership directory instead of silently following the server.
-            return withDisplayName(await contextFromDirectory(session, localSelection), session);
+            return withDisplayName(await resolvePinnedWorkspace(session, localSelection), session);
           }
           return null;
         }
@@ -322,8 +374,8 @@ export function createVelaWorkspaceContextProvider(
           response.status === 403 && (await responseIsMissingPrincipal(response));
         if (localSelection) {
           // The pinned workspace could not be read from current — resolve it
-          // from the directory (fail-closed when the membership is gone).
-          return withDisplayName(await contextFromDirectory(session, localSelection), session);
+          // from the directory (clears the pin only on a CONFIRMED removal).
+          return withDisplayName(await resolvePinnedWorkspace(session, localSelection), session);
         }
         if (missingPrincipal) {
           // Fresh account: B has no current workspace and the client has no
@@ -405,14 +457,26 @@ function velaUserDisplayName(user: VelaUser | null): string {
   return str(user?.id);
 }
 
-export async function listVelaWorkspaceDirectory(
+/**
+ * Result of a directory fetch attempt. `ok` is the load-bearing bit for
+ * anything that decides whether to trust an absence as a CONFIRMED removal
+ * (see `resolvePinnedWorkspace`): true only when B actually answered with a
+ * 2xx — false for a network error, an abort/timeout, or any non-2xx status,
+ * regardless of what (if anything) `items` ends up holding.
+ */
+interface WorkspaceDirectoryFetchResult {
+  ok: boolean;
+  items: WorkspaceDirectoryItem[];
+}
+
+async function fetchVelaWorkspaceDirectory(
   options: VelaWorkspaceContextOptions = {},
-): Promise<WorkspaceDirectoryItem[]> {
+): Promise<WorkspaceDirectoryFetchResult> {
   const fetchImpl = options.fetch ?? fetch;
   const readSession = options.readSession ?? readVelaControlApiContext;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const session = readSession();
-  if (!session || !session.controlKey || !session.apiUrl) return [];
+  if (!session || !session.controlKey || !session.apiUrl) return { ok: false, items: [] };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -421,13 +485,19 @@ export async function listVelaWorkspaceDirectory(
       headers: { authorization: `Bearer ${session.controlKey}` },
       signal: controller.signal,
     });
-    if (!response.ok) return [];
-    return mapVelaWorkspaceDirectory(await response.json());
+    if (!response.ok) return { ok: false, items: [] };
+    return { ok: true, items: mapVelaWorkspaceDirectory(await response.json()) };
   } catch {
-    return [];
+    return { ok: false, items: [] };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function listVelaWorkspaceDirectory(
+  options: VelaWorkspaceContextOptions = {},
+): Promise<WorkspaceDirectoryItem[]> {
+  return (await fetchVelaWorkspaceDirectory(options)).items;
 }
 
 /**
@@ -438,7 +508,10 @@ export async function listVelaWorkspaceDirectory(
  */
 export function createWorkspaceContextProviderFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-  options: Pick<VelaWorkspaceContextOptions, 'getActiveWorkspaceId' | 'setLocalSelection'> = {},
+  options: Pick<
+    VelaWorkspaceContextOptions,
+    'getActiveWorkspaceId' | 'setLocalSelection' | 'clearLocalSelection'
+  > = {},
 ): WorkspaceContextProvider {
   if (env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() === 'vela') {
     return createVelaWorkspaceContextProvider(options);
