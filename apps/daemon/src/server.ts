@@ -520,6 +520,7 @@ import { validateArtifactManifestInput } from './artifacts/manifest.js';
 import { ArtifactPublicationBlockedError } from './artifacts/publication-guard.js';
 import {
   appendMessageStatusEvent,
+  confirmPreviewCommentPinSeq,
   deleteConversation,
   deletePreviewComment,
   deleteProject as dbDeleteProject,
@@ -570,6 +571,7 @@ import {
   normalizeConversationSessionMode,
   deleteRoutine as dbDeleteRoutine,
   openDatabase,
+  reorderPreviewComment,
   setTabs,
   updateConversation,
   updatePreviewCommentAnchor,
@@ -653,6 +655,7 @@ import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js
 import { createCollabRuntime } from './collab/runtime.js';
 import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
 import { headerValue, workspaceResourceContext } from './collab/workspace-resource-mutation.js';
+import { withLastKnownWorkspaceContext } from './collab/workspace-context.js';
 import {
   createWorkspaceTypeRegistry,
   impossibleTeamShareRows,
@@ -2755,10 +2758,19 @@ export async function startServer({
         return { ...velaCliWorkspaceTeamProjectCatalog, list: () => cachedList() };
       })()
     : velaCliWorkspaceTeamProjectCatalog;
-  const workspaceContext = createWorkspaceContextProviderFromEnv(process.env, {
-    getActiveWorkspaceId: () => activeWorkspace.get(),
-    setLocalSelection: (workspaceId: string) => activeWorkspace.set(workspaceId),
-  });
+  // Wrapped so every `.current()` result (this same provider serving the
+  // client's periodic GET /api/workspace/context poll, plus every other
+  // in-daemon caller below) is also remembered for a synchronous, no-network
+  // `.lastKnown()` read. Project's workspace-mutation gate uses that to
+  // cross-check a caller's asserted membership against the daemon's own
+  // last-verified state — see `enforceWorkspaceProjectMutation` in
+  // routes/project/index.ts.
+  const workspaceContext = withLastKnownWorkspaceContext(
+    createWorkspaceContextProviderFromEnv(process.env, {
+      getActiveWorkspaceId: () => activeWorkspace.get(),
+      setLocalSelection: (workspaceId: string) => activeWorkspace.set(workspaceId),
+    }),
+  );
   function persistWorkspaceProjectSyncState(
     projectId: string,
     workspaceId: string | null | undefined,
@@ -4089,6 +4101,7 @@ export async function startServer({
     updatePreviewCommentStatus,
     updatePreviewCommentAnchor,
     deletePreviewComment,
+    reorderPreviewComment,
   };
   const templateDeps = { getTemplate, listTemplates, deleteTemplate, insertTemplate, findTemplateByNameAndProject, updateTemplate };
   const projectStatusDeps = {
@@ -4317,6 +4330,9 @@ export async function startServer({
     conversations: conversationDeps,
     templates: templateDeps,
     status: projectStatusDeps,
+    // Same provider `collab` was built with (collab.workspaceContext ===
+    // workspaceContext) — see the mutation-gate cross-check note above.
+    workspaceContext,
     events: projectEventDeps,
     ids: idDeps,
     telemetry: { reportFinalizedMessage },
@@ -4356,11 +4372,34 @@ export async function startServer({
               void collabCloud.pullProject(projectId).catch(() => {});
             }
           },
+          // Both hooks also reconcile pin_seq (recvq5BVsolIxi): a genuinely
+          // new comment on a team-shared project is inserted with a
+          // provisional LOCAL pin_seq (pin_seq_confirmed=0 — see
+          // upsertPreviewComment); once this push resolves with the
+          // collab-cloud's globally-serialized seq, confirmPreviewCommentPinSeq
+          // overwrites it with that authoritative value, which is what keeps
+          // two devices creating a comment in the same ~5s poll window from
+          // ever landing on the same number. The guard inside
+          // confirmPreviewCommentPinSeq makes calling it from BOTH hooks safe:
+          // it only ever applies once per comment (whichever push resolves
+          // first wins), so an edit's push resolving here is a no-op once the
+          // create's already has, and a resilience net when the create's push
+          // itself failed.
           onCommentCreated: (comment) => {
-            void collabCloud.pushComment(comment).catch(() => {});
+            void collabCloud
+              .pushComment(comment)
+              .then((result) => {
+                if (result) confirmPreviewCommentPinSeq(db, comment.projectId, comment.id, result.seq);
+              })
+              .catch(() => {});
           },
           onCommentUpdated: (comment) => {
-            void collabCloud.pushComment(comment).catch(() => {});
+            void collabCloud
+              .pushComment(comment)
+              .then((result) => {
+                if (result) confirmPreviewCommentPinSeq(db, comment.projectId, comment.id, result.seq);
+              })
+              .catch(() => {});
           },
           onCommentDeleted: (comment) => {
             void collabCloud.pushCommentDeletion(comment).catch(() => {});
@@ -4561,6 +4600,7 @@ export async function startServer({
     documents: { buildDocumentPreview },
     artifacts: artifactDeps,
     projectPreviewScopes,
+    workspaceContext,
   });
 
   registerMediaRoutes(app, {
@@ -4913,6 +4953,7 @@ export async function startServer({
     paths: { PROJECTS_DIR },
     projectStore: projectStoreDeps,
     projectFiles: projectFileDeps,
+    workspaceContext,
   });
 
   const composeDaemonSystemPrompt = async ({

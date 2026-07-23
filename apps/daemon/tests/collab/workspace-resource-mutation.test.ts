@@ -228,6 +228,138 @@ describe('enforceWorkspaceResourceMutation', () => {
     }]);
   });
 
+  // recvqbbQ4yljNC / recvqbeDjAsejl: a member removed from the workspace keeps
+  // sending stale "active" workspace headers (its own client hasn't re-polled
+  // /api/workspace/context yet) until the daemon cross-checks them against its
+  // own last-verified membership state.
+  describe('membership cross-check against the daemon\'s own last-known context', () => {
+    it('BUG: allows a removed member\'s write when only client headers are consulted', () => {
+      // This test pins the CURRENT (vulnerable) behavior: no
+      // `getLastKnownMembership` is wired up, so the gate has only the
+      // client's own claim to go on — exactly the pre-fix code path.
+      const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+        'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-a' },
+      });
+      const { calls, sendApiError } = spySendApiError();
+      const allowed = enforceWorkspaceResourceMutation(
+        'plugin',
+        fakeReq(workspaceHeaders({ workspaceId: 'ws-1', memberId: 'member-a', role: 'member' })),
+        fakeRes(),
+        sendApiError,
+        getWorkspaceResource,
+        getWorkspaceResourceByResourceId,
+        {},
+        'plugin-a',
+        'delete',
+      );
+      expect(allowed).toBe(true);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('rejects the write once the daemon\'s own last-known context says the caller was removed', () => {
+      const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+        'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-a' },
+      });
+      const { calls, sendApiError } = spySendApiError();
+      // Client headers still say "active" (stale) — the daemon's own cache
+      // says this same workspace's caller has been removed.
+      const getLastKnownMembership = () => ({ workspaceId: 'ws-1', memberStatus: 'removed' as const });
+      const allowed = enforceWorkspaceResourceMutation(
+        'plugin',
+        fakeReq(workspaceHeaders({ workspaceId: 'ws-1', memberId: 'member-a', role: 'member' })),
+        fakeRes(),
+        sendApiError,
+        getWorkspaceResource,
+        getWorkspaceResourceByResourceId,
+        {},
+        'plugin-a',
+        'delete',
+        getLastKnownMembership,
+      );
+      expect(allowed).toBe(false);
+      expect(calls).toEqual([{
+        status: 403,
+        code: 'WORKSPACE_PLUGIN_PERMISSION_DENIED',
+        message: 'workspace plugin mutation is not allowed',
+      }]);
+    });
+
+    it('does not override an already-removed header (redundant agreement)', () => {
+      const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+        'plugin-a': { workspaceId: 'ws-1', visibility: 'team', resourceState: 'active', createdByWorkspaceMemberId: 'member-owner' },
+      });
+      const { calls, sendApiError } = spySendApiError();
+      const getLastKnownMembership = () => ({ workspaceId: 'ws-1', memberStatus: 'removed' as const });
+      const allowed = enforceWorkspaceResourceMutation(
+        'plugin',
+        fakeReq({
+          ...workspaceHeaders({ workspaceId: 'ws-1', memberId: 'member-owner', role: 'owner' }),
+          'x-od-workspace-member-status': 'removed',
+        }),
+        fakeRes(),
+        sendApiError,
+        getWorkspaceResource,
+        getWorkspaceResourceByResourceId,
+        {},
+        'plugin-a',
+        'delete',
+        getLastKnownMembership,
+      );
+      expect(allowed).toBe(false);
+      expect(calls).toEqual([{
+        status: 403,
+        code: 'WORKSPACE_PLUGIN_PERMISSION_DENIED',
+        message: 'workspace plugin mutation is not allowed',
+      }]);
+    });
+
+    it('trusts the header when the cache has no opinion for this workspace (never queried it)', () => {
+      const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+        'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-a' },
+      });
+      const { calls, sendApiError } = spySendApiError();
+      const getLastKnownMembership = () => null;
+      const allowed = enforceWorkspaceResourceMutation(
+        'plugin',
+        fakeReq(workspaceHeaders({ workspaceId: 'ws-1', memberId: 'member-a', role: 'member' })),
+        fakeRes(),
+        sendApiError,
+        getWorkspaceResource,
+        getWorkspaceResourceByResourceId,
+        {},
+        'plugin-a',
+        'delete',
+        getLastKnownMembership,
+      );
+      expect(allowed).toBe(true);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('trusts the header when the cache last resolved a DIFFERENT workspace', () => {
+      const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+        'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-a' },
+      });
+      const { calls, sendApiError } = spySendApiError();
+      // Cache holds a real "removed" fact, but for a DIFFERENT workspace than
+      // the one this request is scoped to — must not leak across workspaces.
+      const getLastKnownMembership = () => ({ workspaceId: 'ws-other', memberStatus: 'removed' as const });
+      const allowed = enforceWorkspaceResourceMutation(
+        'plugin',
+        fakeReq(workspaceHeaders({ workspaceId: 'ws-1', memberId: 'member-a', role: 'member' })),
+        fakeRes(),
+        sendApiError,
+        getWorkspaceResource,
+        getWorkspaceResourceByResourceId,
+        {},
+        'plugin-a',
+        'delete',
+        getLastKnownMembership,
+      );
+      expect(allowed).toBe(true);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
   it('reports WORKSPACE_LOCKED instead of a permission denial when the workspace itself is locked', () => {
     const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
       'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-a' },

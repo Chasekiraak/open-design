@@ -2057,6 +2057,34 @@ export async function patchPreviewCommentStatus(
   }
 }
 
+/**
+ * Persist a drag-reorder of the sidebar's display order (recvq5BVsolIxi
+ * Phase 2). Writes only the dragged comment's `sortKey` — never a whole-list
+ * renumber, and never touches `pinSeq` (the canvas pin number).
+ */
+export async function patchPreviewCommentSortKey(
+  projectId: string,
+  conversationId: string,
+  commentId: string,
+  sortKey: number,
+): Promise<PreviewComment | null> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}/reorder`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sortKey }),
+      },
+    );
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as { comment: PreviewComment };
+    return json.comment ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deletePreviewComment(
   projectId: string,
   conversationId: string,

@@ -80,14 +80,27 @@ import {
   workspaceResourceAccess,
   workspaceResourceContext as workspaceProjectContext,
   workspaceResourceContextFromRequest as workspaceProjectContextFromRequest,
+  type GetLastKnownWorkspaceMembership,
   type WorkspaceResourceAccessInput,
   type WorkspaceResourceContext,
   type WorkspaceResourceMutationCapability,
 } from '../../collab/workspace-resource-mutation.js';
+import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
   teamProjectCatalog?: VelaTeamProjectCatalogClient;
+  /**
+   * The daemon's own workspace-context provider (see
+   * `collab/workspace-context.ts`). Only `lastKnown()` is used here, and only
+   * for a synchronous, no-network-I/O cross-check: `enforceWorkspaceProjectMutation`
+   * refuses to trust a client's `x-od-workspace-member-status: active` header
+   * once this same-workspace cache says the caller has actually been removed
+   * (recvqbbQ4yljNC / recvqbeDjAsejl). Absent in tests that don't exercise
+   * this seam — the gate then falls back to trusting the header alone, exactly
+   * like before this cross-check existed.
+   */
+  workspaceContext?: Pick<WorkspaceContextProvider, 'lastKnown'>;
   /**
    * Collab-cloud comment seams, threaded to the nested preview-comment routes.
    * `resolveAuthorMemberId` stamps the server-authoritative author AND identifies
@@ -175,32 +188,68 @@ function projectAccess(
   };
 }
 
-// Thin project-specific field mapping over the shared
-// `enforceWorkspaceResourceMutation` gate (collab/workspace-resource-mutation.ts).
-// `resourceType: 'project'` reproduces the exact
-// `WORKSPACE_PROJECT_PERMISSION_DENIED` code this route already shipped and
-// has tests pinned against — see tests/routes/workspace-projects.test.ts.
-function enforceWorkspaceProjectMutation(
-  req: any,
-  res: Response,
-  sendApiError: (res: Response, status: number, code: string, message: string) => unknown,
-  getWorkspaceProject: (db: unknown, workspaceId: string, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
-  getWorkspaceProjectByProjectId: (db: unknown, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
-  db: unknown,
-  projectId: string,
-  capability: WorkspaceProjectMutationCapability,
-): boolean {
-  return enforceWorkspaceResourceMutation(
-    'project',
-    req,
-    res,
-    sendApiError,
-    getWorkspaceProject,
-    getWorkspaceProjectByProjectId,
-    db,
-    projectId,
-    capability,
-  );
+/**
+ * Build the project-flavored `enforceWorkspaceProjectMutation` gate, bound to
+ * ONE resource type ('project') and — when a workspace-context provider is
+ * available — cross-checked against the daemon's own last-known-good
+ * workspace context.
+ *
+ * Why the cross-check: `workspaceProjectContext()` builds its
+ * `memberStatus`/`role`/`canWriteSyncedFiles` entirely from the CALLER'S OWN
+ * request headers (`x-od-workspace-*`), which the web/desktop client attaches
+ * from its OWN last poll of `/api/workspace/context`. A member removed from
+ * the workspace keeps sending stale `active` headers until that poll catches
+ * up (or the client restarts) — so without this cross-check, a removed
+ * member's write requests sail through on their own say-so
+ * (recvqbbQ4yljNC / recvqbeDjAsejl).
+ *
+ * `workspaceContext.lastKnown()` (`collab/workspace-context.ts`) is a
+ * synchronous, no-network-I/O read of whatever the daemon's ordinary
+ * `.current()` traffic already resolved — that same client poll, plus every
+ * other in-daemon `.current()` caller. This function purposefully does NOT
+ * await `.current()` itself: a fresh vela round-trip on every project write
+ * would be its own cost and its own new failure mode. The time lag between a
+ * real removal and the next cached refresh is accepted (see
+ * `collab/workspace-resource-mutation.ts`'s `withLastKnownMembership` for the
+ * exact narrow-only-on-positive-evidence semantics this relies on).
+ *
+ * Each of this file's three route-registration functions (project, file,
+ * upload) calls this once with its own `ctx.workspaceContext` — never wired
+ * up in most unit tests, in which case the gate falls back to trusting the
+ * header alone, exactly like before this cross-check existed.
+ */
+function createEnforceWorkspaceProjectMutation(
+  workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
+) {
+  const getLastKnownWorkspaceMembership: GetLastKnownWorkspaceMembership | undefined = workspaceContext
+    ? () => {
+        const known = workspaceContext.lastKnown?.() ?? null;
+        return known ? { workspaceId: known.workspaceId, memberStatus: known.memberStatus } : null;
+      }
+    : undefined;
+  return function enforceWorkspaceProjectMutation(
+    req: any,
+    res: Response,
+    sendApiError: (res: Response, status: number, code: string, message: string) => unknown,
+    getWorkspaceProject: (db: unknown, workspaceId: string, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
+    getWorkspaceProjectByProjectId: (db: unknown, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
+    db: unknown,
+    projectId: string,
+    capability: WorkspaceProjectMutationCapability,
+  ): boolean {
+    return enforceWorkspaceResourceMutation(
+      'project',
+      req,
+      res,
+      sendApiError,
+      getWorkspaceProject,
+      getWorkspaceProjectByProjectId,
+      db,
+      projectId,
+      capability,
+      getLastKnownWorkspaceMembership,
+    );
+  };
 }
 
 function projectDetailResolvedDir(
@@ -1387,6 +1436,11 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   const { randomId } = ctx.ids;
   const { validateProjectDesignSystemId, validateProjectSkillId } = ctx.validation;
   const { collabSync, teamProjectCatalog, workspaceTypes } = ctx;
+  // recvqbbQ4yljNC / recvqbeDjAsejl: cross-check the client's workspace
+  // headers against the daemon's own last-known-good context before trusting
+  // them for a mutation — see `createEnforceWorkspaceProjectMutation`'s
+  // docblock above for the full rationale.
+  const enforceWorkspaceProjectMutation = createEnforceWorkspaceProjectMutation(ctx.workspaceContext);
   function sendMissingWorkspaceContext(res: Response) {
     return sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
   }
@@ -3481,7 +3535,11 @@ export function registerProjectArtifactRoutes(app: Express, ctx: RegisterProject
 
 }
 
-export interface RegisterProjectFileRoutesDeps extends RouteDeps<'db' | 'http' | 'paths' | 'uploads' | 'node' | 'projectStore' | 'projectFiles' | 'documents' | 'artifacts' | 'projectPreviewScopes'> {}
+export interface RegisterProjectFileRoutesDeps extends RouteDeps<'db' | 'http' | 'paths' | 'uploads' | 'node' | 'projectStore' | 'projectFiles' | 'documents' | 'artifacts' | 'projectPreviewScopes'> {
+  /** See `RegisterProjectRoutesDeps.workspaceContext` above — same seam,
+   *  used by this file's own `enforceWorkspaceProjectMutation` calls. */
+  workspaceContext?: Pick<WorkspaceContextProvider, 'lastKnown'>;
+}
 
 export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
   const { db } = ctx;
@@ -3491,6 +3549,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
   const { PROJECTS_DIR, DESIGN_SYSTEMS_DIR, USER_DESIGN_SYSTEMS_DIR } = ctx.paths;
   const { upload } = ctx.uploads;
   const { fs } = ctx.node;
+  const enforceWorkspaceProjectMutation = createEnforceWorkspaceProjectMutation(ctx.workspaceContext);
   const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { listFiles, listProjectFolders, createProjectFolder, deleteProjectFolder, searchProjectFiles, readProjectFile, resolveProjectDir, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, sanitizePath, ensureProject } = ctx.projectFiles;
   const { buildDocumentPreview } = ctx.documents;
@@ -5094,7 +5153,11 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
 
 }
 
-export interface RegisterProjectUploadRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'paths' | 'projectStore' | 'projectFiles'> {}
+export interface RegisterProjectUploadRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'paths' | 'projectStore' | 'projectFiles'> {
+  /** See `RegisterProjectRoutesDeps.workspaceContext` above — same seam,
+   *  used by this file's own `enforceWorkspaceProjectMutation` call. */
+  workspaceContext?: Pick<WorkspaceContextProvider, 'lastKnown'>;
+}
 
 export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUploadRoutesDeps) {
   const { db } = ctx;
@@ -5104,6 +5167,7 @@ export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUp
   const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { readProjectFile } = ctx.projectFiles;
   const { fs } = ctx.node;
+  const enforceWorkspaceProjectMutation = createEnforceWorkspaceProjectMutation(ctx.workspaceContext);
 
   app.post(
     '/api/projects/:id/upload',

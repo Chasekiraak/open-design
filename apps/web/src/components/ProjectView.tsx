@@ -40,6 +40,7 @@ import {
   fetchProjectFiles,
   fetchProjectFileText,
   fetchSkill,
+  patchPreviewCommentSortKey,
   patchPreviewCommentStatus,
   projectRawUrl,
   uploadProjectFiles,
@@ -3612,6 +3613,27 @@ export function ProjectView({
       if (!ok) return;
       setPreviewComments((current) => current.filter((comment) => comment.id !== commentId));
       setAttachedComments((current) => removeAttachedComment(current, commentId));
+    },
+    [project.id, activeConversationId],
+  );
+
+  /**
+   * Persist a sidebar drag-reorder (recvq5BVsolIxi Phase 2). Applies the new
+   * `sortKey` to local state FIRST (optimistic — the drag already showed the
+   * new order instantly) so a slow PATCH never flashes the list back to its
+   * old order, then reconciles with whatever the daemon actually persisted.
+   * A failed PATCH leaves the optimistic order in place rather than
+   * snapping back — the daemon call is a best-effort persistence layer for a
+   * personal display preference, not content that must round-trip.
+   */
+  const reorderPreviewComment = useCallback(
+    async (commentId: string, sortKey: number) => {
+      if (!activeConversationId) return;
+      setPreviewComments((current) =>
+        current.map((comment) => (comment.id === commentId ? { ...comment, sortKey } : comment)),
+      );
+      const saved = await patchPreviewCommentSortKey(project.id, activeConversationId, commentId, sortKey);
+      if (saved) setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
     },
     [project.id, activeConversationId],
   );
@@ -9066,6 +9088,7 @@ export function ProjectView({
           previewComments={previewComments}
           onSavePreviewComment={savePreviewComment}
           onRemovePreviewComment={removePreviewComment}
+          onReorderPreviewComment={reorderPreviewComment}
           onSendBoardCommentAttachments={handleSendBoardCommentAttachments}
           onBrandExtractionStopRequest={projectIsProgrammaticBrandExtraction ? handleStop : undefined}
           onRequestBrowserUsePrompt={handleBrowserUsePrompt}

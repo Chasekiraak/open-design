@@ -13,6 +13,7 @@ import {
   insertProject,
   listPreviewComments,
   openDatabase,
+  reorderPreviewComment,
   updatePreviewCommentAnchor,
   updatePreviewCommentStatus,
   updateProject,
@@ -73,6 +74,7 @@ async function startServer() {
       updatePreviewCommentStatus,
       updatePreviewCommentAnchor,
       deletePreviewComment,
+      reorderPreviewComment,
     } as any,
     // Identify the caller from the `member:<id>` Authorization header.
     resolveAuthorMemberId: async (authorization) =>
@@ -123,7 +125,13 @@ async function startServer() {
       member,
       body: { target: commentTarget, note },
     });
-    return res.body.comment as { id: string; authorMemberId?: string; note: string };
+    return res.body.comment as {
+      id: string;
+      authorMemberId?: string;
+      note: string;
+      pinSeq?: number;
+      sortKey?: number;
+    };
   }
 
   const listComments = () =>
@@ -332,5 +340,64 @@ describe('preview comment permission gating', () => {
     expect(del.status).toBe(200);
     expect(api.deleted).toEqual([]);
     expect(api.listComments()).toHaveLength(0);
+  });
+
+  // —— reorder (sidebar sort_key) — recvq5BVsolIxi Phase 2 ————————————————————
+
+  it('reorder is a personal display preference: any member may reorder, not just the author', async () => {
+    const api = await startServer();
+    const comment = await api.createComment('m-author');
+
+    const patch = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${comment.id}/reorder`,
+      { method: 'PATCH', member: 'm-stranger', body: { sortKey: 42 } },
+    );
+    expect(patch.status).toBe(200);
+    expect(patch.body.comment.sortKey).toBe(42);
+    // Unlike status change/delete, reordering is not pushed to the relay and
+    // does not require caller identity at all.
+    const anon = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${comment.id}/reorder`,
+      { method: 'PATCH', body: { sortKey: 43 } },
+    );
+    expect(anon.status).toBe(200);
+    expect(api.updated).toEqual([]);
+    expect(api.created).toEqual([comment.id]);
+  });
+
+  it('reorder writes only sort_key — pin_seq stays exactly what creation assigned', async () => {
+    const api = await startServer();
+    const first = await api.createComment('m-author', 'first');
+    const second = await api.createComment('m-other', 'second');
+    expect(first.pinSeq).toBe(1);
+    expect(second.pinSeq).toBe(2);
+
+    const patch = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${first.id}/reorder`,
+      { method: 'PATCH', member: 'm-author', body: { sortKey: 99 } },
+    );
+    expect(patch.status).toBe(200);
+    expect(patch.body.comment.sortKey).toBe(99);
+    expect(patch.body.comment.pinSeq).toBe(1);
+    // The untouched sibling is unaffected.
+    const rows = api.listComments() as unknown as Array<{ id: string; pinSeq?: number; sortKey?: number }>;
+    expect(rows.find((c) => c.id === second.id)?.pinSeq).toBe(2);
+  });
+
+  it('reorder rejects a non-finite sortKey and 404s for an unknown comment', async () => {
+    const api = await startServer();
+    const comment = await api.createComment('m-author');
+
+    const bad = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${comment.id}/reorder`,
+      { method: 'PATCH', member: 'm-author', body: { sortKey: 'not-a-number' } },
+    );
+    expect(bad.status).toBe(400);
+
+    const missing = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/missing-comment/reorder`,
+      { method: 'PATCH', member: 'm-author', body: { sortKey: 1 } },
+    );
+    expect(missing.status).toBe(404);
   });
 });

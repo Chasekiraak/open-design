@@ -1381,6 +1381,13 @@ interface Props {
   previewComments?: PreviewComment[];
   onSavePreviewComment?: (target: PreviewCommentTarget, note: string, attachAfterSave: boolean, images?: File[], commentId?: string) => Promise<PreviewComment | null>;
   onRemovePreviewComment?: (commentId: string) => Promise<void>;
+  /**
+   * Persist a drag-reorder of the sidebar's display order (recvq5BVsolIxi
+   * Phase 2): `sortKey` is the value the caller computed for `commentId`
+   * (a midpoint between its new neighbors). Never touches `pinSeq` — the
+   * canvas pin number stays whatever it already was.
+   */
+  onReorderPreviewComment?: (commentId: string, sortKey: number) => Promise<void>;
   onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<boolean | void> | boolean | void;
   onFileSaved?: () => Promise<void> | void;
   onBrandExtractionStopRequest?: () => void;
@@ -1429,6 +1436,7 @@ export const FileViewer = memo(function FileViewer({
   previewComments = [],
   onSavePreviewComment,
   onRemovePreviewComment,
+  onReorderPreviewComment,
   onSendBoardCommentAttachments,
   onFileSaved,
   onBrandExtractionStopRequest,
@@ -1482,6 +1490,7 @@ export const FileViewer = memo(function FileViewer({
         previewComments={previewComments}
         onSavePreviewComment={onSavePreviewComment}
         onRemovePreviewComment={onRemovePreviewComment}
+        onReorderPreviewComment={onReorderPreviewComment}
         onSendBoardCommentAttachments={onSendBoardCommentAttachments}
         onFileSaved={onFileSaved}
         onBrandExtractionStopRequest={onBrandExtractionStopRequest}
@@ -3841,6 +3850,16 @@ function commentCreatedAt(comment: PreviewComment): number {
   return Number.isFinite(comment.createdAt) ? comment.createdAt : commentActivityAt(comment);
 }
 
+/**
+ * The sidebar's ordering key (recvq5BVsolIxi): the persisted `sortKey` when
+ * present, else `createdAt` — which reproduces the same "newest first"
+ * default (descending) for a comment created before this field existed, or
+ * from a test fixture that doesn't set it.
+ */
+function commentEffectiveSortKey(comment: PreviewComment): number {
+  return Number.isFinite(comment.sortKey) ? (comment.sortKey as number) : commentCreatedAt(comment);
+}
+
 function commentTargetIntersectsPreview(
   target: PreviewCommentSnapshot | null,
   scale: number,
@@ -3951,7 +3970,7 @@ export function CommentSidePanel({
    *  holds — this panel must not fetch one. */
   currentUser?: CollabCloudMemberDirectoryEntry | null;
   onClearSelection: () => void;
-  onReorder?: (orderedIds: string[]) => void;
+  onReorder?: (orderedIds: string[], draggedId: string) => void;
   onReply: (comment: PreviewComment) => void;
   onSendSelected: () => void | Promise<void>;
   onCreateComment?: (note: string) => boolean | Promise<boolean>;
@@ -3972,6 +3991,22 @@ export function CommentSidePanel({
   // OTHER member still renders without an author line, exactly as before.
   const { resolve: resolveCommentAuthor } = useTeamMembers(currentUser);
   const sorted = comments;
+  // recvq5BVsolIxi: the inline "N." prefix must match the canvas pin number
+  // (comment.pinSeq) so the two surfaces always agree, even when this panel
+  // displays comments in a different order than they were created (the
+  // sidebar sorts by sortKey, newest first by default; pinSeq never moves).
+  // A comment with no pinSeq yet (legacy row / test fixture) falls back to
+  // its rank in CREATION order — independent of `comments`' own order here —
+  // computed locally so this component stays self-sufficient for callers
+  // that pass in an arbitrary (not FileViewer-derived) comment list.
+  const creationRankById = useMemo(() => {
+    const byCreation = [...comments].sort((a, b) => commentCreatedAt(a) - commentCreatedAt(b));
+    return new Map(byCreation.map((comment, index) => [comment.id, index + 1]));
+  }, [comments]);
+  function displayCommentNumber(comment: PreviewComment, fallbackIndex: number): number {
+    if (typeof comment.pinSeq === 'number') return comment.pinSeq;
+    return creationRankById.get(comment.id) ?? fallbackIndex + 1;
+  }
   const visibleSelectedIds = new Set(comments.filter((comment) => selectedIds.has(comment.id)).map((comment) => comment.id));
   const selectedCount = visibleSelectedIds.size;
   // Team-collab send-to-agent gate: only the author or the project owner may
@@ -4033,7 +4068,7 @@ export function CommentSidePanel({
       : commentSideDropEdgeForEvent(event);
     const nextIds = reorderPreviewCommentIds(sorted, draggingId, targetId, edge);
     if (nextIds.join('\0') !== sorted.map((comment) => comment.id).join('\0')) {
-      onReorder?.(nextIds);
+      onReorder?.(nextIds, draggingId);
     }
     setDragState(null);
   };
@@ -4180,7 +4215,7 @@ export function CommentSidePanel({
                     </span>
                   ) : null}
                   <span className="comment-side-author-copy">
-                    <strong>{`${index + 1}. ${commentDisplayLabel(comment, t)}`}</strong>
+                    <strong>{`${displayCommentNumber(comment, index)}. ${commentDisplayLabel(comment, t)}`}</strong>
                     {author ? (
                       <small>
                         {author.displayName}
@@ -4340,22 +4375,34 @@ function reorderPreviewCommentIds(
   return ids;
 }
 
-export function appendSavedPreviewCommentOrder(
-  currentOrderIds: string[],
-  visibleComments: Array<Pick<PreviewComment, 'id'>>,
-  savedId: string,
-): string[] {
-  if (!savedId) return currentOrderIds;
-  const visibleIds = visibleComments.map((comment) => comment.id);
-  if (currentOrderIds.includes(savedId) || visibleIds.includes(savedId)) {
-    return currentOrderIds;
+/**
+ * The persisted sort_key to write for a drag-reorder (recvq5BVsolIxi Phase
+ * 2). `orderedIds` is the FULL post-drop order (see `reorderPreviewCommentIds`
+ * above); `comments` is the pre-drop list the drag started from, so every id
+ * OTHER than `draggedId` still carries its true current `sortKey`/`createdAt`.
+ * Only `draggedId`'s row is ever written — this returns a midpoint between
+ * its NEW neighbors (or one past whichever single neighbor it has at either
+ * end of the list), never a whole-list renumber.
+ */
+export function computeReorderedSortKey(
+  comments: PreviewComment[],
+  orderedIds: string[],
+  draggedId: string,
+): number {
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  const newIndex = orderedIds.indexOf(draggedId);
+  const dragged = byId.get(draggedId);
+  if (newIndex < 0 || !dragged) return commentEffectiveSortKey(dragged ?? comments[0]!);
+  const aboveId = newIndex > 0 ? orderedIds[newIndex - 1] : undefined;
+  const belowId = newIndex < orderedIds.length - 1 ? orderedIds[newIndex + 1] : undefined;
+  const above = aboveId ? byId.get(aboveId) : undefined;
+  const below = belowId ? byId.get(belowId) : undefined;
+  if (above && below) {
+    return (commentEffectiveSortKey(above) + commentEffectiveSortKey(below)) / 2;
   }
-  const visibleIdSet = new Set(visibleIds);
-  const kept = currentOrderIds.filter((id) => visibleIdSet.has(id));
-  const missingVisibleIds = visibleIds.filter((id) => !kept.includes(id));
-  const base = currentOrderIds.length > 0 ? [...kept, ...missingVisibleIds] : visibleIds;
-  const next = [...base, savedId];
-  return next.join('\0') === currentOrderIds.join('\0') ? currentOrderIds : next;
+  if (above) return commentEffectiveSortKey(above) - 1;
+  if (below) return commentEffectiveSortKey(below) + 1;
+  return commentEffectiveSortKey(dragged);
 }
 
 function CommentSideDock({
@@ -4392,7 +4439,7 @@ function CommentSideDock({
   onToggleSelect: (commentId: string) => void;
   onSelectAll: () => void;
   onClearSelection: () => void;
-  onReorder?: (orderedIds: string[]) => void;
+  onReorder?: (orderedIds: string[], draggedId: string) => void;
   onReply: (comment: PreviewComment) => void;
   onSendSelected: () => void | Promise<void>;
   onCreateComment?: (note: string) => boolean | Promise<boolean>;
@@ -5207,7 +5254,14 @@ function CommentPreviewOverlays({
     () =>
       comments
         .map((comment, globalIndex) => {
-          const markerNumber = globalIndex + 1;
+          // recvq5BVsolIxi: the server-assigned pin_seq is the source of
+          // truth (stable across edits, reconciled across devices); a
+          // comment that doesn't carry one yet (a legacy row from before
+          // this field existed, or a test fixture) falls back to its index
+          // in `comments` — which the caller passes in stable CREATION
+          // order (see FileViewer's creationSortedSideComments), so the
+          // fallback matches exactly what `pinSeq` would have assigned.
+          const markerNumber = typeof comment.pinSeq === 'number' ? comment.pinSeq : globalIndex + 1;
           if (driftLadder) {
             // Keep stale/lost comments and carry their state so the marker can
             // badge them, instead of silently dropping a drifted anchor.
@@ -5306,8 +5360,12 @@ function CommentPreviewOverlays({
   const activeSavedIndex = activeExistingCommentId
     ? comments.findIndex((comment) => comment.id === activeExistingCommentId)
     : -1;
-  const activePinNumber = activeSavedIndex >= 0
-    ? activeSavedIndex + 1
+  const activeSavedComment = activeSavedIndex >= 0 ? comments[activeSavedIndex] : undefined;
+  const activePinNumber = activeSavedComment
+    ? (typeof activeSavedComment.pinSeq === 'number' ? activeSavedComment.pinSeq : activeSavedIndex + 1)
+    // A brand-new, not-yet-saved comment: `comments.length + 1` is a
+    // provisional guess at what the daemon will assign — matches the
+    // "provisional local pin_seq" the server itself computes on create.
     : comments.length + 1;
   const targetOverlay = activeTarget ?? hoveredTarget;
   return (
@@ -6556,6 +6614,7 @@ function HtmlViewer({
   previewComments = [],
   onSavePreviewComment,
   onRemovePreviewComment,
+  onReorderPreviewComment,
   onSendBoardCommentAttachments,
   onFileSaved,
   onBrandExtractionStopRequest,
@@ -6585,6 +6644,7 @@ function HtmlViewer({
   previewComments?: PreviewComment[];
   onSavePreviewComment?: (target: PreviewCommentTarget, note: string, attachAfterSave: boolean, images?: File[], commentId?: string) => Promise<PreviewComment | null>;
   onRemovePreviewComment?: (commentId: string) => Promise<void>;
+  onReorderPreviewComment?: (commentId: string, sortKey: number) => Promise<void>;
   onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<boolean | void> | boolean | void;
   onFileSaved?: () => Promise<void> | void;
   onBrandExtractionStopRequest?: () => void;
@@ -7508,7 +7568,6 @@ function HtmlViewer({
   const [activePreviewCommentId, setActivePreviewCommentId] = useState<string | null>(null);
   const [liveCommentTargets, setLiveCommentTargets] = useState<Map<string, PreviewCommentSnapshot>>(() => new Map());
   const liveCommentTargetsRef = useRef(liveCommentTargets);
-  const [commentOrderIds, setCommentOrderIds] = useState<string[]>([]);
   const [commentDraft, setCommentDraft] = useState('');
   // Inspect mode shares the iframe selection bridge with comment mode but
   // routes the picked element to a side panel that mutates per-element CSS
@@ -11172,7 +11231,6 @@ function HtmlViewer({
         activeComposerComment?.id,
       );
       if (saved) {
-        rememberSavedPreviewCommentOrder(saved.id);
         clearBoardComposer();
         setActiveCommentExistingAttachments(saved.attachments ?? []);
         setBoardMode(true);
@@ -11208,7 +11266,6 @@ function HtmlViewer({
     try {
       const saved = await onSavePreviewComment(target, cleanNote, false);
       if (saved) {
-        rememberSavedPreviewCommentOrder(saved.id);
         setCommentSavedToast(t('chat.comments.savedToast'));
         if (activeCommentTarget) clearBoardComposer();
       }
@@ -11727,37 +11784,31 @@ function HtmlViewer({
       imageExportInFlightRef.current = false;
     }
   }
+  // Stable creation-order list (recvq5BVsolIxi): NOT the sidebar's visual
+  // order any more (see `visibleSideComments` below) — kept purely so the
+  // canvas pin numbering (CommentPreviewOverlays, activePinNumber) has a
+  // stable fallback index for a comment that has no server-assigned
+  // `pinSeq` yet (a legacy row, or a test fixture), independent of whatever
+  // order the sidebar happens to display things in.
   const creationSortedSideComments = useMemo(
     () => previewComments
       .filter((comment) => comment.filePath === file.name && comment.status === 'open')
       .sort((a, b) => commentCreatedAt(a) - commentCreatedAt(b)),
     [file.name, previewComments],
   );
-  useEffect(() => {
-    const creationIds = creationSortedSideComments.map((comment) => comment.id);
-    setCommentOrderIds((current) => {
-      const visible = new Set(creationIds);
-      const kept = current.filter((id) => visible.has(id));
-      const added = creationIds.filter((id) => !kept.includes(id));
-      const next = [...kept, ...added];
-      return next.join('\0') === current.join('\0') ? current : next;
-    });
-  }, [creationSortedSideComments]);
-  const visibleSideComments = useMemo(() => {
-    if (commentOrderIds.length === 0) return creationSortedSideComments;
-    const byId = new Map(creationSortedSideComments.map((comment) => [comment.id, comment]));
-    const ordered = commentOrderIds
-      .map((id) => byId.get(id))
-      .filter((comment): comment is PreviewComment => Boolean(comment));
-    const orderedIds = new Set(ordered.map((comment) => comment.id));
-    const missing = creationSortedSideComments.filter((comment) => !orderedIds.has(comment.id));
-    return [...ordered, ...missing];
-  }, [creationSortedSideComments, commentOrderIds]);
-  function rememberSavedPreviewCommentOrder(savedId: string) {
-    setCommentOrderIds((current) =>
-      appendSavedPreviewCommentOrder(current, visibleSideComments, savedId),
-    );
-  }
+  // Sidebar display order: descending by `sortKey` (a fresh comment gets the
+  // largest sortKey, so it shows first by default — "newest at the front").
+  // A legacy/un-migrated row without a sortKey falls back to its createdAt,
+  // which reproduces the exact same "newest first" default. Persisted
+  // server-side (see the `/reorder` route) instead of living only in React
+  // state, so a drag survives a refresh/tab-switch/device-switch.
+  const visibleSideComments = useMemo(
+    () =>
+      [...creationSortedSideComments].sort(
+        (a, b) => commentEffectiveSortKey(b) - commentEffectiveSortKey(a),
+      ),
+    [creationSortedSideComments],
+  );
   const activeSideCommentId = activePreviewCommentId;
   const activeCommentTargetVisible = commentTargetIntersectsPreview(
     activeCommentTarget,
@@ -12296,7 +12347,10 @@ function HtmlViewer({
         )
       }
       onClearSelection={() => setSelectedSideCommentIds(new Set())}
-      onReorder={(orderedIds) => setCommentOrderIds(orderedIds)}
+      onReorder={(orderedIds, draggedId) => {
+        const sortKey = computeReorderedSortKey(visibleSideComments, orderedIds, draggedId);
+        void onReorderPreviewComment?.(draggedId, sortKey);
+      }}
       onReply={(comment) => {
         // Reply == edit on a flat-thread model: prefill the
         // popover with the existing note so the user sees and
@@ -12341,7 +12395,6 @@ function HtmlViewer({
           const accepted = await onSendBoardCommentAttachments(commentsToAttachments(selected));
           if (accepted !== false) {
             setSelectedSideCommentIds(new Set());
-            setCommentOrderIds((current) => current.filter((id) => !sentIds.has(id)));
             setActivePreviewCommentId((current) => current && sentIds.has(current) ? null : current);
           }
         } finally {
@@ -13642,7 +13695,7 @@ function HtmlViewer({
               </div>
               {boardMode ? (
                 <CommentPreviewOverlays
-                  comments={commentCreateMode ? visibleSideComments : []}
+                  comments={commentCreateMode ? creationSortedSideComments : []}
                   driftLadder={collab.enabled}
                   currentVersion={collab.publishedVersion ?? undefined}
                   {...(collab.onLostAnchors ? { onLostAnchors: collab.onLostAnchors } : {})}

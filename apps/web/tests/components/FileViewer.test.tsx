@@ -56,9 +56,9 @@ import {
   LiveArtifactViewer,
   LiveArtifactRefreshHistoryPanel,
   SvgViewer,
-  appendSavedPreviewCommentOrder,
   applyInspectOverridesToSource,
   commentPreviewCanvasSize,
+  computeReorderedSortKey,
   desktopPreviewAutoFitZoomPercent,
   desktopPreviewDocumentContentWidth,
   deckKeyboardShortcutForEvent,
@@ -6274,7 +6274,13 @@ describe('FileViewer tweaks toolbar', () => {
     expect(screen.queryByTestId('comment-saved-marker-slide-one-title')).toBeNull();
   });
 
-  it('orders side comments by creation time while keeping activity timestamps', () => {
+  it('orders side comments by creation time (newest first) while keeping activity timestamps', () => {
+    // recvq5BVsolIxi: default sidebar order is "newest CREATED first", not
+    // "most recently ACTIVE first" — the comment updated most recently
+    // (`createdFirstUpdatedLast`, note "Latest edit") is actually the OLDER
+    // of the two by creation time, so it must sort SECOND despite its
+    // updatedAt being the most recent ("just now" still renders on it, just
+    // not first in the list).
     const createdFirstUpdatedLast: PreviewComment = {
       id: 'comment-updated-last',
       projectId: 'project-1',
@@ -6318,9 +6324,13 @@ describe('FileViewer tweaks toolbar', () => {
     const [firstItem, secondItem] = items;
     expect(firstItem).toBeDefined();
     expect(secondItem).toBeDefined();
-    expect(firstItem!.textContent).toContain('Latest edit');
-    expect(firstItem!.textContent).toContain('just now');
-    expect(secondItem!.textContent).toContain('Older edit');
+    // Created most recently (5 minutes ago) → shows first by default, even
+    // though ITS OWN last activity ("Older edit"'s updatedAt) is older.
+    expect(firstItem!.textContent).toContain('Older edit');
+    // Created earliest (20 minutes ago) → sorts second, despite being the
+    // most recently ACTIVE comment ("just now").
+    expect(secondItem!.textContent).toContain('Latest edit');
+    expect(secondItem!.textContent).toContain('just now');
   });
 
   it('does not preload non-open element comments into the picker composer', async () => {
@@ -6572,6 +6582,11 @@ describe('FileViewer tweaks toolbar', () => {
   });
 
   it('keeps saved marker numbers stable after saving another comment', async () => {
+    // pinSeq is what actually pins the marker number now (recvq5BVsolIxi) —
+    // set explicitly here exactly as the daemon would assign it at creation
+    // (1, 2, then 3), independent of each fixture's deliberately-out-of-order
+    // createdAt below (which exists only to prove the number does NOT
+    // recompute from creation time or array position).
     const olderComment: PreviewComment = {
       id: 'comment-older',
       projectId: 'project-1',
@@ -6587,6 +6602,7 @@ describe('FileViewer tweaks toolbar', () => {
       status: 'open',
       createdAt: 10,
       updatedAt: 10,
+      pinSeq: 1,
     };
     const newerComment: PreviewComment = {
       ...olderComment,
@@ -6598,6 +6614,7 @@ describe('FileViewer tweaks toolbar', () => {
       note: 'Newer comment',
       createdAt: 20,
       updatedAt: 20,
+      pinSeq: 2,
     };
 
     function Harness() {
@@ -6629,6 +6646,7 @@ describe('FileViewer tweaks toolbar', () => {
               status: 'open',
               createdAt: 5,
               updatedAt: 30,
+              pinSeq: 3,
             };
             setComments((current) => [saved, ...current]);
             return saved;
@@ -7331,33 +7349,161 @@ describe('FileViewer tweaks toolbar', () => {
     fireDragEventWithClientY('dragOver', items[0]!, { dataTransfer, clientY: 0 });
     fireDragEventWithClientY('drop', items[0]!, { dataTransfer, clientY: 0 });
 
-    expect(onReorder).toHaveBeenCalledWith(['comment-2', 'comment-1']);
+    // recvq5BVsolIxi Phase 2: onReorder now also reports WHICH comment moved,
+    // so the caller can persist just that one row's sort_key.
+    expect(onReorder).toHaveBeenCalledWith(['comment-2', 'comment-1'], 'comment-2');
   });
 
-  it('appends a newly saved comment to the current visible comment order', () => {
-    expect(
-      appendSavedPreviewCommentOrder(
-        [],
-        [{ id: 'comment-1' }, { id: 'comment-2' }],
-        'comment-3',
-      ),
-    ).toEqual(['comment-1', 'comment-2', 'comment-3']);
+  it('computes a persisted sort_key for a drag-reorder as a midpoint between the new neighbors', () => {
+    const older: PreviewComment = {
+      id: 'comment-older',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'a',
+      selector: '[data-od-id="a"]',
+      label: 'A',
+      text: '',
+      htmlHint: '',
+      position: { x: 0, y: 0, width: 0, height: 0 },
+      note: 'Older',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+      sortKey: 10,
+    };
+    const middle: PreviewComment = { ...older, id: 'comment-middle', note: 'Middle', createdAt: 20, updatedAt: 20, sortKey: 20 };
+    const newest: PreviewComment = { ...older, id: 'comment-newest', note: 'Newest', createdAt: 30, updatedAt: 30, sortKey: 30 };
+    // Sidebar's current (pre-drag) display order is sortKey descending.
+    const comments = [newest, middle, older];
 
+    // Drag "older" (sortKey 10) between "newest" (30) and "middle" (20) —
+    // a midpoint, and neither existing sortKey is disturbed.
     expect(
-      appendSavedPreviewCommentOrder(
-        ['comment-2', 'comment-1'],
-        [{ id: 'comment-1' }, { id: 'comment-2' }],
-        'comment-3',
-      ),
-    ).toEqual(['comment-2', 'comment-1', 'comment-3']);
+      computeReorderedSortKey(comments, ['comment-newest', 'comment-older', 'comment-middle'], 'comment-older'),
+    ).toBe(25);
 
+    // Drag "middle" to the very front (past "newest", the new sole neighbor
+    // below it) — one past the current max, so it's now the front-most.
     expect(
-      appendSavedPreviewCommentOrder(
-        ['comment-1', 'comment-2'],
-        [{ id: 'comment-1' }, { id: 'comment-2' }],
-        'comment-2',
-      ),
-    ).toEqual(['comment-1', 'comment-2']);
+      computeReorderedSortKey(comments, ['comment-middle', 'comment-newest', 'comment-older'], 'comment-middle'),
+    ).toBe(31);
+
+    // Drag "newest" to the very back (past "older", its new sole neighbor
+    // above) — one below the current min.
+    expect(
+      computeReorderedSortKey(comments, ['comment-middle', 'comment-older', 'comment-newest'], 'comment-newest'),
+    ).toBe(9);
+  });
+
+  it('shows the newest comment first by default (recvq5BVsolIxi)', () => {
+    const older: PreviewComment = {
+      id: 'comment-older',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'a',
+      selector: '[data-od-id="a"]',
+      label: 'A',
+      text: '',
+      htmlHint: '',
+      position: { x: 0, y: 0, width: 0, height: 0 },
+      note: 'First comment ever',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const newer: PreviewComment = { ...older, id: 'comment-newer', note: 'Just posted', createdAt: 20, updatedAt: 20 };
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[older, newer]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+
+    const items = screen.getAllByTestId('comment-side-item');
+    // Neither fixture sets `sortKey` — the default falls back to createdAt,
+    // so the more-recently-created comment ("Just posted") leads the list
+    // even though it was passed SECOND in `previewComments`.
+    expect(items[0]!.textContent).toContain('Just posted');
+    expect(items[1]!.textContent).toContain('First comment ever');
+  });
+
+  it('persists a drag reorder via sort_key and keeps it after the comment list refreshes (recvq5BVsolIxi)', async () => {
+    const onReorderPreviewComment = vi.fn().mockResolvedValue(undefined);
+    const commentA: PreviewComment = {
+      id: 'comment-a',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'a',
+      selector: '[data-od-id="a"]',
+      label: 'A',
+      text: '',
+      htmlHint: '',
+      position: { x: 0, y: 0, width: 0, height: 0 },
+      note: 'Comment A',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+      sortKey: 10,
+    };
+    const commentB: PreviewComment = { ...commentA, id: 'comment-b', note: 'Comment B', createdAt: 20, updatedAt: 20, sortKey: 20 };
+
+    const { rerender } = render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[commentA, commentB]}
+        onReorderPreviewComment={onReorderPreviewComment}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+
+    // Default order: B (sortKey 20) first, A (sortKey 10) second.
+    let items = screen.getAllByTestId('comment-side-item');
+    expect(items[0]!.getAttribute('data-comment-id')).toBe('comment-b');
+    expect(items[1]!.getAttribute('data-comment-id')).toBe('comment-a');
+
+    // Drag A (currently second, the drag handle at index 1) above B.
+    items[0]!.getBoundingClientRect = vi.fn(() => ({
+      x: 0, y: 0, top: 0, left: 0, right: 300, bottom: 40, width: 300, height: 40, toJSON: () => ({}),
+    }));
+    const dataTransfer = createDragDataTransfer();
+    // FileViewer renders through the real i18n default (English), unlike the
+    // CommentSidePanel-direct tests above that inject a key-echoing `t` stub —
+    // so the accessible label is the actual translated copy, not the raw key.
+    fireEvent.dragStart(screen.getAllByLabelText('Drag to reorder')[1]!, { dataTransfer });
+    fireDragEventWithClientY('dragOver', items[0]!, { dataTransfer, clientY: 0 });
+    fireDragEventWithClientY('drop', items[0]!, { dataTransfer, clientY: 0 });
+
+    // No neighbor above A's new (front) position, so its sort_key becomes
+    // one past B's — a PATCH request, not a whole-list renumber.
+    await waitFor(() => expect(onReorderPreviewComment).toHaveBeenCalledWith('comment-a', 21));
+
+    // Simulate the daemon having persisted it and the parent re-fetching:
+    // re-render with the updated sortKey already applied, standing in for a
+    // refresh/tab-switch. The dragged order must survive it.
+    rerender(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[{ ...commentA, sortKey: 21 }, commentB]}
+        onReorderPreviewComment={onReorderPreviewComment}
+      />,
+    );
+    items = screen.getAllByTestId('comment-side-item');
+    expect(items[0]!.getAttribute('data-comment-id')).toBe('comment-a');
+    expect(items[1]!.getAttribute('data-comment-id')).toBe('comment-b');
   });
 
   it('does not classify text labels containing a standalone article as links', () => {

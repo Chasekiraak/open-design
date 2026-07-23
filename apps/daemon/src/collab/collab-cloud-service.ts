@@ -95,8 +95,17 @@ export interface CollabCloudService {
    * Push a created OR edited comment to the cloud (best-effort; no-op off-team).
    * The relay upserts by id and receivers apply the newest by `updatedAt`, so the
    * same call carries both the initial create and any later edit/status change.
+   *
+   * Resolves with the cloud-assigned `seq` for THIS push (or `null` off-team /
+   * on failure) so the caller can reconcile a new comment's provisional
+   * `pin_seq` — see `confirmPreviewCommentPinSeq` in db.ts and the
+   * recvq5BVsolIxi design note above `previewCommentToCloud`. The value is
+   * safe to feed into that reconciliation from EITHER a create or an edit
+   * push: the guard there only ever applies once per comment, so whichever
+   * push resolves first (in practice almost always the create) wins and a
+   * later resolution is a no-op.
    */
-  pushComment(comment: PreviewComment): Promise<void>;
+  pushComment(comment: PreviewComment): Promise<{ seq: number } | null>;
   /**
    * Push a delete as a tombstone (best-effort; no-op off-team). Receivers remove
    * the comment by id. Stamps a fresh `updatedAt` so the tombstone is not treated
@@ -168,11 +177,12 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     });
   }
 
-  async function pushComment(comment: PreviewComment): Promise<void> {
+  async function pushComment(comment: PreviewComment): Promise<{ seq: number } | null> {
     const identity = await teamIdentity();
-    if (!identity) return;
+    if (!identity) return null;
     const cloud = previewCommentToCloud(comment, identity.memberId);
-    await deps.client.pushComment(identity.teamId, comment.projectId, cloud);
+    const result = await deps.client.pushComment(identity.teamId, comment.projectId, cloud);
+    return result ?? null;
   }
 
   async function pushCommentDeletion(comment: PreviewComment): Promise<void> {

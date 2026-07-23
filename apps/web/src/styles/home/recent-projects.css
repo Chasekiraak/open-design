@@ -249,6 +249,15 @@
   border-radius: inherit;
   pointer-events: none;
 }
+/* No-preview cards fall back to a saturated hue gradient (see `projectCover`),
+ * not the neutral --bg-subtle real covers sit on — the shared 8%-opacity ring
+ * above reads clearly against a flat light background but melts into the
+ * gradient's own color variation, leaving the card looking borderless next to
+ * every other card in the grid (recvqai6OAfG4k). Bump the ring's contrast
+ * just for this state instead of raising it everywhere. */
+.recent-projects__card-thumb-fallback::after {
+  border-color: color-mix(in srgb, var(--text) 22%, transparent);
+}
 .recent-projects__card-thumb-html,
 .recent-projects__card-thumb-image,
 .recent-projects__card-thumb-video,

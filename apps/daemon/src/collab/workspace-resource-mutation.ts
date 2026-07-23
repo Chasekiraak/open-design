@@ -37,6 +37,54 @@ export type WorkspaceResourceContext = {
 
 export type WorkspaceResourceMutationCapability = 'rename' | 'delete' | 'duplicate' | 'writeFiles';
 
+/**
+ * The one fact a mutation gate needs from the daemon's own verified workspace
+ * state, distilled to the two fields worth cross-checking against a client's
+ * unauthenticated headers. Kept minimal on purpose: this module must not
+ * import the full `WorkspaceContextProvider` (that would pull the async B
+ * integration into a resource-agnostic gate that plugin/skill also depend on)
+ * — a caller injects a plain closure that reads it from wherever the daemon
+ * already caches it (`collab/workspace-context.ts`'s `lastKnown()`).
+ */
+export type WorkspaceMembershipSnapshot = {
+  workspaceId: string;
+  memberStatus: 'active' | 'removed';
+};
+
+export type GetLastKnownWorkspaceMembership = () => WorkspaceMembershipSnapshot | null;
+
+/**
+ * Cross-check the client-asserted `memberStatus` against the daemon's own
+ * last-known-good workspace context.
+ *
+ * Client headers are an unauthenticated hint the web/desktop app attaches
+ * from its OWN last poll of `/api/workspace/context` — a member removed from
+ * the workspace keeps sending stale `active` headers until that poll catches
+ * up (or the app restarts). The daemon's own last-known context — refreshed
+ * by that very poll, and by every other in-daemon `.current()` caller — is
+ * real vela-verified state for THIS SAME workspace. When it explicitly
+ * disagrees (same workspaceId, `memberStatus: 'removed'`), it wins over
+ * whatever the header claims.
+ *
+ * When the daemon has no opinion for this workspace — never polled yet, or
+ * its last poll resolved a DIFFERENT workspace — the header stands. This
+ * must only ever narrow an `active` claim to `removed`; it must never turn
+ * "we don't have cached info yet" into a denial, or every route gated by this
+ * check would fail-closed on daemon startup / a workspace switch.
+ */
+function withLastKnownMembership(
+  ctx: WorkspaceResourceContext,
+  getLastKnownMembership: GetLastKnownWorkspaceMembership | undefined,
+): WorkspaceResourceContext {
+  if (!getLastKnownMembership) return ctx;
+  const known = getLastKnownMembership();
+  if (!known || known.workspaceId !== ctx.workspaceId) return ctx;
+  if (known.memberStatus === 'removed' && ctx.memberStatus !== 'removed') {
+    return { ...ctx, memberStatus: 'removed' };
+  }
+  return ctx;
+}
+
 export type WorkspaceResourceAccessInput = {
   visibility?: string | null;
   resourceState?: string | null;
@@ -177,6 +225,13 @@ function workspaceResourceMutationAllowed(
  * closures over the specific resource's storage (e.g. `workspace_projects` or
  * `workspace_resources` filtered to `resource_type = 'plugin'`) so this
  * module never has to know which table backs which resource type.
+ *
+ * `getLastKnownMembership` is the optional cross-check seam (see
+ * `withLastKnownMembership` above): when provided, the client's asserted
+ * `memberStatus` header is overridden to `'removed'` whenever the daemon's own
+ * last-known-good workspace context says so for this same workspace. Omitted
+ * by a caller with no such cache wired up — the gate then behaves exactly as
+ * before, trusting the header alone.
  */
 export function enforceWorkspaceResourceMutation(
   resourceType: string,
@@ -188,9 +243,10 @@ export function enforceWorkspaceResourceMutation(
   db: unknown,
   resourceId: string,
   capability: WorkspaceResourceMutationCapability,
+  getLastKnownMembership?: GetLastKnownWorkspaceMembership,
 ): boolean {
-  const ctx = workspaceResourceContextFromRequest(req);
-  if (ctx === null) {
+  const requestCtx = workspaceResourceContextFromRequest(req);
+  if (requestCtx === null) {
     // No workspace headers at all — a legacy pre-workspace caller, or a
     // client that just logged out (the frontend only attaches these headers
     // while `workspaceContext` is non-null). Either way there is no identity
@@ -205,10 +261,11 @@ export function enforceWorkspaceResourceMutation(
     }
     return true;
   }
-  if (ctx === 'missing') {
+  if (requestCtx === 'missing') {
     sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
     return false;
   }
+  const ctx = withLastKnownMembership(requestCtx, getLastKnownMembership);
   const row = getWorkspaceResource(db, ctx.workspaceId, resourceId);
   if (!workspaceResourceMutationAllowed(row, ctx, capability)) {
     const code = row && isWorkspaceResourceLocked(ctx)

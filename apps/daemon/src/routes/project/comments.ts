@@ -64,6 +64,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     updatePreviewCommentStatus,
     updatePreviewCommentAnchor,
     deletePreviewComment,
+    reorderPreviewComment,
   } = ctx.conversations;
 
   /** The caller's workspaceMemberId, or undefined off-team / personal mode. */
@@ -153,10 +154,17 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
       } else if (authorMemberId) {
         body.authorMemberId = authorMemberId;
       }
-      const comment = upsertPreviewComment(db, req.params.id, req.params.cid, body);
+      // Resolved BEFORE the upsert (not just before the push below) so a
+      // genuinely new comment's pin_seq starts unconfirmed on a team-shared
+      // project — see UpsertPreviewCommentOptions in db.ts. Ignored on the
+      // edit branch, so computing it here for an edit-via-POST is harmless.
+      const syncEnabled = await shouldSyncComments(req, req.params.id);
+      const comment = upsertPreviewComment(db, req.params.id, req.params.cid, body, {
+        pinPendingCloudConfirm: syncEnabled,
+      });
       updateProject(db, req.params.id, {});
       // Best-effort cross-daemon push; never fails the local save.
-      if (comment && await shouldSyncComments(req, req.params.id)) {
+      if (comment && syncEnabled) {
         try {
           ctx.onCommentCreated?.(comment as unknown as PreviewComment);
         } catch {
@@ -232,6 +240,38 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
           req.params.cid,
           req.params.commentId,
           req.body || {},
+        );
+        if (!comment) return res.status(404).json({ error: 'comment not found' });
+        res.json({ comment });
+      } catch (err: any) {
+        res.status(400).json({ error: String(err?.message || err) });
+      }
+    },
+  );
+
+  app.patch(
+    '/api/projects/:id/conversations/:cid/comments/:commentId/reorder',
+    (req, res) => {
+      const conv = getConversation(db, req.params.cid);
+      if (!conv || conv.projectId !== req.params.id) {
+        return res.status(404).json({ error: 'conversation not found' });
+      }
+      const sortKey = Number(req.body?.sortKey);
+      if (!Number.isFinite(sortKey)) {
+        return res.status(400).json({ error: 'sortKey must be a finite number' });
+      }
+      try {
+        // Sidebar display order is a per-daemon viewing preference, not a
+        // content edit: unlike status change/delete, it is not gated on
+        // authorship (any member may reorder their OWN view of a shared
+        // project's comments), does not bump updated_at, and is never pushed
+        // to the collab-cloud relay — see PreviewComment.sortKey.
+        const comment = reorderPreviewComment(
+          db,
+          req.params.id,
+          req.params.cid,
+          req.params.commentId,
+          sortKey,
         );
         if (!comment) return res.status(404).json({ error: 'comment not found' });
         res.json({ comment });

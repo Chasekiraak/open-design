@@ -42,6 +42,59 @@ export interface WorkspaceContextProvider {
    * refused the switch.
    */
   selectWorkspace?(workspaceId: string): Promise<boolean>;
+  /**
+   * Synchronous read of the most recently resolved context — NO network I/O,
+   * ever. Populated as a side effect of the ordinary `.current()` traffic this
+   * provider already serves: the web client's `GET /api/workspace/context`
+   * poll (every 15s) plus every other in-daemon `.current()` caller. Absent on
+   * a bare provider; `withLastKnownWorkspaceContext` below adds it. A caller
+   * that needs a same-request cross-check against real membership state — a
+   * mutation gate that must not spend a fresh vela round-trip on every write —
+   * reads this instead of awaiting `.current()`.
+   */
+  lastKnown?(): WorkspaceCollabContext | null;
+}
+
+/**
+ * Wrap a provider so every `.current()` result is also remembered for a later
+ * synchronous `.lastKnown()` read, with no extra network I/O of its own. This
+ * is the ONLY sanctioned way to get a same-request read of "what does the
+ * daemon actually believe about this workspace right now" — see
+ * `collab/workspace-resource-mutation.ts`'s membership cross-check, which
+ * refuses to trust a client's `x-od-workspace-member-status` header once the
+ * daemon's own last-verified state says the caller has been removed.
+ *
+ * `lastKnown()` reflects whichever workspace the wrapped provider most
+ * recently resolved — normally the account's one active workspace, since a
+ * single daemon process serves a single signed-in user. It is deliberately
+ * NOT scoped per-workspace-id: a caller must compare `lastKnown().workspaceId`
+ * against the workspace it cares about and treat a mismatch as "no opinion",
+ * exactly like a cache miss.
+ */
+export function withLastKnownWorkspaceContext(
+  provider: WorkspaceContextProvider,
+): WorkspaceContextProvider {
+  let lastKnown: WorkspaceCollabContext | null = null;
+  return {
+    ...provider,
+    async current(req: WorkspaceContextRequest): Promise<WorkspaceCollabContext | null> {
+      const context = await provider.current(req);
+      lastKnown = context;
+      return context;
+    },
+    // Dev/demo provider only (see `set?` above): a direct override is also a
+    // same-process source of truth, so it should update the cache immediately
+    // rather than waiting for the next `.current()` poll tick to catch up.
+    ...(provider.set
+      ? {
+          set: (context: WorkspaceCollabContext | null) => {
+            lastKnown = context;
+            provider.set!(context);
+          },
+        }
+      : {}),
+    lastKnown: () => lastKnown,
+  };
 }
 
 const WORKSPACE_TYPES: ReadonlySet<WorkspaceType> = new Set(['personal', 'team']);
