@@ -390,7 +390,7 @@ export function PluginsView({
         <div>
           {/* #5517: a bare 扩展 heading — no kicker, no lede paragraph. */}
           <h1 id="plugins-title" className="entry-section__title">
-            {t('entry.navExtensions')}
+            {t('entry.navPlugins')}
           </h1>
         </div>
         <div className="plugins-view__hero-actions">
@@ -1463,7 +1463,7 @@ export function ExtensionsMarketplace({
         <div>
           {/* #5517: a bare 扩展 heading — no lede paragraph. */}
           <h1 id="plugin-marketplace-title" className="entry-section__title">
-            {t('entry.navExtensions')}
+            {t('entry.navPlugins')}
           </h1>
         </div>
         {onCreatePlugin ? (

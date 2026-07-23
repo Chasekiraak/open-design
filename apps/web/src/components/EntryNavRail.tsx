@@ -33,6 +33,7 @@ import type {
   WorkspaceDirectoryResponse,
 } from '@open-design/contracts';
 import { fetchVelaLoginStatus, velaLogout } from '../providers/daemon';
+import { resetCloudSignInTipDismissal } from './CloudSignInTip';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
@@ -655,6 +656,11 @@ export function EntryNavRail({
                       // (the context read now resolves to null → the shell
                       // falls back to the signed-out local form).
                       void velaLogout().then(() => {
+                        // recvqbkcLqIFH7: a stale "dismissed" flag on the
+                        // footer's CloudSignInTip must not survive a real
+                        // sign-out, or the rail's only sign-in entry point
+                        // silently disappears with nothing left in its place.
+                        resetCloudSignInTipDismissal();
                         notifyAmrLoginStatusChanged();
                         notifyWorkspaceContextRefresh();
                         notifyWorkspaceBillingRefresh();
@@ -849,8 +855,8 @@ export function EntryNavRail({
             </NavButton>
             <NavButton
               active={view === 'plugins'}
-              ariaLabel={t('entry.navExtensions')}
-              tooltip={t('entry.navExtensions')}
+              ariaLabel={t('entry.navPlugins')}
+              tooltip={t('entry.navPlugins')}
               onClick={() => selectView('plugins')}
               testId="entry-nav-plugins"
             >
@@ -891,8 +897,8 @@ export function EntryNavRail({
             </NavButton>
             <NavButton
               active={view === 'plugins'}
-              ariaLabel={t('entry.navExtensions')}
-              tooltip={t('entry.navExtensions')}
+              ariaLabel={t('entry.navPlugins')}
+              tooltip={t('entry.navPlugins')}
               onClick={() => selectView('plugins')}
               testId="entry-nav-plugins"
             >

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RecentProjectsStrip } from '../../src/components/RecentProjectsStrip';
@@ -368,5 +368,199 @@ describe('recvq5fpqrXzV1 — per-card move-to-team menu item', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
 
     expect(screen.getByRole('menuitem', { name: /Move to team space/i })).toBeTruthy();
+  });
+});
+
+describe('recvqabp2Uy23r — shared badge grid overlay vs list inline', () => {
+  // The badge has two renderings (see recent-projects.css): a floating
+  // hover-revealed overlay inside the thumb (grid) and an always-visible
+  // inline pill next to the name (list, whose 128x52 thumb has no room for
+  // the overlay). Both must actually be wired to the shared card — a
+  // shared project rendering neither is exactly this bug.
+  it('renders the shared badge as a thumb overlay in grid view', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Shared One' })]}
+        onOpen={() => {}}
+        heading="All projects"
+        isSharedProject={(id) => id === 'project-1'}
+      />,
+    );
+
+    const badge = screen.getByText('Shared').closest('.recent-projects__card-badge');
+    expect(badge).not.toBeNull();
+    expect(badge?.classList.contains('recent-projects__card-badge--inline')).toBe(false);
+    expect(badge?.closest('.recent-projects__card-thumb')).not.toBeNull();
+  });
+
+  it('renders the shared badge inline next to the name in list view', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Shared One' })]}
+        onOpen={() => {}}
+        heading="All projects"
+        isSharedProject={(id) => id === 'project-1'}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }));
+
+    const badge = screen.getByText('Shared').closest('.recent-projects__card-badge');
+    expect(badge).not.toBeNull();
+    expect(badge?.classList.contains('recent-projects__card-badge--inline')).toBe(true);
+    expect(badge?.closest('.recent-projects__card-name-row')).not.toBeNull();
+  });
+
+  it('renders no shared badge at all for a project that is not shared', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Private One' })]}
+        onOpen={() => {}}
+        heading="All projects"
+        isSharedProject={() => false}
+      />,
+    );
+
+    expect(screen.queryByText('Shared')).toBeNull();
+  });
+});
+
+describe('recvqbipG9QDTt — Recent Projects filter needs a visible clear entry', () => {
+  // RecentProjectsStrip mounts once per host view and stays alive across
+  // EntryShell tab switches — Home's instance in particular is only ever
+  // hidden via `content-visibility`, never unmounted — so kindFilter /
+  // ownerFilter state survives a round trip through another tab with no
+  // visible sign anything is filtered. A filter that now matches zero
+  // projects reads as "my projects disappeared" instead of "a filter is on".
+  it('shows no clear-filters entry while the default (unfiltered) view is showing', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Only Project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    expect(screen.queryByTestId('recent-projects-clear-filters')).toBeNull();
+  });
+
+  it('surfaces a clear-filters entry once the type filter hides every project, and restores the grid on click', () => {
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Only Project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    // Every project here falls back to the 'prototype' card category
+    // (projectCategory's default), so filtering to Media leaves zero
+    // matches — exactly the "did my projects disappear?" scenario reported.
+    fireEvent.click(screen.getByRole('button', { name: 'Any type' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Media' }));
+
+    expect(screen.queryByText('Only Project')).toBeNull();
+    const clearButton = screen.getByTestId('recent-projects-clear-filters');
+
+    fireEvent.click(clearButton);
+
+    expect(screen.getByText('Only Project')).toBeTruthy();
+    expect(screen.queryByTestId('recent-projects-clear-filters')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Any type' })).toBeTruthy();
+  });
+});
+
+describe('recvqaRqM0dv2x — per-card Duplicate menu item', () => {
+  // Duplicating a project you did not create always 403s (the daemon's
+  // canDuplicate mirrors canMutate: privileged-or-selfCreated only). The item
+  // used to render without the same ownedBySelf gate Rename/Delete already
+  // carry, so it stayed enabled on a foreign team-shared card and looked like
+  // a dead click when pressed.
+  it('disables Duplicate for a project owned by another team member', () => {
+    const onDuplicate = vi.fn();
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'Shared project' })]}
+        onOpen={() => {}}
+        onDuplicate={onDuplicate}
+        projectOwnerMemberIds={new Map([['project-1', 'someone-else']])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    const duplicateItem = screen.getByRole('menuitem', { name: 'Duplicate project' });
+    expect((duplicateItem as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(duplicateItem);
+    expect(onDuplicate).not.toHaveBeenCalled();
+  });
+
+  it('keeps Duplicate enabled and wired for a project the current member created', () => {
+    const onDuplicate = vi.fn();
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'My project' })]}
+        onOpen={() => {}}
+        onDuplicate={onDuplicate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    const duplicateItem = screen.getByRole('menuitem', { name: 'Duplicate project' });
+    expect((duplicateItem as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(duplicateItem);
+    expect(onDuplicate).toHaveBeenCalledWith('project-1');
+  });
+});
+
+describe('recvqbh189zBY6 — single-card delete confirmation', () => {
+  // commitDelete used to await onDelete and drop the result either way, so a
+  // 403/network failure closed the confirm dialog exactly like a success —
+  // the project stayed put with no signal anything had gone wrong.
+  it('keeps the dialog open with a visible error when the delete request fails', async () => {
+    const onDelete = vi.fn(async () => false);
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'My project' })]}
+        onOpen={() => {}}
+        onDelete={onDelete}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(onDelete).toHaveBeenCalledWith('project-1');
+      expect(within(dialog).getByRole('alert')).toBeTruthy();
+    });
+    // The dialog is still open — nothing pretended the project was gone.
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+  });
+
+  it('closes the dialog on a successful delete', async () => {
+    const onDelete = vi.fn(async () => true);
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-1', name: 'My project' })]}
+        onOpen={() => {}}
+        onDelete={onDelete}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(onDelete).toHaveBeenCalledWith('project-1');
+    });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });

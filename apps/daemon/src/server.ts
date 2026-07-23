@@ -278,6 +278,7 @@ import {
   createUserDesignSystem,
   deleteUserDesignSystem,
   digestDesignSystemContext,
+  isTeamSyncedUserDesignSystem,
   LEGACY_DESIGN_SYSTEM_ARTIFACTS,
   linkUserDesignSystemProject,
   listDesignSystems,
@@ -4415,6 +4416,17 @@ export async function startServer({
     projectFiles: projectFileDeps,
     designSystems: {
       buildUserDesignSystemArchive,
+      // recvqb6mfyqXLD: a system pulled from a teammate's team share
+      // (`teamSynced` in its metadata.json — see `isTeamSyncedUserDesignSystem`)
+      // is only mutable by whoever `canManageSharedResource` says may manage
+      // the share — the same principal check `unshare` already enforces.
+      // Anything not teamSynced is the caller's own, so it stays unrestricted.
+      canMutateUserDesignSystem: async (root, id) => {
+        const synced = await isTeamSyncedUserDesignSystem(root, id);
+        if (!synced) return true;
+        const resources = await designSystemsTeamShare.sharedResources();
+        return resources.find((resource) => resource.id === id)?.canUnshare === true;
+      },
       createUserDesignSystem: createWorkspaceOwnedDesignSystem,
       deleteUserDesignSystem,
       ensureUserDesignSystemWorkspaceProject,

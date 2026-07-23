@@ -1211,7 +1211,6 @@ export interface Dict {
   'entry.accountAddAccount': string;
   'entry.accountSignOut': string;
   'entry.navRecents': string;
-  'entry.navExtensions': string;
   'entry.navDashboard': string;
   'entry.blankDraftsTitle': string;
   'entry.blankDraftsDescription': string;
@@ -1511,6 +1510,7 @@ export interface Dict {
   'recentProjects.moveOutOfTeam': string;
   'recentProjects.unshareFailed': string;
   'recentProjects.shareFailed': string;
+  'recentProjects.clearFilters': string;
   'pluginsHome.title': string;
   'pluginsHome.subtitle': string;
   'pluginsHome.browseRegistry': string;
@@ -2145,6 +2145,9 @@ export interface Dict {
   'dsManager.officialPresets': string;
   'dsManager.shareToTeam': string;
   'dsManager.shareToTeamFailed': string;
+  'dsManager.unshareFromTeam': string;
+  'dsManager.unshareFromTeamFailed': string;
+  'dsManager.teamSyncedReadOnly': string;
   'dsManager.enterprise': string;
   'dsManager.yourTemplates': string;
   'dsManager.yourSystemsAria': string;

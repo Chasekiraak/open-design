@@ -10152,19 +10152,12 @@ function HtmlViewer({
     try {
       const css = serializeInspectOverrides(inspectOverrides).trim();
       const next = applyInspectOverridesToSource(source, css);
-      const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: file.name,
-          content: next,
-          versionSource: 'manual',
-          versionLabel: t('fileViewer.edit'),
-        }),
-      });
-      if (!resp.ok) {
-        const payload = await resp.json().catch(() => null) as { error?: string; message?: string } | null;
-        throw new Error(payload?.error || payload?.message || `Save failed (${resp.status})`);
+      const saved = await writeProjectTextFileDetailed(projectId, file.name, next, {
+        versionSource: 'manual',
+        versionLabel: t('fileViewer.edit'),
+      }, workspaceContext);
+      if (!saved.ok) {
+        throw new Error(saved.message || `Save failed (${saved.status ?? ''})`);
       }
       setSource(next);
       setInspectSavedAt(Date.now());

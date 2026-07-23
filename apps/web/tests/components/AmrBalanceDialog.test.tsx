@@ -79,8 +79,11 @@ describe('AmrBalanceDialog', () => {
   });
 
   // No workspace console URL (personal workspace, or the context read has not
-  // landed): the CTA must still go somewhere, not become a dead end.
-  it('falls back to the profile wallet when no console URL is known', async () => {
+  // landed): the CTA must still go somewhere, not become a dead end — and it
+  // must land on the pricing modal (`view=plans`), not the bare wallet page,
+  // otherwise the user has to hunt for the upgrade dialog themselves (dogfood
+  // acceptance regression: recvpYEiH019cD).
+  it('falls back to the profile plans deep link when no console URL is known', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
 
@@ -101,5 +104,6 @@ describe('AmrBalanceDialog', () => {
 
     const target = new URL(String(open.mock.calls.at(-1)?.[0]));
     expect(target.pathname).toBe('/amr/wallet');
+    expect(target.searchParams.get('view')).toBe('plans');
   });
 });

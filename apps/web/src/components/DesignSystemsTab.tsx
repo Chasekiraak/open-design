@@ -192,7 +192,13 @@ export function DesignSystemsTab({
   // list here so the "team" collection and the per-system share action stay in
   // sync. Empty (and the share action is a no-op) when there is no team context.
   const [teamSharedIds, setTeamSharedIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Per-id share metadata mirrored off the same `/team` read — `canUnshare` is
+  // the ownership gate (resource owner, or a workspace owner/admin) computed
+  // server-side in `canManageSharedResource`; the unshare button only renders
+  // when it is true so a member never sees an action the daemon will 403 on.
+  const [teamSharedMeta, setTeamSharedMeta] = useState<ReadonlyMap<string, { canUnshare?: boolean }>>(() => new Map());
   const [sharingId, setSharingId] = useState<string | null>(null);
+  const [unsharingId, setUnsharingId] = useState<string | null>(null);
   const [surfaceFilter, setSurfaceFilter] = useState<SurfaceFilter>('all');
   const [category, setCategory] = useState<string>('All');
   // The master-detail selection — which row renders in the right preview pane.
@@ -359,15 +365,26 @@ export function DesignSystemsTab({
       // landed inside the in-flight/TTL window serve the previous workspace's
       // ids to the new one.
       const cacheKey = `workspace-design-systems-team:${workspaceContext?.workspaceId ?? 'none'}`;
-      const ids = await coalescedGet(cacheKey, async () => {
+      const body = await coalescedGet(cacheKey, async () => {
         const res = await fetch('/api/workspace/design-systems/team', { cache: 'no-store' });
         if (!res.ok) throw new Error(`design-systems-team ${res.status}`);
-        const body = (await res.json()) as { ids?: unknown };
-        return body.ids;
+        return (await res.json()) as { ids?: unknown; resources?: unknown };
       });
-      if (Array.isArray(ids)) {
-        const next = new Set(ids.filter((id): id is string => typeof id === 'string'));
+      if (Array.isArray(body.ids)) {
+        const next = new Set(body.ids.filter((id): id is string => typeof id === 'string'));
         setTeamSharedIds((prev) => setsEqual(prev, next) ? prev : next);
+        if (Array.isArray(body.resources)) {
+          const meta = new Map<string, { canUnshare?: boolean }>();
+          for (const resource of body.resources) {
+            if (!resource || typeof resource !== 'object') continue;
+            const record = resource as Record<string, unknown>;
+            if (typeof record.id !== 'string') continue;
+            meta.set(record.id, {
+              ...(typeof record.canUnshare === 'boolean' ? { canUnshare: record.canUnshare } : {}),
+            });
+          }
+          setTeamSharedMeta(meta);
+        }
         if (options.refreshSystems) await onSystemsRefresh?.();
       }
     } catch {
@@ -419,6 +436,33 @@ export function DesignSystemsTab({
       notifyAction('error', t('dsManager.shareToTeamFailed'));
     } finally {
       setSharingId(null);
+    }
+  }
+
+  // Remove a design system from the team scope. Mirrors PluginsView's
+  // unshareResource: DELETE the same share route, backed by the daemon's
+  // resource-owner permission gate (only the sharer, or a workspace
+  // owner/admin, may unshare — enforced server-side regardless of what the
+  // button shows).
+  async function handleUnshareFromTeam(system: DesignSystemSummary) {
+    if (unsharingId) return;
+    setUnsharingId(system.id);
+    notifyActionLoading(t('dsManager.unshareFromTeam'));
+    try {
+      const res = await fetch(`/api/workspace/design-systems/${encodeURIComponent(system.id)}/share`, {
+        method: 'DELETE',
+      });
+      const body = (await res.json().catch(() => ({}))) as { unshared?: boolean };
+      if (res.ok && body.unshared) {
+        await refreshTeamShared({ refreshSystems: true });
+        notifyAction('success', t('ds.actionDone'));
+      } else {
+        notifyAction('error', t('dsManager.unshareFromTeamFailed'));
+      }
+    } catch {
+      notifyAction('error', t('dsManager.unshareFromTeamFailed'));
+    } finally {
+      setUnsharingId(null);
     }
   }
 
@@ -918,6 +962,9 @@ export function DesignSystemsTab({
           onShareToTeam={handleShareToTeam}
           isTeamShared={teamSharedIds.has(selectedSystem.id)}
           sharing={sharingId === selectedSystem.id}
+          onUnshareFromTeam={handleUnshareFromTeam}
+          canUnshareFromTeam={teamSharedMeta.get(selectedSystem.id)?.canUnshare === true}
+          unsharing={unsharingId === selectedSystem.id}
         />
       );
     }
@@ -1113,6 +1160,15 @@ interface DetailProps {
   isTeamShared?: boolean;
   /** Whether a share request for this system is in flight. */
   sharing?: boolean;
+  /** Remove this design system from the team scope. */
+  onUnshareFromTeam?: (system: DesignSystemSummary) => void;
+  /** Whether the daemon reports the caller may unshare this system — only the
+   *  original sharer, or a workspace owner/admin (see `canManageSharedResource`
+   *  in `team-resource-share.ts`), so a member never sees an action the
+   *  daemon would 403 on. */
+  canUnshareFromTeam?: boolean;
+  /** Whether an unshare request for this system is in flight. */
+  unsharing?: boolean;
 }
 
 function DesignSystemDetail({
@@ -1130,6 +1186,9 @@ function DesignSystemDetail({
   onShareToTeam,
   isTeamShared,
   sharing,
+  onUnshareFromTeam,
+  canUnshareFromTeam,
+  unsharing,
 }: DetailProps) {
   const analytics = useAnalytics();
   const isUser = isUserSystem(system);
@@ -1138,6 +1197,22 @@ function DesignSystemDetail({
   // A built-in preset can always be picked as the global default; a user
   // system must be published first (mirrors the old "Make default" gate).
   const canBeDefault = !isUser || published;
+
+  // Whether the caller may edit, publish/unpublish, or delete this design
+  // system (recvqb6mfyqXLD: a plain member who merely has a teammate's shared
+  // system synced locally saw a fully-live "Edit with agent" button, publish
+  // toggle, and delete menu item — none of which the daemon actually meant
+  // for them). `system.teamSynced` is set once, synchronously, when the
+  // system is materialized from a team share (`markTeamSynced` in
+  // server.ts) — false/absent for anything the caller authored, including a
+  // system the caller themselves shared to the team. Only a teamSynced
+  // system needs the finer-grained check, and it reuses the exact same
+  // signal as "who can unshare" (`canUnshareFromTeam`, sourced from
+  // `canManageSharedResource` in `team-resource-share.ts`: the original
+  // sharer, or a workspace owner/admin). Defaulting to `!teamSynced` (rather
+  // than to the async `isTeamShared`/`teamSharedMeta` read) keeps this safe
+  // even before that metadata has loaded.
+  const canManageTeamSynced = !system.teamSynced || canUnshareFromTeam === true;
 
   // The summary lacks the DESIGN.md body + packageInfo the kit needs, so fetch
   // the full detail. The kit view derives every module from brand.json (when a
@@ -1257,6 +1332,20 @@ function DesignSystemDetail({
           loading: sharing,
         }]
       : []),
+    // Only the resource owner (or a workspace owner/admin) can unshare — the
+    // daemon enforces this via `canManageSharedResource`; `canUnshareFromTeam`
+    // mirrors that so the action never appears for a system a plain member
+    // merely sees synced locally.
+    ...(isUser && onUnshareFromTeam && isTeamShared && canUnshareFromTeam
+      ? [{
+          id: 'unshare-from-team',
+          label: t('dsManager.unshareFromTeam'),
+          icon: 'close' as const,
+          onClick: () => onUnshareFromTeam(system),
+          disabled: busy || unsharing,
+          loading: unsharing,
+        }]
+      : []),
     ...(isUser
       ? [{
           id: 'download',
@@ -1277,7 +1366,11 @@ function DesignSystemDetail({
           loading: actionBusy === 'default',
         }]
       : []),
-    ...(isUser
+    // Delete is a destructive write on the shared resource itself — only the
+    // original sharer or a workspace owner/admin gets the menu item at all
+    // (see `canManageTeamSynced` above); a plain member with a synced copy
+    // never sees it, matching the unshare gate.
+    ...(isUser && canManageTeamSynced
       ? [{
           id: 'delete',
           label: t('dsManager.deleteSystemAria', { title: system.title }),
@@ -1291,7 +1384,10 @@ function DesignSystemDetail({
 
   const actionsSlot = (
     <>
-      {isUser && onEdit ? (
+      {/* "Edit with agent" opens the authoring flow against the system's
+          backing project — a real write surface, so it is fully hidden (not
+          just disabled) for a teamSynced system the caller may not manage. */}
+      {isUser && onEdit && canManageTeamSynced ? (
         <Button
           variant="primary"
           className={styles.actionButton}
@@ -1314,7 +1410,12 @@ function DesignSystemDetail({
           aria-pressed={published}
           aria-busy={actionBusy === 'publish' || undefined}
           onClick={() => void onTogglePublished(system)}
-          disabled={busy}
+          // Published/draft status stays visible for a teamSynced system the
+          // caller cannot manage (parity with how the sidebar status dot
+          // reads for everyone) — only the toggle interaction is withheld,
+          // per the same `canManageTeamSynced` gate as edit/delete.
+          disabled={busy || !canManageTeamSynced}
+          title={canManageTeamSynced ? undefined : t('dsManager.teamSyncedReadOnly')}
         >
           {actionBusy === 'publish' ? <Icon name="spinner" size={13} className={styles.statusToggleSpinner} /> : null}
           <span>{published ? t('dsManager.statusPublished') : t('dsManager.statusDraft')}</span>

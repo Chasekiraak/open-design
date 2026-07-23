@@ -38,6 +38,19 @@ export interface RegisterDesignSystemRoutesDeps extends RouteDeps<'db' | 'paths'
       root: string,
       id: string,
     ) => Promise<{ buffer: Buffer; baseName: string; title: string } | null>;
+    /**
+     * Whether the caller may mutate (edit / publish-toggle / delete) `id`.
+     * Always true for a system the caller authored themselves. For a system
+     * materialized locally from a teammate's team share, true only when the
+     * caller can manage that share — the original sharer, or a workspace
+     * owner/admin (see `canManageSharedResource` in
+     * `collab/team-resource-share.ts`) — mirroring the "who can unshare"
+     * rule exactly. Without this gate, a plain member with a synced local
+     * copy could PATCH/DELETE a design system that was never theirs
+     * (recvqb6mfyqXLD): the UI hides the affordances, but nothing stopped a
+     * direct API call.
+     */
+    canMutateUserDesignSystem: (root: string, id: string) => Promise<boolean>;
     createUserDesignSystem: (root: string, input: UserDesignSystemInput) => Promise<DesignSystemSummary>;
     deleteUserDesignSystem: (root: string, id: string) => Promise<boolean>;
     ensureUserDesignSystemWorkspaceProject: (db: DbHandle, id: string) => Promise<DesignSystemWorkspaceProject | null>;
@@ -83,6 +96,7 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
   const { CRAFT_DIR, USER_DESIGN_SYSTEMS_DIR } = ctx.paths;
   const {
     buildUserDesignSystemArchive,
+    canMutateUserDesignSystem,
     createUserDesignSystem,
     deleteUserDesignSystem,
     ensureUserDesignSystemWorkspaceProject,
@@ -341,6 +355,9 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
 
   app.patch('/api/design-systems/:id', async (req, res) => {
     try {
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id))) {
+        return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
+      }
       const updated = await updateUserDesignSystem(
         USER_DESIGN_SYSTEMS_DIR,
         req.params.id,
@@ -357,6 +374,9 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
 
   app.delete('/api/design-systems/:id', async (req, res) => {
     try {
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id))) {
+        return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
+      }
       const ok = await deleteUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id);
       if (!ok) {
         return res.status(404).json({ error: 'editable design system not found' });

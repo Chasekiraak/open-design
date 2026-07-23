@@ -155,6 +155,50 @@ describe('AssistantMessage feedback gate', () => {
     }
   });
 
+  it('recvqacy887jsF — shows the copy button mid-stream once there is partial text', () => {
+    // The copy affordance is gated on "is there any non-whitespace text yet"
+    // (copyMarkdown in AssistantMessage.tsx), not on the turn having ended —
+    // so a user can copy what has streamed in so far instead of waiting for
+    // the whole reply. The footer's own CSS backs this: `.assistant-footer`
+    // is opacity:0/hover-revealed at rest, but `[data-streaming="true"]`
+    // forces it to full opacity so a mid-stream reader doesn't ALSO need to
+    // hover to see it.
+    const message = baseMessage({
+      content: 'Partial answer so far',
+      runStatus: undefined,
+      endedAt: undefined,
+      events: [{ kind: 'text', text: 'Partial answer so far' } as ChatMessage['events'][number]],
+    });
+    render(
+      <AssistantMessage
+        message={message}
+        streaming
+        projectId="proj-1"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Copy response markdown' })).toBeTruthy();
+  });
+
+  it('recvqacy887jsF — hides the copy button while streaming has not produced any text yet', () => {
+    // The inverse of the above: before the first token lands there is
+    // nothing to copy, so the button correctly stays absent (not merely
+    // faded out) rather than rendering with an empty payload.
+    const message = baseMessage({
+      content: '',
+      runStatus: undefined,
+      endedAt: undefined,
+      events: [{ kind: 'status', label: 'thinking' } as ChatMessage['events'][number]],
+    });
+    render(
+      <AssistantMessage
+        message={message}
+        streaming
+        projectId="proj-1"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Copy response markdown' })).toBeNull();
+  });
+
   it('calls the fork handler from completed assistant turns', () => {
     const onForkFromMessage = vi.fn();
     render(

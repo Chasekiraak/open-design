@@ -703,6 +703,153 @@ describe('workspace project routes', () => {
     expect(projectBody.project.name).toBe('Direct write project');
   });
 
+  // recvqbklNGDqYY — a fully logged-out request (no x-od-workspace-* headers
+  // at all, exactly what the frontend sends once workspaceContext goes null)
+  // used to hit the ctx===null branch of enforceWorkspaceProjectMutation and
+  // be granted the mutation unconditionally, regardless of whether the
+  // project was actually team-shared. A team-shared project must require
+  // real workspace identity; an untouched personal/local project must still
+  // work headerless (the legacy pre-workspace callers this branch exists for).
+  it('rejects headerless direct-route mutations against a team-shared project, but still allows them for a personal project', async () => {
+    const suffix = Date.now();
+    const teamProjectId = `workspace-headerless-team-${suffix}`;
+    const personalProjectId = `workspace-headerless-personal-${suffix}`;
+    await createProject(teamProjectId, 'Headerless team fixture');
+    await createProject(personalProjectId, 'Headerless personal fixture');
+
+    const ownerHeaders = headers('member-headerless-owner', { 'x-od-workspace-role': 'admin' });
+    const moveResp = await fetch(`${baseUrl}/api/workspaces/${workspaceId}/projects/${teamProjectId}/move`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ visibility: 'team' }),
+    });
+    expect(moveResp.status).toBe(200);
+
+    // No x-od-workspace-* headers at all — the post-logout / legacy shape.
+    const teamPatchResp = await fetch(`${baseUrl}/api/projects/${teamProjectId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Illicit headerless rename' }),
+    });
+    expect(teamPatchResp.status).toBe(401);
+    await expect(teamPatchResp.json()).resolves.toMatchObject({
+      error: { code: 'WORKSPACE_CONTEXT_REQUIRED' },
+    });
+
+    // A project this daemon never bound to any workspace (or bound personal)
+    // must keep working for a headerless caller — this is the pre-workspace
+    // legacy path the null-context branch exists for in the first place.
+    const personalPatchResp = await fetch(`${baseUrl}/api/projects/${personalProjectId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed personal fixture' }),
+    });
+    expect(personalPatchResp.status).toBe(200);
+
+    const stillNamed = await fetch(`${baseUrl}/api/projects/${teamProjectId}`);
+    const stillNamedBody = await stillNamed.json() as { project: { name: string } };
+    expect(stillNamedBody.project.name).toBe('Headerless team fixture');
+  });
+
+  // recvqbjbudBS9r — a duplicated project used to leave the daemon with NO
+  // `workspace_projects` row at all for the copy: `POST /api/projects/:id/duplicate`
+  // inserted the new project row but never bound it anywhere. It stayed an
+  // unbound orphan until whichever workspace's project list was read NEXT
+  // (`bindUnboundProjectsToPersonalWorkspace` sweeps every orphan into the
+  // workspace it is reading for), which could be a workspace the user never
+  // touched. The fix binds the copy into the duplicating request's own
+  // workspace immediately, so no later read — for ANY workspace — can steal it.
+  it('binds a duplicated project into the workspace it was duplicated from, not wherever a project list is read next', async () => {
+    const projectId = `dup-workspace-bind-${Date.now()}`;
+    await createProject(projectId, 'Duplicate workspace-bind fixture');
+
+    const ownerHeaders = headers('member-dup-owner', { 'x-od-workspace-role': 'admin' });
+    const moveResp = await fetch(`${baseUrl}/api/workspaces/${workspaceId}/projects/${projectId}/move`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ visibility: 'team' }),
+    });
+    expect(moveResp.status).toBe(200);
+
+    const duplicateResp = await fetch(`${baseUrl}/api/projects/${projectId}/duplicate`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ name: 'Duplicate workspace-bind copy' }),
+    });
+    expect(duplicateResp.status).toBe(200);
+    const duplicateBody = await duplicateResp.json() as { project: { id: string } };
+    const targetId = duplicateBody.project.id;
+
+    // Read a DIFFERENT workspace's project list first. Before the fix this
+    // greedily adopted the still-unbound copy (any personal-workspace read
+    // sweeps every orphan project into itself), so the copy would show up
+    // here instead of in the workspace it was actually duplicated from.
+    const otherWorkspaceId = `ws-other-${Date.now()}`;
+    const otherList = await listInWorkspace(otherWorkspaceId, 'member-other-reader', '?view=all');
+    expect(otherList.projects.some((item) => item.id === targetId)).toBe(false);
+
+    // The workspace the duplicate actually happened in has it immediately —
+    // no dependency on a later list read to adopt it.
+    const ownList = await list('member-dup-owner', '?view=all');
+    expect(ownList.projects.find((item) => item.id === targetId)).toMatchObject({
+      id: targetId,
+      createdByWorkspaceMemberId: 'member-dup-owner',
+    });
+  });
+
+  // recvqbhor3pai2 — duplicating an already-duplicated project (a "copy of a
+  // copy") 403'd with WORKSPACE_PROJECT_PERMISSION_DENIED / "workspace project
+  // mutation is not allowed". Before recvqbjbudBS9r's fix (the test above),
+  // the first duplicate left NO `workspace_projects` row for the copy, so
+  // `workspaceProjectMutationAllowed` hit its `if (!row) return false;` guard
+  // the moment anyone tried to duplicate THAT copy. This test exercises the
+  // exact reported shape (two duplicates back to back, real owner headers
+  // matching the bug report's curl repro) end to end to confirm
+  // `bindDuplicateIntoRequestWorkspace` closes this specific case too — the
+  // copy's own binding row now exists by the time it is duplicated again.
+  it('allows duplicating a project that is itself already a duplicate', async () => {
+    const suffix = Date.now();
+    const projectId = `dup-of-dup-source-${suffix}`;
+    await createProject(projectId, 'Duplicate-of-duplicate fixture');
+
+    const ownerHeaders = headers('member-dup-of-dup-owner', { 'x-od-workspace-role': 'owner' });
+    const moveResp = await fetch(`${baseUrl}/api/workspaces/${workspaceId}/projects/${projectId}/move`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ visibility: 'team' }),
+    });
+    expect(moveResp.status).toBe(200);
+
+    // First duplicate: source -> copy1 (mirrors the "Mobile App Copy" project
+    // in the bug report, which was itself a duplicate).
+    const firstDuplicateResp = await fetch(`${baseUrl}/api/projects/${projectId}/duplicate`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ name: 'Duplicate-of-duplicate copy 1' }),
+    });
+    expect(firstDuplicateResp.status).toBe(200);
+    const firstDuplicateBody = (await firstDuplicateResp.json()) as { project: { id: string } };
+    const copy1Id = firstDuplicateBody.project.id;
+
+    // Second duplicate: duplicate the COPY itself — this is exactly what the
+    // report's curl reproduced against and got "workspace project mutation is
+    // not allowed" for.
+    const secondDuplicateResp = await fetch(`${baseUrl}/api/projects/${copy1Id}/duplicate`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({ name: 'Duplicate-of-duplicate copy 2' }),
+    });
+    expect(secondDuplicateResp.status).toBe(200);
+    const secondDuplicateBody = (await secondDuplicateResp.json()) as { project: { id: string } };
+    const copy2Id = secondDuplicateBody.project.id;
+
+    const ownList = await list('member-dup-of-dup-owner', '?view=all');
+    expect(ownList.projects.find((item) => item.id === copy2Id)).toMatchObject({
+      id: copy2Id,
+      createdByWorkspaceMemberId: 'member-dup-of-dup-owner',
+    });
+  });
+
   it('blocks direct project and file writes when the workspace is locked', async () => {
     const projectId = `workspace-direct-locked-${Date.now()}`;
     await createProject(projectId, 'Locked direct write project');

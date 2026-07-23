@@ -28,6 +28,30 @@ function readDismissed(): boolean {
   }
 }
 
+/**
+ * recvqbkcLqIFH7: a user who ever closed this card (while poking around
+ * signed-out, or on a personal/local workspace) had that dismissal persist
+ * in localStorage FOREVER — including through a later real sign-in and
+ * sign-out. Since this card is the rail's only visible sign-in entry point
+ * once `context` goes back to null, that stale flag silently deleted the
+ * user's only way back in: the rail footer rendered empty, with no error
+ * and no other affordance.
+ *
+ * A real, deliberate sign-out (the account menu's 退出登录) is exactly the
+ * moment the card must be guaranteed to come back, so EntryNavRail calls
+ * this right alongside its other post-sign-out notifications. It must NOT
+ * be called on every workspace-context refresh — only on an explicit
+ * sign-out — or a dismiss made while merely browsing signed-out would keep
+ * getting undone by unrelated context polls.
+ */
+export function resetCloudSignInTipDismissal(): void {
+  try {
+    window.localStorage.removeItem(DISMISSED_KEY);
+  } catch {
+    // best-effort persistence
+  }
+}
+
 type TipState = 'idle' | 'signing' | 'error';
 
 /**

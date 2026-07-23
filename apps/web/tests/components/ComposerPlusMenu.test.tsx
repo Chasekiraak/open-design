@@ -79,7 +79,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /Connectors/i }));
     expectPickRowPreventsMousedown(/Notion/i);
 
-    fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
     expectPickRowPreventsMousedown(/Deck Maker/i);
 
     fireEvent.click(screen.getByRole('menuitem', { name: /^MCP/i }));
@@ -96,13 +96,13 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
         ],
       });
       fireEvent.click(screen.getByTestId('plus-trigger'));
-      fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
 
       // The user clicks into the search box (focus enters the flyout) and types,
       // pruning the list. In a real browser the shrinking list reflows rows out
       // from under the stationary cursor, so Chromium synthesizes a `mouseleave`
       // on the flyout even though the pointer never moved.
-      const search = screen.getByPlaceholderText('Extensions') as HTMLInputElement;
+      const search = screen.getByPlaceholderText('Plugins') as HTMLInputElement;
       search.focus();
       fireEvent.change(search, { target: { value: 'deck' } });
       const flyout = document.querySelector('.plus-menu__flyout') as HTMLElement;
@@ -115,7 +115,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
         vi.advanceTimersByTime(400);
       });
 
-      expect(screen.queryByPlaceholderText('Extensions')).not.toBeNull();
+      expect(screen.queryByPlaceholderText('Plugins')).not.toBeNull();
       expect(screen.getByRole('menuitem', { name: /Deck Maker/i })).toBeTruthy();
     } finally {
       vi.useRealTimers();
@@ -126,8 +126,8 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
     renderMenu();
     fireEvent.click(screen.getByTestId('plus-trigger'));
 
-    fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
-    const pluginSearch = screen.getByPlaceholderText('Extensions') as HTMLInputElement;
+    fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
+    const pluginSearch = screen.getByPlaceholderText('Plugins') as HTMLInputElement;
     fireEvent.change(pluginSearch, { target: { value: 'deck' } });
     expect(pluginSearch.value).toBe('deck');
 
@@ -170,7 +170,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
       expect(menu.style.top).toBe('auto');
       expect(menu.style.bottom).toBe('52px');
       expect(screen.getByRole('menuitem', { name: /Connectors/i })).toBeTruthy();
-      expect(screen.getByRole('menuitem', { name: /Extensions/i })).toBeTruthy();
+      expect(screen.getByRole('menuitem', { name: /Plugins/i })).toBeTruthy();
       expect(screen.getByRole('menuitem', { name: /^MCP/i })).toBeTruthy();
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
@@ -238,7 +238,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
       const menu = screen.getByRole('menu');
       expect(menu.className).toContain('plus-menu__popup--flyout-left');
 
-      fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
       expect(screen.getByRole('menuitem', { name: /Deck Maker/i })).toBeTruthy();
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
@@ -272,7 +272,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
       const menu = screen.getByRole('menu');
       expect(menu.className).toContain('plus-menu__popup--flyout-contained');
 
-      fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
       expect(screen.getByRole('menuitem', { name: /Deck Maker/i })).toBeTruthy();
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
@@ -306,7 +306,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
       const menu = screen.getByRole('menu');
       expect(menu.className).toContain('plus-menu__popup--flyout-contained');
 
-      fireEvent.click(screen.getByRole('menuitem', { name: /Extensions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Plugins/i }));
       expect(screen.getByRole('menuitem', { name: /Deck Maker/i })).toBeTruthy();
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth });
@@ -337,7 +337,7 @@ describe('ComposerPlusMenu pick-row caret protection', () => {
         }) as DOMRect;
 
       fireEvent.click(trigger);
-      const pluginParent = screen.getByRole('menuitem', { name: /Extensions/i });
+      const pluginParent = screen.getByRole('menuitem', { name: /Plugins/i });
       const pluginRow = pluginParent.closest('.plus-menu__submenu-row') as HTMLDivElement;
       pluginRow.getBoundingClientRect = () =>
         ({
@@ -676,10 +676,10 @@ describe('ComposerPlusMenu module wiring', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add connectors' }));
     expect(props.onAddConnector).toHaveBeenCalledTimes(1);
 
-    openSubmenu(/Extensions/i);
+    openSubmenu(/Plugins/i);
     fireEvent.click(screen.getByRole('menuitem', { name: /Deck Maker/i }));
     expect(props.onPickPlugin).toHaveBeenCalledWith(PLUGIN);
-    openSubmenu(/Extensions/i);
+    openSubmenu(/Plugins/i);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add plugin' }));
     expect(props.onAddPlugin).toHaveBeenCalledTimes(1);
 

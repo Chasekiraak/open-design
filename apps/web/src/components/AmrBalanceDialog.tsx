@@ -9,7 +9,7 @@ import {
   attributedAmrUrl,
   recordAmrEntry,
 } from '../analytics/amr-attribution';
-import { amrConsoleUrlForProfile } from '../runtime/amr-guidance';
+import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { teamConsoleUrl } from './EntryNavRail';
 import {
@@ -99,14 +99,17 @@ export function AmrBalanceDialog({
   // Where 「升级套餐」 goes. `teamConsoleUrl(_, 'upgrade')` is the one place that
   // knows B's deep link: it targets the team DASHBOARD (not the settings page)
   // and appends `billing=checkout`, which B's `team-dashboard` route reads to
-  // auto-open its checkout dialog. Falls back to the profile's wallet page when
-  // the console URL is unavailable (personal workspace, or the context read has
-  // not landed) so the CTA is never a dead end.
+  // auto-open its checkout dialog. Falls back to `amrPlansUrlForProfile` (the
+  // same `view=plans` deep link every other Upgrade affordance uses — ChatPane,
+  // SettingsDialog, AvatarMenu, InlineModelSwitcher) when the console URL is
+  // unavailable (personal workspace, or the context read has not landed), so
+  // the CTA still auto-opens AMR's own pricing modal instead of landing the
+  // user on the bare wallet page with no popup (acceptance regression).
   const { context: workspaceContext } = useWorkspaceContext();
   const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
   const upgradeUrl = workspaceSettingsUrl
     ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade')
-    : amrConsoleUrlForProfile(profile);
+    : amrPlansUrlForProfile(profile);
   const resolvedRef = useRef(false);
   const resolveOnce = () => {
     if (resolvedRef.current) return;

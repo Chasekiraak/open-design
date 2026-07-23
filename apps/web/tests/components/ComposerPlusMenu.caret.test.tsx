@@ -116,7 +116,7 @@ describe('ComposerPlusMenu picker mousedown protection (#3195)', () => {
   it('the plugins picker prevents default on mousedown so the caret survives focus transfer', () => {
     renderMenu();
     openMenu();
-    openSubmenu('Extensions');
+    openSubmenu('Plugins');
     expectMousedownPrevented(pickerRow('Sample Plugin'));
   });
 

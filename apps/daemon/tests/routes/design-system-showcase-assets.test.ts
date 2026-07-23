@@ -31,6 +31,7 @@ function registerRoutes(app: express.Express, staticHtml: string | null) {
     projectStore: {} as never,
     designSystems: {
       buildUserDesignSystemArchive: async () => null,
+      canMutateUserDesignSystem: async () => true,
       createUserDesignSystem: async () => ({}) as never,
       deleteUserDesignSystem: async () => false,
       ensureUserDesignSystemWorkspaceProject: async () => null,

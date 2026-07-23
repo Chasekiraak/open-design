@@ -267,12 +267,27 @@ function enforceWorkspaceProjectMutation(
   res: Response,
   sendApiError: (res: Response, status: number, code: string, message: string) => unknown,
   getWorkspaceProject: (db: unknown, workspaceId: string, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
+  getWorkspaceProjectByProjectId: (db: unknown, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
   db: unknown,
   projectId: string,
   capability: WorkspaceProjectMutationCapability,
 ): boolean {
   const ctx = workspaceProjectContextFromRequest(req);
-  if (ctx === null) return true;
+  if (ctx === null) {
+    // No workspace headers at all — a legacy pre-workspace caller, or a
+    // client that just logged out (the frontend only attaches these headers
+    // while `workspaceContext` is non-null). Either way there is no identity
+    // to check against a team. That's fine for a project this daemon has
+    // never bound to a workspace, or one bound as `personal` — but a project
+    // bound `team` requires proof of membership the request doesn't carry;
+    // treat it the same as `'missing'` rather than granting the mutation.
+    const row = getWorkspaceProjectByProjectId(db, projectId);
+    if (row && row.visibility === 'team') {
+      sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
+      return false;
+    }
+    return true;
+  }
   if (ctx === 'missing') {
     sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
     return false;
@@ -1817,6 +1832,46 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       updatedAt: project.updatedAt,
     });
   }
+
+  /**
+   * Bind a freshly duplicated / design-system-copied project into the SAME
+   * workspace the request that made it is acting in.
+   *
+   * `POST /api/projects` binds the project it creates immediately (see
+   * `workspaceIdForCreate` below), but duplicate and design-system-copy used
+   * to skip that step entirely — the new project row landed with NO
+   * `workspace_projects` row at all. It stayed an unbound orphan until
+   * whichever workspace's project list happened to be read next, and only a
+   * PERSONAL workspace read ever adopts an orphan
+   * (`bindUnboundProjectsToPersonalWorkspace` only runs for
+   * `ctx.workspaceType === 'personal'`). So a duplicate made from inside a
+   * team workspace silently re-homed into the caller's personal workspace
+   * the next time it was read, instead of staying in the team it was
+   * actually duplicated from (recvqbjbudBS9r).
+   *
+   * Called only after `enforceWorkspaceProjectMutation` already allowed the
+   * duplicate/copy, which is proof `ctx` names an active, write-capable
+   * member of the workspace that owns the SOURCE project — exactly the right
+   * home for the copy too. A caller with no workspace context at all (legacy
+   * pre-workspace request) leaves the copy unbound, same as before.
+   */
+  function bindDuplicateIntoRequestWorkspace(req: any, targetProjectId: string, now: number) {
+    const ctx = workspaceProjectContextFromRequest(req);
+    if (ctx === null || ctx === 'missing') return;
+    ensureWorkspaceProject(db, {
+      projectId: targetProjectId,
+      workspaceId: ctx.workspaceId,
+      visibility: 'personal',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: ctx.workspaceMemberId,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      syncState: 'local_only',
+      resourceHubResourceId: null,
+      cloudTombstonedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
   function workspaceProjectRowVisibleForLocations(
     row: any,
     locations: Array<{ id: string; path: string; builtIn?: boolean }>,
@@ -2792,6 +2847,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         sourceProject.id,
         'duplicate',
@@ -2850,6 +2906,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           updatedAt: now,
         });
         insertedProject = true;
+        bindDuplicateIntoRequestWorkspace(req, targetProjectId, now);
         const conversationId = randomId();
         insertConversation(db, {
           id: conversationId,
@@ -2895,6 +2952,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         sourceProject.id,
         'duplicate',
@@ -2986,6 +3044,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           updatedAt: now,
         });
         insertedProject = true;
+        bindDuplicateIntoRequestWorkspace(req, targetProjectId, now);
         const conversationId = randomId();
         insertConversation(db, {
           id: conversationId,
@@ -3073,6 +3132,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         patchProject.id,
         'rename',
@@ -3269,6 +3329,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'delete',
@@ -3530,7 +3591,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
   const { PROJECTS_DIR, DESIGN_SYSTEMS_DIR, USER_DESIGN_SYSTEMS_DIR } = ctx.paths;
   const { upload } = ctx.uploads;
   const { fs } = ctx.node;
-  const { getProject, getWorkspaceProject } = ctx.projectStore;
+  const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { listFiles, listProjectFolders, createProjectFolder, deleteProjectFolder, searchProjectFiles, readProjectFile, resolveProjectDir, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, sanitizePath, ensureProject } = ctx.projectFiles;
   const { buildDocumentPreview } = ctx.documents;
   const { validateArtifactManifestInput } = ctx.artifacts;
@@ -4145,6 +4206,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -4178,6 +4240,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -4492,6 +4555,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -4614,6 +4678,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -4687,6 +4752,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -4834,6 +4900,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
           res,
           sendApiError,
           getWorkspaceProject,
+          getWorkspaceProjectByProjectId,
           db,
           req.params.id,
           'writeFiles',
@@ -5058,6 +5125,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         project.id,
         'writeFiles',
@@ -5103,6 +5171,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         res,
         sendApiError,
         getWorkspaceProject,
+        getWorkspaceProjectByProjectId,
         db,
         delProject.id,
         'writeFiles',
@@ -5132,7 +5201,7 @@ export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUp
   const { sendApiError } = ctx.http;
   const { handleProjectUpload } = ctx.uploads;
   const { PROJECTS_DIR } = ctx.paths;
-  const { getProject, getWorkspaceProject } = ctx.projectStore;
+  const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { readProjectFile } = ctx.projectFiles;
   const { fs } = ctx.node;
 
@@ -5152,6 +5221,7 @@ export function registerProjectUploadRoutes(app: Express, ctx: RegisterProjectUp
           res,
           sendApiError,
           getWorkspaceProject,
+          getWorkspaceProjectByProjectId,
           db,
           req.params.id,
           'writeFiles',

@@ -1528,6 +1528,25 @@ export async function deleteUserDesignSystem(root: string, id: string): Promise<
   }
 }
 
+/**
+ * Whether `id` was materialized locally from a teammate's team share, rather
+ * than authored by the current caller. Mirrors the `teamSynced` flag
+ * `markTeamSynced` (server.ts `syncSharedTeamDesignSystem`) writes once a
+ * shared design system is pulled onto disk — false/absent for anything the
+ * caller authored themselves, including a system the caller has *shared* to
+ * the team (the sharer's own copy never gets this flag). Routes that mutate
+ * a `user:` design system (edit / publish toggle / delete) must treat a
+ * `true` result as "not necessarily mine" and check the caller's team-share
+ * management permission before proceeding (see `canManageSharedResource` in
+ * `collab/team-resource-share.ts`) — recvqb6mfyqXLD.
+ */
+export async function isTeamSyncedUserDesignSystem(root: string, id: string): Promise<boolean> {
+  const dirId = stripPrefixAndValidateId(id, 'user:');
+  if (!dirId) return false;
+  const meta = await readUserMetadata(root, dirId);
+  return meta.teamSynced === true;
+}
+
 export async function listUserDesignSystemFiles(
   root: string,
   id: string,

@@ -672,7 +672,7 @@ export function ComposerPlusMenu({
             ) : null}
           </PlusSubmenuRow>
           <PlusSubmenuRow
-            label={t('entry.navExtensions')}
+            label={t('entry.navPlugins')}
             icon="sparkles"
             open={submenu === 'plugins'}
             testId="composer-plus-plugins"
@@ -689,8 +689,8 @@ export function ComposerPlusMenu({
                   <input
                     value={query}
                     onChange={(event) => handleQueryChange(event.target.value)}
-                    placeholder={t('entry.navExtensions')}
-                    aria-label={t('entry.navExtensions')}
+                    placeholder={t('entry.navPlugins')}
+                    aria-label={t('entry.navPlugins')}
                   />
                 </div>
                 <div className="plus-menu__list">

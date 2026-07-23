@@ -198,6 +198,15 @@ export function RecentProjectsStrip({
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
   const [kindFilter, setKindFilter] = useState<ProjectKindFilter>('all');
   const [sort, setSort] = useState<ProjectSort>('updatedDesc');
+  // recvqbipG9QDTt: this component mounts once per host view (Home, Drafts,
+  // All projects) and stays alive across EntryShell tab switches — Home's
+  // instance in particular is only ever hidden via `content-visibility`, not
+  // unmounted (see EntryShell's `inactiveViewProps`) — so a filter picked
+  // here keeps silently narrowing the grid on every later visit with no cue
+  // that anything is filtered. Surfacing `hasActiveFilter` drives the visible
+  // "clear filters" chip below instead of switching tabs quietly resetting
+  // it, per the reporter's own preferred fix.
+  const hasActiveFilter = ownerFilter !== 'all' || kindFilter !== 'all';
   const [openHeaderMenu, setOpenHeaderMenu] = useState<'owner' | 'kind' | 'sort' | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -253,6 +262,12 @@ export function RecentProjectsStrip({
   const [renameTarget, setRenameTarget] = useState<{ id: string; original: string } | null>(null);
   const [renameInput, setRenameInput] = useState('');
   const [confirmTarget, setConfirmTarget] = useState<Project | null>(null);
+  // recvqbh189zBY6: commitDelete used to await onDelete and drop the result on
+  // the floor either way — a 403/network failure closed the dialog exactly
+  // like a success, leaving the project right where it was with no signal
+  // that anything went wrong. Track failure so the dialog can stay open and
+  // say so instead of silently doing nothing.
+  const [deleteFailed, setDeleteFailed] = useState(false);
   // Project → team-space sharing (the project card entry). The daemon gates on
   // `canShareProjects` (403 off-team / no rights), so we only badge on success.
   const [sharingId, setSharingId] = useState<string | null>(null);
@@ -457,6 +472,7 @@ export function RecentProjectsStrip({
     const creator = resolveCreator(project.id);
     if (!creator.ownedBySelf) return;
     setMenuOpenId(null);
+    setDeleteFailed(false);
     setConfirmTarget(project);
   }
 
@@ -510,6 +526,12 @@ export function RecentProjectsStrip({
 
   function requestDuplicate(project: Project) {
     if (!onDuplicate) return;
+    // Same ownership gate the menu item's `disabled` already enforces (see
+    // recvqaRqM0dv2x above) — kept here too so the handler itself can never
+    // fire the doomed-to-403 request, matching startRename/requestDelete's
+    // own defense-in-depth check.
+    const creator = resolveCreator(project.id);
+    if (!creator.ownedBySelf) return;
     setMenuOpenId(null);
     void Promise.resolve(onDuplicate(project.id)).catch((err) => {
       console.warn('[RecentProjectsStrip] duplicate project failed:', err);
@@ -519,8 +541,22 @@ export function RecentProjectsStrip({
   async function commitDelete() {
     if (!confirmTarget || !onDelete) return;
     const target = confirmTarget;
-    setConfirmTarget(null);
-    await onDelete(target.id);
+    setDeleteFailed(false);
+    try {
+      const result = await onDelete(target.id);
+      // A falsy result (false, or void from a caller that never resolves the
+      // promise either way) means the daemon refused or the request failed —
+      // keep the dialog open with a visible reason instead of closing it as
+      // if the project were gone (recvqbh189zBY6).
+      if (result === false) {
+        setDeleteFailed(true);
+        return;
+      }
+      setConfirmTarget(null);
+    } catch (err) {
+      console.warn('[RecentProjectsStrip] delete project failed:', err);
+      setDeleteFailed(true);
+    }
   }
 
   function toggleSelection(projectId: string) {
@@ -704,6 +740,24 @@ export function RecentProjectsStrip({
                 </div>
               ) : null}
             </div>
+            {hasActiveFilter ? (
+              // Only rendered once a filter narrows the grid, so it never
+              // competes for attention with the plain owner/kind/sort chips
+              // above — see recvqbipG9QDTt.
+              <button
+                type="button"
+                className="recent-projects__filter-clear"
+                data-testid="recent-projects-clear-filters"
+                onClick={() => {
+                  setOwnerFilter('all');
+                  setKindFilter('all');
+                  setOpenHeaderMenu(null);
+                }}
+              >
+                <Icon name="close" size={12} />
+                {t('recentProjects.clearFilters')}
+              </button>
+            ) : null}
             <div className="recent-projects__filter-wrap">
               <button
                 type="button"
@@ -940,7 +994,11 @@ export function RecentProjectsStrip({
                     >
                       <Icon name="spinner" size={18} />
                     </span>
-                  ) : shared ? (
+                  ) : shared && view !== 'list' ? (
+                    // Grid's thumb has room for the badge as a floating overlay
+                    // (hover-revealed, see recent-projects.css); list view's
+                    // thumb is far too small (128x52) for it — the inline
+                    // variant next to the name below covers that case instead.
                     <span className="recent-projects__card-badge recent-projects__card-badge--shared">
                       <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="9" cy="8" r="3" />
@@ -953,6 +1011,15 @@ export function RecentProjectsStrip({
                 <div className="recent-projects__card-meta">
                   <div className="recent-projects__card-name-row">
                     <span className="recent-projects__card-name">{project.name}</span>
+                    {shared && view === 'list' ? (
+                      <span className="recent-projects__card-badge recent-projects__card-badge--shared recent-projects__card-badge--inline">
+                        <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="9" cy="8" r="3" />
+                          <path d="M3 20a6 6 0 0 1 12 0M16 11a3 3 0 1 0-1-5.8M21 20a6 6 0 0 0-5-5.9" />
+                        </svg>
+                        {t('recentProjects.sharedBadge')}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="recent-projects__card-footer">
                     <div className="recent-projects__card-time">
@@ -1010,8 +1077,22 @@ export function RecentProjectsStrip({
                           <span>{t('designs.menuRename')}</span>
                         </button>
                       ) : null}
+                      {/* recvqaRqM0dv2x: duplicating a team-shared project you
+                          did not create is meaningless (the daemon's
+                          canDuplicate mirrors canMutate — privileged-or-
+                          selfCreated only, see enforceWorkspaceProjectMutation)
+                          and always 403s. This item was missing the same
+                          ownedBySelf gate Rename/Delete already carry, so it
+                          stayed enabled on a foreign card and looked like a
+                          dead click when pressed. */}
                       {onDuplicate ? (
-                        <button type="button" role="menuitem" onClick={() => requestDuplicate(project)}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!creator.ownedBySelf}
+                          title={creator.ownedBySelf ? undefined : t('recentProjects.ownOnlyMutation')}
+                          onClick={() => requestDuplicate(project)}
+                        >
                           <Icon name="copy" size={12} />
                           <span>{t('designs.menuDuplicate')}</span>
                         </button>
@@ -1126,15 +1207,29 @@ export function RecentProjectsStrip({
         <Dialog
           className="modal-confirm"
           role="alertdialog"
-          onClose={() => setConfirmTarget(null)}
+          onClose={() => {
+            setConfirmTarget(null);
+            setDeleteFailed(false);
+          }}
           ariaLabelledBy={confirmTitleId}
         >
           <DialogTitle id={confirmTitleId}>{t('designs.deleteTitle')}</DialogTitle>
           <DialogDescription>
             {t('designs.deleteConfirm', { name: confirmTarget.name })}
           </DialogDescription>
+          {deleteFailed ? (
+            <p className="recent-projects__card-menu-error" role="alert">
+              {t('ds.actionFailed')}
+            </p>
+          ) : null}
           <DialogFooter className="row">
-            <button type="button" onClick={() => setConfirmTarget(null)}>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmTarget(null);
+                setDeleteFailed(false);
+              }}
+            >
               {t('designs.renameCancel')}
             </button>
             <button type="button" className="primary danger" onClick={() => void commitDelete()}>

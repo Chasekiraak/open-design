@@ -14,9 +14,11 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudSignInTip } from '../../src/components/CloudSignInTip';
+import { CloudSignInTip, resetCloudSignInTipDismissal } from '../../src/components/CloudSignInTip';
 import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
+
+const DISMISSED_KEY = 'od.entry.cloudSignInTip.dismissed';
 
 interface StubbedResponse {
   status?: number;
@@ -126,5 +128,23 @@ describe('CloudSignInTip', () => {
     });
 
     expect(spawnCount).toBe(2);
+  });
+
+  // Regression for 飞书 recvqbkcLqIFH7: dismissing this card once, closing
+  // its "×", used to persist forever — including through a later real
+  // sign-in and sign-out — so a stale dismissal from a completely unrelated
+  // earlier session silently deleted the rail's only sign-in entry point.
+  it('renders again after a dismissal once resetCloudSignInTipDismissal() runs', async () => {
+    const { unmount } = renderTip();
+    fireEvent.click(await screen.findByLabelText('Dismiss Open Design Cloud note'));
+    expect(window.localStorage.getItem(DISMISSED_KEY)).toBe('1');
+    expect(screen.queryByTestId('entry-cloud-signin-tip')).toBeNull();
+    unmount();
+
+    resetCloudSignInTipDismissal();
+    expect(window.localStorage.getItem(DISMISSED_KEY)).toBeNull();
+
+    renderTip();
+    expect(await screen.findByTestId('entry-cloud-signin-tip')).toBeTruthy();
   });
 });
