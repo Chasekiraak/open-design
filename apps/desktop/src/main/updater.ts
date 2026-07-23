@@ -2145,27 +2145,64 @@ async function withUpdaterLifecycleLock<T>(
   layout: DesktopUpdaterStoreLayout,
   logger: DesktopUpdaterLogger,
   task: () => Promise<T>,
+  options: { reclaimStale?: boolean } = {},
 ): Promise<T | null> {
   await mkdir(layout.stateRoot, { recursive: true });
+  const acquire = async (): Promise<boolean> => {
+    try {
+      await mkdir(layout.lockRoot);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return false;
+    }
+  };
+  let acquired = await acquire();
+  if (!acquired && options.reclaimStale === true) {
+    const owner = await readJson<unknown>(join(layout.lockRoot, LOCK_OWNER_FILE));
+    const ownerPid = isRecord(owner) && owner.owner === "open-design-updater-lifecycle"
+      && owner.version === RELEASE_CLEANUP_DESCRIPTOR_VERSION
+      && typeof owner.pid === "number" && Number.isSafeInteger(owner.pid) && owner.pid > 0
+      ? owner.pid
+      : null;
+    let ownerIsDead = false;
+    if (ownerPid != null) {
+      try {
+        process.kill(ownerPid, 0);
+      } catch (error) {
+        ownerIsDead = (error as NodeJS.ErrnoException).code === "ESRCH";
+      }
+    }
+    if (ownerIsDead) {
+      const staleLockRoot = `${layout.lockRoot}.stale-${process.pid}-${Date.now()}`;
+      try {
+        await rename(layout.lockRoot, staleLockRoot);
+        await rm(staleLockRoot, { force: true, recursive: true });
+        acquired = await acquire();
+        if (acquired) {
+          logger.warn("[open-design updater] reclaimed stale updater lifecycle lock", {
+            lockRoot: layout.lockRoot,
+            ownerPid,
+          });
+        }
+      } catch (error) {
+        logger.warn("[open-design updater] failed to reclaim stale updater lifecycle lock", error);
+      }
+    }
+  }
+  if (!acquired) {
+    logger.warn("[open-design updater] skipped release lifecycle because updater lifecycle lock is held", {
+      lockRoot: layout.lockRoot,
+    });
+    return null;
+  }
   try {
-    await mkdir(layout.lockRoot);
     await writeJson(join(layout.lockRoot, LOCK_OWNER_FILE), {
       createdAt: new Date().toISOString(),
       owner: "open-design-updater-lifecycle",
       pid: process.pid,
       version: RELEASE_CLEANUP_DESCRIPTOR_VERSION,
     });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EEXIST") {
-      logger.warn("[open-design updater] skipped release lifecycle because updater lifecycle lock is held", {
-        lockRoot: layout.lockRoot,
-      });
-      return null;
-    }
-    throw error;
-  }
-  try {
     return await task();
   } finally {
     await rm(layout.lockRoot, { force: true, recursive: true }).catch((error: unknown) => {
@@ -2378,6 +2415,7 @@ async function runUpdateReleaseLifecycle(input: {
   layout: DesktopUpdaterStoreLayout;
   logger: DesktopUpdaterLogger;
   now: () => Date;
+  reclaimStaleLock?: boolean;
   readyVersion?: string;
   trigger: DesktopUpdateCacheLifecycleTrigger;
 }): Promise<DesktopUpdateCacheLifecycleSummary | null> {
@@ -2429,7 +2467,7 @@ async function runUpdateReleaseLifecycle(input: {
     });
     await writeJson(layout.cleanupPath, cleaned);
     return summarizeReleaseCleanupDescriptor(cleaned, config.platform);
-  });
+  }, { reclaimStale: input.reclaimStaleLock });
 }
 
 function launcherCleanupError(code: string, message: string): NonNullable<LauncherCleanupEntry["error"]> {
@@ -2746,10 +2784,14 @@ async function loadActiveRelease(
   metadata: UpdateStoreMetadata,
   config: DesktopUpdaterConfig,
   logger: DesktopUpdaterLogger,
+  allowCurrentVersion = false,
 ): Promise<{ active: LoadedRelease | null; ok: true } | { error: DesktopUpdateErrorSnapshot; ok: false }> {
   const active = metadata.active;
   if (active == null) return { ok: true, active: null };
-  if (compareVersions(active.version, config.currentVersion) <= 0) return { ok: true, active: null };
+  const currentVersionComparison = compareVersions(active.version, config.currentVersion);
+  if (currentVersionComparison < 0 || (currentVersionComparison === 0 && !allowCurrentVersion)) {
+    return { ok: true, active: null };
+  }
   const artifactPath = resolve(root.realRoot, active.artifactPath);
   if (!containsPath(root.realRoot, artifactPath)) {
     const error = storeShapeError(root.realRoot, "active release artifact path escaped update root", { artifactPath });
@@ -3009,9 +3051,34 @@ export function createDesktopUpdater(
     const opened = await openStore();
     if (!opened.ok) return opened.status;
     const restoredMetadata = await clearInterruptedIncomingDownload(opened.root, opened.metadata, logger);
-    const loadedActive = await loadActiveRelease(opened.root, restoredMetadata, config, logger);
+    const storedActive = restoredMetadata.active;
+    const launcherPayloadContextValid = storedActive != null
+      && storedActive.artifact.type === "installer"
+      && compareVersions(storedActive.version, config.currentVersion) === 0
+      && await hasValidLauncherPayloadContext(config);
+    const restoredReinstallRequirement = launcherPayloadContextValid
+      ? remoteRequiresReinstall(
+          storedActive.metadata,
+          config,
+          await resolveInstalledOuterVersion(config),
+        ) ?? undefined
+      : undefined;
+    const restoreSameVersionReinstall =
+      restoredReinstallRequirement != null
+      && restoredReinstallRequirement.reason !== "launcher-schema"
+      && restoredReinstallRequirement.minVersion != null
+      && storedActive != null
+      && compareVersions(restoredReinstallRequirement.minVersion, storedActive.version) <= 0;
+    const loadedActive = await loadActiveRelease(
+      opened.root,
+      restoredMetadata,
+      config,
+      logger,
+      restoreSameVersionReinstall,
+    );
     if (!loadedActive.ok) return setState(DESKTOP_UPDATE_STATES.ERROR, loadedActive.error);
     activeRelease = loadedActive.active;
+    reinstallRequirement = activeRelease == null ? undefined : restoredReinstallRequirement;
     // If the app now runs at or beyond the stored active release, the
     // external installer succeeded and its one-shot UI state is stale.
     const clearedAppliedRelease =
@@ -3714,9 +3781,16 @@ export function createDesktopUpdater(
       layout,
       logger,
       now,
+      reclaimStaleLock: true,
       trigger: "manual",
     });
-    if (releaseSummary != null) lifecycleSummary = releaseSummary;
+    if (releaseSummary == null) {
+      return setState(
+        DESKTOP_UPDATE_STATES.ERROR,
+        createError("updater-lifecycle-lock-held", "update cache cleanup is blocked by an active or unverifiable lifecycle lock"),
+      );
+    }
+    lifecycleSummary = releaseSummary;
 
     await clearLauncherStateForManualClear({ config, logger, now, removeLauncherPayloadRoot });
 

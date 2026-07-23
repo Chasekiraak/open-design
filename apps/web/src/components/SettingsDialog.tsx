@@ -5929,7 +5929,9 @@ export function SettingsDialog({
                   </span>
                 </label>
               </div>
-              {aboutUpdaterModel.environment === 'desktop' && appVersionInfo?.packaged !== false ? (
+              {aboutUpdaterModel.environment === 'desktop'
+                && aboutUpdaterModel.supported
+                && appVersionInfo?.packaged !== false ? (
                 <div className="settings-about-diagnostics">
                   <div className="settings-about-diagnostics-text">
                     <h4>{t('settings.clearUpdaterCacheTitle')}</h4>

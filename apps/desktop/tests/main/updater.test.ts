@@ -907,8 +907,12 @@ describe("desktop updater", () => {
   async function runLauncherReseedCheck(
     fixtureOptions: Parameters<typeof createUpdaterFixture>[0],
     currentVersion = "1.0.0-beta.1",
-    harnessOptions: { env?: NodeJS.ProcessEnv; installedOuterVersion?: string | null } = {},
-  ): Promise<{ close: () => Promise<void>; snapshot: Awaited<ReturnType<ReturnType<typeof createDesktopUpdater>["checkForUpdates"]>> }> {
+    harnessOptions: { env?: NodeJS.ProcessEnv; installedOuterVersion?: string | null; restart?: boolean } = {},
+  ): Promise<{
+    close: () => Promise<void>;
+    restartedSnapshot?: Awaited<ReturnType<ReturnType<typeof createDesktopUpdater>["status"]>>;
+    snapshot: Awaited<ReturnType<ReturnType<typeof createDesktopUpdater>["checkForUpdates"]>>;
+  }> {
     const root = makeRoot();
     const fixture = await createUpdaterFixture({
       channel: "beta",
@@ -945,7 +949,7 @@ describe("desktop updater", () => {
         schemaVersion: LAUNCHER_SCHEMA_VERSION,
       })}\n`,
     );
-    const updater = createDesktopUpdater({
+    const updaterInput = {
       arch: "x64",
       currentVersion,
       downloadRoot: join(root, "updates"),
@@ -960,7 +964,8 @@ describe("desktop updater", () => {
       launcherRuntimePath,
       namespace: "release-beta-win",
       source: SIDECAR_SOURCES.PACKAGED,
-    }, {
+    } as const;
+    const updaterDeps: NonNullable<Parameters<typeof createDesktopUpdater>[1]> = {
       extractLauncherPayloadArchive: async ({ destinationRoot }) => {
         await mkdir(join(destinationRoot, "payload", "resources", "open-design"), { recursive: true });
         await writeFile(join(destinationRoot, "payload", "Open Design.exe"), "");
@@ -981,10 +986,15 @@ describe("desktop updater", () => {
       launchAppAfterQuit: async () => ({ helperLogPath: join(root, "updates", "helpers", "test.log") }),
       processExecPath: "C:\\Program Files\\Open Design Beta\\Open Design Beta.exe",
       processPid: 4242,
-    });
+    };
+    const updater = createDesktopUpdater(updaterInput, updaterDeps);
     const snapshot = await updater.checkForUpdates();
+    const restartedSnapshot = harnessOptions.restart === true
+      ? await createDesktopUpdater(updaterInput, updaterDeps).status()
+      : undefined;
     return {
       snapshot,
+      ...(restartedSnapshot == null ? {} : { restartedSnapshot }),
       close: async () => {
         await fixture.close();
         rmSync(root, { force: true, recursive: true });
@@ -1063,6 +1073,34 @@ describe("desktop updater", () => {
       expect(snapshot.artifact?.type).toBe("installer");
       expect(snapshot.availableVersion).toBe("1.0.0-beta.1");
       expect(snapshot.reinstall?.reason).toBe("outer-below-min");
+    } finally {
+      await close();
+    }
+  });
+
+  it("restores a downloaded same-version installer reinstall after restart", async () => {
+    const { restartedSnapshot, close } = await runLauncherReseedCheck(
+      {
+        controlLauncherVersionMin: "1.0.0-beta.1",
+        controlLauncherVersionUrl: "https://example.com/reinstall-help",
+        version: "1.0.0-beta.1",
+      },
+      "1.0.0-beta.1",
+      { installedOuterVersion: "1.0.0-beta.0", restart: true },
+    );
+    try {
+      expect(restartedSnapshot).toMatchObject({
+        availableVersion: "1.0.0-beta.1",
+        reinstall: {
+          installedVersion: "1.0.0-beta.0",
+          minVersion: "1.0.0-beta.1",
+          reason: "outer-below-min",
+          url: "https://example.com/reinstall-help",
+        },
+        state: DESKTOP_UPDATE_STATES.DOWNLOADED,
+      });
+      expect(restartedSnapshot?.artifact?.type).toBe("installer");
+      expect(restartedSnapshot?.downloadPath).toEqual(expect.any(String));
     } finally {
       await close();
     }
@@ -1213,6 +1251,37 @@ describe("desktop updater", () => {
       const rechecked = await updater.checkForUpdates();
       expect(rechecked.state).toBe(DESKTOP_UPDATE_STATES.DOWNLOADED);
       expect(rechecked.downloadPath).toEqual(expect.any(String));
+    } finally {
+      await fixture.close();
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("reclaims a dead-owner lifecycle lock during manual cache clear", async () => {
+    const root = makeRoot();
+    const fixture = await createUpdaterFixture();
+    try {
+      const updater = createDesktopUpdater({
+        arch: "arm64",
+        downloadRoot: root,
+        env: updaterEnv(fixture.metadataUrl),
+        source: SIDECAR_SOURCES.TOOLS_PACK,
+      });
+      const checked = await updater.checkForUpdates();
+      expect(checked.state).toBe(DESKTOP_UPDATE_STATES.DOWNLOADED);
+      await mkdir(join(root, "state", "lock"), { recursive: true });
+      await writeFile(join(root, "state", "lock", "owner.json"), JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        owner: "open-design-updater-lifecycle",
+        pid: 2_147_483_647,
+        version: 1,
+      }));
+
+      const cleared = await updater.clearCache();
+
+      expect(cleared.state).toBe(DESKTOP_UPDATE_STATES.IDLE);
+      expect(existsSync(join(root, "state", "lock"))).toBe(false);
+      expect(await readdir(join(root, "releases"))).toEqual([]);
     } finally {
       await fixture.close();
       rmSync(root, { force: true, recursive: true });

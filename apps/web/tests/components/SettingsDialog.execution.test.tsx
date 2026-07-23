@@ -5392,6 +5392,37 @@ describe('SettingsDialog about interactions', () => {
     expect(await screen.findByText(en['settings.clearUpdaterCacheSuccess'])).toBeTruthy();
   });
 
+  it('hides updater cache recovery when packaged updates are unsupported', async () => {
+    restoreOpenDesignHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          status: vi.fn(async () => updateStatus({
+            platform: 'linux',
+            state: 'unsupported',
+            supported: false,
+          })),
+        },
+      },
+    });
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        initialSection: 'about',
+        appVersionInfo: {
+          version: '1.2.3-beta.3',
+          channel: 'beta',
+          packaged: true,
+          platform: 'linux',
+          arch: 'x64',
+        },
+      },
+    );
+
+    await screen.findByText(en['settings.updateStatusUnsupported']);
+    expect(screen.queryByTestId('settings-clear-updater-cache')).toBeNull();
+  });
+
   it('installs a downloaded payload update from the about page', async () => {
     const payloadReady = updateStatus({
       artifact: {
