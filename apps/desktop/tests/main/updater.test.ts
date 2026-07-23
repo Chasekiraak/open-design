@@ -1273,6 +1273,118 @@ describe("desktop updater", () => {
     }
   });
 
+  // Stone 4 — clear-cache must survive a corrupt store when ownership is
+  // provable: the sentinel is the proof, and everything else in an owned root
+  // is updater cache by definition. Unowned or foreign-generation roots are
+  // never touched.
+  it("rebuilds an owned update store with corrupt metadata through clear-cache", async () => {
+    const root = makeRoot();
+    try {
+      await writeFile(join(root, ".open-design-updater-root.json"), JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        owner: "open-design-updater",
+        source: "tools-pack",
+        version: 1,
+      }));
+      await writeFile(join(root, "metadata.json"), "{ not json");
+      await mkdir(join(root, "releases", "stale-release"), { recursive: true });
+
+      const updater = createDesktopUpdater({
+        arch: "arm64",
+        downloadRoot: root,
+        env: updaterEnv("http://127.0.0.1:9/metadata.json"),
+        source: SIDECAR_SOURCES.TOOLS_PACK,
+      });
+
+      const cleared = await updater.clearCache();
+
+      expect(cleared.state).toBe(DESKTOP_UPDATE_STATES.IDLE);
+      expect(cleared.error).toBeUndefined();
+      const storeMetadata = JSON.parse(await readFile(join(root, "metadata.json"), "utf8")) as Record<string, unknown>;
+      expect(storeMetadata.version).toBe(1);
+      expect(existsSync(join(root, "releases", "stale-release"))).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rebuilds an owned update store with unexpected root entries through clear-cache", async () => {
+    const root = makeRoot();
+    try {
+      await writeFile(join(root, ".open-design-updater-root.json"), JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        owner: "open-design-updater",
+        source: "tools-pack",
+        version: 1,
+      }));
+      await writeFile(join(root, "metadata.json"), JSON.stringify({ version: 1 }));
+      await writeFile(join(root, "stray-file.bin"), "junk");
+
+      const updater = createDesktopUpdater({
+        arch: "arm64",
+        downloadRoot: root,
+        env: updaterEnv("http://127.0.0.1:9/metadata.json"),
+        source: SIDECAR_SOURCES.TOOLS_PACK,
+      });
+
+      const cleared = await updater.clearCache();
+
+      expect(cleared.state).toBe(DESKTOP_UPDATE_STATES.IDLE);
+      expect(existsSync(join(root, "stray-file.bin"))).toBe(false);
+      expect(existsSync(join(root, ".open-design-updater-root.json"))).toBe(true);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to clear a non-empty root without an ownership sentinel", async () => {
+    const root = makeRoot();
+    try {
+      await writeFile(join(root, "user-document.txt"), "precious");
+
+      const updater = createDesktopUpdater({
+        arch: "arm64",
+        downloadRoot: root,
+        env: updaterEnv("http://127.0.0.1:9/metadata.json"),
+        source: SIDECAR_SOURCES.TOOLS_PACK,
+      });
+
+      const cleared = await updater.clearCache();
+
+      expect(cleared.state).toBe(DESKTOP_UPDATE_STATES.ERROR);
+      expect(cleared.error?.code).toBe("update-root-not-owned");
+      expect(await readFile(join(root, "user-document.txt"), "utf8")).toBe("precious");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to clear a root whose ownership marker belongs to another updater generation", async () => {
+    const root = makeRoot();
+    try {
+      await writeFile(join(root, ".open-design-updater-root.json"), JSON.stringify({
+        owner: "open-design-updater",
+        version: 999,
+      }));
+      await writeFile(join(root, "metadata.json"), "{ not json");
+
+      const updater = createDesktopUpdater({
+        arch: "arm64",
+        downloadRoot: root,
+        env: updaterEnv("http://127.0.0.1:9/metadata.json"),
+        source: SIDECAR_SOURCES.TOOLS_PACK,
+      });
+
+      const cleared = await updater.clearCache();
+
+      expect(cleared.state).toBe(DESKTOP_UPDATE_STATES.ERROR);
+      expect(cleared.error?.code).toBe("update-root-version-mismatch");
+      expect(await readFile(join(root, "metadata.json"), "utf8")).toBe("{ not json");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a confirmed desktop handoff journal through clear-cache", async () => {
     const root = makeRoot();
     try {

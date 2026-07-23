@@ -833,6 +833,41 @@ async function ensureOwnedUpdateRoot(
   }
 }
 
+/**
+ * Manual-clear degradation for a corrupt store: rebuild an update root the
+ * updater can PROVE it owns. Proof is the current-generation ownership
+ * sentinel — everything else inside an owned root is updater cache by
+ * definition and safe to purge. Roots without a sentinel (unowned), with a
+ * foreign-generation marker (another updater's store), or failing IO are
+ * never touched; the caller surfaces the original store error instead.
+ */
+async function rebuildOwnedUpdateRootForManualClear(
+  config: DesktopUpdaterConfig,
+  logger: DesktopUpdaterLogger,
+): Promise<boolean> {
+  try {
+    const root = normalizeDownloadRoot(config.downloadRoot);
+    const rootEntry = await lstat(root);
+    if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) return false;
+    const realRoot = await realpath(root);
+    const layout = resolveDesktopUpdaterStoreLayout(realRoot);
+    const sentinel = await readJson<{ version?: number }>(layout.ownershipSentinelPath);
+    if (sentinel == null || sentinel.version !== UPDATE_ROOT_VERSION) return false;
+    for (const entry of await readdir(realRoot)) {
+      if (entry === OWNERSHIP_SENTINEL) continue;
+      await rm(join(realRoot, entry), { force: true, recursive: true });
+    }
+    await writeJson(layout.metadataPath, { version: STORE_METADATA_VERSION });
+    logger.warn("[open-design updater] rebuilt corrupt owned update store for manual clear", { root: realRoot });
+    return true;
+  } catch (error) {
+    logger.warn("[open-design updater] failed to rebuild corrupt update store for manual clear", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 function defaultChannelForVersion(version: string): DesktopUpdateChannel {
   const channel = releaseChannelFromVersion(version);
   return channel ?? DESKTOP_UPDATE_CHANNELS.STABLE;
@@ -3584,8 +3619,16 @@ export function createDesktopUpdater(
     const unsupported = unsupportedStatus();
     if (unsupported != null) return unsupported;
     logUpdateEvent("manual-cache-clear-start");
-    const opened = await openStore();
-    if (!opened.ok) return opened.status;
+    let opened = await openStore();
+    if (!opened.ok) {
+      // Disaster posture: a corrupt store is one of the blocking scenarios
+      // this action exists to recover from. Rebuild only when ownership is
+      // provable; otherwise surface the original store error unchanged.
+      if (!(await rebuildOwnedUpdateRootForManualClear(config, logger))) return opened.status;
+      logUpdateEvent("manual-cache-clear-store-rebuilt");
+      opened = await openStore();
+      if (!opened.ok) return opened.status;
+    }
     // Reset one-shot state before any deletion: even if later cleanup steps
     // fail, the UI must not stay stuck on stale downloaded/frozen state — that
     // is the very blocking scenario this action exists to recover from.
