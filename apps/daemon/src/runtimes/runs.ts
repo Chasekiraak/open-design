@@ -45,6 +45,12 @@ function durableRunState(run) {
     endedWithUnfinishedWork: Boolean(run.endedWithUnfinishedWork),
     ...(typeof run.userPrompt === 'string' ? { userPrompt: run.userPrompt } : {}),
     ...(typeof run.model === 'string' ? { model: run.model } : {}),
+    ...(typeof run.resolvedModelId === 'string'
+      ? { resolvedModelId: run.resolvedModelId }
+      : {}),
+    ...(typeof run.preflightAgentCliVersion === 'string'
+      ? { preflightAgentCliVersion: run.preflightAgentCliVersion }
+      : {}),
     ...(typeof run.reasoning === 'string' ? { reasoning: run.reasoning } : {}),
     ...(typeof run.skillId === 'string' ? { skillId: run.skillId } : {}),
     ...(typeof run.designSystemId === 'string' ? { designSystemId: run.designSystemId } : {}),

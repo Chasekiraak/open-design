@@ -206,6 +206,7 @@ import {
   resolveModelForServiceTier,
 } from './runtimes/models.js';
 import { loadMmdRouteLaunchEnv } from './runtimes/mmd-routes.js';
+import { preflightCodexDefaultModel } from './runtimes/codex-model-preflight.js';
 import { preparePromptFileForAgent } from './runtimes/prompt-file.js';
 import { TerminalControlSequenceStripper } from './runtimes/terminal-control.js';
 import {
@@ -1534,7 +1535,9 @@ export function createFinalizedMessageTelemetryReporter({
         ...(terminalResult ? { result: terminalResult } : {}),
         ...(run?.errorCode ? { error_code: run.errorCode } : {}),
         ...(run?.agentId ? { agent_provider_id: agentIdToTracking(run.agentId) } : {}),
-        ...(run?.model !== undefined ? { model_id: modelIdForTracking(run.model) } : {}),
+        ...(run?.model !== undefined || run?.resolvedModelId !== undefined
+          ? { model_id: modelIdForTracking(run.resolvedModelId ?? run.model) }
+          : {}),
       },
       insertId: `${runId}-langfuse-report-${reportTrigger}-${reportResult}${skipReason ? `-${skipReason}` : ''}`,
     });
@@ -5998,9 +6001,78 @@ export async function startServer({
       // in the normalizer while the child resolves it to the absolute path,
       // leaving the real config untouched. Mirrors the diagnostics-export.ts
       // `envFor('codex')` pattern. See issue #4276.
-      await normalizeCodexConfigFile(
-        spawnEnvForAgent('codex', process.env, configuredAgentEnv),
+      const codexConfigEnv = spawnEnvForAgent(
+        'codex',
+        process.env,
+        configuredAgentEnv,
+        undefined,
+        { resolvedBin: agentLaunch.selectedPath },
       );
+      await normalizeCodexConfigFile(codexConfigEnv);
+
+      // When Open Design leaves model selection at `default`, Codex resolves
+      // the concrete model from config.toml. A known-old CLI can accept the
+      // config, start `exec`, and only then reject a newer configured model.
+      // Gate only evidence-backed stable-version/model combinations before
+      // buildArgs/spawn. Every uncertain boundary (custom provider, API-key
+      // auth, config overlays, project config, unknown/prerelease version)
+      // fails open so Codex keeps its existing forward compatibility.
+      if (agentLaunch.launchPath) {
+        if (run.cancelRequested || design.runs.isTerminal(run.status)) {
+          lifecycle.mark('launch_preflight_end');
+          cleanupPromptFile();
+          return;
+        }
+        const preflight = await preflightCodexDefaultModel({
+          launchPath: agentLaunch.launchPath,
+          env: applyAgentLaunchEnv(codexConfigEnv, agentLaunch),
+          requestedModel: safeModel,
+          projectRoot: effectiveCwd,
+        });
+        if (run.cancelRequested || design.runs.isTerminal(run.status)) {
+          lifecycle.mark('launch_preflight_end');
+          cleanupPromptFile();
+          return;
+        }
+        if (preflight.status === 'compatible' || preflight.status === 'incompatible') {
+          run.resolvedModelId = preflight.model;
+          run.preflightAgentCliVersion = preflight.cliVersion;
+        }
+        if (preflight.status === 'incompatible') {
+          lifecycle.mark('launch_preflight_end');
+          const message =
+            `The '${preflight.model}' model requires a newer version of Codex. ` +
+            `The installed Codex CLI (${preflight.cliVersion}) is older than the known-compatible ` +
+            `minimum (${preflight.requiredCliVersion}). ` +
+            'Upgrade the Codex CLI or choose a model supported by this installation, then retry.';
+          design.runs.emit(run, 'diagnostic', {
+            type: 'model_capability_preflight',
+            status: 'incompatible',
+            model: preflight.model,
+            cli_version: preflight.cliVersion,
+            required_cli_version: preflight.requiredCliVersion,
+          });
+          send('error', createSseErrorPayload(
+            'AGENT_EXECUTION_FAILED',
+            message,
+            {
+              retryable: false,
+              details: {
+                failureCategory: 'model_unavailable',
+                failureDetail: 'cli_version_incompatible',
+                model: preflight.model,
+                requiredCliVersion: preflight.requiredCliVersion,
+              },
+            },
+          ));
+          cleanupPromptFile();
+          // No child was spawned, so there is no process exit code to report.
+          // Passing null preserves the preflight attribution instead of
+          // polluting exit_nonzero transport metrics with a synthetic exit 1.
+          finishWithRetryDecision('failed', null, null);
+          return;
+        }
+      }
     }
 
     // Serialize antigravity spawns whose buildArgs writes a concrete

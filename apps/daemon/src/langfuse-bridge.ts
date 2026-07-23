@@ -88,6 +88,8 @@ interface DaemonRunRecord {
   // into chatBody / req across the createChatRunService boundary.
   userPrompt?: string;
   model?: string;
+  resolvedModelId?: string | null;
+  preflightAgentCliVersion?: string | null;
   reasoning?: string;
   skillId?: string;
   designSystemId?: string;
@@ -257,6 +259,8 @@ function turnInfoFromRun(
     turn.model = run.model;
   } else if (agentReportedModel && agentReportedModel.trim().length > 0) {
     turn.model = agentReportedModel.trim();
+  } else if (run.resolvedModelId && run.resolvedModelId.trim().length > 0) {
+    turn.model = run.resolvedModelId.trim();
   } else {
     // Keep Langfuse aligned with PostHog's model bucket when the user selected
     // "Default (CLI config)" and the runtime did not emit a resolved model.
@@ -1044,6 +1048,9 @@ export async function reportRunCompletedFromDaemon(
       ...getRuntimeInfo(opts.appVersion ?? null),
       ...(run.clientType ? { clientType: run.clientType } : {}),
       ...(getDetectedRuntimeVersions(run.agentId) ?? {}),
+      ...(run.preflightAgentCliVersion
+        ? { agentCliVersion: run.preflightAgentCliVersion }
+        : {}),
     };
     const artifacts = summarizeProducedFiles(traceObjectFilesRaw);
     const diagnostics = summarizeRunDiagnosticsForAnalytics({
