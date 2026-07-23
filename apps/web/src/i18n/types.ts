@@ -173,6 +173,12 @@ export interface Dict {
   'common.daysShort': string;
   'common.untitled': string;
   'designBrowser.savePageBrief': string;
+  'designBrowser.viewport.desktop': string;
+  'designBrowser.viewport.desktopTitle': string;
+  'designBrowser.viewport.tablet': string;
+  'designBrowser.viewport.tabletTitle': string;
+  'designBrowser.viewport.mobile': string;
+  'designBrowser.viewport.mobileTitle': string;
   'designBrowser.menu': string;
   'designBrowser.copyScreenshot': string;
   'designBrowser.hardReload': string;
@@ -188,6 +194,8 @@ export interface Dict {
   'designBrowser.status.openHttpFirst': string;
   'designBrowser.status.openBeforeScreenshot': string;
   'designBrowser.status.screenshotSaved': string;
+  'designBrowser.addImageToChatButton': string;
+  'designBrowser.status.imageAddedToChat': string;
   'designBrowser.status.screenshotFailed': string;
   'designBrowser.status.openBeforeBrief': string;
   'designBrowser.status.briefSaveFailed': string;

@@ -727,94 +727,91 @@ export function EntryNavRail({
         </NavButton>
 
         {context ? (
-          <div className="entry-nav-rail__team-wrap">
-            <button
-              type="button"
-              className="entry-nav-rail__team"
-              onClick={() => setTeamOpen((v) => !v)}
-              aria-expanded={teamOpen}
-              data-testid="workspace-switcher"
-            >
-              <span className="entry-nav-rail__team-avatar" aria-hidden>{workspaceInitial}</span>
-              <span className="entry-nav-rail__team-name">{workspaceName}</span>
-              <Icon name="chevron-down" size={14} />
-            </button>
-            {teamOpen ? (
-              <>
-                <div className="entry-nav-rail__menu-backdrop" onClick={() => setTeamOpen(false)} />
-                <div className="entry-nav-rail__team-menu" role="menu">
-                  {visibleWorkspaceItems.map((item) => {
-                    const active = item.workspaceId === context.workspaceId;
-                    const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
-                    return (
+          <div className="entry-nav-rail__team-section">
+            <div className="entry-nav-rail__team-wrap">
+              <button
+                type="button"
+                className="entry-nav-rail__team"
+                onClick={() => setTeamOpen((v) => !v)}
+                aria-expanded={teamOpen}
+                data-testid="workspace-switcher"
+              >
+                <span className="entry-nav-rail__team-avatar" aria-hidden>{workspaceInitial}</span>
+                <span className="entry-nav-rail__team-name">{workspaceName}</span>
+                <Icon name="chevron-down" size={14} />
+              </button>
+              {teamOpen ? (
+                <>
+                  <div className="entry-nav-rail__menu-backdrop" onClick={() => setTeamOpen(false)} />
+                  <div className="entry-nav-rail__team-menu" role="menu">
+                    {visibleWorkspaceItems.map((item) => {
+                      const active = item.workspaceId === context.workspaceId;
+                      const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
+                      return (
+                        <button
+                          key={item.workspaceId}
+                          type="button"
+                          className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                          role="menuitem"
+                          aria-current={active ? 'true' : undefined}
+                          // Only the in-flight switch disables a row. Disabling the
+                          // CURRENT one made the UA grey it out, so the selected
+                          // workspace read as the inactive one and vice versa;
+                          // `.is-current` (bold + accent ✓) is the selected signal.
+                          disabled={workspaceSwitchingId === item.workspaceId}
+                          onClick={() => {
+                            void switchWorkspace(item.workspaceId);
+                          }}
+                        >
+                          <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
+                          {/* #5517's switcher rows are avatar + full name + ✓ only.
+                              The raw role word ate the name's width and truncated
+                              it; the role is already on 设置·工作区. */}
+                          <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
+                          {active ? <Icon name="check" size={14} /> : null}
+                        </button>
+                      );
+                    })}
+                    {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
+                      <div className="entry-nav-rail__menu-item is-muted" role="status">
+                        {t('common.loading')}
+                      </div>
+                    ) : null}
+                    <div className="entry-nav-rail__menu-divider" />
+                    {canInviteMembers ? (
                       <button
-                        key={item.workspaceId}
                         type="button"
-                        className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                        className="entry-nav-rail__menu-item"
                         role="menuitem"
-                        aria-current={active ? 'true' : undefined}
-                        // Only the in-flight switch disables a row. Disabling the
-                        // CURRENT one made the UA grey it out, so the selected
-                        // workspace read as the inactive one and vice versa;
-                        // `.is-current` (bold + accent ✓) is the selected signal.
-                        disabled={workspaceSwitchingId === item.workspaceId}
                         onClick={() => {
-                          void switchWorkspace(item.workspaceId);
+                          setTeamOpen(false);
+                          setInviteOpen(true);
                         }}
                       >
-                        <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
-                        {/* #5517's switcher rows are avatar + full name + ✓ only.
-                            The raw role word ate the name's width and truncated
-                            it; the role is already on 设置·工作区. */}
-                        <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
-                        {active ? <Icon name="check" size={14} /> : null}
+                        <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
                       </button>
-                    );
-                  })}
-                  {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
-                    <div className="entry-nav-rail__menu-item is-muted" role="status">
-                      {t('common.loading')}
-                    </div>
-                  ) : null}
-                  <div className="entry-nav-rail__menu-divider" />
-                  {canInviteMembers ? (
-                    <button
-                      type="button"
-                      className="entry-nav-rail__menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setTeamOpen(false);
-                        setInviteOpen(true);
-                      }}
-                    >
-                      <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
-                    </button>
-                  ) : null}
-                  {/* Creating a workspace is a B console flow (its sidebar owns the
-                      create dialog; there is no route or query param that opens it
-                      directly), so this entry links OUT instead of doing local work.
-                      With no console URL there is nowhere to send the user — render
-                      nothing rather than a control that silently does nothing. */}
-                  {workspaceSettingsUrl ? (
-                    <a
-                      className="entry-nav-rail__menu-item"
-                      role="menuitem"
-                      href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
-                      {...externalLinkProps}
-                      data-testid="entry-nav-create-team"
-                      onClick={() => setTeamOpen(false)}
-                    >
-                      <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
-                    </a>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-
-        {context ? (
-          <>
+                    ) : null}
+                    {/* Creating a workspace is a B console flow (its sidebar owns the
+                        create dialog; there is no route or query param that opens it
+                        directly), so this entry links OUT instead of doing local work.
+                        With no console URL there is nowhere to send the user — render
+                        nothing rather than a control that silently does nothing. */}
+                    {workspaceSettingsUrl ? (
+                      <a
+                        className="entry-nav-rail__menu-item"
+                        role="menuitem"
+                        href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
+                        {...externalLinkProps}
+                        data-testid="entry-nav-create-team"
+                        onClick={() => setTeamOpen(false)}
+                      >
+                        <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
+                      </a>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
             <NavButton
               active={view === 'drafts'}
               ariaLabel={t('entry.navDrafts')}
@@ -880,7 +877,7 @@ export function EntryNavRail({
                 <span className="entry-nav-rail__btn-label">{t('entry.navWorkspaceSettings')}</span>
               </a>
             ) : null}
-          </>
+          </div>
         ) : (
           <>
             <NavButton

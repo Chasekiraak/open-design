@@ -19,7 +19,8 @@
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--bg) 70%, transparent);
-  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: var(--scrim-backdrop);
+  backdrop-filter: var(--scrim-backdrop);
 }
 .paste-text-dialog-backdrop.modal-backdrop {
   z-index: 2000;
@@ -1301,8 +1302,10 @@ button.df-card-thumb:focus:not(:disabled) {
 .df-row-popover {
   position: fixed;
   z-index: 200;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: var(--glass-regular);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--material-separator);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
   padding: 4px;

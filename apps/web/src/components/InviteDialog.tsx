@@ -10,11 +10,17 @@
 // dialog shows a brief success state and closes; on failure it surfaces an inline
 // error and stays open. The UI never blocks on the backend being present.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { WorkspaceInviteRole } from '@open-design/contracts';
 import { Button } from '@open-design/components';
 import { Icon } from './Icon';
 import { useI18n } from '../i18n';
+
+const ROLE_OPTIONS = ['admin', 'member'] as const;
+
+function roleLabel(role: string, t: ReturnType<typeof useI18n>['t']) {
+  return role === 'admin' ? t('invite.role.admin') : t('invite.role.member');
+}
 
 export interface InviteRow {
   email: string;
@@ -71,11 +77,29 @@ export function InviteDialog({
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openRoleIndex, setOpenRoleIndex] = useState<number | null>(null);
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const roleListboxId = useId();
 
   useEffect(() => {
     if (!open || canAssignRoles) return;
     setRows((prev) => prev.map((row) => ({ ...row, role: DEFAULT_ROLE })));
   }, [canAssignRoles, open]);
+
+  useEffect(() => {
+    if (openRoleIndex === null) return;
+    function onDown(e: MouseEvent) {
+      if (rowsRef.current && !rowsRef.current.contains(e.target as Node)) {
+        setOpenRoleIndex(null);
+      }
+    }
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [openRoleIndex]);
+
+  useEffect(() => {
+    if (!open) setOpenRoleIndex(null);
+  }, [open]);
 
   // Reset the submit lifecycle each time the dialog opens so a prior error /
   // success never lingers on the next invite.
@@ -203,7 +227,7 @@ export function InviteDialog({
               {canAssignRoles ? t('workspaceInvite.roleLabel') : t('workspaceInvite.defaultRoleLabel')}
             </span>
           </div>
-          <div className="entry-invite__rows">
+          <div className="entry-invite__rows" ref={rowsRef}>
             {rows.map((row, i) => (
               <div className="entry-invite__fields" key={i}>
                 <input
@@ -213,16 +237,44 @@ export function InviteDialog({
                   value={row.email}
                   onChange={(e) => updateRow(i, { email: e.target.value })}
                 />
-                <select
-                  className="entry-invite__role"
-                  value={canAssignRoles ? row.role : DEFAULT_ROLE}
-                  onChange={(e) => updateRow(i, { role: e.target.value })}
-                  disabled={!canAssignRoles}
-                  aria-label={canAssignRoles ? t('workspaceInvite.roleLabel') : t('workspaceInvite.defaultRoleLabel')}
-                >
-                  <option value="admin">{t('invite.role.admin')}</option>
-                  <option value="member">{t('invite.role.member')}</option>
-                </select>
+                <div className="entry-invite__role-picker">
+                  <button
+                    type="button"
+                    className="entry-invite__role"
+                    onClick={() => {
+                      if (!canAssignRoles) return;
+                      setOpenRoleIndex((current) => (current === i ? null : i));
+                    }}
+                    disabled={!canAssignRoles}
+                    aria-label={canAssignRoles ? t('workspaceInvite.roleLabel') : t('workspaceInvite.defaultRoleLabel')}
+                    aria-haspopup="listbox"
+                    aria-expanded={openRoleIndex === i}
+                    aria-controls={`${roleListboxId}-${i}`}
+                  >
+                    <span>{roleLabel(canAssignRoles ? row.role : DEFAULT_ROLE, t)}</span>
+                    <Icon name="chevron-down" size={16} />
+                  </button>
+                  {openRoleIndex === i ? (
+                    <div className="entry-invite__role-menu" id={`${roleListboxId}-${i}`} role="listbox">
+                      {ROLE_OPTIONS.map((role) => (
+                        <button
+                          type="button"
+                          key={role}
+                          className={`entry-invite__role-option${(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? ' is-selected' : ''}`}
+                          role="option"
+                          aria-selected={(canAssignRoles ? row.role : DEFAULT_ROLE) === role}
+                          onClick={() => {
+                            updateRow(i, { role });
+                            setOpenRoleIndex(null);
+                          }}
+                        >
+                          <span>{roleLabel(role, t)}</span>
+                          {(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? <Icon name="check" size={16} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 {rows.length > 1 ? (
                   <button
                     type="button"

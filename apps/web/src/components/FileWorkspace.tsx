@@ -48,6 +48,7 @@ import {
   writeProjectTextFile,
 } from '../providers/registry';
 import type { Dict } from '../i18n/types';
+import { STAGE_ATTACHMENT_EVENT, type StageAttachmentEventDetail } from './ChatComposer';
 import { setPendingDesignSystemCreateEntry } from '../analytics/ds-create-entry';
 import { navigate } from '../router';
 import { downloadDesignSystemArchive, downloadProjectArchive } from '../runtime/exports';
@@ -3627,6 +3628,15 @@ export function FileWorkspace({
               onOpenDesignFiles={() => setPersistedActive(DESIGN_FILES_TAB)}
               onOpenFile={openFile}
               onPageInfoChange={(info) => updateBrowserTabInfo(browserTab.id, info)}
+              onAddImageToChat={(attachment) => {
+                // The panel already wrote the capture into the project; hand
+                // the ready ChatAttachment to the composer's staging listener.
+                window.dispatchEvent(
+                  new CustomEvent<StageAttachmentEventDetail>(STAGE_ATTACHMENT_EVENT, {
+                    detail: { attachments: [attachment] },
+                  }),
+                );
+              }}
             />
           </div>
         ))}

@@ -414,6 +414,11 @@ export function useTeamProjects(): TeamProjectsState {
       if (document.visibilityState === 'visible') void loadFull();
     };
     const onTeamProjectsChanged = () => {
+      // A workspace switch fires this same event (see `switchWorkspace` in
+      // EntryNavRail.tsx). Without evicting, an in-flight coalesced read
+      // started just before the switch can resolve inside the new call's
+      // coalescing window and hand back the PREVIOUS workspace's team list.
+      evictCoalescedGet('workspace-team-projects');
       void loadFull();
     };
     const onStorage = (event: StorageEvent) => {

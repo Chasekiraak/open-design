@@ -1329,14 +1329,34 @@ function AppInner() {
     let cancelled = false;
     const request = beginProjectListRequest();
     setProjectsLoading(true);
-    void listCurrentWorkspaceProjects({ workspaceView: effectiveWorkspaceProjectView })
-      .then((list) => {
-        if (cancelled) return;
-        reconcileFetchedProjects(list, request);
-      })
-      .finally(() => {
-        if (!cancelled) setProjectsLoading(false);
-      });
+    (async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const list = await listCurrentWorkspaceProjects({
+            throwOnError: true,
+            workspaceView: effectiveWorkspaceProjectView,
+          });
+          if (!cancelled) reconcileFetchedProjects(list, request);
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          if (attempt === 0) {
+            // Switching into a team workspace can race the daemon's remote
+            // team-project-catalog session warming up for it (recvqaeREM6pdv:
+            // a transient 502 here used to be silently downgraded to an empty
+            // list, which HomeView cannot tell apart from a genuinely empty
+            // workspace and renders as the first-run empty state). Retry once
+            // before giving up instead of reconciling a failure as "no
+            // projects".
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            continue;
+          }
+          console.error('[projects] failed to refresh after workspace switch', err);
+        }
+      }
+    })().finally(() => {
+      if (!cancelled) setProjectsLoading(false);
+    });
     return () => {
       cancelled = true;
     };
