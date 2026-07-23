@@ -848,11 +848,12 @@ export function DesignSystemsTab({
       );
     }
     if (activeSystems.length === 0) {
-      // One empty message per state, never two. A search that matched nothing is
-      // a fact about THIS list, so it is stated here beside the filter that
-      // caused it; an empty scope is a fact about the page, so it is left to the
-      // detail pane's empty card rather than repeated as bare text in both
-      // columns.
+      // `.root`'s grid always reserves a fixed 304px sidebar column (see
+      // DesignSystemsTab.module.css) whether or not this list has content. An
+      // empty `null` here leaves that column visibly blank, which reads as the
+      // detail pane's centered empty-state card sitting off-axis rather than
+      // page-centered. A short placeholder message gives the column real
+      // content so the two-pane split still looks intentional.
       if (designSystemCollection === 'official') {
         return (
           <div className={styles.sidebarEmpty} data-testid="design-systems-empty">
@@ -860,7 +861,11 @@ export function DesignSystemsTab({
           </div>
         );
       }
-      return null;
+      return (
+        <div className={styles.sidebarEmpty}>
+          <p className={styles.sidebarEmptyText}>{t('dsManager.emptyMine')}</p>
+        </div>
+      );
     }
     return activeSystems.map((system) => (
       <SystemRow
