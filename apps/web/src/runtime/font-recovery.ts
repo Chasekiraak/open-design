@@ -38,6 +38,7 @@ const RETRY_DELAYS_MS = [0, 4_000, 15_000, 45_000];
 
 function erroredFamilies(doc: Document): Set<string> {
   const errored = new Set<string>();
+  if (!doc.fonts || typeof doc.fonts.forEach !== 'function') return errored;
   doc.fonts.forEach((face) => {
     if (face.status === 'error') {
       errored.add(face.family.replace(/^["']|["']$/g, ''));
