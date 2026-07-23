@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   hasPullApprovalStateDrift,
@@ -9,7 +9,7 @@ import {
   listPendingApprovalRuns,
   runTargetsPullRequest,
   waitForPendingApprovalRuns,
-} from "./approve-fork-pr-workflows.ts";
+} from "../../../scripts/approve-fork-pr-workflows.ts";
 
 test("isPendingApprovalRun matches approval-gated fork PR runs from GitHub's captured payload shape", () => {
   const pull = {
