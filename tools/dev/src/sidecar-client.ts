@@ -13,6 +13,14 @@ export type AppRuntimeLookup = {
   namespace: string;
 };
 
+export const DESKTOP_STARTUP_TIMEOUT_MS = 90_000;
+
+export type DesktopRuntimeWaitDeps = {
+  inspect?: typeof inspectDesktopRuntime;
+  now?: () => number;
+  sleep?: (delayMs: number) => Promise<void>;
+};
+
 export function resolveDaemonIpcPath(runtime: AppRuntimeLookup): string {
   return resolveAppIpcPath({ app: APP_KEYS.DAEMON, contract: OPEN_DESIGN_SIDECAR_CONTRACT, namespace: runtime.namespace });
 }
@@ -69,12 +77,21 @@ export async function inspectDesktopRuntime(runtime: AppRuntimeLookup, timeoutMs
   }
 }
 
-export async function waitForDesktopRuntime(runtime: AppRuntimeLookup, timeoutMs = 15000): Promise<DesktopStatusSnapshot> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const snapshot = await inspectDesktopRuntime(runtime, 800);
+export async function waitForDesktopRuntime(
+  runtime: AppRuntimeLookup,
+  timeoutMs = DESKTOP_STARTUP_TIMEOUT_MS,
+  deps: DesktopRuntimeWaitDeps = {},
+): Promise<DesktopStatusSnapshot> {
+  const now = deps.now ?? Date.now;
+  const inspect = deps.inspect ?? inspectDesktopRuntime;
+  const sleep =
+    deps.sleep ??
+    ((delayMs: number) => new Promise<void>((resolveWait) => setTimeout(resolveWait, delayMs)));
+  const startedAt = now();
+  while (now() - startedAt < timeoutMs) {
+    const snapshot = await inspect(runtime, 800);
     if (snapshot != null) return snapshot;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+    await sleep(150);
   }
   throw new Error("desktop did not expose status in time");
 }
