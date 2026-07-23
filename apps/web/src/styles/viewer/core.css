@@ -33,6 +33,12 @@
   gap: 8px;
   min-height: 44px;
   flex-shrink: 0;
+  /* Establishes the containment context the @container queries below key off
+     (narrow-pane icon-only mode tabs, the ⋮ overflow menu, and the controls it
+     is a fallback for). Dropped by a merge (rec:recvq5vpmWCBM1) and only
+     partially restored since — without this, every one of those @container
+     rules has no ancestor to match against and is permanently inert. */
+  container-type: inline-size;
 }
 [data-theme='dark'] .viewer-toolbar {
   background: var(--bg-panel);
@@ -44,6 +50,11 @@
 }
 .viewer-toolbar-left { display: inline-flex; align-items: center; gap: 8px; }
 .viewer-toolbar-actions { display: inline-flex; gap: 2px; align-items: center; }
+/* Wraps the icon-action group (screenshot/comment/mark/edit/comment-count/
+   zoom) as a single unit `.viewer-toolbar-actions` can hide via the 600px
+   @container breakpoint above once the ⋮ overflow menu is the fallback home
+   for them — see the container-type note on .viewer-toolbar. */
+.viewer-toolbar-inline-actions { display: inline-flex; gap: 2px; align-items: center; min-width: 0; }
 .viewer-toolbar-tool-divider {
   display: none;
 }

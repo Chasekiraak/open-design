@@ -12447,7 +12447,7 @@ function HtmlViewer({
         </div>
         <div className="viewer-toolbar-actions">
           {showPreviewToolbarControls ? (
-            <>
+            <div className="viewer-toolbar-inline-actions">
               {mode === 'preview' ? (
                 <button
                   type="button"
@@ -12563,7 +12563,7 @@ function HtmlViewer({
                   ) : null}
                 </div>
               ) : null}
-            </>
+            </div>
           ) : null}
           <div className="viewer-toolbar-more" ref={toolbarMoreRef}>
             <button
