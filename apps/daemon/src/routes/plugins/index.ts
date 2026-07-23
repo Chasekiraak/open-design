@@ -15,6 +15,10 @@ import {
   enforceTeamResourceCopyAllowed,
   type TeamResourceStateProvider,
 } from '../../collab/team-resource-state.js';
+import {
+  enforceWorkspaceResourceMutation,
+  headerValue,
+} from '../../collab/workspace-resource-mutation.js';
 import type { PluginShareAction } from '../../services/plugin-share-tasks.js';
 
 export interface RegisterPluginEventRoutesDeps {
@@ -48,6 +52,15 @@ interface AppliedPluginSnapshotLike {
   snapshotId: string;
   pluginId: string;
   [key: string]: unknown;
+}
+
+// The narrow slice of a `workspace_resources` row the mutation gate needs —
+// see collab/workspace-resource-mutation.ts's `WorkspaceResourceAccessInput`,
+// which this mirrors so `enforceWorkspaceResourceMutation` accepts it as-is.
+interface WorkspaceResourceBindingRow {
+  visibility?: string | null;
+  resourceState?: string | null;
+  createdByWorkspaceMemberId?: string | null;
 }
 
 interface MissingInputErrorLike extends Error {
@@ -124,8 +137,30 @@ export interface RegisterPluginRoutesDeps {
   conversations: {
     insertConversation(db: SqliteDbLike, conversation: unknown): unknown;
   };
+  /**
+   * Read access to the generic `workspace_resources` binding table (db.ts),
+   * pre-bound to no particular resource type — routes below pass `'plugin'`
+   * explicitly so a future skill/design-system route can reuse the exact
+   * same deps shape. Optional so callers that never reach the uninstall
+   * route (`registerProjectPluginRoutes`, existing narrow-scope tests) don't
+   * have to wire it; `registerPluginRoutes`'s uninstall handler treats an
+   * absent value as "no gate" rather than crashing.
+   */
+  workspaceResources?: {
+    getWorkspaceResource: (
+      db: SqliteDbLike,
+      resourceType: string,
+      workspaceId: string,
+      resourceId: string,
+    ) => WorkspaceResourceBindingRow | null | undefined;
+    getWorkspaceResourceByResourceId: (
+      db: SqliteDbLike,
+      resourceType: string,
+      resourceId: string,
+    ) => WorkspaceResourceBindingRow | null | undefined;
+  };
   plugins: {
-    listInstalledPlugins: (db: SqliteDbLike) => InstalledPluginLike[];
+    listInstalledPlugins: (db: SqliteDbLike, workspaceId?: string | null) => InstalledPluginLike[];
     getInstalledPlugin: (db: SqliteDbLike, id: string) => InstalledPluginLike | null;
     installPlugin: (db: SqliteDbLike, args: unknown) => AsyncIterable<unknown>;
     isSafePluginId: (id: string) => boolean;
@@ -178,13 +213,43 @@ export function registerPluginEventRoutes(app: Express, deps: RegisterPluginEven
 }
 
 export function registerPluginRoutes(app: Express, deps: RegisterPluginRoutesDeps): void {
-  const { db, paths, ids, projectStore, conversations, plugins, helpers, teamResources } = deps;
-  app.get('/api/plugins', async (_req, res) => { try { res.json({ plugins: helpers.applyBakedPreviews(plugins.listInstalledPlugins(db), helpers.PLUGIN_PREVIEWS_DIR) }); } catch (err) { res.status(500).json({ error: String(err) }); } });
+  const { db, paths, ids, projectStore, conversations, plugins, helpers, teamResources, workspaceResources } = deps;
+  app.get('/api/plugins', async (req, res) => { try { const workspaceId = headerValue(req, 'x-od-workspace-id'); res.json({ plugins: helpers.applyBakedPreviews(plugins.listInstalledPlugins(db, workspaceId), helpers.PLUGIN_PREVIEWS_DIR) }); } catch (err) { res.status(500).json({ error: String(err) }); } });
   app.get('/api/plugins/:id', async (req, res) => { try { const plugin = plugins.getInstalledPlugin(db, req.params.id); if (!plugin) return res.status(404).json({ error: 'plugin not found' }); res.json(plugin); } catch (err) { res.status(500).json({ error: String(err) }); } });
   app.post('/api/plugins/upload-zip', (req, res) => helpers.pluginUpload.single('file')(req, res, async (err: unknown) => { if (err) return helpers.sendMulterError(res, err); try { const file = req.file; if (!file?.buffer) return res.status(400).json({ error: 'file is required' }); const result = await helpers.pluginInstallation.stageUploadedPluginZip(file.buffer, `upload:zip:${helpers.decodeMultipartFilename(file.originalname || 'plugin.zip')}`); res.status((result as { ok?: boolean }).ok ? 200 : 400).json(result); } catch (uploadErr: unknown) { res.status(400).json({ ok: false, warnings: [], message: uploadErr instanceof Error ? uploadErr.message : String(uploadErr), log: [] }); } }));
   app.post('/api/plugins/upload-folder', (req, res) => helpers.pluginUpload.array('files', 500)(req, res, async (err: unknown) => { if (err) return helpers.sendMulterError(res, err); try { const files = Array.isArray(req.files) ? req.files as Array<{ buffer: Buffer; originalname: string }> : []; if (files.length === 0) return res.status(400).json({ error: 'files are required' }); const result = await helpers.pluginInstallation.stageUploadedPluginFolder(files, req.body?.paths); res.status((result as { ok?: boolean } | null)?.ok ? 200 : 400).json(result); } catch (uploadErr: unknown) { res.status(400).json({ ok: false, warnings: [], message: uploadErr instanceof Error ? uploadErr.message : String(uploadErr), log: [] }); } }));
   app.post('/api/plugins/install', async (req, res) => helpers.installOrUpgradePlugin(req, res, 'install'));
-  app.post('/api/plugins/:id/uninstall', async (req, res) => { try { if (!plugins.isSafePluginId(req.params.id)) return res.status(400).json({ error: 'invalid plugin id' }); const result = await plugins.uninstallPlugin(db, req.params.id, paths.PLUGIN_REGISTRY_ROOTS); if (!result.ok && !result.removedFolder) return res.status(404).json({ error: 'plugin not found', warning: result.warning }); res.json(result); } catch (err) { res.status(500).json({ error: String(err) }); } });
+  // This route used to carry NO permission check at all: any caller (any
+  // workspace, any role) could uninstall any plugin. Now gated the same way
+  // project mutations are, via the shared
+  // `enforceWorkspaceResourceMutation` (collab/workspace-resource-mutation.ts).
+  //
+  // The gate only applies when the plugin has an actual `workspace_resources`
+  // binding row (i.e. it was installed through the workspace-aware
+  // `/api/plugins/install` after this shipped). A plugin installed BEFORE
+  // this round — bundled or user-installed — has no binding row at all;
+  // per the design's "no retroactive tagging" rule (same one design-systems'
+  // `designSystemVisibleFromWorkspace` already ships), an unbound resource
+  // stays outside the isolation regime rather than becoming permanently
+  // un-uninstallable the moment a caller happens to carry workspace headers.
+  app.post('/api/plugins/:id/uninstall', async (req, res) => {
+    try {
+      if (!plugins.isSafePluginId(req.params.id)) return res.status(400).json({ error: 'invalid plugin id' });
+      const binding = workspaceResources?.getWorkspaceResourceByResourceId(db, 'plugin', req.params.id);
+      if (binding && workspaceResources && !enforceWorkspaceResourceMutation(
+        'plugin',
+        req,
+        res,
+        helpers.sendApiError,
+        (dbArg, workspaceId, resourceId) => workspaceResources.getWorkspaceResource(dbArg as SqliteDbLike, 'plugin', workspaceId, resourceId),
+        (dbArg, resourceId) => workspaceResources.getWorkspaceResourceByResourceId(dbArg as SqliteDbLike, 'plugin', resourceId),
+        db,
+        req.params.id,
+        'delete',
+      )) return;
+      const result = await plugins.uninstallPlugin(db, req.params.id, paths.PLUGIN_REGISTRY_ROOTS); if (!result.ok && !result.removedFolder) return res.status(404).json({ error: 'plugin not found', warning: result.warning }); res.json(result);
+    } catch (err) { res.status(500).json({ error: String(err) }); }
+  });
   app.post('/api/plugins/:id/upgrade', async (req, res) => helpers.installOrUpgradePlugin(req, res, 'upgrade'));
   app.post('/api/plugins/:id/apply', async (req, res) => { try { const plugin = plugins.getInstalledPlugin(db, req.params.id); if (!plugin) return res.status(404).json({ error: 'plugin not found' }); const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {}; const inputs = body.inputs && typeof body.inputs === 'object' ? body.inputs : {}; const grantCaps = Array.isArray(body.grantCaps) ? body.grantCaps.filter((c: unknown): c is string => typeof c === 'string') : []; const locale = typeof body.locale === 'string' ? body.locale : undefined; const registry = await helpers.loadPluginRegistryView(); const connectorProbe = helpers.buildConnectorProbe(helpers.connectorService); const computed = plugins.applyPlugin({ plugin, inputs, registry, locale, connectorProbe }); if (grantCaps.length > 0) { const merged = new Set([...computed.result.capabilitiesGranted, ...grantCaps]); computed.result.capabilitiesGranted = Array.from(merged); computed.result.appliedPlugin.capabilitiesGranted = Array.from(merged); } res.json({ ok: true, ...computed.result, warnings: computed.warnings, manifestSourceDigest: computed.manifestSourceDigest }); } catch (err: unknown) { if (err instanceof plugins.MissingInputError) return res.status(422).json({ error: 'missing_inputs', fields: err.fields }); res.status(500).json({ error: String(err) }); } });
   app.post('/api/plugins/:id/duplicate-project', helpers.requireLocalDaemonRequest, async (req, res) => {

@@ -981,10 +981,12 @@
   line-height: 1.55;
   color: var(--text-muted);
   max-width: 64ch;
+  overflow-wrap: anywhere;
 }
 
 .run-error__diagnostic {
   overflow: hidden;
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-subtle);
 }
@@ -1108,6 +1110,11 @@
   transition: background 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .chat-error-action:hover { background: var(--accent-hover, var(--accent)); }
+/* Secondary recovery (Retry / Continue) — ghost. */
+.chat-error-retry {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+}
 
 /* Inline AMR sign-in inside the unified card. The pill's base layout is scoped
    to Settings/onboarding, so it arrives unstyled here — give it its own full

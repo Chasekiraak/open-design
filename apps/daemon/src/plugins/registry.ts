@@ -32,6 +32,7 @@ import type {
   TrustTier,
 } from '@open-design/contracts';
 import { defaultTrustForRecord, resolveCapabilitiesGranted } from './trust.js';
+import { getWorkspaceResourceByResourceId } from '../db.js';
 import type Database from 'better-sqlite3';
 
 type SqliteDb = Database.Database;
@@ -230,9 +231,39 @@ export function rowToInstalledPlugin(row: DbRow): InstalledPluginRecord {
   };
 }
 
-export function listInstalledPlugins(db: SqliteDb): InstalledPluginRecord[] {
+/**
+ * Is this plugin visible from `scope` (the requesting workspace)?
+ *
+ * Same one-way rule design-systems already ships (`designSystemVisibleFromWorkspace`
+ * in design-systems/index.ts): a plugin CLAIMED by another workspace (a
+ * `workspace_resources` row whose `workspace_id` differs) is hidden, and an
+ * UNCLAIMED plugin (no binding row at all) stays visible everywhere. Every
+ * plugin installed before workspace isolation shipped looks unclaimed, so
+ * this never makes a pre-existing install vanish out from under an upgrading
+ * user — only a plugin installed AFTER this shipped, into a specific
+ * workspace, can be hidden from a different one.
+ */
+function pluginVisibleFromWorkspace(db: SqliteDb, pluginId: string, scope: string | null | undefined): boolean {
+  const scopeId = scope?.trim();
+  if (!scopeId) return true;
+  const binding = getWorkspaceResourceByResourceId(db, 'plugin', pluginId);
+  const ownerId = typeof binding?.workspaceId === 'string' ? binding.workspaceId.trim() : '';
+  if (!ownerId) return true;
+  return ownerId === scopeId;
+}
+
+/**
+ * `workspaceId` is optional and defaults to the pre-workspace-isolation
+ * behavior (every installed plugin, unfiltered) so every existing caller —
+ * `od plugin list`, inventory stats, the bundled-scenario scan in server.ts —
+ * keeps working unchanged. Only callers that pass a workspaceId (currently
+ * `GET /api/plugins`) get the workspace-scoped view.
+ */
+export function listInstalledPlugins(db: SqliteDb, workspaceId?: string | null): InstalledPluginRecord[] {
   const rows = db.prepare(`SELECT * FROM installed_plugins ORDER BY title ASC`).all() as DbRow[];
-  return rows.map(rowToInstalledPlugin);
+  const records = rows.map(rowToInstalledPlugin);
+  if (!workspaceId) return records;
+  return records.filter((record) => pluginVisibleFromWorkspace(db, record.id, workspaceId));
 }
 
 export function getInstalledPlugin(db: SqliteDb, id: string): InstalledPluginRecord | null {

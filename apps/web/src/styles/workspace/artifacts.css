@@ -219,7 +219,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
+  /* Borderless: the panel fill alone separates the card from the page. */
   background: var(--bg-panel);
+  border: 0;
   border-radius: var(--radius-sm);
   line-height: 1.55;
 }

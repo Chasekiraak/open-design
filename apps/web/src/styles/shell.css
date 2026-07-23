@@ -2112,13 +2112,34 @@ a.avatar-item:visited {
 }
 
 /* -------- Split / panes -------------------------------------------- */
+/* Registered as animatable lengths so the `.split` <-> `.split-focus` grid
+   collapse (below) can transition smoothly instead of hard-cutting between a
+   3-column and 1-column `grid-template-columns`. Un-registered custom
+   properties are just token strings to the animation engine — no
+   `@property` means no interpolation, which was the root cause of the
+   expand/collapse jump this file fixes. */
+@property --project-chat-panel-width {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 460px;
+}
+@property --project-chat-handle-width {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 8px;
+}
 .split {
   --project-chat-panel-width: 460px;
+  --project-chat-handle-width: 8px;
   --project-workspace-panel-track: minmax(400px, 1fr);
   display: grid;
+  /* Always three tracks — collapsing never drops to a 1-column layout.
+     `.split-focus` below transitions the first two tracks to 0 instead, so
+     the workspace track (a plain `1fr`/`minmax` share, not a registered
+     length) smoothly reclaims the freed space frame-by-frame. */
   grid-template-columns:
     var(--project-chat-panel-width)
-    8px
+    var(--project-chat-handle-width)
     var(--project-workspace-panel-track);
   min-height: 0;
   min-width: 0;
@@ -2127,8 +2148,20 @@ a.avatar-item:visited {
   /* Translucent: the app wash peeks through the resize gutter between the
      chat pane and workspace, so panels read as floating on the wash. */
   background: var(--veil-page);
+  /* Default ("enter") duration — this is the after-change style whenever
+     `.split-focus` is REMOVED (expanding back to the 3-column layout), so it
+     governs the expand direction. `.split.split-focus` below overrides both
+     durations to the faster "exit" timing for the collapse direction. */
+  transition:
+    --project-chat-panel-width 200ms cubic-bezier(0.23, 1, 0.32, 1),
+    --project-chat-handle-width 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .split.is-resizing-chat {
+  /* Pointer/keyboard resize writes `--project-chat-panel-width` directly on
+     every frame (see `applySplitChatPanelWidth` in ProjectView.tsx); animating
+     those writes would make the panel visibly lag behind the cursor, so the
+     transition is suspended for the duration of an interactive resize. */
+  transition: none;
   cursor: col-resize;
   user-select: none;
 }
@@ -2146,7 +2179,15 @@ a.avatar-item:visited {
   background: var(--text-strong);
 }
 .split.split-focus {
-  grid-template-columns: minmax(0, 1fr);
+  --project-chat-panel-width: 0px;
+  --project-chat-handle-width: 0px;
+  /* Focused mode never needed the workspace track's 400px floor (there's no
+     chat column competing for space), and matches the previous hardcoded
+     `minmax(0, 1fr)` collapse target exactly. */
+  --project-workspace-panel-track: minmax(0, 1fr);
+  transition:
+    --project-chat-panel-width 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    --project-chat-handle-width 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .split-chat-slot {
   position: relative;

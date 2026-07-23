@@ -197,6 +197,13 @@ export function PluginsView({
 }: PluginsViewProps) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
+  // Attaches the same workspace identity headers project reads already carry
+  // (`workspaceProjectHeaders`), so the daemon's `GET /api/plugins` /
+  // `POST /api/plugins/install` can apply the workspace-scoped filter and
+  // stamp new installs with the acting workspace. `useWorkspaceContext` is a
+  // coalesced read shared across the nav shell, so calling it again here does
+  // not fan out an extra fetch.
+  const { context: pluginsWorkspaceContext } = useWorkspaceContext();
   const pluginsPageViewFiredRef = useRef(false);
   useEffect(() => {
     if (pluginsPageViewFiredRef.current) return;
@@ -233,8 +240,8 @@ export function PluginsView({
   async function refresh() {
     setLoading(true);
     const [rows, allRows, catalogs] = await Promise.all([
-      listPlugins(),
-      listPlugins({ includeHidden: true }),
+      listPlugins({ workspaceContext: pluginsWorkspaceContext }),
+      listPlugins({ includeHidden: true, workspaceContext: pluginsWorkspaceContext }),
       listPluginMarketplaces(),
     ]);
     setPlugins(rows);
@@ -247,7 +254,10 @@ export function PluginsView({
     void refresh();
     window.addEventListener('open-design:plugins-changed', refresh);
     return () => window.removeEventListener('open-design:plugins-changed', refresh);
-  }, []);
+    // Re-run on workspace switch (not just mount) so "installed" reflects the
+    // newly active workspace's binding — see `pluginsWorkspaceContext` above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pluginsWorkspaceContext?.workspaceId]);
 
   const userPlugins = useMemo(
     () => plugins.filter(isPersonalPluginRecord),
@@ -363,7 +373,7 @@ export function PluginsView({
     setPendingInstallEntry(plugin.key);
     try {
       const outcome = await finishImport(
-        () => installPluginSource(plugin.installSource ?? plugin.entry.name),
+        () => installPluginSource(plugin.installSource ?? plugin.entry.name, pluginsWorkspaceContext),
         'installed',
       );
       if (outcome.ok) setAvailableDetails(null);
@@ -690,7 +700,7 @@ export function PluginsView({
       {importOpen ? (
         <PluginImportModal
           onClose={() => setImportOpen(false)}
-          onInstallSource={(source) => finishImport(() => installPluginSource(source))}
+          onInstallSource={(source) => finishImport(() => installPluginSource(source, pluginsWorkspaceContext))}
           onUploadZip={(file) => finishImport(() => uploadPluginZip(file))}
           onUploadFolder={(files) => finishImport(() => uploadPluginFolder(files))}
         />

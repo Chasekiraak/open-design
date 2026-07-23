@@ -2088,10 +2088,14 @@ describe('projectSplitClassName', () => {
   });
 
   it('uses CSS variables for split widths so pointer resize can update layout without rerendering workspace content', () => {
+    // `.split`'s grid-template-columns is always
+    // `var(--project-chat-panel-width) var(--project-chat-handle-width) var(--project-workspace-panel-track)`
+    // (see shell.css), so the style object only needs to carry the three
+    // custom properties — no more concatenated `gridTemplateColumns` string.
     expect(projectSplitStyle(false, 512, 'minmax(420px, 1fr)')).toEqual({
       '--project-chat-panel-width': '512px',
+      '--project-chat-handle-width': '8px',
       '--project-workspace-panel-track': 'minmax(420px, 1fr)',
-      gridTemplateColumns: '512px 8px minmax(420px, 1fr)',
     });
     expect(projectSplitStyle(true, 512, 'minmax(420px, 1fr)')).toBeUndefined();
   });

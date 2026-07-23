@@ -221,8 +221,8 @@
 }
 .od-toast.tone-error {
   border: 1px solid color-mix(in srgb, var(--danger, #cf222e) 42%, var(--border));
-  background: var(--red-bg);
-  color: var(--red);
+  background: color-mix(in srgb, var(--danger, #cf222e) 13%, var(--bg));
+  color: var(--text);
   box-shadow:
     0 4px 14px rgba(0, 0, 0, 0.14),
     0 0 0 1px color-mix(in srgb, var(--danger, #cf222e) 12%, transparent);
@@ -1457,7 +1457,8 @@
 }
 .app .msg.assistant:hover .assistant-footer,
 .app .msg.assistant:focus-within .assistant-footer,
-.app .assistant-footer[data-streaming="true"] { opacity: 1; }
+.app .assistant-footer[data-streaming="true"],
+.app .assistant-footer[data-last="true"] { opacity: 1; }
 @media (hover: none) {
   .app .assistant-footer { opacity: 1; }
 }
@@ -2951,6 +2952,7 @@
 }
 .app .handoff-path-row {
   display: flex;
+  gap: 8px;
   min-width: 0;
 }
 .app .handoff-path-button {
@@ -2958,8 +2960,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
-  min-height: 34px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);

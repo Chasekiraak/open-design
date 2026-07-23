@@ -539,6 +539,9 @@ import {
   listWorkspaceProjectBindings,
   getTemplate,
   ensureWorkspaceProject,
+  ensureWorkspaceResource,
+  getWorkspaceResource,
+  getWorkspaceResourceByResourceId,
   insertConversation,
   insertProject,
   insertRoutine,
@@ -649,6 +652,7 @@ import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
 import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
+import { headerValue, workspaceResourceContext } from './collab/workspace-resource-mutation.js';
 import {
   createWorkspaceTypeRegistry,
   impossibleTeamShareRows,
@@ -4641,6 +4645,19 @@ export async function startServer({
       res.flushHeaders?.();
       const writeEvent = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       if (mode === 'upgrade') writeEvent('progress', { kind: 'progress', phase: 'resolving', message: `Upgrading ${id} from ${source} (policy=${body.policy === 'pinned' ? 'pinned' : 'latest'})` });
+      // Stamp a fresh INSTALL (not upgrade — upgrading a plugin installed
+      // before workspace isolation shipped must not retroactively tag it,
+      // same "no retroactive tagging" rule design-systems already ships) with
+      // the requesting workspace, mirroring the project-creation route's
+      // `ensureWorkspaceProject` call. No-op when the caller carries no
+      // workspace headers (e.g. `od plugin install`, or a not-logged-in web
+      // session) — the plugin simply stays unbound, visible everywhere.
+      const installWorkspaceContext = mode === 'install'
+        ? (() => {
+            const workspaceIdForInstall = headerValue(req, 'x-od-workspace-id');
+            return workspaceIdForInstall ? workspaceResourceContext(req, workspaceIdForInstall) : null;
+          })()
+        : null;
       try {
         const basePlugin = mode === 'upgrade' ? getInstalledPlugin(db, id) : null;
         for await (const ev of installPlugin(db, {
@@ -4658,6 +4675,14 @@ export async function startServer({
           lockfilePath: PLUGIN_LOCKFILE_PATH,
         })) {
           writeEvent(ev.kind, ev);
+          if (ev.kind === 'success' && installWorkspaceContext && installWorkspaceContext.memberStatus === 'active' && ev.plugin?.id) {
+            ensureWorkspaceResource(db, 'plugin', installWorkspaceContext.workspaceId, ev.plugin.id, {
+              visibility: 'personal',
+              resourceState: 'active',
+              createdByWorkspaceMemberId: installWorkspaceContext.workspaceMemberId,
+              updatedByWorkspaceMemberId: installWorkspaceContext.workspaceMemberId,
+            });
+          }
           if (ev.kind === 'success' || ev.kind === 'error') break;
         }
       } catch (err) {
@@ -4804,6 +4829,7 @@ export async function startServer({
     ids: idDeps,
     projectStore: projectStoreDeps,
     conversations: conversationDeps,
+    workspaceResources: { getWorkspaceResource, getWorkspaceResourceByResourceId },
     plugins: {
       listInstalledPlugins,
       getInstalledPlugin,

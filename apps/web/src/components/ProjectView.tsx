@@ -1157,6 +1157,7 @@ export function buildQuestionFormKey(
 
 type ProjectSplitStyle = CSSProperties & {
   '--project-chat-panel-width': string;
+  '--project-chat-handle-width': string;
   '--project-workspace-panel-track': string;
 };
 
@@ -1168,11 +1169,18 @@ export function projectSplitStyle(
   if (workspaceFocused) return undefined;
   return {
     '--project-chat-panel-width': `${chatPanelWidth}px`,
+    '--project-chat-handle-width': `${SPLIT_RESIZE_HANDLE_WIDTH}px`,
     '--project-workspace-panel-track': workspacePanelTrack,
-    gridTemplateColumns: `${chatPanelWidth}px ${SPLIT_RESIZE_HANDLE_WIDTH}px ${workspacePanelTrack}`,
   };
 }
 
+// Writes the two animatable width custom properties directly (see the
+// `@property` registrations + `.split` / `.split.split-focus` transition
+// rules in shell.css) instead of composing a `gridTemplateColumns` string —
+// the grid layout is always driven by
+// `var(--project-chat-panel-width) var(--project-chat-handle-width) var(--project-workspace-panel-track)`
+// declared once on `.split`, so a plain custom-property write is all a
+// collapse/expand or a live resize needs to animate or track the cursor.
 function applySplitChatPanelWidth(
   split: HTMLDivElement | null,
   width: number,
@@ -1185,18 +1193,18 @@ function applySplitChatPanelWidth(
     // `.split-focus` CSS class alone (see `projectSplitStyle`, which
     // deliberately returns no inline style while focused). A resize firing
     // while focused still reaches this function via the ResizeObserver
-    // effect below; without this guard it would write a stale three-column
-    // `gridTemplateColumns` back onto the element, which — as an inline
-    // style — outranks `.split-focus` and reintroduces the (hidden, so
-    // blank) chat column as dead space while squeezing the workspace
-    // column into a garbled sliver.
-    split.style.removeProperty('grid-template-columns');
+    // effect below; without this guard it would write stale inline width
+    // overrides back onto the element, which — as inline styles — outrank
+    // the `.split-focus` class rule's `0px` values and reintroduce the
+    // (hidden, so blank) chat column as dead space.
     split.style.removeProperty('--project-chat-panel-width');
+    split.style.removeProperty('--project-chat-handle-width');
+    split.style.removeProperty('--project-workspace-panel-track');
     return;
   }
   split.style.setProperty('--project-chat-panel-width', `${width}px`);
-  split.style.gridTemplateColumns =
-    `${width}px ${SPLIT_RESIZE_HANDLE_WIDTH}px ${workspacePanelTrack}`;
+  split.style.setProperty('--project-chat-handle-width', `${SPLIT_RESIZE_HANDLE_WIDTH}px`);
+  split.style.setProperty('--project-workspace-panel-track', workspacePanelTrack);
 }
 
 // The media model the user picked in the New Project → Media dialog, keyed by
@@ -1645,6 +1653,15 @@ export function ProjectView({
   const [liveArtifacts, setLiveArtifacts] = useState<LiveArtifactSummary[]>([]);
   const [liveArtifactEvents, setLiveArtifactEvents] = useState<LiveArtifactEventItem[]>([]);
   const [workspaceFocused, setWorkspaceFocused] = useState(false);
+  // Read by `renderPreferredChatPanelWidth` instead of closing over
+  // `workspaceFocused` directly, so that callback's identity (and therefore
+  // the ResizeObserver effect keyed on it, below) doesn't need to depend on
+  // focus state — see the ref-sync effect near that callback for why.
+  const workspaceFocusedRef = useRef(workspaceFocused);
+  // Mirrors `workspaceFocused` but lags behind it while collapsing, so the
+  // chat pane stays mounted/visible until the `.split` width transition
+  // actually finishes — see the sync effect near the ResizeObserver below.
+  const [chatSlotHidden, setChatSlotHidden] = useState(workspaceFocused);
   const [commentInspectorActive, setCommentInspectorActive] = useState(false);
   const commentInspectorPortalId = useId();
   const leftInspectorActive = commentInspectorActive;
@@ -7763,10 +7780,20 @@ export function ProjectView({
   ): number => {
     const next = clampChatPanelWidth(preferredWidth, maxWidth);
     chatPanelWidthRef.current = next;
-    applySplitChatPanelWidth(splitRef.current, next, workspacePanelTrack, workspaceFocused);
+    applySplitChatPanelWidth(splitRef.current, next, workspacePanelTrack, workspaceFocusedRef.current);
     if (options.commitState !== false) setChatPanelWidth(next);
     return next;
-  }, [workspacePanelTrack, workspaceFocused]);
+  }, [workspacePanelTrack]);
+  // Deliberately excludes `workspaceFocused`: the ResizeObserver effect below
+  // is keyed on this callback's identity, and recreating the observer on
+  // every focus toggle forced a synchronous `clientWidth` reflow + style
+  // rewrite in the same commit as the collapse/expand — a second, more
+  // subtle jitter source layered on top of the grid hard-cut this file's
+  // change fixes. `workspaceFocusedRef` (kept fresh below) gives the callback
+  // body the current value without making it a dependency.
+  useEffect(() => {
+    workspaceFocusedRef.current = workspaceFocused;
+  }, [workspaceFocused]);
 
   const applyChatPanelWidth = useCallback((
     width: number,
@@ -7795,10 +7822,13 @@ export function ProjectView({
     }
   }, [renderPreferredChatPanelWidth]);
 
-  useEffect(() => {
-    chatPanelWidthRef.current = chatPanelWidth;
-    applySplitChatPanelWidth(splitRef.current, chatPanelWidth, workspacePanelTrack, workspaceFocused);
-  }, [chatPanelWidth, workspacePanelTrack, workspaceFocused]);
+  // `chatPanelWidthRef` and the `--project-chat-panel-width` DOM write are
+  // already kept in sync by `renderPreferredChatPanelWidth` (which sets the
+  // ref and calls `applySplitChatPanelWidth` in the same statement, right
+  // before `setChatPanelWidth`). A mirroring effect keyed on `chatPanelWidth`
+  // would just replay that identical write a tick later — dropped as
+  // redundant. `projectSplitStyle` (the JSX `style` prop below) is the only
+  // other writer, and it already re-renders whenever `chatPanelWidth` changes.
 
   useEffect(() => {
     chatPanelMaxWidthRef.current = chatPanelMaxWidth;
@@ -7831,6 +7861,53 @@ export function ProjectView({
   }, [renderPreferredChatPanelWidth]);
 
   useEffect(() => () => finishChatPanelResize(false), [finishChatPanelResize]);
+
+  // `.split-chat-slot`'s `hidden` attribute used to track `workspaceFocused`
+  // 1:1 — the instant focus mode engaged, the chat pane vanished (`display:
+  // none`) while the grid column collapse played out underneath it. Now that
+  // the collapse animates (see shell.css), hiding the slot immediately reads
+  // as a second, JS-driven jump layered on top of the smooth width
+  // transition: the content disappears a beat before the column visually
+  // reaches zero. Expanding still unhides immediately — the content should
+  // be visible while the column grows back in — but collapsing waits for the
+  // width transition to actually finish.
+  useEffect(() => {
+    if (!workspaceFocused) {
+      setChatSlotHidden(false);
+      return undefined;
+    }
+    const split = splitRef.current;
+    if (!split) {
+      setChatSlotHidden(true);
+      return undefined;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setChatSlotHidden(true);
+    };
+    const handleTransitionEnd = (event: TransitionEvent) => {
+      if (event.target !== split) return;
+      if (
+        event.propertyName !== '--project-chat-panel-width'
+        && event.propertyName !== '--project-chat-handle-width'
+      ) {
+        return;
+      }
+      finish();
+    };
+    split.addEventListener('transitionend', handleTransitionEnd);
+    // Collapse is 140ms (shell.css `.split.split-focus`); the margin above
+    // that covers `prefers-reduced-motion` (duration collapses to ~0 globally,
+    // which some engines never fire a `transitionend` for) and any
+    // already-collapsed-width edge case where the property never changes.
+    const fallback = window.setTimeout(finish, 220);
+    return () => {
+      split.removeEventListener('transitionend', handleTransitionEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [workspaceFocused]);
 
   const handleChatResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -8720,7 +8797,7 @@ export function ProjectView({
         ].filter(Boolean).join(' ')}
         style={projectSplitStyle(workspaceFocused, splitLeftPanelWidth, workspacePanelTrack)}
       >
-        <div className="split-chat-slot" hidden={workspaceFocused}>
+        <div className="split-chat-slot" hidden={chatSlotHidden}>
           {commentInspectorActive ? (
             <div
               id={commentInspectorPortalId}

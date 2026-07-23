@@ -73,6 +73,17 @@ import {
   type TeamShareScopeRefusal,
   type WorkspaceTypeRegistry,
 } from '../../collab/team-share-scope.js';
+import {
+  enforceWorkspaceResourceMutation,
+  headerValue,
+  isWorkspaceResourceLocked as isWorkspaceLocked,
+  workspaceResourceAccess,
+  workspaceResourceContext as workspaceProjectContext,
+  workspaceResourceContextFromRequest as workspaceProjectContextFromRequest,
+  type WorkspaceResourceAccessInput,
+  type WorkspaceResourceContext,
+  type WorkspaceResourceMutationCapability,
+} from '../../collab/workspace-resource-mutation.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
@@ -99,86 +110,16 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
   workspaceTypes?: Pick<WorkspaceTypeRegistry, 'isKnownPersonal'>;
 }
 
-type WorkspaceProjectContext = {
-  workspaceId: string;
-  workspaceType: 'personal' | 'team';
-  /**
-   * The caller's RAW `x-od-workspace-type` claim, before it is collapsed into
-   * `workspaceType` above. `workspaceType` defaults an absent header to
-   * 'personal', which is the right default for view filtering but must never be
-   * read as the caller ASSERTING "personal" — only an explicit header is
-   * evidence. Null means the caller made no claim.
-   */
-  workspaceTypeAsserted: 'personal' | 'team' | null;
-  appUserId: string;
-  workspaceMemberId: string;
-  role: 'owner' | 'admin' | 'member';
-  memberStatus: 'active' | 'removed';
-  lifecycleState: 'active' | 'billing_past_due' | 'locked' | 'deleting' | 'deleted';
-  canShareProjects: boolean;
-  canWriteSyncedFiles: boolean;
-};
-
-type WorkspaceProjectMutationCapability = 'rename' | 'delete' | 'duplicate' | 'writeFiles';
-
-type WorkspaceProjectAccessInput = {
-  visibility?: string | null;
-  resourceState?: string | null;
-  createdByWorkspaceMemberId?: string | null;
-};
-
-function headerValue(req: any, name: string): string | null {
-  const value = req.get(name);
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function headerBool(req: any, name: string, fallback: boolean): boolean {
-  const value = headerValue(req, name);
-  if (value === null) return fallback;
-  if (value === 'false') return false;
-  if (value === 'true') return true;
-  return fallback;
-}
-
-// Temporary adapter until the B-owned CurrentWorkspaceContext is wired into
-// the daemon. Keep D's project CRUD behind this seam so the header fallback
-// can be replaced without changing visibility and permission logic.
-function workspaceProjectContext(req: any, workspaceId: string): WorkspaceProjectContext | null {
-  const workspaceMemberId = headerValue(req, 'x-od-workspace-member-id');
-  if (!workspaceMemberId) return null;
-  const workspaceTypeHeader = headerValue(req, 'x-od-workspace-type');
-  const lifecycleState = headerValue(req, 'x-od-workspace-lifecycle-state') ?? 'active';
-  const role = headerValue(req, 'x-od-workspace-role') ?? 'member';
-  const legacyWriteEnabled = headerBool(req, 'x-od-workspace-write-enabled', true);
-  const canWriteSyncedFiles = headerBool(req, 'x-od-workspace-can-write-synced-files', legacyWriteEnabled);
-  return {
-    workspaceId,
-    workspaceType: workspaceTypeHeader === 'team' ? 'team' : 'personal',
-    workspaceTypeAsserted:
-      workspaceTypeHeader === 'team' || workspaceTypeHeader === 'personal' ? workspaceTypeHeader : null,
-    appUserId: headerValue(req, 'x-od-app-user-id') ?? 'local-user',
-    workspaceMemberId,
-    role: role === 'owner' || role === 'admin' ? role : 'member',
-    memberStatus: headerValue(req, 'x-od-workspace-member-status') === 'removed' ? 'removed' : 'active',
-    lifecycleState: lifecycleState === 'billing_past_due' || lifecycleState === 'locked' || lifecycleState === 'deleting' || lifecycleState === 'deleted'
-      ? lifecycleState
-      : 'active',
-    canShareProjects: headerBool(req, 'x-od-workspace-can-share-projects', canWriteSyncedFiles),
-    canWriteSyncedFiles,
-  };
-}
-
-function workspaceProjectContextFromRequest(req: any): WorkspaceProjectContext | 'missing' | null {
-  const workspaceId = headerValue(req, 'x-od-workspace-id');
-  const workspaceMemberId = headerValue(req, 'x-od-workspace-member-id');
-  if (!workspaceId && !workspaceMemberId) return null;
-  if (!workspaceId || !workspaceMemberId) return 'missing';
-  return workspaceProjectContext(req, workspaceId) ?? 'missing';
-}
-
-function isWorkspaceLocked(ctx: WorkspaceProjectContext): boolean {
-  return ctx.lifecycleState === 'locked' || ctx.lifecycleState === 'deleted';
-}
+// `WorkspaceProjectContext`/`WorkspaceProjectMutationCapability`/
+// `WorkspaceProjectAccessInput` and the header-reading helpers used to be
+// defined here, hard-coded to "project". They now live in
+// `collab/workspace-resource-mutation.ts` as the resource-agnostic
+// `WorkspaceResource*` shapes (imported above and aliased back to these
+// project-flavored names) so plugin/skill/design-system callers share the
+// exact same header-parsing and mutation-gate logic instead of forking it.
+type WorkspaceProjectContext = WorkspaceResourceContext;
+type WorkspaceProjectMutationCapability = WorkspaceResourceMutationCapability;
+type WorkspaceProjectAccessInput = WorkspaceResourceAccessInput;
 
 /**
  * Can a team share be RECORDED in the workspace this request is acting in?
@@ -208,27 +149,12 @@ function projectAccess(
   ctx: WorkspaceProjectContext,
   workspaceTypes?: Pick<WorkspaceTypeRegistry, 'isKnownPersonal'> | null,
 ) {
-  const frozen = wp.resourceState === 'frozen' || wp.resourceState === 'deleted' || isWorkspaceLocked(ctx);
-  const selfCreated = wp.createdByWorkspaceMemberId != null && wp.createdByWorkspaceMemberId === ctx.workspaceMemberId;
-  const privileged = ctx.role === 'owner' || ctx.role === 'admin';
-  const canMutate = !frozen && ctx.canWriteSyncedFiles && ctx.memberStatus === 'active' && (privileged || selfCreated);
-  // Sharing is the one mutation that must ALSO work on an unattributed row:
-  // lazy projection never assigns ownership to the reader (adoption red
-  // line), yet a local project physically exists only on this user's disk —
-  // sharing it stamps the sharer as owner (see ownerForTeamShare). Without
-  // this, a plain member's own drafts could never be shared. Destructive
-  // actions (delete/rename/unshare) stay on the strict `canMutate`.
-  const unattributed = wp.createdByWorkspaceMemberId == null;
-  const canShareLocal =
-    !frozen && ctx.canWriteSyncedFiles && ctx.memberStatus === 'active' &&
-    (privileged || selfCreated || unattributed);
-  const disabledReason = frozen
-    ? ctx.lifecycleState === 'deleted' || wp.resourceState === 'deleted'
-      ? 'workspace_deleted'
-      : 'workspace_locked'
-    : canMutate
-      ? undefined
-      : 'permission_denied';
+  // frozen/selfCreated/privileged/canMutate/canShareLocal/disabledReason are
+  // the resource-agnostic part, computed once in
+  // collab/workspace-resource-mutation.ts so a fix there lands for plugin and
+  // skill too. Only the fields below (canMoveToTeam/canMoveToPersonal/
+  // canOpen/canExport/canSendTo) are project-specific UX affordances.
+  const { frozen, canMutate, canShareLocal, disabledReason } = workspaceResourceAccess(wp, ctx);
   return {
     canOpen: !frozen && ctx.memberStatus === 'active',
     canRename: canMutate,
@@ -249,19 +175,11 @@ function projectAccess(
   };
 }
 
-function workspaceProjectMutationAllowed(
-  row: WorkspaceProjectAccessInput | null | undefined,
-  ctx: WorkspaceProjectContext,
-  capability: WorkspaceProjectMutationCapability,
-): boolean {
-  if (!row) return false;
-  const access = projectAccess(row, ctx);
-  if (capability === 'duplicate') return access.canDuplicate;
-  if (capability === 'delete') return access.canDelete;
-  if (capability === 'rename') return access.canRename;
-  return access.canRestoreVersion;
-}
-
+// Thin project-specific field mapping over the shared
+// `enforceWorkspaceResourceMutation` gate (collab/workspace-resource-mutation.ts).
+// `resourceType: 'project'` reproduces the exact
+// `WORKSPACE_PROJECT_PERMISSION_DENIED` code this route already shipped and
+// has tests pinned against — see tests/routes/workspace-projects.test.ts.
 function enforceWorkspaceProjectMutation(
   req: any,
   res: Response,
@@ -272,35 +190,17 @@ function enforceWorkspaceProjectMutation(
   projectId: string,
   capability: WorkspaceProjectMutationCapability,
 ): boolean {
-  const ctx = workspaceProjectContextFromRequest(req);
-  if (ctx === null) {
-    // No workspace headers at all — a legacy pre-workspace caller, or a
-    // client that just logged out (the frontend only attaches these headers
-    // while `workspaceContext` is non-null). Either way there is no identity
-    // to check against a team. That's fine for a project this daemon has
-    // never bound to a workspace, or one bound as `personal` — but a project
-    // bound `team` requires proof of membership the request doesn't carry;
-    // treat it the same as `'missing'` rather than granting the mutation.
-    const row = getWorkspaceProjectByProjectId(db, projectId);
-    if (row && row.visibility === 'team') {
-      sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
-      return false;
-    }
-    return true;
-  }
-  if (ctx === 'missing') {
-    sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
-    return false;
-  }
-  const row = getWorkspaceProject(db, ctx.workspaceId, projectId);
-  if (!workspaceProjectMutationAllowed(row, ctx, capability)) {
-    const code = row && isWorkspaceLocked(ctx)
-      ? 'WORKSPACE_LOCKED'
-      : 'WORKSPACE_PROJECT_PERMISSION_DENIED';
-    sendApiError(res, 403, code, 'workspace project mutation is not allowed');
-    return false;
-  }
-  return true;
+  return enforceWorkspaceResourceMutation(
+    'project',
+    req,
+    res,
+    sendApiError,
+    getWorkspaceProject,
+    getWorkspaceProjectByProjectId,
+    db,
+    projectId,
+    capability,
+  );
 }
 
 function projectDetailResolvedDir(

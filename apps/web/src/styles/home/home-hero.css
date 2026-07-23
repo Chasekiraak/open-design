@@ -2717,11 +2717,16 @@
 .home-hero__plugin-preset:not(:disabled):focus-visible,
 .home-hero__plugin-preset.is-active {
   outline: none;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  /* Light hover border: only a hint of accent over the neutral border. */
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
   background: color-mix(in srgb, var(--accent-tint) 32%, var(--bg-panel));
   color: var(--text-strong);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+/* Selected keeps the firmer accent ring so it still reads above plain hover. */
+.home-hero__plugin-preset.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }
 
 .home-hero__plugin-preset.is-pending {

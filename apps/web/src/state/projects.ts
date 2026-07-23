@@ -889,6 +889,17 @@ export async function persistTabsToDaemonNow(
 
 export interface ListPluginsOptions {
   includeHidden?: boolean;
+  /**
+   * When present, attaches the same workspace identity headers project reads
+   * already carry (`workspaceProjectHeaders`) so the daemon's `GET /api/plugins`
+   * can apply its workspace-scoped filter (routes/plugins/index.ts +
+   * `listInstalledPlugins`'s one-way "unclaimed visible everywhere, claimed
+   * elsewhere hidden" rule). Omit for callers that want the unfiltered,
+   * pre-workspace-isolation list — this also skips the shared
+   * `cachedVisiblePlugins` write below, so a workspace-scoped read here can
+   * never leak into `listPluginsFresh()`'s unscoped cache.
+   */
+  workspaceContext?: WorkspaceCollabContext | null;
 }
 
 // Module-level cache of the visible plugin list. The `/api/plugins` payload is
@@ -905,13 +916,21 @@ export async function listPlugins(
   options: ListPluginsOptions = {},
 ): Promise<InstalledPluginRecord[]> {
   try {
-    const resp = await fetch('/api/plugins');
+    const resp = await fetch(
+      '/api/plugins',
+      options.workspaceContext ? { headers: workspaceProjectHeaders(options.workspaceContext) } : undefined,
+    );
     if (!resp.ok) return [];
     const json = (await resp.json()) as { plugins?: InstalledPluginRecord[] };
     const plugins = json.plugins ?? [];
     const visible = plugins.filter(isVisiblePlugin);
-    cachedVisiblePlugins = visible;
-    cachedVisibleAt = Date.now();
+    // Only the UNSCOPED read populates the shared cache `listPluginsFresh()`
+    // serves — a workspace-scoped read must never leak its filtered result
+    // into that cache for an unscoped (or differently-scoped) caller.
+    if (!options.workspaceContext) {
+      cachedVisiblePlugins = visible;
+      cachedVisibleAt = Date.now();
+    }
     return options.includeHidden ? plugins : visible;
   } catch {
     return [];
@@ -974,12 +993,18 @@ interface PluginInstallEvent {
   warnings?: string[];
 }
 
-export async function installPluginSource(source: string): Promise<PluginInstallOutcome> {
+export async function installPluginSource(
+  source: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<PluginInstallOutcome> {
   const log: string[] = [];
   try {
     const resp = await fetch('/api/plugins/install', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify({ source }),
     });
     if (!resp.ok) {
