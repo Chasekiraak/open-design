@@ -257,7 +257,7 @@ const jsonLd = [
             <div class="codex-skill-grid">
               {related.map((r) => (
                 <article class="tpl-card">
-                  <a class="tpl-media" href={href(`/plugins/${r.slug}/`)}>
+                  <a class="tpl-media" href={href(`/plugins/${r.slug}/`)} aria-label={skillCopy(cc, r.slug).name}>
                     <img class="tpl-media-poster" src={r.image} alt="" loading="lazy" />
                     <span class="tpl-media-kind">{categoryLabel(cc, r.category)}</span>
                   </a>
