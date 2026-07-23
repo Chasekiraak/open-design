@@ -68,3 +68,15 @@ Fixes #
      (e.g. `pnpm --filter @open-design/web test`). -->
 
 -
+
+
+## Contribution license
+
+<!-- Required for every PR that changes a file governed by the root LICENSE.
+     Maintainers must not merge the PR while this box is unchecked. If every
+     changed file is under a separate component license, name that license
+     below instead. -->
+
+- [ ] For every changed file governed by the root `LICENSE`, I have read and agree to additional condition 2 of the Open Design Community License 1.0, submit my contribution under those terms, and have the authority to grant the rights stated there. Files with a separate component license remain under that license.
+
+Separately licensed component, if applicable: N/A

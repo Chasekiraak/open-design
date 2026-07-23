@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: открытая альтернатива Claude Design</h1>
+<h1 align="center">Open Design: альтернатива Claude Design с доступным исходным кодом</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ уже здесь.** Раньше долгие сессии дизайна прерывались на каждой заминке — запуск терял своё место, выбор модели заставлял гадать, а экспорт требовал ещё одного обходного пути. 0.13.0 сохраняет сессию живой: возобновляйте запуски Codex / OpenCode / Pi / Open Design Cloud между ходами, быстрее выбирайте нужную модель и передавайте подкреплённые скриншотами PPTX / PDF, не покидая приложение. [Скачать 0.13.0](https://github.com/nexu-io/open-design/releases) · [Примечания к выпуску](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Программа Open Design Fellow теперь открыта.** Если вы тоже верите, что дизайн должен быть открытым — станьте Open Design Fellow, формируйте продукт вместе с основной командой и помогайте большему числу людей участвовать в определении будущего дизайна. Подробности → [`MAINTAINERS.md`](../../MAINTAINERS.md) и [Discord](https://discord.gg/mHAjSMV6gz).
 
 <p align="center">
-  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Баннер Open Design: заголовок &quot;Открытая альтернатива Claude Design&quot; на фоне классической сцены с колоннами, фигурами в тогах и цифровым кодом, а также карточками статистики по дизайн-системам, плагинам, кодинг-агентам и медиапровайдерам" width="100%" />
+  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="релиз" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="лицензия" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="лицензия" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="../../QUICKSTART.md"><img alt="быстрый старт" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Что такое Open Design
 
-🎨 **Открытая альтернатива Claude Design.** &nbsp;🖥️ **Локальное по умолчанию нативное десктопное приложение для macOS и Windows.** &nbsp;⚡ **100+ функциональных навыков + отдельный каталог шаблонов рендеринга** · ✨ **151 пакет дизайн-систем** · 📦 **277 плагинов.** &nbsp;🤖 **Работает через 25 различных локальных исполняемых CLI**, либо на любом OpenAI-совместимом эндпоинте через BYOK.
+🎨 **Альтернатива Claude Design с доступным исходным кодом.** &nbsp;🖥️ **Локальное по умолчанию нативное десктопное приложение для macOS и Windows.** &nbsp;⚡ **100+ функциональных навыков + отдельный каталог шаблонов рендеринга** · ✨ **151 пакет дизайн-систем** · 📦 **277 плагинов.** &nbsp;🤖 **Работает через 25 различных локальных исполняемых CLI**, либо на любом OpenAI-совместимом эндпоинте через BYOK.
 
 Open Design превращает этот цикл в **файловую систему функциональных навыков, шаблонов рендеринга, дизайн-систем и плагинов**, которую агенты могут читать, писать и ремиксовать.
 
@@ -49,7 +49,6 @@ Open Design превращает этот цикл в **файловую сис�
 <table>
 <tr>
 <td valign="top">
-<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Главная страница" /><br/>
 <sub><b>Home</b> — точка входа с обзором. Выберите навык и дизайн-систему, введите бриф и запустите всё из одного места.</sub>
 </td>
 </tr>
@@ -261,7 +260,7 @@ Open Design превращает этот цикл в **файловую сис�
 
 > **В апреле 2026 года Anthropic выпустила Claude Design — впервые LLM перестала писать прозу и начала поставлять дизайн-артефакты напрямую.** Это стало вирусным. Но продукт остался закрытым, только платным, только облачным, привязанным к модели Anthropic, навыкам Anthropic, поверхности Anthropic. Никакого доступа к исходникам, никакого self-host, никакого деплоя на Vercel, никакой возможности подставить собственного агента.
 
-Open Design (OD) — это открытая альтернатива. Тот же цикл, та же ментальная модель «сначала артефакт», без всякой привязки:
+Open Design (OD) — это альтернатива с доступным исходным кодом. Тот же цикл, та же ментальная модель «сначала артефакт», без всякой привязки:
 
 - 🤖 **Агентно-нативный, не зависящий от модели.** Мы не поставляем агента. `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi`, уже находящиеся в вашем `PATH`, — это дизайн-движок. Переключайтесь одним кликом.
 - 🧠 **Брендовый уровень по умолчанию.** Каждый рендер читает `DESIGN.md` активного пакета как основной контракт бренда. Репозиторий содержит 151 пакет дизайн-систем; старые пакеты могут состоять только из `DESIGN.md`, а новые — добавлять `manifest.json`, `tokens.css`, компоненты, ресурсы и сведения о происхождении. Положите папку — и выбор её найдёт.
@@ -274,8 +273,8 @@ Open Design (OD) — это открытая альтернатива. Тот ж
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| Открытый исходный код | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
-| Self-host / десктоп | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| Доступный исходный код | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
+| Самохостинг неограниченного числа рабочих пространств с одним участником / десктоп | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | Агентно-нативный (работает в вашем CLI) | Только Anthropic | ❌ | Только облачный агент | **✅ 25 CLI + BYOK** |
 | `DESIGN.md` брендового уровня | Проприетарный | Theme JSON | Ограниченные токены | **✅ 151 поставляемых систем** |
 | Навыки / плагины / шаблоны | Закрытые | Магазин плагинов | Закрытые | **✅ 100+ функциональных навыков · отдельный каталог шаблонов рендеринга · 277 плагинов** |
@@ -740,7 +739,7 @@ SVG выше регенерируется ежедневно через [`.githu
 
 | Проект | Роль |
 |---|---|
-| Claude Design | Закрытый продукт, открытой альтернативой которому является этот репозиторий. |
+| Claude Design | Закрытый продукт, альтернативой с доступным исходным кодом которому является этот репозиторий. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | Компас дизайн-философии — рабочий процесс джуниор-дизайнера, протокол брендовых ассетов, чек-лист против AI-слопа, пятимерная критика. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | Навык веб-PPT в журнальном стиле, включённый дословно в [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/). По умолчанию для режима презентаций. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | Семейство HTML PPT Studio — 15 шаблонов презентаций, 36 тем, 31 макет страниц, рантайм анимации, режим презентера с магнитными карточками. |
@@ -757,4 +756,4 @@ SVG выше регенерируется ежедневно через [`.githu
 
 ## Лицензия
 
-Apache-2.0. Включённые навыки и шаблоны со своими файлами `LICENSE` сохраняют собственные лицензии, включая `design-templates/guizang-ppt/` (MIT, [@op7418](https://github.com/op7418)), `design-templates/html-ppt/` (MIT, [@lewislulu](https://github.com/lewislulu)) и `skills/web-clone/` (MIT, [@Jane-xiaoer](https://github.com/Jane-xiaoer)).
+[Open Design Community License 1.0](../../LICENSE) — пользовательская лицензия с доступным исходным кодом на основе Apache 2.0 и дополнительными условиями для внешнего хостинга и брендинга интерфейса. Если третья сторона постоянно эксплуатирует или администрирует Open Design для любого неаффилированного внешнего клиента, требуется отдельное коммерческое разрешение, даже если клиент всего один. Включённые компоненты со своими файлами `LICENSE` сохраняют собственные лицензии, включая `design-templates/guizang-ppt/` (MIT, [@op7418](https://github.com/op7418)), `design-templates/html-ppt/` (MIT, [@lewislulu](https://github.com/lewislulu)) и `skills/web-clone/` (MIT, [@Jane-xiaoer](https://github.com/Jane-xiaoer)).

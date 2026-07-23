@@ -251,7 +251,7 @@ node --experimental-strip-types scripts/sync-litellm-models.ts
 - **Review 期间不要 squash。** 推 fixup commit；merge 时我们会 squash。
 - **不要 force-push 共享分支**，除非 reviewer 主动让你这么做。
 
-我们不强制 CLA。Apache-2.0 已经覆盖；你的贡献按同样的 license 授权。
+我们目前不要求单独签署 CLA。对根许可证覆盖文件的贡献，只有贡献者在 PR 模板中勾选 `contribution-license` 复选框，明确同意 [Open Design Community License 1.0 第 2 项附加条件](../../LICENSE) 后才会被接受。该复选框未勾选时，维护者不得合并 PR；许可证变更时已经在途的 PR 也必须重新确认。带有独立 `LICENSE` 文件的组件继续适用该组件自己的贡献政策。
 
 ---
 
@@ -308,7 +308,7 @@ tl;dr：好好提 PR、认真 review、在 [Discussions][discussions] / [Discord
 
 ## License
 
-提交贡献即代表你同意你的贡献按本仓库的 [Apache-2.0 License](../../LICENSE) 授权。例外是 [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) 下的所有文件，保留它们原始的 MIT license 和原作者 [op7418](https://github.com/op7418) 的归属。
+在 PR 模板中勾选 `contribution-license` 复选框，即表示你同意按 [Open Design Community License 1.0](../../LICENSE)（包括第 2 项附加条件）提交你的贡献；目标组件带有独立 `LICENSE` 文件时除外。你同时声明自己有权按这些条款提交该贡献。已知的 MIT 许可例外包括 [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/)（继续保留原作者 [op7418](https://github.com/op7418) 的归属）和 [`skills/web-clone/`](../../skills/web-clone/)（继续保留原作者 [Jane Xiaoer](https://github.com/Jane-xiaoer) 的归属）。
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

@@ -72,6 +72,11 @@ const BUNDLED_RESOURCE_TREES = [
   { from: join("data", "plugin-previews"), to: join("data", "plugin-previews") },
 ] as const;
 
+// Legal notices referenced by the root license must travel with every desktop
+// build. They live beside the bundled daemon resources so macOS, Windows, and
+// Linux packages all receive the same immutable release-time copies.
+const BUNDLED_ROOT_FILES = ["LICENSE", "LICENSES.md", "BRAND_NOTICE.md"] as const;
+
 export async function copyBundledResourceTrees({
   workspaceRoot,
   resourceRoot,
@@ -83,5 +88,9 @@ export async function copyBundledResourceTrees({
     await cp(join(workspaceRoot, entry.from), join(resourceRoot, entry.to), {
       recursive: true,
     });
+  }
+
+  for (const fileName of BUNDLED_ROOT_FILES) {
+    await cp(join(workspaceRoot, fileName), join(resourceRoot, fileName));
   }
 }

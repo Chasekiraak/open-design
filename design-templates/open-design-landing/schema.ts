@@ -64,7 +64,7 @@ export interface BrandBlock {
   edition: string;
   /** Visible build version — `'v0.4.6'`. */
   version: string;
-  /** SPDX license identifier or short label — `'Apache-2.0'`. */
+  /** License identifier or short label — for example `'ODCL 1.0'`. */
   license: string;
   /** Primary CTA URL (Star on GitHub, etc.). */
   primary_url: string;

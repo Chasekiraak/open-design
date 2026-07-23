@@ -392,8 +392,15 @@ Au-delà de ça :
   squashent au merge.
 - **Pas de force-push sur une branche partagée** sauf si un reviewer le demande.
 
-Nous n'imposons pas de CLA. Apache-2.0 couvre le projet ; votre contribution
-est licenciée sous la même licence.
+Nous n'exigeons actuellement pas de CLA signé séparément. Les contributions
+aux fichiers couverts par la licence racine ne sont acceptées que si la
+personne contributrice accepte explicitement la
+[condition supplémentaire 2 de l'Open Design Community License 1.0](../../LICENSE) en cochant
+la case `contribution-license` dans le modèle de pull request. Les mainteneurs
+ne doivent pas fusionner une pull request tant que cette case n'est pas cochée ;
+les pull requests déjà ouvertes lors du changement de licence doivent fournir
+une nouvelle confirmation. Un composant doté de son propre fichier `LICENSE`
+conserve sa politique de contribution spécifique.
 
 ---
 
@@ -485,10 +492,16 @@ se fait tout seul.
 
 ## Licence
 
-En contribuant, vous acceptez que votre contribution soit licenciée sous la
-[licence Apache-2.0](../../LICENSE) de ce repo, à l'exception des fichiers dans
-[`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/), qui conservent leur licence MIT
-originale et l'attribution d'auteur à [op7418](https://github.com/op7418).
+En cochant la case `contribution-license` dans le modèle de pull request, vous
+acceptez que votre contribution soit soumise sous
+l'[Open Design Community License 1.0](../../LICENSE), y compris sa condition supplémentaire 2,
+sauf si le composant cible possède son propre fichier `LICENSE`. Vous déclarez
+avoir le droit de soumettre la contribution sous ces conditions. Les exceptions
+connues sous licence MIT comprennent
+[`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/), qui
+conserve l'attribution d'auteur à [op7418](https://github.com/op7418), et
+[`skills/web-clone/`](../../skills/web-clone/), qui conserve l'attribution
+d'auteur à [Jane Xiaoer](https://github.com/Jane-xiaoer).
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

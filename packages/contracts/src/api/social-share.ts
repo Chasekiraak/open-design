@@ -163,7 +163,7 @@ export function buildSocialSharePayload(input: SocialShareRequest): SocialShareR
   const title = cleanText(input.title, fallbackTitle);
   const fallbackText = kind === 'project-html'
     ? `Built with Open Design: ${title}. Open Design repo: ${OPEN_DESIGN_GITHUB_REPO_URL}`
-    : 'Open Design is an open-source workspace for creating, editing, deploying, and handing off design artifacts.';
+    : 'Open Design is a source-available workspace for creating, editing, deploying, and handing off design artifacts, licensed under the Open Design Community License 1.0.';
   const text = cleanText(input.text, fallbackText);
   const copyText = cleanText(input.copyText, `${text}\n${url}`);
   const platforms = PLATFORM_DESCRIPTORS.map((descriptor) => ({

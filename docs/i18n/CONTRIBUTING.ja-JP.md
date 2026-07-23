@@ -230,7 +230,7 @@ export const fooAgentDef = {
 - **レビュー中にスカッシュしない。** fixup をプッシュしてください。マージ時にスカッシュします。
 - **共有ブランチへの force-push 禁止。** レビュアーが依頼した場合を除きます。
 
-CLA は求めません。Apache-2.0 でカバーされます。あなたのコントリビューションは同じライセンスの下でライセンスされます。
+現在、個別に署名する CLA は求めていません。ルートライセンスの対象ファイルへのコントリビューションは、pull request テンプレートの `contribution-license` チェックボックスをオンにして [Open Design Community License 1.0 追加条件 2](../../LICENSE) に明示的に同意した場合にのみ受け入れます。メンテナーは、このチェックボックスがオフの pull request をマージしてはなりません。ライセンス変更時点ですでにオープンだった pull request については、改めて確認が必要です。独自の `LICENSE` ファイルを持つコンポーネントには、そのコンポーネント固有のコントリビューションポリシーが引き続き適用されます。
 
 ---
 
@@ -288,7 +288,7 @@ tl;dr：良い PR を出し、丁寧にレビューし、[Discussions][discussio
 
 ## ライセンス
 
-コントリビューションすることにより、あなたのコントリビューションがこのリポジトリの [Apache-2.0 License](../../LICENSE) の下でライセンスされることに同意するものとします。ただし、[`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) 内のファイルは元の MIT ライセンスと [op7418](https://github.com/op7418) の帰属表示を保持します。
+pull request テンプレートの `contribution-license` チェックボックスをオンにすることで、対象コンポーネントに独自の `LICENSE` ファイルがない限り、[Open Design Community License 1.0](../../LICENSE)（追加条件 2 を含む）の下でコントリビューションを提出することに同意します。また、その条件で提出する権限を有することを表明します。MIT ライセンスが適用される既知の例外には、[op7418](https://github.com/op7418) の帰属表示を保持する [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) と、[Jane Xiaoer](https://github.com/Jane-xiaoer) の帰属表示を保持する [`skills/web-clone/`](../../skills/web-clone/) があります。
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

@@ -8,11 +8,11 @@
     "meta": { "title": "Studio Nº 01", "subtitle": "Berlin / Open / Earth" },
     "filed_under": "Design · Intelligence",
     "tagline": "Designing intelligence with skills, taste, and your own agent.",
-    "description": "Open Design is the open-source alternative to Claude Design. 12 coding-agent CLIs · 31 composable skills · 72 brand-grade design systems. Local-first, web-deployable, BYOK at every layer.",
+    "description": "Open Design is the source-available alternative to Claude Design. 12 coding-agent CLIs · 31 composable skills · 72 brand-grade design systems. Local-first, web-deployable, BYOK at every layer.",
     "locale": "en",
     "edition": "Vol. 01 / Issue Nº 26",
     "version": "v0.3.0",
-    "license": "Apache-2.0",
+    "license": "ODCL 1.0",
     "primary_url": "https://github.com/nexu-io/open-design",
     "primary_url_label": "Star · 0K",
     "download_url": "https://github.com/nexu-io/open-design/releases",
@@ -24,7 +24,7 @@
     "year_roman": "MMXXVI",
     "founded": "Est. MMXXVI",
     "rails": {
-      "right": "Open Design — Vol. 01 · Issue Nº 26 · Apache-2.0",
+      "right": "Open Design — Vol. 01 · Issue Nº 26 · ODCL 1.0",
       "left": "Skills · Systems · Agents · BYOK · Local-first"
     },
     "languages": ["EN", "DE", "中文", "日本語"],
@@ -61,7 +61,7 @@
       { "text": "code", "em": true },
       { "text": ".", "dot": true }
     ],
-    "lead": "The open-source alternative to Anthropic&rsquo;s Claude Design. 12 coding agents — Claude, Codex, Cursor, Gemini and friends — drive 31 composable skills and 72 brand-grade design systems. Generate web pages, slide decks, mobile prototypes, images, even short videos — all running on your own laptop.",
+    "lead": "The source-available alternative to Anthropic&rsquo;s Claude Design. 12 coding agents — Claude, Codex, Cursor, Gemini and friends — drive 31 composable skills and 72 brand-grade design systems. Generate web pages, slide decks, mobile prototypes, images, even short videos — all running on your own laptop.",
     "primary":   { "label": "Star us on GitHub",  "href": "https://github.com/nexu-io/open-design" },
     "secondary": { "label": "Download desktop",   "href": "https://github.com/nexu-io/open-design/releases" },
     "stats": [
@@ -205,7 +205,7 @@
     ],
     "foot_left": "Skills inform everything. Files make it real.",
     "foot_right_bold": "github.com/nexu-io/open-design",
-    "foot_right_rest": "Apache-2.0"
+    "foot_right_rest": "ODCL 1.0"
   },
 
   "work": {
@@ -318,7 +318,7 @@
   },
 
   "footer": {
-    "brand_description": "The open-source alternative to Claude Design. Built on the shoulders of <a class='inline-link' href='https://github.com/alchaincyf/huashu-design' target='_blank' rel='noreferrer noopener'>huashu-design</a>, <a class='inline-link' href='https://github.com/op7418/guizang-ppt-skill' target='_blank' rel='noreferrer noopener'>guizang-ppt</a>, <a class='inline-link' href='https://github.com/multica-ai/multica' target='_blank' rel='noreferrer noopener'>multica-ai</a>, and <a class='inline-link' href='https://github.com/OpenCoworkAI/open-codesign' target='_blank' rel='noreferrer noopener'>open-codesign</a>.",
+    "brand_description": "The source-available alternative to Claude Design. Built on the shoulders of <a class='inline-link' href='https://github.com/alchaincyf/huashu-design' target='_blank' rel='noreferrer noopener'>huashu-design</a>, <a class='inline-link' href='https://github.com/op7418/guizang-ppt-skill' target='_blank' rel='noreferrer noopener'>guizang-ppt</a>, <a class='inline-link' href='https://github.com/multica-ai/multica' target='_blank' rel='noreferrer noopener'>multica-ai</a>, and <a class='inline-link' href='https://github.com/OpenCoworkAI/open-codesign' target='_blank' rel='noreferrer noopener'>open-codesign</a>.",
     "brand_cta": {
       "label": "Download desktop",
       "href": "https://github.com/nexu-io/open-design/releases",

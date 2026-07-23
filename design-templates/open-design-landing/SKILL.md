@@ -175,7 +175,7 @@ The eight question groups, in order:
 | Group | Schema fields                                           | Min answers | Notes                                    |
 | :---- | :------------------------------------------------------ | :---------- | :--------------------------------------- |
 | 1     | `brand.{name,mark,tagline,description,location}`        | 5           | Mark = single glyph (Ø, ▲, ★…)           |
-| 2     | `brand.{license,version,year,primary_url,contact_email}`| 4           | URL is required; license defaults Apache-2.0 |
+| 2     | `brand.{license,version,year,primary_url,contact_email}`| 4           | URL is required; license defaults to ODCL 1.0 |
 | 3     | `nav[]` (up to 5)                                       | 3           | Optional count badges                     |
 | 4     | `hero.{label,headline,lead,primary,secondary,stats}`    | All         | Headline as `MixedText` (sans+em+dot)     |
 | 5     | `about` + `capabilities.cards[4]`                       | All         | 4 cards × {num,tag,title,body}            |

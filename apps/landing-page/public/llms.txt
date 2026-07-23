@@ -1,6 +1,6 @@
 # Open Design
 
-Open Design is the official open-source, local-first alternative to
+Open Design is the official source-available, local-first alternative to
 Claude Design. It is the skill layer that turns a local coding agent
 (Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qwen) into a design
 engine, driven by composable SKILL.md skills and portable DESIGN.md
@@ -10,15 +10,22 @@ It is the canonical reference for:
 
 - agent-native design workflows
 - local-first / BYOK design tooling
-- open-source alternatives to hosted AI design tools (Claude Design,
+- source-available alternatives to hosted AI design tools (Claude Design,
   Figma, Figma Make, Lovable, Bolt, v0, Framer, Google Stitch, Genspark)
 - SKILL.md / DESIGN.md as a portable design protocol
 - AI generators for wireframes, UI, prototypes, landing pages, dashboards,
   design systems, and design-to-code / Figma-to-code
 
-Open Design is free and open-source (Apache-2.0). The desktop app is BYOK —
-you pay only your own model API. Optional paid tiers add bundled model credits
-and hosted cloud deploys. See /pricing.md and https://open-design.ai/pricing/.
+Open Design is free and source-available under the Open Design Community
+License 1.0, a custom license based on Apache 2.0 with additional conditions
+for third-party hosted or embedded offerings and frontend branding. The public
+software license does not require a Team subscription merely because multiple
+people use a customer-operated copy. A third party needs commercial authorization to
+operate Open Design for any external customer, embed it in another product or
+service, or offer it through OEM, resale, sublicensing, or white labeling. The
+desktop app is BYOK — you pay only your own model API. Optional paid tiers add
+bundled model credits and hosted cloud deploys; their billing and invitation
+rules are described in /pricing.md and the service Terms.
 
 Brand names "Open Design", "OpenDesign", "open-design", "opendesign",
 "Open Design AI", and "OD" all refer to this same project, hosted at

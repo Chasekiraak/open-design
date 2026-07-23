@@ -254,7 +254,7 @@ The `LOCALES` array in [`apps/web/src/i18n/types.ts`](apps/web/src/i18n/types.ts
 **Terminology guidelines:**
 - Use the English term with a brief explanation in parentheses on first use if no standard translation exists:
   ```
-  Open Design è un'alternativa open-source (codice aperto) a Claude Design.
+  Open Design è un'alternativa source-available (codice sorgente disponibile) a Claude Design.
   ```
 - For regional variants (zh-CN vs zh-TW, pt-BR vs pt-PT), choose the most widely understood variant for your target audience
 - See [Regional terminology](#regional-terminology) section for specific glossaries
@@ -302,7 +302,7 @@ Translations follow the conventions of the target region's tech writing communit
 
 **Terms to translate when standard exists:**
 - "local-first" → your language's equivalent
-- "open-source" → your language's equivalent
+- "source-available" → your language's equivalent; do not translate it as "open-source"
 - "installation" → your language's equivalent
 - "quickstart" → your language's equivalent
 - "settings" → your language's equivalent
@@ -599,7 +599,7 @@ Updated language switcher in:
 Example:
 - Used neutral Spanish terminology to be understood across all regions
 - Kept technical terms like "CLI", "API", "BYOK" in English as they're widely recognized
-- Translated "open-source" as "código abierto" (standard term in Spanish tech community)
+- Translated "source-available" as "código fuente disponible" and did not use "código abierto"
 
 ## Checklist
 - [ ] All prose text translated
@@ -718,12 +718,12 @@ Starting daemon on port 17456...
 Web server running at http://localhost:17573
 ```
 
-### Q: What if my language doesn't have a word for "open-source"?
+### Q: What if my language doesn't have a word for "source-available"?
 
 **A:** Use the English term with a brief explanation in parentheses on first use:
 
 ```markdown
-Open Design è un'alternativa open-source (codice aperto) a Claude Design.
+Open Design è un'alternativa source-available (codice sorgente disponibile) a Claude Design.
 ```
 
 After the first use, you can use just the English term.

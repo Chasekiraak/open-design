@@ -1,6 +1,6 @@
 <div dir="rtl">
 
-<h1 align="center">Open Design: البديل مفتوح المصدر لـ Claude Design</h1>
+<h1 align="center">Open Design: بديل Claude Design المتاح مصدره</h1>
 
 > 🔥 **‏Open Design 0.13.0 — _Stay in Flow_ وصل.** جلسات التصميم الطويلة كانت تنهار مع كل مقاطعة — التشغيل يفقد موضعه، ومنتقي النماذج يجعلك تخمّن، والتصدير يحتاج إلى التفافة إضافية. الإصدار 0.13.0 يُبقي الجلسة حيّة: استأنف تشغيلات Codex / OpenCode / Pi / Open Design Cloud عبر الجولات، واختر النموذج المناسب أسرع، وسلّم ملفات PPTX / PDF مدعومة بلقطات الشاشة دون مغادرة التطبيق. [تنزيل 0.13.0](https://github.com/nexu-io/open-design/releases) · [ملاحظات الإصدار](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -9,7 +9,7 @@
 > 🏅 **برنامج Open Design Fellow مفتوح الآن.** إن كنت تؤمن أنت أيضًا بأن التصميم يجب أن يكون مفتوحًا — كُن Open Design Fellow، وشارك في تشكيل المنتج جنبًا إلى جنب مع الفريق الأساسي، وساعد المزيد من الناس على المشاركة في تحديد مستقبل التصميم. التفاصيل ← [`MAINTAINERS.md`](../../MAINTAINERS.md) و[Discord](https://discord.gg/mHAjSMV6gz).
 
 <p align="center">
-  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
+  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="../../QUICKSTART.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -33,7 +33,7 @@
 
 ## ما هو Open Design
 
-🎨 **البديل مفتوح المصدر القائم على الجهاز المحلي أولًا لـ Claude Design.** &nbsp;🖥️ **تطبيق سطح مكتب أصلي لنظامي macOS وWindows.** &nbsp;⚡ **أكثر من 100 مهارة وظيفية + كتالوج منفصل لقوالب التصيير** · ✨ **151 حزمة نظام تصميم** · 📦 **277 إضافة جاهزة للاستخدام.** &nbsp;🖼️ يولّد **نماذج أولية للويب · سطح المكتب · الجوال**، و**لوحات معلومات / مخرجات حية**، و**عروضًا تقديمية**، و**صورًا**، و**فيديو**، إضافة إلى رسوميات حركية بـ **HyperFrames**. 🔒 معاينة iframe معزولة · تصدير بصيغ HTML / PDF / PPTX / MP4. &nbsp;🤖 **يعمل على 25 ملف CLI تنفيذيًا محليًا متميزًا**، أو أي نقطة نهاية متوافقة مع OpenAI عبر BYOK.
+🎨 **بديل Claude Design المتاح مصدره والقائم على الجهاز المحلي أولًا.** &nbsp;🖥️ **تطبيق سطح مكتب أصلي لنظامي macOS وWindows.** &nbsp;⚡ **أكثر من 100 مهارة وظيفية + كتالوج منفصل لقوالب التصيير** · ✨ **151 حزمة نظام تصميم** · 📦 **277 إضافة جاهزة للاستخدام.** &nbsp;🖼️ يولّد **نماذج أولية للويب · سطح المكتب · الجوال**، و**لوحات معلومات / مخرجات حية**، و**عروضًا تقديمية**، و**صورًا**، و**فيديو**، إضافة إلى رسوميات حركية بـ **HyperFrames**. 🔒 معاينة iframe معزولة · تصدير بصيغ HTML / PDF / PPTX / MP4. &nbsp;🤖 **يعمل على 25 ملف CLI تنفيذيًا محليًا متميزًا**، أو أي نقطة نهاية متوافقة مع OpenAI عبر BYOK.
 
 ‏Open Design يحوّل الحلقة إلى **نظام ملفات من المهارات الوظيفية وقوالب التصيير وأنظمة التصميم والإضافات** يستطيع الوكلاء قراءته والكتابة عليه وإعادة مزجه.
 
@@ -51,7 +51,6 @@
 <table>
 <tr>
 <td valign="top">
-<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Home page" /><br/>
 <sub><b>الصفحة الرئيسية</b> — نقطة الدخول للنظرة العامة. اختر مهارة ونظام تصميم، واكتب الموجز، وانطلق بكل شيء من مكان واحد.</sub>
 </td>
 </tr>
@@ -263,7 +262,7 @@
 
 > **في أبريل 2026، أطلقت Anthropic Claude Design — وهي المرة الأولى التي يتوقف فيها نموذج لغوي كبير عن كتابة النثر ويبدأ في تسليم مخرجات تصميم مباشرة.** انتشر بسرعة كبيرة. لكنه ظل مغلق المصدر، مدفوعًا فقط، سحابيًا فقط، مقيَّدًا بنموذج Anthropic ومهارات Anthropic وسطح Anthropic. لا دفع، ولا استضافة ذاتية، ولا نشر على Vercel، ولا إمكانية تبديل بوكيلك الخاص.
 
-‏Open Design (OD) هو البديل مفتوح المصدر. الحلقة نفسها، والنموذج الذهني نفسه القائم على المخرجات أولًا، دون أي تقييد:
+‏Open Design (OD) هو البديل المتاح مصدره. الحلقة نفسها، والنموذج الذهني نفسه القائم على المخرجات أولًا، دون أي تقييد:
 
 - 🤖 **أصيل للوكلاء، محايد تجاه النموذج.** نحن لا نشحن وكيلًا. أدوات `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` الموجودة أصلًا في `PATH` لديك هي محرك التصميم. بدّلها بنقرة واحدة.
 - 🧠 **بجودة العلامة التجارية افتراضيًا.** تقرأ كل عملية تصيير `DESIGN.md` من الحزمة النشطة بوصفه عقد العلامة الأساسي. يُشحَن مع المستودع 151 حزمة نظام تصميم؛ قد تقتصر الحزم القديمة على `DESIGN.md`، بينما يمكن للأحدث إضافة `manifest.json` و`tokens.css` والمكوّنات والأصول وبيانات المصدر. أسقِط مجلدًا، فيعثر عليه المُنتقي.
@@ -276,8 +275,8 @@
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| مفتوح المصدر | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
-| استضافة ذاتية / سطح مكتب | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| المصدر متاح | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
+| استضافة ذاتية لعدد غير محدود من مساحات العمل أحادية العضو / سطح مكتب | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | أصيل للوكلاء (يعمل في واجهة CLI لديك) | Anthropic فقط | ❌ | وكيل سحابي فقط | **✅ 25 واجهة CLI + BYOK** |
 | `DESIGN.md` بجودة العلامة التجارية | احتكاري | Theme JSON | رموز محدودة | **✅ 151 نظامًا مشحونًا** |
 | المهارات / الإضافات / القوالب | مغلقة | متجر إضافات | مغلقة | **✅ أكثر من 100 مهارة وظيفية · كتالوج منفصل لقوالب التصيير · 277 إضافة** |
@@ -720,7 +719,7 @@ gh pr create --fill
 
 | المشروع | الدور |
 |---|---|
-| Claude Design | المنتج مغلق المصدر الذي يُعدّ هذا المستودع البديل مفتوح المصدر له. |
+| Claude Design | المنتج مغلق المصدر الذي يُعدّ هذا المستودع البديل المتاح مصدره له. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | بوصلة فلسفة التصميم — سير عمل المصمم المبتدئ، بروتوكول أصول العلامة التجارية، قائمة تحقق ضد الركاكة بالذكاء الاصطناعي، نقد بخمسة أبعاد. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | مهارة عرض الويب بأسلوب المجلات، مجمَّعة حرفيًا ضمن [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/). افتراضية لوضع العرض التقديمي. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | عائلة HTML PPT Studio — 15 قالب عرض تقديمي، 36 سمة، 31 تخطيط صفحة، وقت تشغيل للحركة، وضع عرض ببطاقات مغناطيسية. |
@@ -737,6 +736,6 @@ gh pr create --fill
 
 ## الترخيص
 
-‏Apache-2.0. يحتفظ المجمَّع `design-templates/guizang-ppt/` بترخيصه الأصلي [LICENSE](../../design-templates/guizang-ppt/LICENSE) (MIT، [@op7418](https://github.com/op7418)). ويحتفظ المجمَّع `design-templates/html-ppt/` بترخيصه الأصلي [LICENSE](../../design-templates/html-ppt/LICENSE) (MIT، [@lewislulu](https://github.com/lewislulu)).
+‏[Open Design Community License 1.0](../../LICENSE)، وهو ترخيص مخصص متاح المصدر مبني على Apache 2.0 مع شروط إضافية للاستضافة الخارجية والعلامة التجارية للواجهة. يتطلب تفويضًا تجاريًا منفصلًا أن يشغّل طرف ثالث Open Design أو يديره بصورة مستمرة لصالح أي عميل خارجي غير مرتبط، حتى لو كان عميلاً واحدًا. تحتفظ المكونات المجمعة ذات ملفات `LICENSE` المنفصلة بتراخيصها، بما فيها `design-templates/guizang-ppt/` (MIT، [@op7418](https://github.com/op7418)) و`design-templates/html-ppt/` (MIT، [@lewislulu](https://github.com/lewislulu)).
 
 </div>

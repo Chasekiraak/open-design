@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: Açık kaynaklı Claude Design alternatifi</h1>
+<h1 align="center">Open Design: Kaynak kodu erişilebilir Claude Design alternatifi</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ burada.** Uzun tasarım oturumları eskiden her kesintide bozulurdu — bir çalıştırma yerini kaybederdi, model seçici tahmin yürütmenize yol açardı, bir dışa aktarma bir sapma daha gerektirirdi. 0.13.0 oturumu canlı tutar: Codex / OpenCode / Pi / Open Design Cloud çalıştırmalarını turlar boyunca sürdürün, doğru modeli daha hızlı seçin ve ekran görüntüsüyle desteklenen PPTX / PDF dosyalarını uygulamadan çıkmadan teslim edin. [0.13.0'ı indir](https://github.com/nexu-io/open-design/releases) · [Sürüm notları](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Open Design Fellow programı artık açık.** Siz de tasarımın açık olması gerektiğine inanıyorsanız — bir Open Design Fellow olun, ürünü çekirdek ekiple birlikte şekillendirin ve daha fazla insanın tasarımın geleceğini tanımlamaya katılmasına yardımcı olun. Ayrıntılar → [`MAINTAINERS.md`](../../MAINTAINERS.md) ve [Discord](https://discord.gg/mHAjSMV6gz).
 
 <p align="center">
-  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
+  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="../../QUICKSTART.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Open Design nedir
 
-🎨 **Yerel öncelikli, açık kaynaklı Claude Design alternatifi.** &nbsp;🖥️ **macOS ve Windows için yerel masaüstü uygulaması.** &nbsp;⚡ **100+ işlevsel beceri + ayrı render şablonu kataloğu** · ✨ **151 tasarım sistemi paketi** · 📦 **277 kullanıma hazır eklenti.** &nbsp;🖼️ **web · masaüstü · mobil prototipler**, **canlı panolar / artifact'ler**, **sunum desteleri**, **görseller**, **video** ve ayrıca **HyperFrames** hareket grafikleri üretir. 🔒 Yalıtılmış iframe önizlemesi · HTML / PDF / PPTX / MP4 dışa aktarımı. &nbsp;🤖 **Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity ve 25 ayrı yerel CLI yürütülebilir dosyası üzerinde** veya BYOK ile herhangi bir OpenAI uyumlu uç noktada çalışır.
+🎨 **Yerel öncelikli, kaynak kodu erişilebilir Claude Design alternatifi.** &nbsp;🖥️ **macOS ve Windows için yerel masaüstü uygulaması.** &nbsp;⚡ **100+ işlevsel beceri + ayrı render şablonu kataloğu** · ✨ **151 tasarım sistemi paketi** · 📦 **277 kullanıma hazır eklenti.** &nbsp;🖼️ **web · masaüstü · mobil prototipler**, **canlı panolar / artifact'ler**, **sunum desteleri**, **görseller**, **video** ve ayrıca **HyperFrames** hareket grafikleri üretir. 🔒 Yalıtılmış iframe önizlemesi · HTML / PDF / PPTX / MP4 dışa aktarımı. &nbsp;🤖 **Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity ve 25 ayrı yerel CLI yürütülebilir dosyası üzerinde** veya BYOK ile herhangi bir OpenAI uyumlu uç noktada çalışır.
 
 Open Design bu döngüyü ajanların okuyup yazabildiği bir **işlevsel beceriler, render tasarım şablonları, tasarım sistemleri ve eklentiler dosya sistemine** dönüştürür.
 
@@ -49,7 +49,6 @@ Open Design'ın ne olduğuna ve ne yaptığına hızlı bir bakış. **Home**'da
 <table>
 <tr>
 <td valign="top">
-<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Home page" /><br/>
 <sub><b>Home</b> — genel bakış giriş noktası. Bir beceri ve bir tasarım sistemi seçin, özeti yazın ve her şeyi tek bir yerden başlatın.</sub>
 </td>
 </tr>
@@ -261,7 +260,7 @@ Her deste **HTML** (tek dosya, gömülü varlıklar), **PDF** (tarayıcı yazdı
 
 > **Nisan 2026'da Anthropic Claude Design'ı yayınladı — bir LLM'in ilk kez düz metin yazmayı bırakıp doğrudan tasarım artifact'leri sunduğu an.** Viral oldu. Ama kapalı kaynaklı, yalnızca ücretli, yalnızca bulut tabanlı kaldı; Anthropic'in modeline, Anthropic'in becerilerine, Anthropic'in yüzeyine kilitliydi. Ödeme yok, kendi sunucunda barındırma yok, Vercel dağıtımı yok, kendi ajanını takma yok.
 
-Open Design (OD) açık kaynaklı alternatiftir. Aynı döngü, aynı artifact öncelikli zihinsel model, hiçbir bağımlılık kilidi olmadan:
+Open Design (OD) kaynak kodu erişilebilir alternatiftir. Aynı döngü, aynı artifact öncelikli zihinsel model, hiçbir bağımlılık kilidi olmadan:
 
 - 🤖 **Ajan-yerel, modelden bağımsız.** Bir ajan sunmuyoruz. `PATH`'inizde zaten bulunan `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` tasarım motorudur. Tek tıkla değiştirin.
 - 🧠 **Varsayılan olarak marka düzeyinde.** Her render etkin paketin `DESIGN.md` dosyasını temel marka sözleşmesi olarak okur. Depoda 151 tasarım sistemi paketi bulunur; eski paketler yalnızca `DESIGN.md` içerebilir, yenileri `manifest.json`, `tokens.css`, bileşenler, varlıklar ve provenance ekleyebilir. Bir klasör bırakın, seçici onu bulur.
@@ -274,8 +273,8 @@ Open Design (OD) açık kaynaklı alternatiftir. Aynı döngü, aynı artifact �
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| Açık kaynak | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
-| Kendi sunucunda barındırma / masaüstü | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| Kaynak kodu erişilebilir | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
+| Sınırsız sayıda tek üyeli workspace'i kendi sunucunda barındırma / masaüstü | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | Ajan-yerel (CLI'nizde çalışır) | Yalnızca Anthropic | ❌ | Yalnızca bulut ajanı | **✅ 25 CLI + BYOK** |
 | Marka düzeyinde `DESIGN.md` | Tescilli | Theme JSON | Sınırlı token | **✅ 151 sistem sunuluyor** |
 | Beceriler / eklentiler / şablonlar | Kapalı | Eklenti mağazası | Kapalı | **✅ 100+ işlevsel beceri · ayrı render şablonu kataloğu · 277 eklenti** |
@@ -718,7 +717,7 @@ Bu size otuz dakika kazandırdıysa, bir ★ verin. Yıldızlar kira ödemez —
 
 | Proje | Rol |
 |---|---|
-| Claude Design | Bu deponun açık kaynaklı alternatifi olduğu kapalı kaynaklı ürün. |
+| Claude Design | Bu deponun kaynak kodu erişilebilir alternatifi olduğu kapalı kaynaklı ürün. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | Tasarım felsefesi pusulası — junior-tasarımcı iş akışı, marka-varlığı protokolü, anti-AI-slop kontrol listesi, beş boyutlu eleştiri. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | Dergi tarzı web PPT becerisi, [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) altında birebir paketlenmiştir. Deste modu için varsayılan. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | HTML PPT Studio ailesi — 15 deste şablonu, 36 tema, 31 sayfa düzeni, animasyon çalışma zamanı, manyetik-kart sunucu modu. |
@@ -735,4 +734,4 @@ Ayrıntılı köken → [`docs/references.md`](../../docs/references.md).
 
 ## Lisans
 
-Apache-2.0. Paketlenmiş `design-templates/guizang-ppt/` orijinal [LICENSE](../../design-templates/guizang-ppt/LICENSE) dosyasını korur (MIT, [@op7418](https://github.com/op7418)). Paketlenmiş `design-templates/html-ppt/` orijinal [LICENSE](../../design-templates/html-ppt/LICENSE) dosyasını korur (MIT, [@lewislulu](https://github.com/lewislulu)).
+[Open Design Community License 1.0](../../LICENSE), Apache 2.0 temelli ve harici barındırma ile frontend markalaması için ek koşullar içeren özel bir kaynak kodu erişilebilir lisansıdır. Üçüncü bir tarafın Open Design'ı bağlantısız herhangi bir harici müşteri için sürekli işletmesi veya yönetmesi, müşteri tek bir kişi veya kuruluş olsa bile ayrı bir ticari izin gerektirir. Kendi `LICENSE` dosyasına sahip paketlenmiş bileşenler lisanslarını korur; bunlara `design-templates/guizang-ppt/` (MIT, [@op7418](https://github.com/op7418)) ve `design-templates/html-ppt/` (MIT, [@lewislulu](https://github.com/lewislulu)) dahildir.

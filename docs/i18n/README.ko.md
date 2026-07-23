@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: 오픈소스 Claude Design 대안</h1>
+<h1 align="center">Open Design: 소스 사용 가능한 Claude Design 대안</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ 출시.** 긴 디자인 세션은 지금까지 중단될 때마다 끊겼습니다 — 실행은 진행 위치를 잃고, 모델 선택기는 추측하게 만들고, 내보내기는 한 번 더 우회해야 했습니다. 0.13.0은 세션을 계속 살아 있게 합니다: Codex / OpenCode / Pi / Open Design Cloud 실행을 여러 턴에 걸쳐 재개하고, 알맞은 모델을 더 빠르게 고르며, 스크린샷 기반 PPTX / PDF를 앱을 벗어나지 않고 전달하세요. [0.13.0 다운로드](https://github.com/nexu-io/open-design/releases) · [릴리스 노트](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Open Design Fellow 프로그램이 지금 열렸습니다.** 디자인은 열려 있어야 한다고 믿으신다면 — Open Design Fellow가 되어 핵심 팀과 함께 제품을 빚어내고, 더 많은 사람이 디자인의 미래를 정의하는 일에 참여하도록 도와주세요. 자세히 → [`MAINTAINERS.md`](../../MAINTAINERS.md) 및 [Discord](https://discord.gg/mHAjSMV6gz).
 
 <p align="center">
-  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
+  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="QUICKSTART.ko.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Open Design란
 
-🎨 **로컬 우선의 오픈소스 Claude Design 대안.** &nbsp;🖥️ **macOS와 Windows용 네이티브 데스크톱 앱.** &nbsp;⚡ **100개 이상의 기능 스킬 + 별도 렌더링 템플릿 카탈로그** · ✨ **151개의 디자인 시스템 패키지** · 📦 **바로 쓸 수 있는 277개의 플러그인.** &nbsp;🖼️ **웹 · 데스크톱 · 모바일 프로토타입**, **라이브 대시보드 / 아티팩트**, **덱**, **이미지**, **비디오**, 그리고 **HyperFrames** 모션 그래픽을 생성합니다. 🔒 샌드박스 iframe 미리보기 · HTML / PDF / PPTX / MP4 내보내기. &nbsp;🤖 **25개의 고유한 로컬 CLI 실행 파일에서 실행**되며, BYOK를 통해 OpenAI 호환 엔드포인트라면 무엇이든 사용할 수 있습니다.
+🎨 **로컬 우선의 소스 사용 가능한 Claude Design 대안.** &nbsp;🖥️ **macOS와 Windows용 네이티브 데스크톱 앱.** &nbsp;⚡ **100개 이상의 기능 스킬 + 별도 렌더링 템플릿 카탈로그** · ✨ **151개의 디자인 시스템 패키지** · 📦 **바로 쓸 수 있는 277개의 플러그인.** &nbsp;🖼️ **웹 · 데스크톱 · 모바일 프로토타입**, **라이브 대시보드 / 아티팩트**, **덱**, **이미지**, **비디오**, 그리고 **HyperFrames** 모션 그래픽을 생성합니다. 🔒 샌드박스 iframe 미리보기 · HTML / PDF / PPTX / MP4 내보내기. &nbsp;🤖 **25개의 고유한 로컬 CLI 실행 파일에서 실행**되며, BYOK를 통해 OpenAI 호환 엔드포인트라면 무엇이든 사용할 수 있습니다.
 
 Open Design는 그 루프를 에이전트가 읽고 쓸 수 있는 **기능 스킬 · 렌더링 디자인 템플릿 · 디자인 시스템 · 플러그인의 파일시스템**으로 만듭니다.
 
@@ -49,7 +49,6 @@ Open Design가 무엇이고 무엇을 하는지 빠르게 살펴봅니다. **Hom
 <table>
 <tr>
 <td valign="top">
-<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Home page" /><br/>
 <sub><b>Home</b> — 개요 진입점. 스킬과 디자인 시스템을 고르고, 브리프를 입력한 뒤, 한곳에서 모든 것을 시작하세요.</sub>
 </td>
 </tr>
@@ -261,7 +260,7 @@ Runtime 정의는 [`apps/daemon/src/runtimes/defs/`](../../apps/daemon/src/runti
 
 > **2026년 4월, Anthropic은 Claude Design을 출시했습니다 — LLM이 산문 작성을 멈추고 디자인 아티팩트를 직접 전달하기 시작한 최초의 순간이었습니다.** 그것은 입소문을 탔습니다. 그러나 그것은 닫힌 소스로, 유료 전용으로, 클라우드 전용으로 머물렀고, Anthropic의 모델, Anthropic의 스킬, Anthropic의 표면에 묶여 있었습니다. 결제도, 셀프 호스트도, Vercel 배포도, 자신의 에이전트로 교체하는 것도 없었습니다.
 
-Open Design(OD)는 그 오픈소스 대안입니다. 같은 루프, 같은 아티팩트 우선의 사고방식, 잠금은 전혀 없이:
+Open Design(OD)는 그 소스 사용 가능한 대안입니다. 같은 루프, 같은 아티팩트 우선의 사고방식, 잠금은 전혀 없이:
 
 - 🤖 **에이전트 네이티브, 모델에 구애받지 않음.** 우리는 에이전트를 제공하지 않습니다. 이미 당신의 `PATH`에 있는 `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi`가 디자인 엔진입니다. 한 번의 클릭으로 교체하세요.
 - 🧠 **기본부터 브랜드급.** 모든 렌더는 활성 패키지의 `DESIGN.md`를 핵심 브랜드 계약으로 읽습니다. 151개 디자인 시스템 패키지가 제공되며, 레거시 패키지는 `DESIGN.md`만 포함할 수 있고 새 패키지는 `manifest.json`, `tokens.css`, 컴포넌트, 에셋, 출처 정보를 더할 수 있습니다. 폴더 하나만 넣으면 피커가 찾아냅니다.
@@ -274,8 +273,8 @@ Open Design(OD)는 그 오픈소스 대안입니다. 같은 루프, 같은 아�
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| 오픈소스 | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
-| 셀프 호스트 / 데스크톱 | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| 소스 사용 가능 | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
+| 멤버 1명 워크스페이스 무제한 셀프 호스팅 / 데스크톱 | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | 에이전트 네이티브(당신의 CLI에서 실행) | Anthropic 전용 | ❌ | 클라우드 에이전트 전용 | **✅ 25개 CLI + BYOK** |
 | 브랜드급 `DESIGN.md` | 독점 | 테마 JSON | 제한적 토큰 | **✅ 151개 시스템 제공** |
 | 스킬 / 플러그인 / 템플릿 | 비공개 | 플러그인 스토어 | 비공개 | **✅ 100개 이상의 기능 스킬 · 별도 렌더링 템플릿 카탈로그 · 277개 플러그인** |
@@ -718,7 +717,7 @@ gh pr create --fill
 
 | 프로젝트 | 역할 |
 |---|---|
-| Claude Design | 이 저장소가 오픈소스 대안으로 삼는 폐쇄 소스 제품. |
+| Claude Design | 이 저장소가 소스 사용 가능한 대안으로 삼는 폐쇄 소스 제품. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | 디자인 철학의 나침반 — 주니어 디자이너 워크플로, 브랜드 에셋 프로토콜, 안티 AI 슬롭 체크리스트, 5차원 비평. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | 매거진 스타일 웹 PPT 스킬로, [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) 아래에 똑같이 번들로 제공됨. 덱 모드의 기본값. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | HTML PPT Studio 제품군 — 15개 덱 템플릿, 36개 테마, 31개 페이지 레이아웃, 애니메이션 런타임, 마그네틱 카드 프레젠터 모드. |
@@ -735,4 +734,4 @@ gh pr create --fill
 
 ## 라이선스
 
-Apache-2.0. 번들로 제공되는 `design-templates/guizang-ppt/`는 원본 [LICENSE](../../design-templates/guizang-ppt/LICENSE)(MIT, [@op7418](https://github.com/op7418))를 유지합니다. 번들로 제공되는 `design-templates/html-ppt/`는 원본 [LICENSE](../../design-templates/html-ppt/LICENSE)(MIT, [@lewislulu](https://github.com/lewislulu))를 유지합니다.
+[Open Design Community License 1.0](../../LICENSE). Apache 2.0을 기반으로 하며 외부 호스팅과 프런트엔드 브랜딩에 추가 조건을 둔 맞춤형 소스 사용 가능 라이선스입니다. 제3자가 관련 없는 외부 고객을 위해 Open Design을 계속 운영 또는 관리하는 경우에는 고객이 한 곳뿐이더라도 별도의 상업적 승인이 필요합니다. 별도의 `LICENSE`가 있는 번들 구성 요소는 각자의 라이선스를 유지하며, 여기에는 `design-templates/guizang-ppt/`(MIT, [@op7418](https://github.com/op7418))와 `design-templates/html-ppt/`(MIT, [@lewislulu](https://github.com/lewislulu))가 포함됩니다.

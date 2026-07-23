@@ -1613,7 +1613,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Issue Nº 26',
       filedUnder: 'Filed under',
       category: 'Design · Intelligence',
-      madeOnEarth: 'Apache-2.0 · Made on Earth',
+      madeOnEarth: 'ODCL 1.0 · Made on Earth',
       live: 'Live',
       languageSwitcherLabel: 'Switch language',
       languageSwitcherPrefix: 'Lang',
@@ -1659,7 +1659,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: '第 01 卷 / 第 26 期',
       filedUnder: '归档于',
       category: '设计 · 智能',
-      madeOnEarth: 'Apache-2.0 · 来自地球',
+      madeOnEarth: 'ODCL 1.0 · 来自地球',
       live: '在线',
       languageSwitcherLabel: '切换语言',
       languageSwitcherPrefix: '语言',
@@ -1705,7 +1705,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: '第 01 卷 / 第 26 期',
       filedUnder: '歸檔於',
       category: '設計 · 智能',
-      madeOnEarth: 'Apache-2.0 · 來自地球',
+      madeOnEarth: 'ODCL 1.0 · 來自地球',
       live: '在線',
       languageSwitcherLabel: '切換語言',
       languageSwitcherPrefix: '語言',
@@ -1751,7 +1751,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Issue Nº 26',
       filedUnder: '分類',
       category: 'デザイン · インテリジェンス',
-      madeOnEarth: 'Apache-2.0 · 地球製',
+      madeOnEarth: 'ODCL 1.0 · 地球製',
       live: 'ライブ',
       languageSwitcherLabel: '言語を切り替え',
       languageSwitcherPrefix: '言語',
@@ -1797,7 +1797,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: '제 01 권 / 제 26 호',
       filedUnder: '분류',
       category: '디자인 · 인텔리전스',
-      madeOnEarth: 'Apache-2.0 · 지구에서 제작',
+      madeOnEarth: 'ODCL 1.0 · 지구에서 제작',
       live: '라이브',
       languageSwitcherLabel: '언어 전환',
       languageSwitcherPrefix: '언어',
@@ -1843,7 +1843,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Band 01 / Ausgabe Nº 26',
       filedUnder: 'Kategorie',
       category: 'Design · Intelligenz',
-      madeOnEarth: 'Apache-2.0 · Made on Earth',
+      madeOnEarth: 'ODCL 1.0 · Made on Earth',
       live: 'Live',
       languageSwitcherLabel: 'Sprache wechseln',
       languageSwitcherPrefix: 'Sprache',
@@ -1889,7 +1889,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Nº 26',
       filedUnder: 'Classé dans',
       category: 'Design · Intelligence',
-      madeOnEarth: 'Apache-2.0 · Fait sur Terre',
+      madeOnEarth: 'ODCL 1.0 · Fait sur Terre',
       live: 'Live',
       languageSwitcherLabel: 'Changer de langue',
       languageSwitcherPrefix: 'Langue',
@@ -1935,7 +1935,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Том 01 / Выпуск Nº 26',
       filedUnder: 'Раздел',
       category: 'Дизайн · Интеллект',
-      madeOnEarth: 'Apache-2.0 · Сделано на Земле',
+      madeOnEarth: 'ODCL 1.0 · Сделано на Земле',
       live: 'Live',
       languageSwitcherLabel: 'Сменить язык',
       languageSwitcherPrefix: 'Язык',
@@ -1981,7 +1981,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Nº 26',
       filedUnder: 'Categoría',
       category: 'Diseño · Inteligencia',
-      madeOnEarth: 'Apache-2.0 · Hecho en la Tierra',
+      madeOnEarth: 'ODCL 1.0 · Hecho en la Tierra',
       live: 'Live',
       languageSwitcherLabel: 'Cambiar idioma',
       languageSwitcherPrefix: 'Idioma',
@@ -2027,7 +2027,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Nº 26',
       filedUnder: 'Categoria',
       category: 'Design · Inteligência',
-      madeOnEarth: 'Apache-2.0 · Feito na Terra',
+      madeOnEarth: 'ODCL 1.0 · Feito na Terra',
       live: 'Live',
       languageSwitcherLabel: 'Trocar idioma',
       languageSwitcherPrefix: 'Idioma',
@@ -2073,7 +2073,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Nº 26',
       filedUnder: 'Categoria',
       category: 'Design · Intelligenza',
-      madeOnEarth: 'Apache-2.0 · Fatto sulla Terra',
+      madeOnEarth: 'ODCL 1.0 · Fatto sulla Terra',
       live: 'Live',
       languageSwitcherLabel: 'Cambia lingua',
       languageSwitcherPrefix: 'Lingua',
@@ -2119,7 +2119,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Tập 01 / Số Nº 26',
       filedUnder: 'Chủ đề',
       category: 'Thiết kế · Trí tuệ',
-      madeOnEarth: 'Apache-2.0 · Làm trên Trái Đất',
+      madeOnEarth: 'ODCL 1.0 · Làm trên Trái Đất',
       live: 'Live',
       languageSwitcherLabel: 'Đổi ngôn ngữ',
       languageSwitcherPrefix: 'Ngôn ngữ',
@@ -2165,7 +2165,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Tom 01 / Wydanie Nº 26',
       filedUnder: 'Kategoria',
       category: 'Design · Inteligencja',
-      madeOnEarth: 'Apache-2.0 · Made on Earth',
+      madeOnEarth: 'ODCL 1.0 · Made on Earth',
       live: 'Live',
       languageSwitcherLabel: 'Zmień język',
       languageSwitcherPrefix: 'Język',
@@ -2211,7 +2211,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Edisi Nº 26',
       filedUnder: 'Kategori',
       category: 'Desain · Inteligensi',
-      madeOnEarth: 'Apache-2.0 · Dibuat di Bumi',
+      madeOnEarth: 'ODCL 1.0 · Dibuat di Bumi',
       live: 'Live',
       languageSwitcherLabel: 'Ganti bahasa',
       languageSwitcherPrefix: 'Bahasa',
@@ -2257,7 +2257,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Vol. 01 / Editie Nº 26',
       filedUnder: 'Categorie',
       category: 'Design · Intelligentie',
-      madeOnEarth: 'Apache-2.0 · Made on Earth',
+      madeOnEarth: 'ODCL 1.0 · Made on Earth',
       live: 'Live',
       languageSwitcherLabel: 'Taal wisselen',
       languageSwitcherPrefix: 'Taal',
@@ -2303,7 +2303,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'المجلد 01 / العدد Nº 26',
       filedUnder: 'ضمن',
       category: 'تصميم · ذكاء',
-      madeOnEarth: 'Apache-2.0 · صنع على الأرض',
+      madeOnEarth: 'ODCL 1.0 · صنع على الأرض',
       live: 'مباشر',
       languageSwitcherLabel: 'تبديل اللغة',
       languageSwitcherPrefix: 'اللغة',
@@ -2349,7 +2349,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Cilt 01 / Sayı Nº 26',
       filedUnder: 'Kategori',
       category: 'Tasarım · Zeka',
-      madeOnEarth: 'Apache-2.0 · Dünya üzerinde yapıldı',
+      madeOnEarth: 'ODCL 1.0 · Dünya üzerinde yapıldı',
       live: 'Canlı',
       languageSwitcherLabel: 'Dili değiştir',
       languageSwitcherPrefix: 'Dil',
@@ -2395,7 +2395,7 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
       issue: 'Том 01 / Випуск Nº 26',
       filedUnder: 'Розділ',
       category: 'Дизайн · Інтелект',
-      madeOnEarth: 'Apache-2.0 · Зроблено на Землі',
+      madeOnEarth: 'ODCL 1.0 · Зроблено на Землі',
       live: 'Live',
       languageSwitcherLabel: 'Змінити мову',
       languageSwitcherPrefix: 'Мова',
@@ -2440,94 +2440,94 @@ const COMMON_COPY: Record<LandingLocaleCode, CommonCopy> = {
 
 const HOME_SEO_COPY: Record<LandingLocaleCode, HomeSeoCopy> = {
   en: {
-    title: 'Open Design — Best Open Source Claude Design Alternative',
+    title: 'Open Design — Best Source-available Claude Design Alternative',
     description:
-      'Open-source vibe design workspace & Claude Design alternative — build prototypes, landing pages, dashboards, slides & HTML video with your own coding agent.',
+      'Source-available under ODCL 1.0: a vibe design workspace and Claude Design alternative for building prototypes, landing pages, dashboards, slides, and HTML video with your own coding agent.',
   },
   zh: {
-    title: 'Open Design —— 最佳 Claude Design 开源替代',
+    title: 'Open Design —— 最佳 Claude Design 源码可用替代',
     description:
-      'Open Design 是开源的 vibe design workspace，也是 Claude Design 的开源替代——用你自己的 coding agent 做原型、落地页、仪表盘、Slides 和 HTML 视频。',
+      'Open Design 是采用 ODCL 1.0 的源码可用 vibe design workspace，也是 Claude Design 的替代——用你自己的 coding agent 做原型、落地页、仪表盘、Slides 和 HTML 视频。',
   },
   'zh-tw': {
-    title: 'Open Design —— 最佳 Claude Design 開源替代',
+    title: 'Open Design —— 最佳 Claude Design 原始碼可用替代',
     description:
-      'Open Design 是最佳的開源、本地優先 Claude Design 替代方案。用 Claude Code、Codex、Cursor、Gemini、OpenCode 或 Qwen 生成簡報、落地頁、儀表板與品牌系統，背後由 {skills} 個可組合 Skill 與 {systems} 套 DESIGN.md 系統驅動。',
+      'Open Design 是採用 ODCL 1.0、原始碼可用且本地優先的 Claude Design 替代方案。用 Claude Code、Codex、Cursor、Gemini、OpenCode 或 Qwen 生成簡報、落地頁、儀表板與品牌系統，背後由 {skills} 個可組合 Skill 與 {systems} 套 DESIGN.md 系統驅動。',
   },
   ja: {
-    title: 'Open Design — 最高のオープンソース Claude Design 代替',
+    title: 'Open Design — 最高のソース公開型 Claude Design 代替',
     description:
-      'オープンソースの vibe design workspace であり Claude Design の代替。自分の coding agent でプロトタイプ、ランディングページ、ダッシュボード、スライド、HTML 動画を作成。',
+      'ODCL 1.0 のソース公開型 vibe design workspace であり Claude Design の代替。自分の coding agent でプロトタイプ、ランディングページ、ダッシュボード、スライド、HTML 動画を作成。',
   },
   ko: {
-    title: 'Open Design — 최고의 오픈소스 Claude Design 대안',
+    title: 'Open Design — 최고의 소스 공개형 Claude Design 대안',
     description:
-      '오픈소스 vibe design workspace이자 Claude Design 대안. 내 coding agent로 프로토타입, 랜딩 페이지, 대시보드, 슬라이드, HTML 비디오를 만드세요.',
+      'ODCL 1.0을 따르는 소스 공개형 vibe design workspace이자 Claude Design 대안. 내 coding agent로 프로토타입, 랜딩 페이지, 대시보드, 슬라이드, HTML 비디오를 만드세요.',
   },
   de: {
-    title: 'Open Design — beste Open-Source-Alternative zu Claude Design',
+    title: 'Open Design — beste Source-available-Alternative zu Claude Design',
     description:
-      'Open-Source Vibe Design Workspace und Claude-Design-Alternative – Prototypen, Landingpages, Dashboards, Slides & HTML-Video mit deinem eigenen Coding-Agent.',
+      'Source-available unter ODCL 1.0: Vibe Design Workspace und Claude-Design-Alternative für Prototypen, Landingpages, Dashboards, Slides und HTML-Video mit deinem eigenen Coding-Agent.',
   },
   fr: {
-    title: "Open Design — la meilleure alternative open source à Claude Design",
+    title: "Open Design — la meilleure alternative à code source disponible à Claude Design",
     description:
-      'Vibe design workspace open source et alternative à Claude Design — créez prototypes, landing pages, dashboards, slides et vidéo HTML avec votre agent de code.',
+      'Sous ODCL 1.0, un vibe design workspace à code source disponible et une alternative à Claude Design pour créer prototypes, landing pages, dashboards, slides et vidéo HTML avec votre agent de code.',
   },
   ru: {
-    title: 'Open Design — лучшая open-source альтернатива Claude Design',
+    title: 'Open Design — лучшая альтернатива Claude Design с доступным исходным кодом',
     description:
-      'Open-source vibe design workspace и альтернатива Claude Design — прототипы, лендинги, дашборды, слайды и HTML-видео с вашим кодинг-агентом.',
+      'Vibe design workspace с доступным исходным кодом по ODCL 1.0 и альтернатива Claude Design — прототипы, лендинги, дашборды, слайды и HTML-видео с вашим кодинг-агентом.',
   },
   es: {
-    title: 'Open Design — la mejor alternativa open source a Claude Design',
+    title: 'Open Design — la mejor alternativa a Claude Design con código fuente disponible',
     description:
-      'Vibe design workspace open source y alternativa a Claude Design: crea prototipos, landing pages, dashboards, slides y vídeo HTML con tu agente de código.',
+      'Bajo ODCL 1.0, un vibe design workspace con código fuente disponible y una alternativa a Claude Design para crear prototipos, landing pages, dashboards, slides y vídeo HTML con tu agente de código.',
   },
   'pt-br': {
-    title: 'Open Design — a melhor alternativa open source ao Claude Design',
+    title: 'Open Design — a melhor alternativa ao Claude Design com código-fonte disponível',
     description:
-      'Vibe design workspace open source e alternativa ao Claude Design — crie protótipos, landing pages, dashboards, slides e vídeo HTML com seu coding agent.',
+      'Sob a ODCL 1.0, um vibe design workspace com código-fonte disponível e alternativa ao Claude Design para criar protótipos, landing pages, dashboards, slides e vídeo HTML com seu coding agent.',
   },
   it: {
-    title: "Open Design — la migliore alternativa open source a Claude Design",
+    title: "Open Design — la migliore alternativa a Claude Design a codice sorgente disponibile",
     description:
-      'Vibe design workspace open source e alternativa a Claude Design: crea prototipi, landing page, dashboard, slide e video HTML con il tuo coding agent.',
+      'Con licenza ODCL 1.0, un vibe design workspace a codice sorgente disponibile e un’alternativa a Claude Design per creare prototipi, landing page, dashboard, slide e video HTML con il tuo coding agent.',
   },
   vi: {
-    title: 'Open Design — lựa chọn mã nguồn mở tốt nhất thay Claude Design',
+    title: 'Open Design — lựa chọn có mã nguồn khả dụng tốt nhất thay Claude Design',
     description:
-      'Open Design là lựa chọn mã nguồn mở, local-first tốt nhất thay Claude Design. Tạo deck, landing page, dashboard và hệ thống thương hiệu bằng Claude Code, Codex, Cursor, Gemini, OpenCode hoặc Qwen, với {skills} skill có thể ghép và {systems} hệ DESIGN.md di động.',
+      'Open Design là lựa chọn có mã nguồn khả dụng theo ODCL 1.0 và local-first thay Claude Design. Tạo deck, landing page, dashboard và hệ thống thương hiệu bằng Claude Code, Codex, Cursor, Gemini, OpenCode hoặc Qwen, với {skills} skill có thể ghép và {systems} hệ DESIGN.md di động.',
   },
   pl: {
-    title: 'Open Design — najlepsza open-source alternatywa dla Claude Design',
+    title: 'Open Design — najlepsza alternatywa dla Claude Design z dostępnym kodem źródłowym',
     description:
-      'Open Design to najlepsza, open-source i local-first alternatywa dla Claude Design. Twórz decki, landing page, dashboardy i systemy marki z Claude Code, Codex, Cursor, Gemini, OpenCode lub Qwen, używając {skills} kompozycyjnych skills i {systems} przenośnych systemów DESIGN.md.',
+      'Open Design to alternatywa dla Claude Design z dostępnym kodem źródłowym na licencji ODCL 1.0 i podejściem local-first. Twórz decki, landing page, dashboardy i systemy marki z Claude Code, Codex, Cursor, Gemini, OpenCode lub Qwen, używając {skills} kompozycyjnych skills i {systems} przenośnych systemów DESIGN.md.',
   },
   id: {
-    title: 'Open Design — alternatif open source terbaik untuk Claude Design',
+    title: 'Open Design — alternatif Claude Design terbaik dengan kode sumber tersedia',
     description:
-      'Open Design adalah alternatif terbaik, open source, dan local-first untuk Claude Design. Buat deck, landing page, dashboard, dan sistem merek dengan Claude Code, Codex, Cursor, Gemini, OpenCode, atau Qwen, didukung {skills} skill komposable dan {systems} sistem DESIGN.md portabel.',
+      'Open Design adalah alternatif Claude Design dengan kode sumber tersedia berdasarkan ODCL 1.0 dan mengutamakan lokal. Buat deck, landing page, dashboard, dan sistem merek dengan Claude Code, Codex, Cursor, Gemini, OpenCode, atau Qwen, didukung {skills} skill komposable dan {systems} sistem DESIGN.md portabel.',
   },
   nl: {
-    title: 'Open Design — het beste open-source alternatief voor Claude Design',
+    title: 'Open Design — het beste Claude Design-alternatief met beschikbare broncode',
     description:
-      'Open Design is het beste open-source en local-first alternatief voor Claude Design. Maak decks, landingspagina’s, dashboards en merksystemen met Claude Code, Codex, Cursor, Gemini, OpenCode of Qwen, aangedreven door {skills} combineerbare skills en {systems} draagbare DESIGN.md-systemen.',
+      'Open Design is een local-first alternatief voor Claude Design met beschikbare broncode onder ODCL 1.0. Maak decks, landingspagina’s, dashboards en merksystemen met Claude Code, Codex, Cursor, Gemini, OpenCode of Qwen, aangedreven door {skills} combineerbare skills en {systems} draagbare DESIGN.md-systemen.',
   },
   ar: {
-    title: 'Open Design — أفضل بديل مفتوح المصدر لـ Claude Design',
+    title: 'Open Design — أفضل بديل متاح المصدر لـ Claude Design',
     description:
-      'Open Design هو أفضل بديل مفتوح المصدر والمحلي أولاً لـ Claude Design. أنشئ عروضاً وصفحات هبوط ولوحات بيانات وأنظمة علامة عبر Claude Code أو Codex أو Cursor أو Gemini أو OpenCode أو Qwen، مع {skills} مهارة قابلة للتركيب و {systems} نظام DESIGN.md قابل للنقل.',
+      'Open Design بديل متاح المصدر بموجب ODCL 1.0 ومحلي أولاً لـ Claude Design. أنشئ عروضاً وصفحات هبوط ولوحات بيانات وأنظمة علامة عبر Claude Code أو Codex أو Cursor أو Gemini أو OpenCode أو Qwen، مع {skills} مهارة قابلة للتركيب و {systems} نظام DESIGN.md قابل للنقل.',
   },
   tr: {
-    title: "Open Design — Claude Design'ın en iyi açık kaynak alternatifi",
+    title: "Open Design — Claude Design'ın en iyi kaynak kodu erişilebilir alternatifi",
     description:
-      'Açık kaynaklı vibe design workspace ve Claude Design alternatifi — kendi kodlama ajanınla prototip, açılış sayfası, dashboard, slayt ve HTML video oluştur.',
+      'ODCL 1.0 kapsamında kaynak kodu erişilebilir vibe design workspace ve Claude Design alternatifi — kendi kodlama ajanınla prototip, açılış sayfası, dashboard, slayt ve HTML video oluştur.',
   },
   uk: {
-    title: 'Open Design — найкраща open-source альтернатива Claude Design',
+    title: 'Open Design — найкраща альтернатива Claude Design з доступним вихідним кодом',
     description:
-      'Open Design — найкраща open-source і local-first альтернатива Claude Design. Створюйте презентації, лендинги, дашборди та бренд-системи через Claude Code, Codex, Cursor, Gemini, OpenCode або Qwen на базі {skills} skills і {systems} DESIGN.md-систем.',
+      'Open Design — local-first альтернатива Claude Design з доступним вихідним кодом за ODCL 1.0. Створюйте презентації, лендинги, дашборди та бренд-системи через Claude Code, Codex, Cursor, Gemini, OpenCode або Qwen на базі {skills} skills і {systems} DESIGN.md-систем.',
   },
 };
 
@@ -2535,7 +2535,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   en: [
     {
       q: 'What is Open Design?',
-      a: 'Open Design is the official open-source AI design workspace from the nexu-io/open-design project. It turns a local coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode, or Qwen — into a design engine driven by composable skills and portable DESIGN.md systems.',
+      a: 'Open Design is the official source-available AI design workspace from the nexu-io/open-design project, licensed under the Open Design Community License 1.0 (ODCL 1.0). It turns a local coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode, or Qwen — into a design engine driven by composable skills and portable DESIGN.md systems.',
     },
     {
       q: 'Is Open Design official?',
@@ -2544,16 +2544,16 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'How is Open Design different from Claude Design?',
-      a: 'Claude Design is a hosted product tied to a single vendor. Open Design is local-first, open source under Apache-2.0, and BYOK: you bring your own agent, credentials, and DESIGN.md system.',
+      a: 'Claude Design is a hosted product tied to a single vendor. Open Design is local-first, source-available under ODCL 1.0, and BYOK: you bring your own agent, credentials, and DESIGN.md system.',
     },
     {
-      q: 'Is Open Design an open-source Claude Design alternative?',
-      a: 'Yes — Open Design is the open-source, local-first Claude Design alternative. Where Claude Design is closed, hosted, and locked to Anthropic models, Open Design is Apache-2.0, runs on your own machine, and is BYOK, so you drive it with Claude Code, Codex, Cursor, Gemini, OpenCode, or Qwen and keep every artifact as files you own.',
+      q: 'Is Open Design a source-available Claude Design alternative?',
+      a: 'Yes — Open Design is a source-available, local-first Claude Design alternative under ODCL 1.0. It runs on your own machine and is BYOK, so you drive it with Claude Code, Codex, Cursor, Gemini, OpenCode, or Qwen and keep every artifact as files you own.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'What is a vibe design workspace?',
-      a: 'A vibe design workspace is where you design by describing intent to an AI agent — from prompt to prototype, web page, slides, or HTML video — instead of hand-placing every element. Open Design is an open-source, agent-native vibe design workspace: it wires the coding agent you already run into a full design workflow, so one tool takes you from a rough idea to production-ready output you own.',
+      a: 'A vibe design workspace is where you design by describing intent to an AI agent — from prompt to prototype, web page, slides, or HTML video — instead of hand-placing every element. Open Design is a source-available, agent-native vibe design workspace: it wires the coding agent you already run into a full design workflow, so one tool takes you from a rough idea to production-ready output you own.',
       href: '/blog/what-is-vibe-design/',
     },
     {
@@ -2566,7 +2566,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Can I self-host or fork it?',
-      a: 'Yes. The code is Apache-2.0. You can fork the repo, edit skills, add your own DESIGN.md systems, or run the daemon on your own machines.',
+      a: 'Yes, subject to ODCL 1.0. You can fork the repo, edit skills, and add your own DESIGN.md systems. The public software license does not require a Team subscription for multi-user, customer-operated copies. Any third party that continuously operates a hosted, managed, or white-label service for an external customer requires commercial authorization.',
     },
     // ---- Q7+ — added after the initial sync; every locale carries
     // translated copies of these entries (keep all 18 lists at 13 items).
@@ -2582,11 +2582,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'How much does Open Design cost?',
-      a: 'The product is free and Apache-2.0 — there is no Open Design subscription. You pay the API costs of whichever provider you use (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, etc.), billed directly to your account. BYOK keeps both the credentials and the spend on your side of the line.',
+      a: 'The local Community software is free and source-available under ODCL 1.0. You pay the API costs of whichever provider you use (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, etc.); optional Open Design Cloud and Team services may have separate pricing.',
     },
     {
       q: 'Can I self-host Open Design on Vercel, Cloudflare, or my own server?',
-      a: 'Yes. The daemon runs anywhere Node 24 runs, and the landing page is a static Astro build that deploys to Cloudflare Pages, Vercel, or Netlify as-is. Teams running shared deployments typically pin the daemon to a machine inside their network and point each developer\'s CLI at it.',
+      a: 'Yes, subject to ODCL 1.0. The daemon runs anywhere Node 24 runs. The public software license does not require a Team subscription for multi-user, customer-operated copies. Any third party that continuously operates a hosted, managed, or white-label service for an external customer requires commercial authorization.',
     },
     {
       q: 'How do I move my brand into Open Design?',
@@ -2603,18 +2603,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   zh: [
     {
-      q: 'Open Design 是开源的 Claude Design 替代品吗？',
-      a: '是的——Open Design 是开源、本地优先的 Claude Design 替代方案。Claude Design 闭源、托管、锁定 Anthropic 模型；Open Design 是 Apache-2.0，跑在你自己的机器上，且 BYOK，你可以用 Claude Code、Codex、Cursor、Gemini、OpenCode 或 Qwen 驱动它，产出的每个文件都归你所有。',
+      q: 'Open Design 是源码可用的 Claude Design 替代品吗？',
+      a: '是的——Open Design 是采用 ODCL 1.0、源码可用且本地优先的 Claude Design 替代方案。它跑在你自己的机器上且支持 BYOK，你可以用 Claude Code、Codex、Cursor、Gemini、OpenCode 或 Qwen 驱动它，产出的每个文件都归你所有。',
       href: '/alternatives/claude-design/',
     },
     {
       q: '什么是 vibe design workspace？',
-      a: 'vibe design workspace 是通过向 AI agent 描述意图来做设计——从 prompt 到原型、网页、slides、HTML 视频——而不是手动摆放每个元素。Open Design 是一个开源、agent-native 的 vibe design workspace：把你已经在用的 coding agent 接进完整设计工作流，一个工具就把你从粗略想法带到可交付、归你所有的成品。',
+      a: 'vibe design workspace 是通过向 AI agent 描述意图来做设计——从 prompt 到原型、网页、slides、HTML 视频——而不是手动摆放每个元素。Open Design 是一个源码可用、agent-native 的 vibe design workspace：把你已经在用的 coding agent 接进完整设计工作流，一个工具就把你从粗略想法带到可交付、归你所有的成品。',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Open Design 是什么？',
-      a: 'Open Design 是 nexu-io/open-design 项目的官方开源 AI 设计工作台。它把本地编码 Agent（Claude Code、Codex、Cursor、Gemini CLI、OpenCode 或 Qwen）变成设计引擎，并由可组合 SKILL.md 工作流驱动。',
+      a: 'Open Design 是 nexu-io/open-design 项目采用 Open Design Community License 1.0（ODCL 1.0）的官方源码可用 AI 设计工作台。它把本地编码 Agent（Claude Code、Codex、Cursor、Gemini CLI、OpenCode 或 Qwen）变成设计引擎，并由可组合 SKILL.md 工作流驱动。',
     },
     {
       q: 'Open Design 是官方项目吗？',
@@ -2623,7 +2623,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '它和 Claude Design 有什么不同？',
-      a: 'Claude Design 是绑定单一厂商的云端产品。Open Design 本地优先、Apache-2.0 开源，并且 BYOK：你使用自己的 Agent、密钥和 Skill 规则。',
+      a: 'Claude Design 是绑定单一厂商的云端产品。Open Design 本地优先、采用 ODCL 1.0 且源码可用，并且 BYOK：你使用自己的 Agent、密钥和 Skill 规则。',
     },
     {
       q: 'Open Design 可以本地运行吗？',
@@ -2635,7 +2635,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '可以自托管或 fork 吗？',
-      a: '可以。代码采用 Apache-2.0 协议，你可以 fork 仓库、编辑 Skill、加入自己的 reference 规则，或在自己的机器上运行 daemon。',
+      a: '可以，但需遵守 ODCL 1.0。你可以 fork 仓库、编辑 Skill，并加入自己的 reference 规则。多人使用由客户自行运营的公开软件副本，不需要 Team 订阅。第三方只要为任何外部客户持续运营托管、代管或白标服务，就需要商业授权。',
     },
     {
       q: '我的数据会发送给 Anthropic、OpenAI 或 Google 吗？',
@@ -2647,11 +2647,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design 要多少钱？',
-      a: '产品本身免费且为 Apache-2.0 开源——不存在 Open Design 订阅。你只需支付所用供应商（Anthropic、OpenAI、Google、Mistral、xAI、Moonshot 等）的 API 费用，直接计入你自己的账户。BYOK 让密钥和开销都留在你这一侧。',
+      a: '本地 Community 软件免费，并按 ODCL 1.0 源码可用。你需要支付所用模型供应商的 API 费用；可选的 Open Design Cloud 与 Team 服务可能另行收费。',
     },
     {
       q: '可以把 Open Design 自托管到 Vercel、Cloudflare 或自己的服务器吗？',
-      a: '可以。daemon 在任何能跑 Node 24 的地方运行，落地页是静态 Astro 构建，可直接部署到 Cloudflare Pages、Vercel 或 Netlify。团队共享部署通常把 daemon 固定在内网一台机器上，让每个开发者的 CLI 指向它。',
+      a: '可以，但需遵守 ODCL 1.0。daemon 可在任何能跑 Node 24 的环境运行。多人使用由客户自行运营的公开软件副本，不需要 Team 订阅。第三方只要为任何外部客户持续运营托管、代管或白标服务，就需要商业授权。',
     },
     {
       q: '怎么把我的品牌迁入 Open Design？',
@@ -2669,7 +2669,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   'zh-tw': [
     {
       q: 'Open Design 是什麼？',
-      a: 'Open Design 是 nexu-io/open-design 專案的官方開源 AI 設計工作台。它把本地 coding agent（Claude Code、Codex、Cursor、Gemini CLI、OpenCode 或 Qwen）變成設計引擎，並由可組合 Skill 與可攜式 DESIGN.md 系統驅動。',
+      a: 'Open Design 是 nexu-io/open-design 專案採用 Open Design Community License 1.0（ODCL 1.0）的官方原始碼可用 AI 設計工作台。它把本地 coding agent（Claude Code、Codex、Cursor、Gemini CLI、OpenCode 或 Qwen）變成設計引擎，並由可組合 Skill 與可攜式 DESIGN.md 系統驅動。',
     },
     {
       q: 'Open Design 是官方專案嗎？',
@@ -2678,7 +2678,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '它和 Claude Design 有什麼不同？',
-      a: 'Claude Design 是綁定單一供應商的雲端產品。Open Design 本地優先、Apache-2.0 開源，並且 BYOK：你使用自己的 agent、密鑰與 DESIGN.md 設計系統。',
+      a: 'Claude Design 是綁定單一供應商的雲端產品。Open Design 本地優先、採用 ODCL 1.0 且原始碼可用，並且 BYOK：你使用自己的 agent、密鑰與 DESIGN.md 設計系統。',
     },
     {
       q: 'Open Design 可以本地執行嗎？',
@@ -2690,7 +2690,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '可以自架或 fork 嗎？',
-      a: '可以。程式碼採 Apache-2.0，你可以 fork repo、編輯 Skill、加入自己的 DESIGN.md 系統，或在自己的機器上跑 daemon。',
+      a: '可以，但須遵守 ODCL 1.0。你可以 fork repo、編輯 Skill，並加入自己的 DESIGN.md 系統。多人使用由客戶自行營運的公開軟體副本，不需要 Team 訂閱。第三方只要為任何外部客戶持續營運託管、代管或白標服務，就需要商業授權。',
     },
     {
       q: '我的資料會傳給 Anthropic、OpenAI 或 Google 嗎？',
@@ -2702,11 +2702,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design 要多少錢？',
-      a: '產品本身免費且採 Apache-2.0——不存在 Open Design 訂閱。你只需支付所用供應商（Anthropic、OpenAI、Google、Mistral、xAI、Moonshot 等）的 API 費用，直接計入你自己的帳戶。BYOK 讓密鑰與開銷都留在你這一側。',
+      a: '本地 Community 軟體免費，並依 ODCL 1.0 提供原始碼。你需支付所用模型供應商的 API 費用；可選的 Open Design Cloud 與 Team 服務可能另行收費。',
     },
     {
       q: '可以把 Open Design 自架到 Vercel、Cloudflare 或自己的伺服器嗎？',
-      a: '可以。daemon 在任何能跑 Node 24 的地方執行，落地頁是靜態 Astro 建置，可直接部署到 Cloudflare Pages、Vercel 或 Netlify。團隊共享部署通常把 daemon 固定在內網一台機器上，讓每個開發者的 CLI 指向它。',
+      a: '可以，但須遵守 ODCL 1.0。daemon 可在任何能跑 Node 24 的環境執行。多人使用由客戶自行營運的公開軟體副本，不需要 Team 訂閱。第三方只要為任何外部客戶持續營運託管、代管或白標服務，就需要商業授權。',
     },
     {
       q: '怎麼把我的品牌遷入 Open Design？',
@@ -2723,18 +2723,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   ja: [
     {
-      q: 'Open Design はオープンソースの Claude Design 代替ですか？',
-      a: 'はい——Open Design はオープンソースかつローカル優先の Claude Design 代替です。Claude Design はクローズドでホスト型、Anthropic モデルに固定されていますが、Open Design は Apache-2.0 で自分のマシン上で動き、BYOK。Claude Code、Codex、Cursor、Gemini、OpenCode、Qwen で駆動でき、生成物はすべて自分のファイルとして手元に残ります。',
+      q: 'Open Design はソース公開型の Claude Design 代替ですか？',
+      a: 'はい——Open Design は ODCL 1.0 のソース公開型かつローカル優先の Claude Design 代替です。自分のマシン上で動作し、BYOK により Claude Code、Codex、Cursor、Gemini、OpenCode、Qwen で駆動でき、生成物はすべて自分のファイルとして手元に残ります。',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'vibe design workspace とは？',
-      a: 'vibe design workspace とは、要素を一つずつ手で配置する代わりに、AI エージェントに意図を伝えて設計する場です——prompt からプロトタイプ、Web ページ、スライド、HTML 動画まで。Open Design はオープンソースで agent-native な vibe design workspace で、すでに使っているコーディングエージェントを完全な設計ワークフローに組み込み、ひとつのツールでラフなアイデアから自分のものになる完成物まで導きます。',
+      a: 'vibe design workspace とは、要素を一つずつ手で配置する代わりに、AI エージェントに意図を伝えて設計する場です——prompt からプロトタイプ、Web ページ、スライド、HTML 動画まで。Open Design はソース公開型で agent-native な vibe design workspace で、すでに使っているコーディングエージェントを完全な設計ワークフローに組み込み、ひとつのツールでラフなアイデアから自分のものになる完成物まで導きます。',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Open Design とは何ですか？',
-      a: 'Open Design は nexu-io/open-design プロジェクト公式のオープンソース AI デザインワークスペースです。Claude Code、Codex、Cursor、Gemini CLI、OpenCode、Qwen などのローカル coding agent を、スキルと DESIGN.md システムで動くデザインエンジンにします。',
+      a: 'Open Design は nexu-io/open-design プロジェクト公式の、ODCL 1.0 に基づくソース公開型 AI デザインワークスペースです。Claude Code、Codex、Cursor、Gemini CLI、OpenCode、Qwen などのローカル coding agent を、スキルと DESIGN.md システムで動くデザインエンジンにします。',
     },
     {
       q: 'Open Design は公式ですか？',
@@ -2743,7 +2743,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Claude Design と何が違いますか？',
-      a: 'Claude Design は単一ベンダーに紐づくホスト型製品です。Open Design はローカル優先、Apache-2.0 のオープンソース、BYOK で、自分の agent、鍵、DESIGN.md を使います。',
+      a: 'Claude Design は単一ベンダーに紐づくホスト型製品です。Open Design はローカル優先、ODCL 1.0 のソース公開型、BYOK で、自分の agent、鍵、DESIGN.md を使います。',
     },
     {
       q: 'ローカルで動きますか？',
@@ -2755,7 +2755,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'セルフホストや fork はできますか？',
-      a: 'できます。Apache-2.0 のコードなので、repo を fork し、skill を編集し、独自の DESIGN.md システムを追加できます。',
+      a: 'ODCL 1.0 の条件に従って可能です。repo の fork、skill の編集、独自 DESIGN.md システムの追加ができます。顧客自身が運用する公開ソフトウェアのコピーを複数人で利用する場合、Team サブスクリプションは不要です。第三者が外部顧客のためにホスト型、運用代行、またはホワイトラベルのサービスを継続運営する場合は、商用許可が必要です。',
     },
     {
       q: 'データは Anthropic、OpenAI、Google に送られますか？',
@@ -2767,11 +2767,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design の料金は？',
-      a: 'プロダクト自体は無料で Apache-2.0 です。Open Design のサブスクリプションはありません。支払うのは利用するプロバイダー（Anthropic、OpenAI、Google、Mistral、xAI、Moonshot など）の API 料金だけで、あなたのアカウントに直接請求されます。BYOK により、鍵も支出もあなたの側に残ります。',
+      a: 'ローカルの Community ソフトウェアは無料で、ODCL 1.0 に基づきソースが公開されています。利用するモデルプロバイダーの API 料金は必要で、オプションの Open Design Cloud と Team サービスには別料金が設定される場合があります。',
     },
     {
       q: 'Vercel、Cloudflare、自前サーバーでセルフホストできますか？',
-      a: 'できます。daemon は Node 24 が動く場所ならどこでも動き、ランディングページは静的な Astro ビルドなので Cloudflare Pages、Vercel、Netlify にそのままデプロイできます。共有運用するチームは通常、ネットワーク内のマシンに daemon を固定し、各開発者の CLI をそこに向けます。',
+      a: 'ODCL 1.0 の条件に従って可能です。daemon は Node 24 が動く場所で実行できます。顧客自身が運用する公開ソフトウェアのコピーを複数人で利用する場合、Team サブスクリプションは不要です。第三者が外部顧客のためにホスト型、運用代行、またはホワイトラベルのサービスを継続運営する場合は、商用許可が必要です。',
     },
     {
       q: '自分のブランドを Open Design に持ち込むには？',
@@ -2788,18 +2788,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   ko: [
     {
-      q: 'Open Design은 오픈소스 Claude Design 대안인가요?',
-      a: '네——Open Design은 오픈소스, 로컬 우선 Claude Design 대안입니다. Claude Design은 폐쇄형·호스팅형이며 Anthropic 모델에 묶여 있지만, Open Design은 Apache-2.0이고 내 컴퓨터에서 실행되며 BYOK입니다. Claude Code, Codex, Cursor, Gemini, OpenCode, Qwen으로 구동할 수 있고 생성된 모든 산출물은 내 파일로 남습니다.',
+      q: 'Open Design은 소스 공개형 Claude Design 대안인가요?',
+      a: '네——Open Design은 ODCL 1.0을 따르는 소스 공개형, 로컬 우선 Claude Design 대안입니다. 내 컴퓨터에서 실행되고 BYOK를 지원하므로 Claude Code, Codex, Cursor, Gemini, OpenCode, Qwen으로 구동할 수 있으며 생성된 모든 산출물은 내 파일로 남습니다.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'vibe design workspace란 무엇인가요?',
-      a: 'vibe design workspace는 모든 요소를 손으로 배치하는 대신 AI 에이전트에 의도를 설명해 디자인하는 공간입니다 — prompt에서 프로토타입, 웹 페이지, 슬라이드, HTML 비디오까지. Open Design은 오픈소스이자 agent-native한 vibe design workspace로, 이미 쓰는 코딩 에이전트를 완전한 디자인 워크플로에 연결해 하나의 도구로 거친 아이디어에서 내 것이 되는 완성물까지 이끕니다.',
+      a: 'vibe design workspace는 모든 요소를 손으로 배치하는 대신 AI 에이전트에 의도를 설명해 디자인하는 공간입니다 — prompt에서 프로토타입, 웹 페이지, 슬라이드, HTML 비디오까지. Open Design은 소스 공개형이자 agent-native한 vibe design workspace로, 이미 쓰는 코딩 에이전트를 완전한 디자인 워크플로에 연결해 하나의 도구로 거친 아이디어에서 내 것이 되는 완성물까지 이끕니다.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Open Design은 무엇인가요?',
-      a: 'Open Design은 nexu-io/open-design 프로젝트의 공식 오픈소스 AI 디자인 워크스페이스입니다. Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qwen 같은 로컬 coding agent를 조합형 skill과 DESIGN.md 시스템으로 구동되는 디자인 엔진으로 바꿉니다.',
+      a: 'Open Design은 nexu-io/open-design 프로젝트의 공식 소스 공개형 AI 디자인 워크스페이스이며 ODCL 1.0을 따릅니다. Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qwen 같은 로컬 coding agent를 조합형 skill과 DESIGN.md 시스템으로 구동되는 디자인 엔진으로 바꿉니다.',
     },
     {
       q: 'Open Design은 공식 프로젝트인가요?',
@@ -2808,7 +2808,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Claude Design과 무엇이 다른가요?',
-      a: 'Claude Design은 단일 벤더에 묶인 호스팅 제품입니다. Open Design은 로컬 우선, Apache-2.0 오픈소스, BYOK이며 사용자의 agent, 키, DESIGN.md 시스템을 그대로 씁니다.',
+      a: 'Claude Design은 단일 벤더에 묶인 호스팅 제품입니다. Open Design은 로컬 우선, ODCL 1.0 기반 소스 공개형, BYOK이며 사용자의 agent, 키, DESIGN.md 시스템을 그대로 씁니다.',
     },
     {
       q: '로컬에서 실행되나요?',
@@ -2820,7 +2820,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '셀프호스팅이나 fork가 가능한가요?',
-      a: '가능합니다. Apache-2.0 코드라 repo를 fork하고, skill을 편집하고, 자체 DESIGN.md 시스템을 추가할 수 있습니다.',
+      a: 'ODCL 1.0 조건에 따라 가능합니다. repo를 fork하고 skill을 편집하며 자체 DESIGN.md 시스템을 추가할 수 있습니다. 고객이 직접 운영하는 공개 소프트웨어 사본을 여러 명이 사용하는 데 Team 구독은 필요하지 않습니다. 제3자가 외부 고객을 위해 호스팅, 관리형 또는 화이트라벨 서비스를 지속적으로 운영하려면 상용 승인이 필요합니다.',
     },
     {
       q: '내 데이터가 Anthropic, OpenAI, Google로 전송되나요?',
@@ -2832,11 +2832,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design 비용은 얼마인가요?',
-      a: '제품은 무료이고 Apache-2.0입니다. Open Design 구독은 없습니다. 사용하는 프로바이더(Anthropic, OpenAI, Google, Mistral, xAI, Moonshot 등)의 API 비용만 본인 계정으로 직접 결제하면 됩니다. BYOK 덕분에 키와 지출 모두 사용자 쪽에 남습니다.',
+      a: '로컬 Community 소프트웨어는 무료이며 ODCL 1.0에 따라 소스가 공개됩니다. 사용하는 모델 프로바이더의 API 비용은 별도이며, 선택형 Open Design Cloud와 Team 서비스에는 별도 요금이 적용될 수 있습니다.',
     },
     {
       q: 'Vercel, Cloudflare, 자체 서버에 셀프호스팅할 수 있나요?',
-      a: '가능합니다. daemon은 Node 24가 도는 곳이면 어디서든 실행되고, 랜딩 페이지는 정적 Astro 빌드라 Cloudflare Pages, Vercel, Netlify에 그대로 배포됩니다. 공유 배포를 운영하는 팀은 보통 네트워크 안의 머신에 daemon을 고정하고 각 개발자의 CLI를 그쪽으로 연결합니다.',
+      a: 'ODCL 1.0 조건에 따라 가능합니다. daemon은 Node 24가 도는 곳에서 실행할 수 있습니다. 고객이 직접 운영하는 공개 소프트웨어 사본을 여러 명이 사용하는 데 Team 구독은 필요하지 않습니다. 제3자가 외부 고객을 위해 호스팅, 관리형 또는 화이트라벨 서비스를 지속적으로 운영하려면 상용 승인이 필요합니다.',
     },
     {
       q: '내 브랜드를 Open Design으로 옮기려면?',
@@ -2853,18 +2853,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   de: [
     {
-      q: 'Ist Open Design eine quelloffene Claude-Design-Alternative?',
-      a: 'Ja — Open Design ist die quelloffene, lokale Claude-Design-Alternative. Wo Claude Design geschlossen, gehostet und an Anthropic-Modelle gebunden ist, ist Open Design Apache-2.0, läuft auf deinem eigenen Rechner und ist BYOK: Du steuerst es mit Claude Code, Codex, Cursor, Gemini, OpenCode oder Qwen und behältst jedes Ergebnis als eigene Dateien.',
+      q: 'Ist Open Design eine Source-available-Alternative zu Claude Design?',
+      a: 'Ja — Open Design ist eine lokale Source-available-Alternative zu Claude Design unter ODCL 1.0. Es läuft auf deinem eigenen Rechner, ist BYOK und bewahrt jedes Ergebnis als deine eigenen Dateien.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'Was ist ein Vibe Design Workspace?',
-      a: 'Ein Vibe Design Workspace ist ein Ort, an dem du gestaltest, indem du einem KI-Agent deine Absicht beschreibst — vom Prompt zu Prototyp, Webseite, Slides oder HTML-Video — statt jedes Element von Hand zu platzieren. Open Design ist ein quelloffener, agent-nativer Vibe Design Workspace: Er bindet den Coding-Agent, den du bereits nutzt, in einen vollständigen Design-Workflow ein, sodass ein Werkzeug dich von der groben Idee zum fertigen, dir gehörenden Ergebnis bringt.',
+      a: 'Ein Vibe Design Workspace ist ein Ort, an dem du gestaltest, indem du einem KI-Agent deine Absicht beschreibst — vom Prompt zu Prototyp, Webseite, Slides oder HTML-Video — statt jedes Element von Hand zu platzieren. Open Design ist ein Source-available, agent-nativer Vibe Design Workspace: Er bindet den Coding-Agent, den du bereits nutzt, in einen vollständigen Design-Workflow ein, sodass ein Werkzeug dich von der groben Idee zum fertigen, dir gehörenden Ergebnis bringt.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Was ist Open Design?',
-      a: 'Open Design ist der offizielle Open-Source-AI-Design-Workspace des Projekts nexu-io/open-design. Es macht lokale Coding-Agents wie Claude Code, Codex, Cursor, Gemini CLI, OpenCode oder Qwen zu einer Design-Engine auf Basis von Skills und DESIGN.md-Systemen.',
+      a: 'Open Design ist der offizielle Source-available-AI-Design-Workspace des Projekts nexu-io/open-design unter ODCL 1.0. Es macht lokale Coding-Agents wie Claude Code, Codex, Cursor, Gemini CLI, OpenCode oder Qwen zu einer Design-Engine auf Basis von Skills und DESIGN.md-Systemen.',
     },
     {
       q: 'Ist Open Design offiziell?',
@@ -2873,7 +2873,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Worin unterscheidet es sich von Claude Design?',
-      a: 'Claude Design ist ein gehostetes Produkt eines einzelnen Anbieters. Open Design ist local-first, Apache-2.0 Open Source und BYOK: Sie bringen Agent, Schlüssel und DESIGN.md-System selbst mit.',
+      a: 'Claude Design ist ein gehostetes Produkt eines einzelnen Anbieters. Open Design ist local-first, Source-available unter ODCL 1.0 und BYOK: Sie bringen Agent, Schlüssel und DESIGN.md-System selbst mit.',
     },
     {
       q: 'Läuft Open Design lokal?',
@@ -2885,7 +2885,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Kann ich es selbst hosten oder forken?',
-      a: 'Ja. Der Code ist Apache-2.0. Sie können das Repo forken, Skills bearbeiten, eigene DESIGN.md-Systeme hinzufügen oder den Daemon selbst betreiben.',
+      a: 'Ja, gemäß ODCL 1.0. Sie können das Repo forken und Skills bearbeiten. Für eine von einem Kunden selbst betriebene Kopie der öffentlichen Software ist bei Nutzung durch mehrere Personen kein Team-Abonnement erforderlich. Jeder Dritte, der für einen externen Kunden dauerhaft einen gehosteten, verwalteten oder White-Label-Dienst betreibt, benötigt eine kommerzielle Genehmigung.',
     },
     {
       q: 'Werden meine Daten an Anthropic, OpenAI oder Google gesendet?',
@@ -2897,11 +2897,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Was kostet Open Design?',
-      a: 'Das Produkt ist kostenlos und Apache-2.0 — es gibt kein Open-Design-Abo. Sie zahlen nur die API-Kosten Ihres Providers (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot usw.), direkt über Ihr eigenes Konto. BYOK hält Schlüssel und Ausgaben auf Ihrer Seite.',
+      a: 'Die lokale Community-Software ist kostenlos und unter ODCL 1.0 Source-available. Provider-API-Kosten fallen separat an; optionale Open Design Cloud- und Team-Dienste können eigene Preise haben.',
     },
     {
       q: 'Kann ich Open Design auf Vercel, Cloudflare oder eigenen Servern hosten?',
-      a: 'Ja. Der Daemon läuft überall, wo Node 24 läuft, und die Landingpage ist ein statischer Astro-Build, der unverändert auf Cloudflare Pages, Vercel oder Netlify deployt. Teams mit geteilten Deployments pinnen den Daemon meist auf eine Maschine im eigenen Netz und richten jede Entwickler-CLI darauf aus.',
+      a: 'Ja, gemäß ODCL 1.0. Der Daemon läuft überall, wo Node 24 läuft. Für eine von einem Kunden selbst betriebene Kopie der öffentlichen Software ist bei Nutzung durch mehrere Personen kein Team-Abonnement erforderlich. Jeder Dritte, der für einen externen Kunden dauerhaft einen gehosteten, verwalteten oder White-Label-Dienst betreibt, benötigt eine kommerzielle Genehmigung.',
     },
     {
       q: 'Wie bringe ich meine Marke in Open Design?',
@@ -2918,18 +2918,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   fr: [
     {
-      q: 'Open Design est-il une alternative open source à Claude Design ?',
-      a: 'Oui — Open Design est l’alternative open source et locale à Claude Design. Là où Claude Design est fermé, hébergé et verrouillé aux modèles Anthropic, Open Design est en Apache-2.0, s’exécute sur votre propre machine et fonctionne en BYOK : pilotez-le avec Claude Code, Codex, Cursor, Gemini, OpenCode ou Qwen et gardez chaque livrable sous forme de fichiers qui vous appartiennent.',
+      q: 'Open Design est-il une alternative à code source disponible à Claude Design ?',
+      a: 'Oui — Open Design est une alternative locale à Claude Design, à code source disponible sous ODCL 1.0. Il s’exécute sur votre propre machine, fonctionne en BYOK et conserve chaque livrable sous forme de fichiers qui vous appartiennent.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'Qu’est-ce qu’un vibe design workspace ?',
-      a: 'Un vibe design workspace est un espace où l’on conçoit en décrivant son intention à un agent IA — du prompt au prototype, page web, slides ou vidéo HTML — plutôt qu’en plaçant chaque élément à la main. Open Design est un vibe design workspace open source et agent-native : il intègre l’agent de code que vous utilisez déjà dans un flux de design complet, pour passer d’une idée brute à un résultat livrable et bien à vous.',
+      a: 'Un vibe design workspace est un espace où l’on conçoit en décrivant son intention à un agent IA — du prompt au prototype, page web, slides ou vidéo HTML — plutôt qu’en plaçant chaque élément à la main. Open Design est un vibe design workspace à code source disponible et agent-native : il intègre l’agent de code que vous utilisez déjà dans un flux de design complet, pour passer d’une idée brute à un résultat livrable et bien à vous.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: "Qu'est-ce qu'Open Design ?",
-      a: "Open Design est l'espace de travail officiel et open source du projet nexu-io/open-design. Il transforme un agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode ou Qwen — en moteur de design piloté par des skills composables et des systèmes DESIGN.md portables.",
+      a: "Open Design est l'espace de travail officiel à code source disponible du projet nexu-io/open-design, sous ODCL 1.0. Il transforme un agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode ou Qwen — en moteur de design piloté par des skills composables et des systèmes DESIGN.md portables.",
     },
     {
       q: 'Open Design est-il officiel ?',
@@ -2938,7 +2938,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Quelle différence avec Claude Design ?',
-      a: 'Claude Design est un produit hébergé lié à un fournisseur unique. Open Design est local-first, open source Apache-2.0 et BYOK : vous apportez votre agent, vos clés et votre système DESIGN.md.',
+      a: 'Claude Design est un produit hébergé lié à un fournisseur unique. Open Design est local-first, à code source disponible sous ODCL 1.0 et BYOK : vous apportez votre agent, vos clés et votre système DESIGN.md.',
     },
     {
       q: 'Open Design fonctionne-t-il en local ?',
@@ -2950,7 +2950,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: "Puis-je l'auto-héberger ou le forker ?",
-      a: 'Oui. Le code est Apache-2.0. Vous pouvez forker le repo, modifier les skills, ajouter vos systèmes DESIGN.md ou exécuter le daemon sur vos machines.',
+      a: 'Oui, sous réserve de l’ODCL 1.0. Vous pouvez forker le repo et modifier les skills. Une copie du logiciel public exploitée par le client peut être utilisée par plusieurs personnes sans abonnement Team. Tout tiers qui exploite de façon continue un service hébergé, géré ou en marque blanche pour un client externe doit obtenir une autorisation commerciale.',
     },
     {
       q: 'Mes données sont-elles envoyées à Anthropic, OpenAI ou Google ?',
@@ -2962,11 +2962,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Combien coûte Open Design ?',
-      a: 'Le produit est gratuit et sous Apache-2.0 — il n\'existe pas d\'abonnement Open Design. Vous payez les coûts d\'API du fournisseur que vous utilisez (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, etc.), facturés directement sur votre compte. Le BYOK garde les clés et la dépense de votre côté.',
+      a: 'Le logiciel Community local est gratuit et son code source est disponible sous ODCL 1.0. Les coûts d’API du fournisseur restent séparés ; les services Open Design Cloud et Team optionnels peuvent avoir leur propre tarification.',
     },
     {
       q: 'Puis-je auto-héberger Open Design sur Vercel, Cloudflare ou mon propre serveur ?',
-      a: 'Oui. Le daemon tourne partout où Node 24 tourne, et la landing page est un build Astro statique qui se déploie tel quel sur Cloudflare Pages, Vercel ou Netlify. Les équipes en déploiement partagé épinglent en général le daemon sur une machine de leur réseau et y pointent la CLI de chaque développeur.',
+      a: 'Oui, sous réserve de l’ODCL 1.0. Le daemon tourne partout où Node 24 tourne. Une copie du logiciel public exploitée par le client peut être utilisée par plusieurs personnes sans abonnement Team. Tout tiers qui exploite de façon continue un service hébergé, géré ou en marque blanche pour un client externe doit obtenir une autorisation commerciale.',
     },
     {
       q: 'Comment importer ma marque dans Open Design ?',
@@ -2983,18 +2983,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   ru: [
     {
-      q: 'Open Design — это open-source альтернатива Claude Design?',
-      a: 'Да — Open Design это открытая, локальная альтернатива Claude Design. Claude Design закрыт, работает в облаке и привязан к моделям Anthropic, а Open Design — Apache-2.0, запускается на вашей машине и работает по BYOK: управляйте им через Claude Code, Codex, Cursor, Gemini, OpenCode или Qwen и храните каждый результат как свои файлы.',
+      q: 'Open Design — это альтернатива Claude Design с доступным исходным кодом?',
+      a: 'Да — Open Design это локальная альтернатива Claude Design с доступным исходным кодом по ODCL 1.0. Она запускается на вашей машине, работает по BYOK и сохраняет каждый результат как ваши файлы.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'Что такое vibe design workspace?',
-      a: 'Vibe design workspace — это среда, где вы проектируете, описывая замысел ИИ-агенту — от промпта до прототипа, веб-страницы, слайдов или HTML-видео — вместо расстановки каждого элемента вручную. Open Design это открытый, agent-native vibe design workspace: он встраивает кодинг-агента, которым вы уже пользуетесь, в полный дизайн-процесс, и один инструмент ведёт вас от черновой идеи к готовому результату, который принадлежит вам.',
+      a: 'Vibe design workspace — это среда, где вы проектируете, описывая замысел ИИ-агенту — от промпта до прототипа, веб-страницы, слайдов или HTML-видео — вместо расстановки каждого элемента вручную. Open Design — agent-native vibe design workspace с доступным исходным кодом: он встраивает кодинг-агента, которым вы уже пользуетесь, в полный дизайн-процесс, и один инструмент ведёт вас от черновой идеи к готовому результату, который принадлежит вам.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Что такое Open Design?',
-      a: 'Open Design — официальный open-source AI design workspace проекта nexu-io/open-design. Он превращает локальный coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode или Qwen — в design-движок на базе composable skills и переносимых DESIGN.md-систем.',
+      a: 'Open Design — официальный AI design workspace проекта nexu-io/open-design с доступным исходным кодом по ODCL 1.0. Он превращает локальный coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode или Qwen — в design-движок на базе composable skills и переносимых DESIGN.md-систем.',
     },
     {
       q: 'Open Design официальный?',
@@ -3003,7 +3003,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Чем он отличается от Claude Design?',
-      a: 'Claude Design — hosted-продукт одного вендора. Open Design — local-first, Apache-2.0 open source и BYOK: вы используете своего agent, свои ключи и свою DESIGN.md-систему.',
+      a: 'Claude Design — hosted-продукт одного вендора. Open Design — local-first, с доступным исходным кодом по ODCL 1.0 и BYOK: вы используете своего agent, свои ключи и свою DESIGN.md-систему.',
     },
     {
       q: 'Open Design запускается локально?',
@@ -3015,7 +3015,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Можно self-host или fork?',
-      a: 'Да. Код Apache-2.0. Можно fork-нуть repo, менять skills, добавлять свои DESIGN.md-системы и запускать daemon на своих машинах.',
+      a: 'Да, согласно ODCL 1.0. Можно fork-нуть repo и менять skills. Для многопользовательского использования копии общедоступного ПО, которую эксплуатирует сам клиент, подписка Team не требуется. Любой третьей стороне, которая постоянно эксплуатирует размещаемый, управляемый или white-label сервис для внешнего клиента, требуется коммерческое разрешение.',
     },
     {
       q: 'Мои данные отправляются в Anthropic, OpenAI или Google?',
@@ -3027,11 +3027,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Сколько стоит Open Design?',
-      a: 'Продукт бесплатный и под Apache-2.0 — подписки Open Design не существует. Вы платите только за API того провайдера, которым пользуетесь (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot и др.), напрямую со своего аккаунта. BYOK оставляет и ключи, и расходы на вашей стороне.',
+      a: 'Локальная Community-версия бесплатна, а её исходный код доступен по ODCL 1.0. Расходы на API провайдера оплачиваются отдельно; опциональные сервисы Open Design Cloud и Team могут иметь собственные тарифы.',
     },
     {
       q: 'Можно self-host Open Design на Vercel, Cloudflare или своём сервере?',
-      a: 'Да. Daemon работает везде, где работает Node 24, а лендинг — статическая сборка Astro, которая деплоится на Cloudflare Pages, Vercel или Netlify как есть. Команды с общим деплоем обычно закрепляют daemon на машине внутри своей сети и направляют CLI каждого разработчика на неё.',
+      a: 'Да, согласно ODCL 1.0. Daemon работает везде, где работает Node 24. Для многопользовательского использования копии общедоступного ПО, которую эксплуатирует сам клиент, подписка Team не требуется. Любой третьей стороне, которая постоянно эксплуатирует размещаемый, управляемый или white-label сервис для внешнего клиента, требуется коммерческое разрешение.',
     },
     {
       q: 'Как перенести свой бренд в Open Design?',
@@ -3048,18 +3048,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   es: [
     {
-      q: '¿Open Design es una alternativa open source a Claude Design?',
-      a: 'Sí — Open Design es la alternativa open source y local a Claude Design. Donde Claude Design es cerrado, alojado y atado a los modelos de Anthropic, Open Design es Apache-2.0, se ejecuta en tu propia máquina y es BYOK: contrólalo con Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen y conserva cada resultado como archivos que son tuyos.',
+      q: '¿Open Design es una alternativa con código fuente disponible a Claude Design?',
+      a: 'Sí — Open Design es la alternativa con código fuente disponible y local a Claude Design. Donde Claude Design es cerrado, alojado y atado a los modelos de Anthropic, Open Design es ODCL 1.0, se ejecuta en tu propia máquina y es BYOK: contrólalo con Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen y conserva cada resultado como archivos que son tuyos.',
       href: '/alternatives/claude-design/',
     },
     {
       q: '¿Qué es un vibe design workspace?',
-      a: 'Un vibe design workspace es un espacio donde diseñas describiendo tu intención a un agente de IA — del prompt al prototipo, página web, slides o vídeo HTML — en lugar de colocar cada elemento a mano. Open Design es un vibe design workspace open source y agent-native: conecta el agente de código que ya usas a un flujo de diseño completo, de modo que una sola herramienta te lleva de una idea en bruto a un resultado listo y tuyo.',
+      a: 'Un vibe design workspace es un espacio donde diseñas describiendo tu intención a un agente de IA — del prompt al prototipo, página web, slides o vídeo HTML — en lugar de colocar cada elemento a mano. Open Design es un vibe design workspace con código fuente disponible y agent-native: conecta el agente de código que ya usas a un flujo de diseño completo, de modo que una sola herramienta te lleva de una idea en bruto a un resultado listo y tuyo.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: '¿Qué es Open Design?',
-      a: 'Open Design es el workspace oficial y open source de IA de diseño del proyecto nexu-io/open-design. Convierte un coding agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode o Qwen — en un motor de diseño con skills componibles y sistemas DESIGN.md portables.',
+      a: 'Open Design es el workspace oficial y con código fuente disponible de IA de diseño del proyecto nexu-io/open-design. Convierte un coding agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode o Qwen — en un motor de diseño con skills componibles y sistemas DESIGN.md portables.',
     },
     {
       q: '¿Open Design es oficial?',
@@ -3068,7 +3068,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '¿En qué se diferencia de Claude Design?',
-      a: 'Claude Design es un producto alojado ligado a un solo proveedor. Open Design es local-first, open source Apache-2.0 y BYOK: usas tu propio agent, claves y sistema DESIGN.md.',
+      a: 'Claude Design es un producto alojado ligado a un solo proveedor. Open Design es local-first, con código fuente disponible ODCL 1.0 y BYOK: usas tu propio agent, claves y sistema DESIGN.md.',
     },
     {
       q: '¿Open Design corre localmente?',
@@ -3080,7 +3080,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '¿Puedo autoalojarlo o hacer fork?',
-      a: 'Sí. El código es Apache-2.0. Puedes hacer fork del repo, editar skills, añadir sistemas DESIGN.md propios o ejecutar el daemon en tus máquinas.',
+      a: 'Sí, sujeto a la ODCL 1.0. Puedes hacer fork del repo y editar sus skills. Una copia del software público operada por el propio cliente puede ser utilizada por varias personas sin una suscripción Team. Cualquier tercero que opere de forma continuada un servicio alojado, gestionado o de marca blanca para un cliente externo necesita autorización comercial.',
     },
     {
       q: '¿Mis datos se envían a Anthropic, OpenAI o Google?',
@@ -3092,11 +3092,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: '¿Cuánto cuesta Open Design?',
-      a: 'El producto es gratuito y Apache-2.0: no existe una suscripción de Open Design. Pagas los costes de API del proveedor que uses (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, etc.), facturados directamente a tu cuenta. BYOK mantiene las claves y el gasto de tu lado.',
+      a: 'El software Community local es gratuito y tiene el código fuente disponible bajo ODCL 1.0. Los costes de API se pagan por separado; los servicios opcionales Open Design Cloud y Team pueden tener precios propios.',
     },
     {
       q: '¿Puedo autoalojar Open Design en Vercel, Cloudflare o mi propio servidor?',
-      a: 'Sí. El daemon corre donde corra Node 24, y la landing es un build estático de Astro que se despliega tal cual en Cloudflare Pages, Vercel o Netlify. Los equipos con despliegues compartidos suelen fijar el daemon en una máquina de su red y apuntar ahí la CLI de cada desarrollador.',
+      a: 'Sí, sujeto a la ODCL 1.0. El daemon corre donde corra Node 24. Una copia del software público operada por el propio cliente puede ser utilizada por varias personas sin una suscripción Team. Cualquier tercero que opere de forma continuada un servicio alojado, gestionado o de marca blanca para un cliente externo necesita autorización comercial.',
     },
     {
       q: '¿Cómo llevo mi marca a Open Design?',
@@ -3113,18 +3113,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   'pt-br': [
     {
-      q: 'O Open Design é uma alternativa open source ao Claude Design?',
-      a: 'Sim — o Open Design é a alternativa open source e local ao Claude Design. Enquanto o Claude Design é fechado, hospedado e preso aos modelos da Anthropic, o Open Design é Apache-2.0, roda na sua própria máquina e é BYOK: use Claude Code, Codex, Cursor, Gemini, OpenCode ou Qwen para conduzi-lo e mantenha cada entrega como arquivos que são seus.',
+      q: 'O Open Design é uma alternativa com código-fonte disponível ao Claude Design?',
+      a: 'Sim — o Open Design é a alternativa com código-fonte disponível e local ao Claude Design. Enquanto o Claude Design é fechado, hospedado e preso aos modelos da Anthropic, o Open Design é ODCL 1.0, roda na sua própria máquina e é BYOK: use Claude Code, Codex, Cursor, Gemini, OpenCode ou Qwen para conduzi-lo e mantenha cada entrega como arquivos que são seus.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'O que é um vibe design workspace?',
-      a: 'Um vibe design workspace é onde você projeta descrevendo a intenção a um agente de IA — do prompt ao protótipo, página web, slides ou vídeo HTML — em vez de posicionar cada elemento à mão. O Open Design é um vibe design workspace open source e agent-native: integra o coding agent que você já usa a um fluxo de design completo, então uma ferramenta leva você de uma ideia bruta a um resultado pronto e seu.',
+      a: 'Um vibe design workspace é onde você projeta descrevendo a intenção a um agente de IA — do prompt ao protótipo, página web, slides ou vídeo HTML — em vez de posicionar cada elemento à mão. O Open Design é um vibe design workspace com código-fonte disponível e agent-native: integra o coding agent que você já usa a um fluxo de design completo, então uma ferramenta leva você de uma ideia bruta a um resultado pronto e seu.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'O que é Open Design?',
-      a: 'Open Design é o workspace oficial, open source, de design com IA do projeto nexu-io/open-design. Ele transforma um coding agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode ou Qwen — em um motor de design movido por skills componíveis e sistemas DESIGN.md portáteis.',
+      a: 'Open Design é o workspace oficial, com código-fonte disponível, de design com IA do projeto nexu-io/open-design. Ele transforma um coding agent local — Claude Code, Codex, Cursor, Gemini CLI, OpenCode ou Qwen — em um motor de design movido por skills componíveis e sistemas DESIGN.md portáteis.',
     },
     {
       q: 'Open Design é oficial?',
@@ -3133,7 +3133,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Qual a diferença para o Claude Design?',
-      a: 'Claude Design é um produto hospedado preso a um fornecedor. Open Design é local-first, open source Apache-2.0 e BYOK: você traz seu agent, suas chaves e seu sistema DESIGN.md.',
+      a: 'Claude Design é um produto hospedado preso a um fornecedor. Open Design é local-first, com código-fonte disponível ODCL 1.0 e BYOK: você traz seu agent, suas chaves e seu sistema DESIGN.md.',
     },
     {
       q: 'Open Design roda localmente?',
@@ -3145,7 +3145,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Posso auto-hospedar ou fazer fork?',
-      a: 'Sim. O código é Apache-2.0. Você pode fazer fork do repo, editar skills, adicionar seus sistemas DESIGN.md ou rodar o daemon nas suas máquinas.',
+      a: 'Sim, sujeito à ODCL 1.0. Você pode fazer fork do repo e editar as skills. Uma cópia do software público operada pelo próprio cliente pode ser usada por várias pessoas sem uma assinatura Team. Qualquer terceiro que opere continuamente um serviço hospedado, gerenciado ou white-label para um cliente externo precisa de autorização comercial.',
     },
     {
       q: 'Meus dados são enviados para Anthropic, OpenAI ou Google?',
@@ -3157,11 +3157,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Quanto custa o Open Design?',
-      a: 'O produto é gratuito e Apache-2.0 — não existe assinatura do Open Design. Você paga os custos de API do provedor que usar (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot etc.), cobrados direto na sua conta. O BYOK mantém as chaves e o gasto do seu lado.',
+      a: 'O software Community local é gratuito e tem código-fonte disponível sob a ODCL 1.0. Os custos de API são separados; os serviços opcionais Open Design Cloud e Team podem ter preços próprios.',
     },
     {
       q: 'Posso auto-hospedar o Open Design na Vercel, Cloudflare ou no meu servidor?',
-      a: 'Sim. O daemon roda onde o Node 24 rodar, e a landing page é um build estático do Astro que vai para Cloudflare Pages, Vercel ou Netlify sem mudanças. Times com deployments compartilhados costumam fixar o daemon numa máquina da rede e apontar a CLI de cada dev para ela.',
+      a: 'Sim, sujeito à ODCL 1.0. O daemon roda onde o Node 24 rodar. Uma cópia do software público operada pelo próprio cliente pode ser usada por várias pessoas sem uma assinatura Team. Qualquer terceiro que opere continuamente um serviço hospedado, gerenciado ou white-label para um cliente externo precisa de autorização comercial.',
     },
     {
       q: 'Como levo minha marca para o Open Design?',
@@ -3178,18 +3178,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   it: [
     {
-      q: 'Open Design è un’alternativa open source a Claude Design?',
-      a: 'Sì — Open Design è l’alternativa open source e locale a Claude Design. Dove Claude Design è chiuso, ospitato e legato ai modelli Anthropic, Open Design è Apache-2.0, gira sulla tua macchina ed è BYOK: guidalo con Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen e conserva ogni risultato come file tuoi.',
+      q: 'Open Design è un’alternativa a codice sorgente disponibile a Claude Design?',
+      a: 'Sì — Open Design è l’alternativa a codice sorgente disponibile e locale a Claude Design. Dove Claude Design è chiuso, ospitato e legato ai modelli Anthropic, Open Design è ODCL 1.0, gira sulla tua macchina ed è BYOK: guidalo con Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen e conserva ogni risultato come file tuoi.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'Che cos’è un vibe design workspace?',
-      a: 'Un vibe design workspace è uno spazio in cui progetti descrivendo l’intento a un agente IA — dal prompt al prototipo, pagina web, slide o video HTML — invece di posizionare ogni elemento a mano. Open Design è un vibe design workspace open source e agent-native: collega il coding agent che già usi a un flusso di design completo, così un solo strumento ti porta da un’idea grezza a un risultato pronto e tuo.',
+      a: 'Un vibe design workspace è uno spazio in cui progetti descrivendo l’intento a un agente IA — dal prompt al prototipo, pagina web, slide o video HTML — invece di posizionare ogni elemento a mano. Open Design è un vibe design workspace a codice sorgente disponibile e agent-native: collega il coding agent che già usi a un flusso di design completo, così un solo strumento ti porta da un’idea grezza a un risultato pronto e tuo.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: "Cos'è Open Design?",
-      a: 'Open Design è il workspace ufficiale e open source di AI design del progetto nexu-io/open-design. Trasforma un coding agent locale — Claude Code, Codex, Cursor, Gemini CLI, OpenCode o Qwen — in un motore di design guidato da skill componibili e sistemi DESIGN.md portabili.',
+      a: 'Open Design è il workspace ufficiale e a codice sorgente disponibile di AI design del progetto nexu-io/open-design. Trasforma un coding agent locale — Claude Code, Codex, Cursor, Gemini CLI, OpenCode o Qwen — in un motore di design guidato da skill componibili e sistemi DESIGN.md portabili.',
     },
     {
       q: 'Open Design è ufficiale?',
@@ -3198,7 +3198,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'In cosa differisce da Claude Design?',
-      a: 'Claude Design è un prodotto hosted legato a un solo vendor. Open Design è local-first, open source Apache-2.0 e BYOK: usi il tuo agent, le tue chiavi e il tuo sistema DESIGN.md.',
+      a: 'Claude Design è un prodotto hosted legato a un solo vendor. Open Design è local-first, a codice sorgente disponibile ODCL 1.0 e BYOK: usi il tuo agent, le tue chiavi e il tuo sistema DESIGN.md.',
     },
     {
       q: 'Open Design gira in locale?',
@@ -3210,7 +3210,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Posso self-hostarlo o fare fork?',
-      a: 'Sì. Il codice è Apache-2.0. Puoi fare fork del repo, modificare le skill, aggiungere sistemi DESIGN.md o eseguire il daemon sui tuoi server.',
+      a: 'Sì, nel rispetto della ODCL 1.0. Puoi fare fork del repo e modificare le skill. Una copia del software pubblico gestita dal cliente può essere utilizzata da più persone senza un abbonamento Team. Qualsiasi terzo che gestisca continuativamente un servizio ospitato, gestito o white-label per un cliente esterno deve ottenere un’autorizzazione commerciale.',
     },
     {
       q: 'I miei dati vengono inviati ad Anthropic, OpenAI o Google?',
@@ -3222,11 +3222,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Quanto costa Open Design?',
-      a: 'Il prodotto è gratuito e Apache-2.0 — non esiste un abbonamento Open Design. Paghi solo i costi API del provider che usi (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, ecc.), addebitati direttamente sul tuo account. Il BYOK tiene chiavi e spesa dalla tua parte.',
+      a: 'Il software Community locale è gratuito e ha il codice sorgente disponibile sotto ODCL 1.0. I costi API sono separati; i servizi opzionali Open Design Cloud e Team possono avere prezzi propri.',
     },
     {
       q: 'Posso self-hostare Open Design su Vercel, Cloudflare o un mio server?',
-      a: 'Sì. Il daemon gira ovunque giri Node 24, e la landing è una build statica di Astro che si deploya così com\'è su Cloudflare Pages, Vercel o Netlify. I team con deployment condivisi di solito fissano il daemon su una macchina della propria rete e vi puntano la CLI di ogni sviluppatore.',
+      a: 'Sì, nel rispetto della ODCL 1.0. Il daemon gira ovunque giri Node 24. Una copia del software pubblico gestita dal cliente può essere utilizzata da più persone senza un abbonamento Team. Qualsiasi terzo che gestisca continuativamente un servizio ospitato, gestito o white-label per un cliente esterno deve ottenere un’autorizzazione commerciale.',
     },
     {
       q: 'Come porto il mio brand in Open Design?',
@@ -3244,7 +3244,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   vi: [
     {
       q: 'Open Design là gì?',
-      a: 'Open Design là workspace thiết kế AI mã nguồn mở chính thức của dự án nexu-io/open-design. Nó biến coding agent chạy trên máy bạn — Claude Code, Codex, Cursor, Gemini CLI, OpenCode hoặc Qwen — thành engine thiết kế dựa trên skill ghép được và hệ DESIGN.md di động.',
+      a: 'Open Design là workspace thiết kế AI mã nguồn khả dụng chính thức của dự án nexu-io/open-design. Nó biến coding agent chạy trên máy bạn — Claude Code, Codex, Cursor, Gemini CLI, OpenCode hoặc Qwen — thành engine thiết kế dựa trên skill ghép được và hệ DESIGN.md di động.',
     },
     {
       q: 'Open Design có phải dự án chính thức không?',
@@ -3253,7 +3253,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Khác gì Claude Design?',
-      a: 'Claude Design là sản phẩm hosted gắn với một nhà cung cấp. Open Design local-first, open source Apache-2.0 và BYOK: bạn dùng agent, key và hệ DESIGN.md của chính mình.',
+      a: 'Claude Design là sản phẩm hosted gắn với một nhà cung cấp. Open Design local-first, có mã nguồn khả dụng ODCL 1.0 và BYOK: bạn dùng agent, key và hệ DESIGN.md của chính mình.',
     },
     {
       q: 'Open Design chạy local được không?',
@@ -3265,7 +3265,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Có thể self-host hoặc fork không?',
-      a: 'Có. Mã nguồn Apache-2.0. Bạn có thể fork repo, sửa skill, thêm hệ DESIGN.md riêng hoặc chạy daemon trên máy của mình.',
+      a: 'Có, theo các điều kiện của ODCL 1.0. Bạn có thể fork repo và chỉnh sửa skill. Bản sao phần mềm công khai do khách hàng tự vận hành có thể được nhiều người sử dụng mà không cần gói Team. Bất kỳ bên thứ ba nào liên tục vận hành dịch vụ lưu trữ, quản lý hoặc white-label cho một khách hàng bên ngoài đều cần ủy quyền thương mại.',
     },
     {
       q: 'Dữ liệu của tôi có bị gửi cho Anthropic, OpenAI hay Google không?',
@@ -3277,11 +3277,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design giá bao nhiêu?',
-      a: 'Sản phẩm miễn phí và theo Apache-2.0 — không có gói thuê bao Open Design. Bạn chỉ trả chi phí API của nhà cung cấp mình dùng (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, v.v.), tính thẳng vào tài khoản của bạn. BYOK giữ cả key lẫn chi tiêu ở phía bạn.',
+      a: 'Phần mềm Community chạy cục bộ là miễn phí và có mã nguồn khả dụng theo ODCL 1.0. Chi phí API được tính riêng; các dịch vụ Open Design Cloud và Team tùy chọn có thể có mức giá riêng.',
     },
     {
       q: 'Có thể self-host Open Design trên Vercel, Cloudflare hay server riêng không?',
-      a: 'Có. Daemon chạy ở bất cứ đâu Node 24 chạy được, còn landing page là bản build Astro tĩnh, deploy nguyên trạng lên Cloudflare Pages, Vercel hoặc Netlify. Các team dùng chung thường ghim daemon vào một máy trong mạng nội bộ và trỏ CLI của từng dev vào đó.',
+      a: 'Có, theo ODCL 1.0. Daemon chạy ở nơi Node 24 hoạt động. Bản sao phần mềm công khai do khách hàng tự vận hành có thể được nhiều người sử dụng mà không cần gói Team. Bất kỳ bên thứ ba nào liên tục vận hành dịch vụ lưu trữ, quản lý hoặc white-label cho một khách hàng bên ngoài đều cần ủy quyền thương mại.',
     },
     {
       q: 'Làm sao đưa thương hiệu của tôi vào Open Design?',
@@ -3299,7 +3299,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   pl: [
     {
       q: 'Czym jest Open Design?',
-      a: 'Open Design to oficjalny, open-source workspace AI design projektu nexu-io/open-design. Zamienia lokalnego coding agenta — Claude Code, Codex, Cursor, Gemini CLI, OpenCode albo Qwen — w silnik designu oparty o kompozycyjne skills i przenośne systemy DESIGN.md.',
+      a: 'Open Design to oficjalny, z dostępnym kodem źródłowym workspace AI design projektu nexu-io/open-design. Zamienia lokalnego coding agenta — Claude Code, Codex, Cursor, Gemini CLI, OpenCode albo Qwen — w silnik designu oparty o kompozycyjne skills i przenośne systemy DESIGN.md.',
     },
     {
       q: 'Czy Open Design jest oficjalne?',
@@ -3308,7 +3308,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Czym różni się od Claude Design?',
-      a: 'Claude Design to hostowany produkt jednego dostawcy. Open Design jest local-first, open source Apache-2.0 i BYOK: używasz własnego agenta, kluczy i systemu DESIGN.md.',
+      a: 'Claude Design to hostowany produkt jednego dostawcy. Open Design jest local-first, z dostępnym kodem źródłowym ODCL 1.0 i BYOK: używasz własnego agenta, kluczy i systemu DESIGN.md.',
     },
     {
       q: 'Czy Open Design działa lokalnie?',
@@ -3320,7 +3320,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Czy mogę self-hostować albo zrobić fork?',
-      a: 'Tak. Kod jest Apache-2.0. Możesz forkować repo, edytować skills, dodawać własne systemy DESIGN.md lub uruchomić daemon u siebie.',
+      a: 'Tak, zgodnie z ODCL 1.0. Możesz forkować repo i edytować skills. Wieloosobowe korzystanie z kopii publicznego oprogramowania obsługiwanej przez klienta nie wymaga subskrypcji Team. Każda strona trzecia, która stale prowadzi hostowaną, zarządzaną lub white-label usługę dla klienta zewnętrznego, potrzebuje zgody komercyjnej.',
     },
     {
       q: 'Czy moje dane trafiają do Anthropic, OpenAI lub Google?',
@@ -3332,11 +3332,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Ile kosztuje Open Design?',
-      a: 'Produkt jest darmowy i na licencji Apache-2.0 — nie istnieje subskrypcja Open Design. Płacisz tylko koszty API dostawcy, którego używasz (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot itd.), rozliczane bezpośrednio na Twoim koncie. BYOK trzyma i klucze, i wydatki po Twojej stronie.',
+      a: 'Lokalne oprogramowanie Community jest bezpłatne i ma dostępny kod źródłowy na ODCL 1.0. Koszty API są oddzielne; opcjonalne usługi Open Design Cloud i Team mogą mieć własne ceny.',
     },
     {
       q: 'Czy mogę self-hostować Open Design na Vercel, Cloudflare albo własnym serwerze?',
-      a: 'Tak. Daemon działa wszędzie tam, gdzie działa Node 24, a landing page to statyczny build Astro, który wdrożysz bez zmian na Cloudflare Pages, Vercel czy Netlify. Zespoły ze wspólnym wdrożeniem zwykle przypinają daemon do maszyny w swojej sieci i kierują na nią CLI każdego dewelopera.',
+      a: 'Tak, zgodnie z ODCL 1.0. Daemon działa wszędzie tam, gdzie działa Node 24. Wieloosobowe korzystanie z kopii publicznego oprogramowania obsługiwanej przez klienta nie wymaga subskrypcji Team. Każda strona trzecia, która stale prowadzi hostowaną, zarządzaną lub white-label usługę dla klienta zewnętrznego, potrzebuje zgody komercyjnej.',
     },
     {
       q: 'Jak przenieść moją markę do Open Design?',
@@ -3354,7 +3354,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   id: [
     {
       q: 'Apa itu Open Design?',
-      a: 'Open Design adalah workspace AI design resmi dan open source dari proyek nexu-io/open-design. Ia mengubah coding agent lokal — Claude Code, Codex, Cursor, Gemini CLI, OpenCode, atau Qwen — menjadi mesin desain berbasis skill komposable dan sistem DESIGN.md portabel.',
+      a: 'Open Design adalah workspace AI design resmi dan dengan kode sumber tersedia dari proyek nexu-io/open-design. Ia mengubah coding agent lokal — Claude Code, Codex, Cursor, Gemini CLI, OpenCode, atau Qwen — menjadi mesin desain berbasis skill komposable dan sistem DESIGN.md portabel.',
     },
     {
       q: 'Apakah Open Design resmi?',
@@ -3363,7 +3363,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Apa bedanya dengan Claude Design?',
-      a: 'Claude Design adalah produk hosted yang terikat pada satu vendor. Open Design local-first, open source Apache-2.0, dan BYOK: Anda memakai agent, key, dan sistem DESIGN.md sendiri.',
+      a: 'Claude Design adalah produk hosted yang terikat pada satu vendor. Open Design local-first, dengan kode sumber tersedia ODCL 1.0, dan BYOK: Anda memakai agent, key, dan sistem DESIGN.md sendiri.',
     },
     {
       q: 'Apakah Open Design berjalan lokal?',
@@ -3375,7 +3375,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Bisakah self-host atau fork?',
-      a: 'Bisa. Kodenya Apache-2.0. Anda bisa fork repo, mengedit skill, menambah sistem DESIGN.md sendiri, atau menjalankan daemon di mesin Anda.',
+      a: 'Bisa, sesuai ODCL 1.0. Anda dapat fork repo dan mengedit skill. Salinan perangkat lunak publik yang dioperasikan sendiri oleh pelanggan dapat digunakan banyak orang tanpa langganan Team. Pihak ketiga mana pun yang terus mengoperasikan layanan hosted, managed, atau white-label untuk pelanggan eksternal memerlukan izin komersial.',
     },
     {
       q: 'Apakah data saya dikirim ke Anthropic, OpenAI, atau Google?',
@@ -3387,11 +3387,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Berapa biaya Open Design?',
-      a: 'Produknya gratis dan Apache-2.0 — tidak ada langganan Open Design. Anda hanya membayar biaya API provider yang Anda pakai (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, dll.), ditagih langsung ke akun Anda. BYOK menjaga key dan pengeluaran tetap di sisi Anda.',
+      a: 'Perangkat lunak Community lokal gratis dan kode sumbernya tersedia di bawah ODCL 1.0. Biaya API terpisah; layanan Open Design Cloud dan Team opsional dapat memiliki harga sendiri.',
     },
     {
       q: 'Bisakah self-host Open Design di Vercel, Cloudflare, atau server sendiri?',
-      a: 'Bisa. Daemon berjalan di mana pun Node 24 berjalan, dan landing page adalah build Astro statis yang bisa langsung dideploy ke Cloudflare Pages, Vercel, atau Netlify. Tim dengan deployment bersama biasanya menambatkan daemon di satu mesin dalam jaringan dan mengarahkan CLI tiap developer ke sana.',
+      a: 'Bisa, sesuai ODCL 1.0. Daemon berjalan di mana pun Node 24 berjalan. Salinan perangkat lunak publik yang dioperasikan sendiri oleh pelanggan dapat digunakan banyak orang tanpa langganan Team. Pihak ketiga mana pun yang terus mengoperasikan layanan hosted, managed, atau white-label untuk pelanggan eksternal memerlukan izin komersial.',
     },
     {
       q: 'Bagaimana memindahkan brand saya ke Open Design?',
@@ -3409,7 +3409,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   nl: [
     {
       q: 'Wat is Open Design?',
-      a: 'Open Design is de officiële open-source AI design workspace van het project nexu-io/open-design. Het verandert een lokale coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode of Qwen — in een design-engine met combineerbare skills en draagbare DESIGN.md-systemen.',
+      a: 'Open Design is de officiële met beschikbare broncode AI design workspace van het project nexu-io/open-design. Het verandert een lokale coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode of Qwen — in een design-engine met combineerbare skills en draagbare DESIGN.md-systemen.',
     },
     {
       q: 'Is Open Design officieel?',
@@ -3418,7 +3418,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Wat is het verschil met Claude Design?',
-      a: 'Claude Design is een hosted product van één leverancier. Open Design is local-first, Apache-2.0 open source en BYOK: je gebruikt je eigen agent, sleutels en DESIGN.md-systeem.',
+      a: 'Claude Design is een hosted product van één leverancier. Open Design is local-first, ODCL 1.0 met beschikbare broncode en BYOK: je gebruikt je eigen agent, sleutels en DESIGN.md-systeem.',
     },
     {
       q: 'Draait Open Design lokaal?',
@@ -3430,7 +3430,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Kan ik self-hosten of forken?',
-      a: 'Ja. De code is Apache-2.0. Je kunt de repo forken, skills aanpassen, eigen DESIGN.md-systemen toevoegen of de daemon zelf draaien.',
+      a: 'Ja, onder ODCL 1.0. Je kunt de repo forken en skills bewerken. Een door de klant zelf beheerde kopie van de openbare software kan door meerdere personen worden gebruikt zonder Team-abonnement. Elke derde die doorlopend een gehoste, beheerde of white-label dienst voor een externe klant exploiteert, heeft commerciële toestemming nodig.',
     },
     {
       q: 'Worden mijn gegevens naar Anthropic, OpenAI of Google gestuurd?',
@@ -3442,11 +3442,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Wat kost Open Design?',
-      a: 'Het product is gratis en Apache-2.0 — er bestaat geen Open Design-abonnement. Je betaalt alleen de API-kosten van de provider die je gebruikt (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot, enz.), rechtstreeks via je eigen account. BYOK houdt zowel de sleutels als de uitgaven aan jouw kant.',
+      a: 'De lokale Community-software is gratis en heeft beschikbare broncode onder ODCL 1.0. API-kosten staan los daarvan; optionele Open Design Cloud- en Team-diensten kunnen eigen prijzen hebben.',
     },
     {
       q: 'Kan ik Open Design self-hosten op Vercel, Cloudflare of mijn eigen server?',
-      a: 'Ja. De daemon draait overal waar Node 24 draait, en de landingspagina is een statische Astro-build die ongewijzigd naar Cloudflare Pages, Vercel of Netlify gaat. Teams met gedeelde deployments pinnen de daemon meestal op een machine in hun netwerk en richten de CLI van elke developer daarop.',
+      a: 'Ja, onder ODCL 1.0. De daemon draait overal waar Node 24 draait. Een door de klant zelf beheerde kopie van de openbare software kan door meerdere personen worden gebruikt zonder Team-abonnement. Elke derde die doorlopend een gehoste, beheerde of white-label dienst voor een externe klant exploiteert, heeft commerciële toestemming nodig.',
     },
     {
       q: 'Hoe breng ik mijn merk naar Open Design?',
@@ -3473,7 +3473,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'ما الفرق عن Claude Design؟',
-      a: 'Claude Design منتج مستضاف مرتبط بمورّد واحد. Open Design محلي أولاً، مفتوح المصدر وفق Apache-2.0، وBYOK: تستخدم agent ومفاتيحك ونظام DESIGN.md الخاص بك.',
+      a: 'Claude Design منتج مستضاف مرتبط بمورّد واحد. Open Design محلي أولاً، متاح المصدر وفق ODCL 1.0، وBYOK: تستخدم agent ومفاتيحك ونظام DESIGN.md الخاص بك.',
     },
     {
       q: 'هل يعمل Open Design محلياً؟',
@@ -3485,7 +3485,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'هل يمكنني الاستضافة الذاتية أو عمل fork؟',
-      a: 'نعم. الكود Apache-2.0. يمكنك fork للrepo، تعديل skills، إضافة أنظمة DESIGN.md، أو تشغيل الdaemon على أجهزتك.',
+      a: 'نعم، وفق شروط ODCL 1.0. يمكنك fork للrepo وتعديل الـ skills. لا يتطلب استخدام عدة أشخاص لنسخة من البرنامج العام يشغلها العميل نفسه اشتراك Team. وأي طرف ثالث يشغّل بصورة مستمرة خدمة مستضافة أو مُدارة أو white-label لعميل خارجي يحتاج إلى تفويض تجاري.',
     },
     {
       q: 'هل تُرسل بياناتي إلى Anthropic أو OpenAI أو Google؟',
@@ -3497,11 +3497,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'كم يكلّف Open Design؟',
-      a: 'المنتج مجاني وبرخصة Apache-2.0 — لا يوجد اشتراك في Open Design. تدفع فقط تكاليف API للمزوّد الذي تستخدمه (Anthropic أو OpenAI أو Google أو Mistral أو xAI أو Moonshot وغيرها)، وتُحاسب مباشرة على حسابك. يبقي BYOK المفاتيح والإنفاق في جانبك.',
+      a: 'برنامج Community المحلي مجاني ومتاح المصدر بموجب ODCL 1.0. تُدفع تكاليف API بشكل منفصل، وقد تكون لخدمات Open Design Cloud وTeam الاختيارية أسعار مستقلة.',
     },
     {
       q: 'هل يمكن استضافة Open Design ذاتياً على Vercel أو Cloudflare أو خادمي الخاص؟',
-      a: 'نعم. يعمل الـ daemon أينما يعمل Node 24، وصفحة الهبوط بناء Astro ثابت يُنشر كما هو على Cloudflare Pages أو Vercel أو Netlify. الفرق التي تدير نشراً مشتركاً تثبّت عادةً الـ daemon على جهاز داخل شبكتها وتوجّه CLI كل مطوّر إليه.',
+      a: 'نعم، وفق ODCL 1.0. يعمل الـ daemon أينما يعمل Node 24. لا يتطلب استخدام عدة أشخاص لنسخة من البرنامج العام يشغلها العميل نفسه اشتراك Team. وأي طرف ثالث يشغّل بصورة مستمرة خدمة مستضافة أو مُدارة أو white-label لعميل خارجي يحتاج إلى تفويض تجاري.',
     },
     {
       q: 'كيف أنقل علامتي التجارية إلى Open Design؟',
@@ -3518,18 +3518,18 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   ],
   tr: [
     {
-      q: 'Open Design açık kaynaklı bir Claude Design alternatifi mi?',
-      a: 'Evet — Open Design açık kaynaklı, yerel çalışan Claude Design alternatifidir. Claude Design kapalı, barındırılan ve Anthropic modellerine kilitliyken; Open Design Apache-2.0’dır, kendi makinende çalışır ve BYOK’tur: Claude Code, Codex, Cursor, Gemini, OpenCode veya Qwen ile çalıştır, her çıktıyı sana ait dosyalar olarak sakla.',
+      q: 'Open Design kaynak kodu erişilebilir bir Claude Design alternatifi mi?',
+      a: 'Evet — Open Design kaynak kodu erişilebilir, yerel çalışan Claude Design alternatifidir. Claude Design kapalı, barındırılan ve Anthropic modellerine kilitliyken; Open Design ODCL 1.0’dır, kendi makinende çalışır ve BYOK’tur: Claude Code, Codex, Cursor, Gemini, OpenCode veya Qwen ile çalıştır, her çıktıyı sana ait dosyalar olarak sakla.',
       href: '/alternatives/claude-design/',
     },
     {
       q: 'Vibe design workspace nedir?',
-      a: 'Vibe design workspace, her öğeyi elle yerleştirmek yerine bir yapay zeka ajanına niyetini anlatarak tasarım yaptığın yerdir — prompttan prototipe, web sayfasına, slaytlara veya HTML videoya. Open Design açık kaynaklı, agent-native bir vibe design workspace’tir: hâlihazırda kullandığın kodlama ajanını eksiksiz bir tasarım akışına bağlar; tek bir araç seni kaba bir fikirden sana ait, teslime hazır bir sonuca götürür.',
+      a: 'Vibe design workspace, her öğeyi elle yerleştirmek yerine bir yapay zeka ajanına niyetini anlatarak tasarım yaptığın yerdir — prompttan prototipe, web sayfasına, slaytlara veya HTML videoya. Open Design kaynak kodu erişilebilir, agent-native bir vibe design workspace’tir: hâlihazırda kullandığın kodlama ajanını eksiksiz bir tasarım akışına bağlar; tek bir araç seni kaba bir fikirden sana ait, teslime hazır bir sonuca götürür.',
       href: '/blog/what-is-vibe-design/',
     },
     {
       q: 'Open Design nedir?',
-      a: "Open Design, nexu-io/open-design projesinin resmi açık kaynak AI design workspace'idir. Claude Code, Codex, Cursor, Gemini CLI, OpenCode veya Qwen gibi yerel coding agent'ları, birleştirilebilir skill'ler ve taşınabilir DESIGN.md sistemleriyle çalışan bir tasarım motoruna dönüştürür.",
+      a: "Open Design, nexu-io/open-design projesinin resmi kaynak kodu erişilebilir AI design workspace'idir. Claude Code, Codex, Cursor, Gemini CLI, OpenCode veya Qwen gibi yerel coding agent'ları, birleştirilebilir skill'ler ve taşınabilir DESIGN.md sistemleriyle çalışan bir tasarım motoruna dönüştürür.",
     },
     {
       q: 'Open Design resmi mi?',
@@ -3538,7 +3538,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: "Claude Design'dan farkı ne?",
-      a: 'Claude Design tek bir vendor’a bağlı hosted bir üründür. Open Design local-first, Apache-2.0 açık kaynak ve BYOK’tur: kendi agent’ını, anahtarlarını ve DESIGN.md sistemini kullanırsın.',
+      a: 'Claude Design tek bir vendor’a bağlı hosted bir üründür. Open Design local-first, ODCL 1.0 kaynak kodu erişilebilir ve BYOK’tur: kendi agent’ını, anahtarlarını ve DESIGN.md sistemini kullanırsın.',
     },
     {
       q: 'Open Design yerelde çalışır mı?',
@@ -3550,7 +3550,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Self-host veya fork mümkün mü?',
-      a: 'Evet. Kod Apache-2.0. Repo’yu fork edebilir, skill’leri düzenleyebilir, kendi DESIGN.md sistemlerinizi ekleyebilir veya daemon’ı kendi makinelerinizde çalıştırabilirsiniz.',
+      a: 'Evet, ODCL 1.0 koşullarına tabi olarak. Repo’yu fork edip skill’leri düzenleyebilirsiniz. Müşterinin kendisinin işlettiği açık yazılım kopyasının birden fazla kişi tarafından kullanılması Team aboneliği gerektirmez. Herhangi bir dış müşteri için hosted, managed veya white-label hizmeti sürekli işleten üçüncü tarafın ticari izin alması gerekir.',
     },
     {
       q: 'Verilerim Anthropic, OpenAI veya Google\'a gönderiliyor mu?',
@@ -3562,11 +3562,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Open Design\'ın maliyeti nedir?',
-      a: 'Ürün ücretsiz ve Apache-2.0 lisanslıdır — Open Design aboneliği yoktur. Yalnızca kullandığınız sağlayıcının (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot vb.) API maliyetini ödersiniz; doğrudan kendi hesabınıza faturalandırılır. BYOK hem anahtarları hem harcamayı sizin tarafınızda tutar.',
+      a: 'Yerel Community yazılımı ücretsizdir ve ODCL 1.0 kapsamında kaynak kodu erişilebilirdir. API maliyetleri ayrıdır; isteğe bağlı Open Design Cloud ve Team hizmetleri ayrıca fiyatlandırılabilir.',
     },
     {
       q: 'Open Design\'ı Vercel, Cloudflare veya kendi sunucumda self-host edebilir miyim?',
-      a: 'Evet. Daemon, Node 24\'ün çalıştığı her yerde çalışır; landing page ise Cloudflare Pages, Vercel veya Netlify\'a olduğu gibi deploy edilen statik bir Astro build\'idir. Paylaşımlı kurulum yöneten ekipler genellikle daemon\'ı ağlarındaki bir makineye sabitler ve her geliştiricinin CLI\'ını oraya yönlendirir.',
+      a: 'Evet, ODCL 1.0 koşullarına tabi olarak. Daemon Node 24’ün çalıştığı her yerde çalışır. Müşterinin kendisinin işlettiği açık yazılım kopyasının birden fazla kişi tarafından kullanılması Team aboneliği gerektirmez. Herhangi bir dış müşteri için hosted, managed veya white-label hizmeti sürekli işleten üçüncü tarafın ticari izin alması gerekir.',
     },
     {
       q: 'Markamı Open Design\'a nasıl taşırım?',
@@ -3584,7 +3584,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
   uk: [
     {
       q: 'Що таке Open Design?',
-      a: 'Open Design — офіційний open-source AI design workspace проєкту nexu-io/open-design. Він перетворює локальний coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode або Qwen — на design-двигун із composable skills і переносними DESIGN.md-системами.',
+      a: 'Open Design — офіційний з доступним вихідним кодом AI design workspace проєкту nexu-io/open-design. Він перетворює локальний coding agent — Claude Code, Codex, Cursor, Gemini CLI, OpenCode або Qwen — на design-двигун із composable skills і переносними DESIGN.md-системами.',
     },
     {
       q: 'Open Design офіційний?',
@@ -3593,7 +3593,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Чим він відрізняється від Claude Design?',
-      a: 'Claude Design — hosted-продукт одного вендора. Open Design — local-first, Apache-2.0 open source і BYOK: ви використовуєте свого agent, свої ключі та свою DESIGN.md-систему.',
+      a: 'Claude Design — hosted-продукт одного вендора. Open Design — local-first, ODCL 1.0 з доступним вихідним кодом і BYOK: ви використовуєте свого agent, свої ключі та свою DESIGN.md-систему.',
     },
     {
       q: 'Open Design запускається локально?',
@@ -3605,7 +3605,7 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Можна self-host або fork?',
-      a: 'Так. Код Apache-2.0. Можна fork-нути repo, змінювати skills, додавати власні DESIGN.md-системи й запускати daemon на своїх машинах.',
+      a: 'Так, відповідно до ODCL 1.0. Можна fork-нути repo та редагувати skills. Багатокористувацьке використання копії публічного ПЗ, яку експлуатує сам клієнт, не потребує підписки Team. Будь-яка третя сторона, що постійно експлуатує hosted, managed або white-label сервіс для зовнішнього клієнта, повинна отримати комерційний дозвіл.',
     },
     {
       q: 'Мої дані надсилаються в Anthropic, OpenAI чи Google?',
@@ -3617,11 +3617,11 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
     },
     {
       q: 'Скільки коштує Open Design?',
-      a: 'Продукт безплатний і під Apache-2.0 — підписки Open Design не існує. Ви платите лише за API того провайдера, яким користуєтеся (Anthropic, OpenAI, Google, Mistral, xAI, Moonshot тощо), напряму зі свого акаунта. BYOK залишає і ключі, і витрати на вашому боці.',
+      a: 'Локальне Community-ПЗ безплатне, а його вихідний код доступний за ODCL 1.0. Витрати на API сплачуються окремо; опційні сервіси Open Design Cloud і Team можуть мати власні тарифи.',
     },
     {
       q: 'Чи можна self-host Open Design на Vercel, Cloudflare або власному сервері?',
-      a: 'Так. Daemon працює всюди, де працює Node 24, а лендинг — статична збірка Astro, яка деплоїться на Cloudflare Pages, Vercel чи Netlify як є. Команди зі спільним деплоєм зазвичай закріплюють daemon на машині у своїй мережі та спрямовують CLI кожного розробника на неї.',
+      a: 'Так, відповідно до ODCL 1.0. Daemon працює всюди, де працює Node 24. Багатокористувацьке використання копії публічного ПЗ, яку експлуатує сам клієнт, не потребує підписки Team. Будь-яка третя сторона, що постійно експлуатує hosted, managed або white-label сервіс для зовнішнього клієнта, повинна отримати комерційний дозвіл.',
     },
     {
       q: 'Як перенести свій бренд в Open Design?',
@@ -3640,15 +3640,15 @@ const HOME_FAQ_COPY: Record<LandingLocaleCode, HomeFaqTemplate[]> = {
 
 const HOME_PAGE_COPY_EN: HomePageCopy = {
   rail: {
-    right: 'Open Design — Vol. 01 · Issue Nº 26 · Apache-2.0',
+    right: 'Open Design — Vol. 01 · Issue Nº 26 · ODCL 1.0',
     left: 'Skills · Systems · Agents · BYOK · Local-first',
   },
   hero: {
     discordAria: 'Join the Open Design Discord',
     joinDiscord: 'Join Discord',
-    label: 'Open-source design studio',
+    label: 'Source-available design studio',
     issue: 'Nº 01',
-    titlePrefix: 'Open-source',
+    titlePrefix: 'Source-available',
     titleEmphasis: 'Claude Design,',
     titleMiddle: 'running on',
     titleSecondEmphasis: 'your own agent',
@@ -3863,7 +3863,7 @@ const HOME_PAGE_COPY_EN: HomePageCopy = {
     label: 'Open Design 常见问题',
     titlePrefix: 'Questions about',
     titleMiddle: 'and the',
-    titleSuffix: 'open-source Claude Design alternative',
+    titleSuffix: 'source-available Claude Design alternative',
   },
   cta: {
     rule: 'Contact / Conversation',
@@ -3883,7 +3883,7 @@ const HOME_PAGE_COPY_EN: HomePageCopy = {
   },
   footer: {
     summary:
-      'The open-source alternative to Claude Design. Built on the shoulders of huashu-design, guizang-ppt, multica-ai, and open-codesign.',
+      'The source-available alternative to Claude Design under ODCL 1.0. Built on the shoulders of huashu-design, guizang-ppt, multica-ai, and open-codesign.',
     downloadAria: 'Download the Open Design desktop app',
     download: 'Download desktop',
     columns: {
@@ -3907,7 +3907,7 @@ const HOME_PAGE_COPY_EN: HomePageCopy = {
       compare: 'Compare',
       alternative: 'Claude Design alternative',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Issue Nº 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Issue Nº 26',
     bottomRightA: 'Berlin / Open / Earth',
     bottomRightB: '52.5200° N · 13.4050° E',
     mega: 'Open Design.',
@@ -3918,15 +3918,15 @@ const HOME_PAGE_COPY: Partial<Record<LandingLocaleCode, HomePageCopy>> = {
   en: HOME_PAGE_COPY_EN,
   zh: {
     rail: {
-      right: 'Open Design — 第 01 卷 · 第 26 期 · Apache-2.0',
+      right: 'Open Design — 第 01 卷 · 第 26 期 · ODCL 1.0',
       left: 'Skills · UIUX Design · Agents · BYOK · 本地优先',
     },
     hero: {
       discordAria: '加入 Open Design Discord',
       joinDiscord: '加入 Discord',
-      label: '开源设计工作室',
+      label: '源码可用设计工作室',
       issue: 'Nº 01',
-      titlePrefix: '开源的',
+      titlePrefix: '源码可用的',
       titleEmphasis: 'Claude Design',
       titleMiddle: '运行在',
       titleSecondEmphasis: '你自己的 Agent 上',
@@ -4138,7 +4138,7 @@ const HOME_PAGE_COPY: Partial<Record<LandingLocaleCode, HomePageCopy>> = {
       label: 'Open Design 常見問題',
       titlePrefix: '关于',
       titleMiddle: '以及',
-      titleSuffix: 'Claude Design 开源替代方案的问题',
+      titleSuffix: 'Claude Design 源码可用替代方案的问题',
     },
     cta: {
       rule: '联系 / 对话',
@@ -4157,7 +4157,7 @@ const HOME_PAGE_COPY: Partial<Record<LandingLocaleCode, HomePageCopy>> = {
     },
     footer: {
       summary:
-        'Claude Design 的开源替代方案。站在 huashu-design、guizang-ppt、multica-ai 和 open-codesign 的肩膀上构建。',
+        '采用 ODCL 1.0、源码可用的 Claude Design 替代方案。站在 huashu-design、guizang-ppt、multica-ai 和 open-codesign 的肩膀上构建。',
       downloadAria: '下载 Open Design 桌面应用',
       download: '下载桌面端',
       columns: {
@@ -4181,7 +4181,7 @@ const HOME_PAGE_COPY: Partial<Record<LandingLocaleCode, HomePageCopy>> = {
         compare: '对比',
         alternative: 'Claude Design 替代方案',
       },
-      bottomLeft: 'Open Design · Apache-2.0 · 2026 / 第 01 卷 / 第 26 期',
+      bottomLeft: 'Open Design · ODCL 1.0 · 2026 / 第 01 卷 / 第 26 期',
       bottomRightA: '柏林 / 开放 / 地球',
       bottomRightB: '52.5200° N · 13.4050° E',
       mega: 'Open Design.',
@@ -4192,13 +4192,13 @@ const HOME_PAGE_COPY: Partial<Record<LandingLocaleCode, HomePageCopy>> = {
 HOME_PAGE_COPY['zh-tw'] = {
   ...HOME_PAGE_COPY.zh!,
   rail: {
-    right: 'Open Design — 第 01 卷 · 第 26 期 · Apache-2.0',
+    right: 'Open Design — 第 01 卷 · 第 26 期 · ODCL 1.0',
     left: 'Skills · 設計系統 · Agents · BYOK · 本地優先',
   },
   hero: {
     ...HOME_PAGE_COPY.zh!.hero,
-    label: '開源設計工作室',
-    titlePrefix: '開源的',
+    label: '原始碼可用設計工作室',
+    titlePrefix: '原始碼可用的',
     titleEmphasis: 'Claude Design',
     titleMiddle: '運行在',
     titleSecondEmphasis: '你自己的 Agent 上',
@@ -4410,7 +4410,7 @@ HOME_PAGE_COPY['zh-tw'] = {
     answers: '官方回答，沒有行銷廢話',
     titlePrefix: '關於',
     titleMiddle: '以及',
-    titleSuffix: 'Claude Design 開源替代方案的問題',
+    titleSuffix: 'Claude Design 原始碼可用替代方案的問題',
   },
   cta: {
     ...HOME_PAGE_COPY.zh!.cta,
@@ -4432,7 +4432,7 @@ HOME_PAGE_COPY['zh-tw'] = {
   footer: {
     ...HOME_PAGE_COPY.zh!.footer,
     summary:
-      'Claude Design 的開源替代方案。站在 huashu-design、guizang-ppt、multica-ai 和 open-codesign 的肩膀上構建。',
+      '採用 ODCL 1.0、原始碼可用的 Claude Design 替代方案。站在 huashu-design、guizang-ppt、multica-ai 和 open-codesign 的肩膀上構建。',
     downloadAria: '下載 Open Design 桌面應用',
     download: '下載桌面端',
     columns: {
@@ -4456,7 +4456,7 @@ HOME_PAGE_COPY['zh-tw'] = {
       compare: '比較',
       alternative: 'Claude Design 替代方案',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / 第 01 卷 / 第 26 期',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / 第 01 卷 / 第 26 期',
     bottomRightA: '柏林 / 開放 / 地球',
   },
 };
@@ -4472,7 +4472,7 @@ type DeepPartial<T> = {
 const LANDING_UI_COPY: LandingUiCopy = {
   footer: {
     summary:
-      'The official open-source, local-first alternative to Claude Design. Apache-2.0, BYOK at every layer.',
+      'The official source-available, local-first alternative to Claude Design. ODCL 1.0, BYOK at every layer.',
     catalog: 'Catalog',
     openDesign: 'Open Design',
     products: 'Products',
@@ -4494,7 +4494,7 @@ const LANDING_UI_COPY: LandingUiCopy = {
     htmlAnything: 'HTML Anything',
     htmlVideo: 'HTML Video',
     nexuIo: 'nexu.io',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Issue Nº 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Issue Nº 26',
     bottomRight: 'Berlin / Open / Earth · 52.5200° N · 13.4050° E',
   },
   blog: {
@@ -4523,7 +4523,7 @@ const LANDING_UI_COPY: LandingUiCopy = {
     cta: {
       downloadTitle: 'Download the desktop build',
       downloadBody:
-        'Take the open-source design workspace for a spin, inspect the release notes on GitHub, or join our Discord for live community feedback.',
+        'Take the source-available design workspace for a spin, inspect the release notes on GitHub, or join our Discord for live community feedback.',
       downloadLabel: 'Download desktop ↗',
       skillsTitle: 'Run the skill workflow locally',
       skillsBody:
@@ -4765,7 +4765,7 @@ const LANDING_UI_COPY_OVERRIDES: Partial<
   zh: {
     footer: {
       summary:
-        '官方开源、本地优先的 Claude Design 替代方案。Apache-2.0，所有层都 BYOK。',
+        '官方源码可用、本地优先的 Claude Design 替代方案。ODCL 1.0，所有层都 BYOK。',
       catalog: '目录',
       products: '产品',
       resources: '资源',
@@ -4786,7 +4786,7 @@ const LANDING_UI_COPY_OVERRIDES: Partial<
       htmlAnything: 'HTML Anything',
       htmlVideo: 'HTML Video',
       nexuIo: 'nexu.io',
-      bottomLeft: '● Open Design · Apache-2.0 · 2026 / 第 01 卷 / 第 26 期',
+      bottomLeft: '● Open Design · ODCL 1.0 · 2026 / 第 01 卷 / 第 26 期',
       bottomRight: '柏林 / 开放 / 地球 · 52.5200° N · 13.4050° E',
     },
     blog: {
@@ -4815,7 +4815,7 @@ const LANDING_UI_COPY_OVERRIDES: Partial<
       cta: {
         downloadTitle: '下载桌面版本',
         downloadBody:
-          '试用这个开源设计工作台，在 GitHub 查看 release notes，或加入 Discord 获取社区反馈。',
+          '试用这个源码可用设计工作台，在 GitHub 查看 release notes，或加入 Discord 获取社区反馈。',
         downloadLabel: '下载桌面端 ↗',
         skillsTitle: '在本地运行 Skill 工作流',
         skillsBody:
@@ -5053,7 +5053,7 @@ const LANDING_UI_COPY_OVERRIDES: Partial<
   'zh-tw': {
     footer: {
       summary:
-        '官方開源、本地優先的 Claude Design 替代方案。Apache-2.0，每一層都 BYOK。',
+        '官方原始碼可用、本地優先的 Claude Design 替代方案。ODCL 1.0，每一層都 BYOK。',
       catalog: '目錄',
       products: '產品',
       resources: '資源',
@@ -5074,7 +5074,7 @@ const LANDING_UI_COPY_OVERRIDES: Partial<
       htmlAnything: 'HTML Anything',
       htmlVideo: 'HTML Video',
       nexuIo: 'nexu.io',
-      bottomLeft: '● Open Design · Apache-2.0 · 2026 / 第 01 卷 / 第 26 期',
+      bottomLeft: '● Open Design · ODCL 1.0 · 2026 / 第 01 卷 / 第 26 期',
       bottomRight: '柏林 / 開放 / 地球 · 52.5200° N · 13.4050° E',
     },
     blog: {
@@ -5166,8 +5166,8 @@ function mergeCopy<T>(base: T, override: DeepPartial<T> | undefined): T {
 const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<HomePageCopy>>> = {
   ja: {
     hero: {
-      label: 'オープンソース・デザインスタジオ',
-      titlePrefix: 'オープンソースの',
+      label: 'ソース公開型・デザインスタジオ',
+      titlePrefix: 'ソース公開型の',
       titleMiddle: 'を',
       titleSecondEmphasis: '自分の Agent で動かす',
       lead: (skills, systems) =>
@@ -5180,14 +5180,14 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'ラボ', titlePrefix: '成長し続ける', titleEmphasis: '実験アーカイブ', titleSuffix: '：Skill、デッキ、機械生成の形式' },
     method: { label: 'メソッド', titlePrefix: '', titleEmphasis: 'シグナル', titleSuffix: 'からシステムへ' },
     work: { label: '選定作品', titlePrefix: 'Brief を', titleEmphasisA: '記憶に残る', titleMiddle: '出荷可能な', titleEmphasisB: 'artifact', titleSuffix: 'へ変える Skill' },
-    faqSection: { rule: 'FAQ', answers: '公式回答', label: 'Open Design よくある質問', titlePrefix: '', titleMiddle: 'と', titleSuffix: 'Claude Design のオープンソース代替について' },
+    faqSection: { rule: 'FAQ', answers: '公式回答', label: 'Open Design よくある質問', titlePrefix: '', titleMiddle: 'と', titleSuffix: 'Claude Design のソース公開型代替について' },
     cta: { label: '始める', titlePrefix: '', titleOpen: 'オープン', titleMiddle: 'で', titleVisual: '視覚的に強い', titleSuffix: 'ものを一緒に作る', star: 'GitHub で Star' },
-    footer: { summary: 'Claude Design のオープンソース代替。local-first、BYOK、Apache-2.0。', download: 'デスクトップをダウンロード' },
+    footer: { summary: 'Claude Design のソース公開型代替。local-first、BYOK、ODCL 1.0。', download: 'デスクトップをダウンロード' },
   },
   ko: {
     hero: {
-      label: '오픈소스 디자인 스튜디오',
-      titlePrefix: '오픈소스',
+      label: '소스 공개형 디자인 스튜디오',
+      titlePrefix: '소스 공개형',
       titleMiddle: '을',
       titleSecondEmphasis: '내 Agent에서 실행',
       lead: (skills, systems) =>
@@ -5200,14 +5200,14 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: '랩', titlePrefix: '계속 자라는', titleEmphasis: '실험 아카이브', titleSuffix: '— Skill, deck, 생성 형식' },
     method: { label: '방법', titlePrefix: '', titleEmphasis: '신호', titleSuffix: '에서 시스템으로' },
     work: { label: '선정 작업', titlePrefix: 'Brief를', titleEmphasisA: '기억에 남는', titleMiddle: '출하 가능한', titleEmphasisB: 'artifact', titleSuffix: '로 바꾸는 Skill' },
-    faqSection: { rule: 'FAQ', answers: '공식 답변', label: 'Open Design 자주 묻는 질문', titlePrefix: '', titleMiddle: '및', titleSuffix: 'Claude Design 오픈소스 대안 질문' },
+    faqSection: { rule: 'FAQ', answers: '공식 답변', label: 'Open Design 자주 묻는 질문', titlePrefix: '', titleMiddle: '및', titleSuffix: 'Claude Design 소스 공개형 대안 질문' },
     cta: { label: '시작하기', titlePrefix: '함께', titleOpen: '열린', titleMiddle: '그리고', titleVisual: '시각적으로 강한', titleSuffix: '것을 만듭니다', star: 'GitHub에서 Star' },
-    footer: { summary: 'Claude Design의 오픈소스 대안. Local-first, BYOK, Apache-2.0.', download: '데스크톱 다운로드' },
+    footer: { summary: 'Claude Design의 소스 공개형 대안. Local-first, BYOK, ODCL 1.0.', download: '데스크톱 다운로드' },
   },
   de: {
     hero: {
-      label: 'Open-Source-Designstudio',
-      titlePrefix: 'Open-source',
+      label: 'Source-available-Designstudio',
+      titlePrefix: 'Source-available',
       titleMiddle: 'läuft auf',
       titleSecondEmphasis: 'deinem eigenen Agent',
       lead: (skills, systems) =>
@@ -5220,15 +5220,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Labor', titlePrefix: 'Ein wachsendes', titleEmphasis: 'Experimentarchiv', titleSuffix: 'für Skills, Decks und maschinische Formen' },
     method: { label: 'Methode', titlePrefix: 'Von', titleEmphasis: 'Signal', titleSuffix: 'zu System' },
     work: { label: 'Ausgewählte Arbeiten', titlePrefix: 'Skills, die Briefings in', titleEmphasisA: 'prägnante', titleMiddle: 'lieferbare', titleEmphasisB: 'Artifacts', titleSuffix: 'verwandeln' },
-    faqSection: { rule: 'FAQ', answers: 'Offizielle Antworten', label: 'Open-Design-FAQ', titlePrefix: 'Fragen zu', titleMiddle: 'und', titleSuffix: 'der Open-Source-Alternative zu Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Offizielle Antworten', label: 'Open-Design-FAQ', titlePrefix: 'Fragen zu', titleMiddle: 'und', titleSuffix: 'der Source-available-Alternative zu Claude Design' },
     cta: { label: 'Loslegen', titlePrefix: 'Lasst uns etwas', titleOpen: 'Offenes', titleMiddle: 'und', titleVisual: 'Visuell starkes', titleSuffix: 'bauen', star: 'Auf GitHub sternen' },
-    footer: { summary: 'Die Open-Source-Alternative zu Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Desktop herunterladen' },
+    footer: { summary: 'Die Source-available-Alternative zu Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Desktop herunterladen' },
   },
   fr: {
     hero: {
-      label: 'Studio de design open source',
+      label: 'Studio de design à code source disponible',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, sur',
+      titleMiddle: 'à code source disponible, sur',
       titleSecondEmphasis: 'votre propre agent',
       lead: (skills, systems) =>
         `Open Design est l'alternative officielle, local-first, à Claude Design. Votre agent de coding — Claude Code, Codex, Cursor, Gemini, OpenCode ou Qwen — devient un moteur de design piloté par ${skills} skills composables et ${systems} systèmes DESIGN.md portables.`,
@@ -5240,14 +5240,14 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Une', titleEmphasis: "archive d'expériences", titleSuffix: 'en croissance : skills, decks et formes générées' },
     method: { label: 'Méthode', titlePrefix: 'Du', titleEmphasis: 'signal', titleSuffix: 'au système' },
     work: { label: 'Travaux choisis', titlePrefix: 'Des skills qui transforment les briefs en', titleEmphasisA: 'artifacts', titleMiddle: 'mémorables et', titleEmphasisB: 'livrables', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Réponses officielles', label: 'FAQ Open Design', titlePrefix: 'Questions sur', titleMiddle: 'et', titleSuffix: "l'alternative open source à Claude Design" },
+    faqSection: { rule: 'FAQ', answers: 'Réponses officielles', label: 'FAQ Open Design', titlePrefix: 'Questions sur', titleMiddle: 'et', titleSuffix: "l'alternative à code source disponible à Claude Design" },
     cta: { label: 'Commencer', titlePrefix: 'Construisons quelque chose', titleOpen: "d'ouvert", titleMiddle: 'et', titleVisual: 'visuellement mémorable', titleSuffix: '', star: 'Mettre une Star sur GitHub' },
-    footer: { summary: "L'alternative open source à Claude Design. Local-first, BYOK, Apache-2.0.", download: 'Télécharger le desktop' },
+    footer: { summary: "L'alternative à code source disponible à Claude Design. Local-first, BYOK, ODCL 1.0.", download: 'Télécharger le desktop' },
   },
   ru: {
     hero: {
-      label: 'Open-source дизайн-студия',
-      titlePrefix: 'Open-source',
+      label: 'с доступным исходным кодом дизайн-студия',
+      titlePrefix: 'с доступным исходным кодом',
       titleMiddle: 'работает на',
       titleSecondEmphasis: 'вашем собственном Agent',
       lead: (skills, systems) =>
@@ -5260,15 +5260,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Лаборатория', titlePrefix: 'Растущий', titleEmphasis: 'архив экспериментов', titleSuffix: 'со skills, deck и машинными формами' },
     method: { label: 'Метод', titlePrefix: 'От', titleEmphasis: 'сигнала', titleSuffix: 'к системе' },
     work: { label: 'Избранные работы', titlePrefix: 'Skills превращают brief в', titleEmphasisA: 'запоминающиеся', titleMiddle: 'и готовые к отправке', titleEmphasisB: 'artifacts', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Официальные ответы', label: 'Вопросы об Open Design', titlePrefix: 'Вопросы про', titleMiddle: 'и', titleSuffix: 'open-source альтернативу Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Официальные ответы', label: 'Вопросы об Open Design', titlePrefix: 'Вопросы про', titleMiddle: 'и', titleSuffix: 'с доступным исходным кодом альтернативу Claude Design' },
     cta: { label: 'Начать', titlePrefix: 'Давайте создадим что-то', titleOpen: 'открытое', titleMiddle: 'и', titleVisual: 'визуально сильное', titleSuffix: '', star: 'Поставить Star на GitHub' },
-    footer: { summary: 'Open-source альтернатива Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Скачать desktop' },
+    footer: { summary: 'с доступным исходным кодом альтернатива Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Скачать desktop' },
   },
   es: {
     hero: {
-      label: 'Estudio de diseño open source',
+      label: 'Estudio de diseño con código fuente disponible',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, corriendo en',
+      titleMiddle: 'con código fuente disponible, corriendo en',
       titleSecondEmphasis: 'tu propio agent',
       lead: (skills, systems) =>
         `Open Design es la alternativa oficial, local-first, a Claude Design. Tu coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen — se convierte en motor de diseño con ${skills} skills componibles y ${systems} sistemas DESIGN.md portables.`,
@@ -5280,15 +5280,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Un', titleEmphasis: 'archivo experimental', titleSuffix: 'en crecimiento para skills, decks y formas generadas' },
     method: { label: 'Método', titlePrefix: 'De la', titleEmphasis: 'señal', titleSuffix: 'al sistema' },
     work: { label: 'Trabajos seleccionados', titlePrefix: 'Skills que convierten briefs en', titleEmphasisA: 'artifacts', titleMiddle: 'memorables y', titleEmphasisB: 'entregables', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Respuestas oficiales', label: 'FAQ de Open Design', titlePrefix: 'Preguntas sobre', titleMiddle: 'y', titleSuffix: 'la alternativa open source a Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Respuestas oficiales', label: 'FAQ de Open Design', titlePrefix: 'Preguntas sobre', titleMiddle: 'y', titleSuffix: 'la alternativa con código fuente disponible a Claude Design' },
     cta: { label: 'Empezar', titlePrefix: 'Construyamos algo', titleOpen: 'abierto', titleMiddle: 'y', titleVisual: 'visualmente memorable', titleSuffix: '', star: 'Dar Star en GitHub' },
-    footer: { summary: 'La alternativa open source a Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Descargar desktop' },
+    footer: { summary: 'La alternativa con código fuente disponible a Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Descargar desktop' },
   },
   'pt-br': {
     hero: {
-      label: 'Estúdio de design open source',
+      label: 'Estúdio de design com código-fonte disponível',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, rodando no',
+      titleMiddle: 'com código-fonte disponível, rodando no',
       titleSecondEmphasis: 'seu próprio agent',
       lead: (skills, systems) =>
         `Open Design é a alternativa oficial, local-first, ao Claude Design. Seu coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode ou Qwen — vira um motor de design com ${skills} skills componíveis e ${systems} sistemas DESIGN.md portáteis.`,
@@ -5300,15 +5300,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Um', titleEmphasis: 'arquivo experimental', titleSuffix: 'em crescimento para skills, decks e formas geradas' },
     method: { label: 'Método', titlePrefix: 'Do', titleEmphasis: 'sinal', titleSuffix: 'ao sistema' },
     work: { label: 'Trabalhos selecionados', titlePrefix: 'Skills que transformam briefs em', titleEmphasisA: 'artifacts', titleMiddle: 'memoráveis e', titleEmphasisB: 'entregáveis', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Respostas oficiais', label: 'FAQ Open Design', titlePrefix: 'Perguntas sobre', titleMiddle: 'e', titleSuffix: 'a alternativa open source ao Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Respostas oficiais', label: 'FAQ Open Design', titlePrefix: 'Perguntas sobre', titleMiddle: 'e', titleSuffix: 'a alternativa com código-fonte disponível ao Claude Design' },
     cta: { label: 'Começar', titlePrefix: 'Vamos criar algo', titleOpen: 'aberto', titleMiddle: 'e', titleVisual: 'visualmente memorável', titleSuffix: '', star: 'Dar Star no GitHub' },
-    footer: { summary: 'A alternativa open source ao Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Baixar desktop' },
+    footer: { summary: 'A alternativa com código-fonte disponível ao Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Baixar desktop' },
   },
   it: {
     hero: {
-      label: 'Studio di design open source',
+      label: 'Studio di design a codice sorgente disponibile',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, sul',
+      titleMiddle: 'a codice sorgente disponibile, sul',
       titleSecondEmphasis: 'tuo agent',
       lead: (skills, systems) =>
         `Open Design è l'alternativa ufficiale, local-first, a Claude Design. Il tuo coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode o Qwen — diventa un motore di design con ${skills} skill componibili e ${systems} sistemi DESIGN.md portabili.`,
@@ -5320,15 +5320,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Un', titleEmphasis: 'archivio sperimentale', titleSuffix: 'in crescita per skill, deck e forme generate' },
     method: { label: 'Metodo', titlePrefix: 'Dal', titleEmphasis: 'segnale', titleSuffix: 'al sistema' },
     work: { label: 'Lavori selezionati', titlePrefix: 'Skill che trasformano brief in', titleEmphasisA: 'artifact', titleMiddle: 'memorabili e', titleEmphasisB: 'pronti da consegnare', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Risposte ufficiali', label: 'FAQ Open Design', titlePrefix: 'Domande su', titleMiddle: 'e', titleSuffix: "l'alternativa open source a Claude Design" },
+    faqSection: { rule: 'FAQ', answers: 'Risposte ufficiali', label: 'FAQ Open Design', titlePrefix: 'Domande su', titleMiddle: 'e', titleSuffix: "l'alternativa a codice sorgente disponibile a Claude Design" },
     cta: { label: 'Inizia', titlePrefix: 'Costruiamo qualcosa di', titleOpen: 'aperto', titleMiddle: 'e', titleVisual: 'visivamente memorabile', titleSuffix: '', star: 'Metti Star su GitHub' },
-    footer: { summary: "L'alternativa open source a Claude Design. Local-first, BYOK, Apache-2.0.", download: 'Scarica desktop' },
+    footer: { summary: "L'alternativa a codice sorgente disponibile a Claude Design. Local-first, BYOK, ODCL 1.0.", download: 'Scarica desktop' },
   },
   vi: {
     hero: {
-      label: 'Studio thiết kế mã nguồn mở',
+      label: 'Studio thiết kế mã nguồn khả dụng',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'mã nguồn mở, chạy trên',
+      titleMiddle: 'mã nguồn khả dụng, chạy trên',
       titleSecondEmphasis: 'agent của bạn',
       lead: (skills, systems) =>
         `Open Design là lựa chọn chính thức, local-first, thay Claude Design. Coding agent bạn đang dùng — Claude Code, Codex, Cursor, Gemini, OpenCode hoặc Qwen — trở thành engine thiết kế với ${skills} skill có thể ghép và ${systems} hệ DESIGN.md di động.`,
@@ -5340,15 +5340,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Một', titleEmphasis: 'kho thử nghiệm', titleSuffix: 'đang lớn lên cho skill, deck và hình thức tạo sinh' },
     method: { label: 'Phương pháp', titlePrefix: 'Từ', titleEmphasis: 'tín hiệu', titleSuffix: 'đến hệ thống' },
     work: { label: 'Tác phẩm chọn lọc', titlePrefix: 'Skill biến brief thành', titleEmphasisA: 'artifact', titleMiddle: 'đáng nhớ và', titleEmphasisB: 'có thể giao', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Câu trả lời chính thức', label: 'FAQ Open Design', titlePrefix: 'Câu hỏi về', titleMiddle: 'và', titleSuffix: 'lựa chọn mã nguồn mở thay Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Câu trả lời chính thức', label: 'FAQ Open Design', titlePrefix: 'Câu hỏi về', titleMiddle: 'và', titleSuffix: 'lựa chọn mã nguồn khả dụng thay Claude Design' },
     cta: { label: 'Bắt đầu', titlePrefix: 'Cùng tạo ra thứ', titleOpen: 'mở', titleMiddle: 'và', titleVisual: 'ấn tượng về thị giác', titleSuffix: '', star: 'Star trên GitHub' },
-    footer: { summary: 'Lựa chọn mã nguồn mở thay Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Tải desktop' },
+    footer: { summary: 'Lựa chọn mã nguồn khả dụng thay Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Tải desktop' },
   },
   pl: {
     hero: {
-      label: 'Studio designu open source',
+      label: 'Studio designu z dostępnym kodem źródłowym',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, na',
+      titleMiddle: 'z dostępnym kodem źródłowym, na',
       titleSecondEmphasis: 'Twoim agencie',
       lead: (skills, systems) =>
         `Open Design to oficjalna, local-first alternatywa dla Claude Design. Twój coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode albo Qwen — staje się silnikiem designu z ${skills} kompozycyjnymi skills i ${systems} przenośnymi systemami DESIGN.md.`,
@@ -5360,15 +5360,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Rosnące', titleEmphasis: 'archiwum eksperymentów', titleSuffix: 'dla skills, decków i form generatywnych' },
     method: { label: 'Metoda', titlePrefix: 'Od', titleEmphasis: 'sygnału', titleSuffix: 'do systemu' },
     work: { label: 'Wybrane prace', titlePrefix: 'Skills zmieniają briefy w', titleEmphasisA: 'zapadające w pamięć', titleMiddle: 'i gotowe do wysyłki', titleEmphasisB: 'artifacts', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Oficjalne odpowiedzi', label: 'FAQ Open Design', titlePrefix: 'Pytania o', titleMiddle: 'i', titleSuffix: 'open-source alternatywę dla Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Oficjalne odpowiedzi', label: 'FAQ Open Design', titlePrefix: 'Pytania o', titleMiddle: 'i', titleSuffix: 'z dostępnym kodem źródłowym alternatywę dla Claude Design' },
     cta: { label: 'Zacznij', titlePrefix: 'Zbudujmy coś', titleOpen: 'otwartego', titleMiddle: 'i', titleVisual: 'wizualnie mocnego', titleSuffix: '', star: 'Daj Star na GitHubie' },
-    footer: { summary: 'Open-source alternatywa dla Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Pobierz desktop' },
+    footer: { summary: 'z dostępnym kodem źródłowym alternatywa dla Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Pobierz desktop' },
   },
   id: {
     hero: {
-      label: 'Studio desain open source',
+      label: 'Studio desain dengan kode sumber tersedia',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, berjalan di',
+      titleMiddle: 'dengan kode sumber tersedia, berjalan di',
       titleSecondEmphasis: 'agent Anda sendiri',
       lead: (skills, systems) =>
         `Open Design adalah alternatif resmi, local-first, untuk Claude Design. Coding agent yang sudah Anda pakai — Claude Code, Codex, Cursor, Gemini, OpenCode, atau Qwen — menjadi mesin desain dengan ${skills} skill komposable dan ${systems} sistem DESIGN.md portabel.`,
@@ -5380,15 +5380,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Arsip', titleEmphasis: 'eksperimen', titleSuffix: 'yang terus tumbuh untuk skill, deck, dan bentuk generatif' },
     method: { label: 'Metode', titlePrefix: 'Dari', titleEmphasis: 'sinyal', titleSuffix: 'ke sistem' },
     work: { label: 'Karya pilihan', titlePrefix: 'Skill yang mengubah brief menjadi', titleEmphasisA: 'artifact', titleMiddle: 'berkesan dan', titleEmphasisB: 'siap dikirim', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Jawaban resmi', label: 'FAQ Open Design', titlePrefix: 'Pertanyaan tentang', titleMiddle: 'dan', titleSuffix: 'alternatif open source untuk Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Jawaban resmi', label: 'FAQ Open Design', titlePrefix: 'Pertanyaan tentang', titleMiddle: 'dan', titleSuffix: 'alternatif dengan kode sumber tersedia untuk Claude Design' },
     cta: { label: 'Mulai', titlePrefix: 'Mari bangun sesuatu yang', titleOpen: 'terbuka', titleMiddle: 'dan', titleVisual: 'kuat secara visual', titleSuffix: '', star: 'Beri Star di GitHub' },
-    footer: { summary: 'Alternatif open source untuk Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Unduh desktop' },
+    footer: { summary: 'Alternatif dengan kode sumber tersedia untuk Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Unduh desktop' },
   },
   nl: {
     hero: {
-      label: 'Open-source designstudio',
+      label: 'met beschikbare broncode designstudio',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'open source, draaiend op',
+      titleMiddle: 'met beschikbare broncode, draaiend op',
       titleSecondEmphasis: 'je eigen agent',
       lead: (skills, systems) =>
         `Open Design is het officiële local-first alternatief voor Claude Design. Je bestaande coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode of Qwen — wordt een design-engine met ${skills} combineerbare skills en ${systems} draagbare DESIGN.md-systemen.`,
@@ -5400,15 +5400,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Een groeiend', titleEmphasis: 'experimenteel archief', titleSuffix: 'voor skills, decks en machinevormen' },
     method: { label: 'Methode', titlePrefix: 'Van', titleEmphasis: 'signaal', titleSuffix: 'naar systeem' },
     work: { label: 'Geselecteerd werk', titlePrefix: 'Skills die briefings omzetten in', titleEmphasisA: 'memorabele', titleMiddle: 'en leverbare', titleEmphasisB: 'artifacts', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Officiële antwoorden', label: 'Open Design-FAQ', titlePrefix: 'Vragen over', titleMiddle: 'en', titleSuffix: 'het open-source alternatief voor Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Officiële antwoorden', label: 'Open Design-FAQ', titlePrefix: 'Vragen over', titleMiddle: 'en', titleSuffix: 'het met beschikbare broncode alternatief voor Claude Design' },
     cta: { label: 'Starten', titlePrefix: 'Laten we iets', titleOpen: 'opens', titleMiddle: 'en', titleVisual: 'visueel memorabels', titleSuffix: 'bouwen', star: 'Star op GitHub' },
-    footer: { summary: 'Het open-source alternatief voor Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Desktop downloaden' },
+    footer: { summary: 'Het met beschikbare broncode alternatief voor Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Desktop downloaden' },
   },
   ar: {
     hero: {
-      label: 'استوديو تصميم مفتوح المصدر',
+      label: 'استوديو تصميم متاح المصدر',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'مفتوح المصدر يعمل على',
+      titleMiddle: 'متاح المصدر يعمل على',
       titleSecondEmphasis: 'الـ Agent الخاص بك',
       lead: (skills, systems) =>
         `Open Design هو البديل الرسمي المحلي أولاً لـ Claude Design. يتحول coding agent الذي تستخدمه — Claude Code أو Codex أو Cursor أو Gemini أو OpenCode أو Qwen — إلى محرك تصميم مدفوع بـ ${skills} skills قابلة للتركيب و ${systems} أنظمة DESIGN.md قابلة للنقل.`,
@@ -5420,15 +5420,15 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'المختبر', titlePrefix: 'أرشيف', titleEmphasis: 'تجارب', titleSuffix: 'ينمو للـ skills والعروض والأشكال التوليدية' },
     method: { label: 'المنهج', titlePrefix: 'من', titleEmphasis: 'الإشارة', titleSuffix: 'إلى النظام' },
     work: { label: 'أعمال مختارة', titlePrefix: 'Skills تحول الـ brief إلى', titleEmphasisA: 'artifacts', titleMiddle: 'لا تُنسى و', titleEmphasisB: 'قابلة للتسليم', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'إجابات رسمية', label: 'أسئلة Open Design', titlePrefix: 'أسئلة حول', titleMiddle: 'و', titleSuffix: 'البديل مفتوح المصدر لـ Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'إجابات رسمية', label: 'أسئلة Open Design', titlePrefix: 'أسئلة حول', titleMiddle: 'و', titleSuffix: 'البديل متاح المصدر لـ Claude Design' },
     cta: { label: 'ابدأ', titlePrefix: 'لنبن شيئاً', titleOpen: 'مفتوحاً', titleMiddle: 'و', titleVisual: 'قوياً بصرياً', titleSuffix: '', star: 'ضع Star على GitHub' },
-    footer: { summary: 'البديل مفتوح المصدر لـ Claude Design. محلي أولاً، BYOK، Apache-2.0.', download: 'تنزيل سطح المكتب' },
+    footer: { summary: 'البديل متاح المصدر لـ Claude Design. محلي أولاً، BYOK، ODCL 1.0.', download: 'تنزيل سطح المكتب' },
   },
   tr: {
     hero: {
-      label: 'Açık kaynak tasarım stüdyosu',
+      label: 'Kaynak kodu erişilebilir tasarım stüdyosu',
       titlePrefix: 'Claude Design',
-      titleMiddle: 'açık kaynak,',
+      titleMiddle: 'kaynak kodu erişilebilir,',
       titleSecondEmphasis: 'kendi Agentında çalışır',
       lead: (skills, systems) =>
         `Open Design, Claude Design'ın resmi local-first alternatifidir. Zaten kullandığın coding agent — Claude Code, Codex, Cursor, Gemini, OpenCode veya Qwen — ${skills} birleştirilebilir skill ve ${systems} taşınabilir DESIGN.md sistemiyle çalışan bir tasarım motoruna dönüşür.`,
@@ -5440,14 +5440,14 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Lab', titlePrefix: 'Büyüyen bir', titleEmphasis: 'deney arşivi', titleSuffix: ': skill, deck ve üretken formlar' },
     method: { label: 'Yöntem', titlePrefix: '', titleEmphasis: 'Sinyalden', titleSuffix: 'sisteme' },
     work: { label: 'Seçilmiş işler', titlePrefix: 'Briefleri', titleEmphasisA: 'akılda kalan', titleMiddle: 've teslim edilebilir', titleEmphasisB: 'artifactlara', titleSuffix: 'çeviren skilller' },
-    faqSection: { rule: 'FAQ', answers: 'Resmi yanıtlar', label: 'Open Design SSS', titlePrefix: '', titleMiddle: 've', titleSuffix: "Claude Design'ın açık kaynak alternatifi hakkında sorular" },
+    faqSection: { rule: 'FAQ', answers: 'Resmi yanıtlar', label: 'Open Design SSS', titlePrefix: '', titleMiddle: 've', titleSuffix: "Claude Design'ın kaynak kodu erişilebilir alternatifi hakkında sorular" },
     cta: { label: 'Başla', titlePrefix: 'Birlikte', titleOpen: 'açık', titleMiddle: 've', titleVisual: 'görsel olarak güçlü', titleSuffix: 'bir şey üretelim', star: "GitHub'da Star ver" },
-    footer: { summary: "Claude Design'ın açık kaynak alternatifi. Local-first, BYOK, Apache-2.0.", download: 'Desktop indir' },
+    footer: { summary: "Claude Design'ın kaynak kodu erişilebilir alternatifi. Local-first, BYOK, ODCL 1.0.", download: 'Desktop indir' },
   },
   uk: {
     hero: {
-      label: 'Open-source дизайн-студія',
-      titlePrefix: 'Open-source',
+      label: 'з доступним вихідним кодом дизайн-студія',
+      titlePrefix: 'з доступним вихідним кодом',
       titleMiddle: 'працює на',
       titleSecondEmphasis: 'вашому власному Agent',
       lead: (skills, systems) =>
@@ -5460,9 +5460,9 @@ const HOME_PAGE_COPY_OVERRIDES: Partial<Record<LandingLocaleCode, DeepPartial<Ho
     labs: { label: 'Лабораторія', titlePrefix: 'Зростаючий', titleEmphasis: 'архів експериментів', titleSuffix: 'зі skills, deck та машинними формами' },
     method: { label: 'Метод', titlePrefix: 'Від', titleEmphasis: 'сигналу', titleSuffix: 'до системи' },
     work: { label: 'Вибрані роботи', titlePrefix: 'Skills перетворюють brief на', titleEmphasisA: 'пам’ятні', titleMiddle: 'і готові до відправки', titleEmphasisB: 'artifacts', titleSuffix: '' },
-    faqSection: { rule: 'FAQ', answers: 'Офіційні відповіді', label: 'FAQ Open Design українською', titlePrefix: 'Питання про', titleMiddle: 'і', titleSuffix: 'open-source альтернативу Claude Design' },
+    faqSection: { rule: 'FAQ', answers: 'Офіційні відповіді', label: 'FAQ Open Design українською', titlePrefix: 'Питання про', titleMiddle: 'і', titleSuffix: 'з доступним вихідним кодом альтернативу Claude Design' },
     cta: { label: 'Почати', titlePrefix: 'Давайте створимо щось', titleOpen: 'відкрите', titleMiddle: 'і', titleVisual: 'візуально сильне', titleSuffix: '', star: 'Поставити Star на GitHub' },
-    footer: { summary: 'Open-source альтернатива Claude Design. Local-first, BYOK, Apache-2.0.', download: 'Завантажити desktop' },
+    footer: { summary: 'з доступним вихідним кодом альтернатива Claude Design. Local-first, BYOK, ODCL 1.0.', download: 'Завантажити desktop' },
   },
 };
 
@@ -5471,7 +5471,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
 > = {
   ja: {
     summary:
-      'Claude Design の公式オープンソース、ローカル優先の代替。Apache-2.0、すべての層で BYOK。',
+      'Claude Design の公式ソース公開型、ローカル優先の代替。ODCL 1.0、すべての層で BYOK。',
     catalog: 'カタログ',
     products: 'プロダクト',
     resources: 'リソース',
@@ -5487,7 +5487,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'リリース',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / 第 01 巻 / 第 26 号',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / 第 01 巻 / 第 26 号',
     bottomRight: 'ベルリン / オープン / 地球 · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: '姉妹プロジェクト',
@@ -5497,7 +5497,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   ko: {
     summary:
-      'Claude Design의 공식 오픈소스, 로컬 우선 대안입니다. Apache-2.0, 모든 계층에서 BYOK.',
+      'Claude Design의 공식 소스 공개형, 로컬 우선 대안입니다. ODCL 1.0, 모든 계층에서 BYOK.',
     catalog: '카탈로그',
     products: '제품',
     resources: '리소스',
@@ -5513,7 +5513,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: '릴리스',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / 01권 / 26호',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / 01권 / 26호',
     bottomRight: '베를린 / 오픈 / 지구 · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: '자매 프로젝트',
@@ -5523,7 +5523,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   de: {
     summary:
-      'Die offizielle quelloffene, lokal zuerst gedachte Alternative zu Claude Design. Apache-2.0, BYOK auf jeder Ebene.',
+      'Die offizielle Source-available, lokal zuerst gedachte Alternative zu Claude Design. ODCL 1.0, BYOK auf jeder Ebene.',
     catalog: 'Katalog',
     products: 'Produkte',
     resources: 'Ressourcen',
@@ -5539,7 +5539,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Versionen',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Band 01 / Ausgabe Nr. 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Band 01 / Ausgabe Nr. 26',
     bottomRight: 'Berlin / Offen / Erde · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Schwesterprojekte',
@@ -5549,7 +5549,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   fr: {
     summary:
-      "L'alternative officielle open source et locale d'abord à Claude Design. Apache-2.0, BYOK à chaque couche.",
+      "L'alternative officielle à code source disponible et locale d'abord à Claude Design. ODCL 1.0, BYOK à chaque couche.",
     catalog: 'Catalogue',
     products: 'Produits',
     resources: 'Ressources',
@@ -5565,7 +5565,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Versions',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Numéro 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Numéro 26',
     bottomRight: 'Berlin / Ouvert / Terre · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Projets sœurs',
@@ -5575,7 +5575,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   ru: {
     summary:
-      'Официальная открытая и локально ориентированная альтернатива Claude Design. Apache-2.0, BYOK на каждом уровне.',
+      'Официальная локальная альтернатива с доступным исходным кодом Claude Design. ODCL 1.0, BYOK на каждом уровне.',
     catalog: 'Каталог',
     products: 'Продукты',
     resources: 'Ресурсы',
@@ -5591,7 +5591,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Релизы',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Том 01 / Выпуск № 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Том 01 / Выпуск № 26',
     bottomRight: 'Берлин / Открыто / Земля · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Родственные проекты',
@@ -5601,7 +5601,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   es: {
     summary:
-      'La alternativa oficial de código abierto y local-first a Claude Design. Apache-2.0, BYOK en cada capa.',
+      'La alternativa oficial con código fuente disponible y local-first a Claude Design. ODCL 1.0, BYOK en cada capa.',
     catalog: 'Catálogo',
     products: 'Productos',
     resources: 'Recursos',
@@ -5617,7 +5617,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Versiones',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volumen 01 / Número 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volumen 01 / Número 26',
     bottomRight: 'Berlín / Abierto / Tierra · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Proyectos relacionados',
@@ -5627,7 +5627,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   'pt-br': {
     summary:
-      'A alternativa oficial, de código aberto e local-first ao Claude Design. Apache-2.0, BYOK em todas as camadas.',
+      'A alternativa oficial, de código aberto e local-first ao Claude Design. ODCL 1.0, BYOK em todas as camadas.',
     catalog: 'Catálogo',
     products: 'Produtos',
     resources: 'Recursos',
@@ -5643,7 +5643,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Versões',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Edição Nº 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Edição Nº 26',
     bottomRight: 'Berlim / Aberto / Terra · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Projetos irmãos',
@@ -5653,7 +5653,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   it: {
     summary:
-      "L'alternativa ufficiale open source e locale-first a Claude Design. Apache-2.0, BYOK a ogni livello.",
+      "L'alternativa ufficiale a codice sorgente disponibile e locale-first a Claude Design. ODCL 1.0, BYOK a ogni livello.",
     catalog: 'Catalogo',
     products: 'Prodotti',
     resources: 'Risorse',
@@ -5669,7 +5669,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Rilasci',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Numero 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Numero 26',
     bottomRight: 'Berlino / Aperto / Terra · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Progetti correlati',
@@ -5679,7 +5679,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   vi: {
     summary:
-      'Lựa chọn chính thức, mã nguồn mở và ưu tiên cục bộ thay Claude Design. Apache-2.0, BYOK ở mọi lớp.',
+      'Lựa chọn chính thức, mã nguồn khả dụng và ưu tiên cục bộ thay Claude Design. ODCL 1.0, BYOK ở mọi lớp.',
     catalog: 'Danh mục',
     products: 'Sản phẩm',
     resources: 'Tài nguyên',
@@ -5695,7 +5695,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Bản phát hành',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Tập 01 / Số 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Tập 01 / Số 26',
     bottomRight: 'Berlin / Mở / Trái đất · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Dự án liên quan',
@@ -5705,7 +5705,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   pl: {
     summary:
-      'Oficjalna, otwartoźródłowa i lokalna alternatywa dla Claude Design. Apache-2.0, BYOK na każdej warstwie.',
+      'Oficjalna, z dostępnym kodem źródłowym i lokalna alternatywa dla Claude Design. ODCL 1.0, BYOK na każdej warstwie.',
     catalog: 'Katalog',
     products: 'Produkty',
     resources: 'Zasoby',
@@ -5721,7 +5721,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Wydania',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Tom 01 / Numer 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Tom 01 / Numer 26',
     bottomRight: 'Berlin / Otwarte / Ziemia · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Projekty siostrzane',
@@ -5731,7 +5731,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   id: {
     summary:
-      'Alternatif resmi, sumber terbuka, dan mengutamakan lokal untuk Claude Design. Apache-2.0, BYOK di setiap lapisan.',
+      'Alternatif resmi, kode sumber tersedia, dan mengutamakan lokal untuk Claude Design. ODCL 1.0, BYOK di setiap lapisan.',
     catalog: 'Katalog',
     products: 'Produk',
     resources: 'Sumber daya',
@@ -5747,7 +5747,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Rilis',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Edisi Nº 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Edisi Nº 26',
     bottomRight: 'Berlin / Terbuka / Bumi · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Proyek terkait',
@@ -5757,7 +5757,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   nl: {
     summary:
-      'Het officiële open-source en local-first alternatief voor Claude Design. Apache-2.0, BYOK in elke laag.',
+      'Het officiële met beschikbare broncode en local-first alternatief voor Claude Design. ODCL 1.0, BYOK in elke laag.',
     catalog: 'Catalogus',
     products: 'Producten',
     resources: 'Bronnen',
@@ -5773,7 +5773,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'Uitgaven',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Volume 01 / Editie Nº 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Volume 01 / Editie Nº 26',
     bottomRight: 'Berlijn / Open / Aarde · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'Zusterprojecten',
@@ -5783,7 +5783,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   ar: {
     summary:
-      'البديل الرسمي مفتوح المصدر والمحلي أولاً لـ Claude Design. Apache-2.0 وBYOK في كل طبقة.',
+      'البديل الرسمي متاح المصدر والمحلي أولاً لـ Claude Design. ODCL 1.0 وBYOK في كل طبقة.',
     catalog: 'الفهرس',
     products: 'المنتجات',
     resources: 'الموارد',
@@ -5799,7 +5799,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     releases: 'الإصدارات',
     discord: 'Discord',
     rss: 'RSS',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / المجلد 01 / العدد 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / المجلد 01 / العدد 26',
     bottomRight: 'برلين / مفتوح / الأرض · 52.5200° N · 13.4050° E',
     xTwitter: 'X / Twitter',
     sisterProjects: 'المشاريع الشقيقة',
@@ -5809,7 +5809,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
   },
   tr: {
     summary:
-      "Claude Design için resmi, açık kaynak ve yerel öncelikli alternatif. Apache-2.0, her katmanda BYOK.",
+      "Claude Design için resmi, kaynak kodu erişilebilir ve yerel öncelikli alternatif. ODCL 1.0, her katmanda BYOK.",
     catalog: 'Katalog',
     products: 'Ürünler',
     resources: 'Kaynaklar',
@@ -5830,12 +5830,12 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     htmlAnything: 'HTML Anything',
     htmlVideo: 'HTML Video',
     nexuIo: 'nexu.io',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Cilt 01 / Sayı Nº 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Cilt 01 / Sayı Nº 26',
     bottomRight: 'Berlin / Açık / Dünya · 52.5200° N · 13.4050° E',
   },
   uk: {
     summary:
-      'Офіційна відкрита та локально орієнтована альтернатива Claude Design. Apache-2.0, BYOK на кожному рівні.',
+      'Офіційна локальна альтернатива з доступним вихідним кодом Claude Design. ODCL 1.0, BYOK на кожному рівні.',
     catalog: 'Каталог',
     products: 'Продукти',
     resources: 'Ресурси',
@@ -5856,7 +5856,7 @@ const LOCALIZED_LANDING_FOOTER_COPY: Partial<
     htmlAnything: 'HTML Anything',
     htmlVideo: 'HTML Video',
     nexuIo: 'nexu.io',
-    bottomLeft: '● Open Design · Apache-2.0 · 2026 / Том 01 / Випуск № 26',
+    bottomLeft: '● Open Design · ODCL 1.0 · 2026 / Том 01 / Випуск № 26',
     bottomRight: 'Берлін / Відкрито / Земля · 52.5200° N · 13.4050° E',
   },
 };
@@ -5866,7 +5866,7 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
 > = {
   ja: {
     summary:
-      'Claude Design のオープンソース代替。huashu-design、guizang-ppt、multica-ai、open-codesign の蓄積の上に構築されています。',
+      'Claude Design のソース公開型代替。huashu-design、guizang-ppt、multica-ai、open-codesign の蓄積の上に構築されています。',
     downloadAria: 'Open Design デスクトップアプリをダウンロード',
     download: 'デスクトップをダウンロード',
     columns: { studio: 'スタジオ', library: 'ライブラリ', connect: '接続', openDesign: 'Open Design' },
@@ -5885,13 +5885,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: '比較',
       alternative: 'Claude Design の代替',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / 第 01 巻 / 第 26 号',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / 第 01 巻 / 第 26 号',
     bottomRightA: 'ベルリン / オープン / 地球',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   ko: {
     summary:
-      'Claude Design의 오픈소스 대안입니다. huashu-design, guizang-ppt, multica-ai, open-codesign의 축적 위에 구축되었습니다.',
+      'Claude Design의 소스 공개형 대안입니다. huashu-design, guizang-ppt, multica-ai, open-codesign의 축적 위에 구축되었습니다.',
     downloadAria: 'Open Design 데스크톱 앱 다운로드',
     download: '데스크톱 다운로드',
     columns: { studio: '스튜디오', library: '라이브러리', connect: '연결', openDesign: 'Open Design' },
@@ -5910,13 +5910,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: '비교',
       alternative: 'Claude Design 대안',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / 01권 / 26호',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / 01권 / 26호',
     bottomRightA: '베를린 / 오픈 / 지구',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   de: {
     summary:
-      'Die quelloffene Alternative zu Claude Design. Gebaut auf den Vorarbeiten von huashu-design, guizang-ppt, multica-ai und open-codesign.',
+      'Die Source-available Alternative zu Claude Design. Gebaut auf den Vorarbeiten von huashu-design, guizang-ppt, multica-ai und open-codesign.',
     downloadAria: 'Open-Design-Desktop-App herunterladen',
     download: 'Desktop herunterladen',
     columns: { studio: 'Studio', library: 'Bibliothek', connect: 'Verbinden', openDesign: 'Open Design' },
@@ -5935,13 +5935,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Vergleich',
       alternative: 'Claude-Design-Alternative',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Band 01 / Ausgabe Nr. 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Band 01 / Ausgabe Nr. 26',
     bottomRightA: 'Berlin / Offen / Erde',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   fr: {
     summary:
-      "L'alternative open source à Claude Design. Construite sur les travaux de huashu-design, guizang-ppt, multica-ai et open-codesign.",
+      "L'alternative à code source disponible à Claude Design. Construite sur les travaux de huashu-design, guizang-ppt, multica-ai et open-codesign.",
     downloadAria: "Télécharger l'application desktop Open Design",
     download: 'Télécharger le desktop',
     columns: { studio: 'Studio', library: 'Bibliothèque', connect: 'Connexion', openDesign: 'Open Design' },
@@ -5960,13 +5960,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Comparaison',
       alternative: 'Alternative à Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Numéro 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Numéro 26',
     bottomRightA: 'Berlin / Ouvert / Terre',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   ru: {
     summary:
-      'Открытая альтернатива Claude Design, созданная на основе работ huashu-design, guizang-ppt, multica-ai и open-codesign.',
+      'Альтернатива с доступным исходным кодом Claude Design, созданная на основе работ huashu-design, guizang-ppt, multica-ai и open-codesign.',
     downloadAria: 'Скачать настольное приложение Open Design',
     download: 'Скачать desktop',
     columns: { studio: 'Студия', library: 'Библиотека', connect: 'Связь', openDesign: 'Open Design' },
@@ -5985,13 +5985,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Сравнение',
       alternative: 'Альтернатива Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Том 01 / Выпуск № 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Том 01 / Выпуск № 26',
     bottomRightA: 'Берлин / Открыто / Земля',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   es: {
     summary:
-      'La alternativa de código abierto a Claude Design, construida sobre huashu-design, guizang-ppt, multica-ai y open-codesign.',
+      'La alternativa con código fuente disponible a Claude Design, construida sobre huashu-design, guizang-ppt, multica-ai y open-codesign.',
     downloadAria: 'Descargar la aplicación de escritorio de Open Design',
     download: 'Descargar desktop',
     columns: { studio: 'Estudio', library: 'Biblioteca', connect: 'Conectar', openDesign: 'Open Design' },
@@ -6010,7 +6010,7 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Comparación',
       alternative: 'Alternativa a Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volumen 01 / Número 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volumen 01 / Número 26',
     bottomRightA: 'Berlín / Abierto / Tierra',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
@@ -6035,13 +6035,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Comparação',
       alternative: 'Alternativa ao Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Edição Nº 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Edição Nº 26',
     bottomRightA: 'Berlim / Aberto / Terra',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   it: {
     summary:
-      "L'alternativa open source a Claude Design, costruita sulle basi di huashu-design, guizang-ppt, multica-ai e open-codesign.",
+      "L'alternativa a codice sorgente disponibile a Claude Design, costruita sulle basi di huashu-design, guizang-ppt, multica-ai e open-codesign.",
     downloadAria: "Scarica l'app desktop di Open Design",
     download: 'Scarica desktop',
     columns: { studio: 'Studio', library: 'Libreria', connect: 'Connessione', openDesign: 'Open Design' },
@@ -6060,13 +6060,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Confronto',
       alternative: 'Alternativa a Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Numero 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Numero 26',
     bottomRightA: 'Berlino / Aperto / Terra',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   vi: {
     summary:
-      'Lựa chọn mã nguồn mở thay Claude Design, xây trên nền tảng của huashu-design, guizang-ppt, multica-ai và open-codesign.',
+      'Lựa chọn mã nguồn khả dụng thay Claude Design, xây trên nền tảng của huashu-design, guizang-ppt, multica-ai và open-codesign.',
     downloadAria: 'Tải ứng dụng desktop Open Design',
     download: 'Tải desktop',
     columns: { studio: 'Studio', library: 'Thư viện', connect: 'Kết nối', openDesign: 'Open Design' },
@@ -6085,7 +6085,7 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'So sánh',
       alternative: 'Lựa chọn thay Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Tập 01 / Số 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Tập 01 / Số 26',
     bottomRightA: 'Berlin / Mở / Trái đất',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
@@ -6110,13 +6110,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Porównanie',
       alternative: 'Alternatywa dla Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Tom 01 / Numer 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Tom 01 / Numer 26',
     bottomRightA: 'Berlin / Otwarte / Ziemia',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   id: {
     summary:
-      'Alternatif sumber terbuka untuk Claude Design, dibangun di atas karya huashu-design, guizang-ppt, multica-ai, dan open-codesign.',
+      'Alternatif kode sumber tersedia untuk Claude Design, dibangun di atas karya huashu-design, guizang-ppt, multica-ai, dan open-codesign.',
     downloadAria: 'Unduh aplikasi desktop Open Design',
     download: 'Unduh desktop',
     columns: { studio: 'Studio', library: 'Pustaka', connect: 'Koneksi', openDesign: 'Open Design' },
@@ -6135,13 +6135,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Perbandingan',
       alternative: 'Alternatif Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Edisi Nº 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Edisi Nº 26',
     bottomRightA: 'Berlin / Terbuka / Bumi',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   nl: {
     summary:
-      'Het open-source alternatief voor Claude Design, gebouwd op het werk van huashu-design, guizang-ppt, multica-ai en open-codesign.',
+      'Het met beschikbare broncode alternatief voor Claude Design, gebouwd op het werk van huashu-design, guizang-ppt, multica-ai en open-codesign.',
     downloadAria: 'Download de Open Design desktop-app',
     download: 'Desktop downloaden',
     columns: { studio: 'Studio', library: 'Bibliotheek', connect: 'Verbinden', openDesign: 'Open Design' },
@@ -6160,13 +6160,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Vergelijking',
       alternative: 'Claude Design-alternatief',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Volume 01 / Editie Nº 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Volume 01 / Editie Nº 26',
     bottomRightA: 'Berlijn / Open / Aarde',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   ar: {
     summary:
-      'البديل مفتوح المصدر لـ Claude Design، مبني على أعمال huashu-design وguizang-ppt وmultica-ai وopen-codesign.',
+      'البديل متاح المصدر لـ Claude Design، مبني على أعمال huashu-design وguizang-ppt وmultica-ai وopen-codesign.',
     downloadAria: 'تنزيل تطبيق Open Design لسطح المكتب',
     download: 'تنزيل سطح المكتب',
     columns: { studio: 'الاستوديو', library: 'المكتبة', connect: 'التواصل', openDesign: 'Open Design' },
@@ -6185,13 +6185,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'المقارنة',
       alternative: 'بديل Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / المجلد 01 / العدد 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / المجلد 01 / العدد 26',
     bottomRightA: 'برلين / مفتوح / الأرض',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   tr: {
     summary:
-      "Claude Design'ın açık kaynak alternatifi; huashu-design, guizang-ppt, multica-ai ve open-codesign çalışmalarının üzerine kuruldu.",
+      "Claude Design'ın kaynak kodu erişilebilir alternatifi; huashu-design, guizang-ppt, multica-ai ve open-codesign çalışmalarının üzerine kuruldu.",
     downloadAria: 'Open Design desktop uygulamasını indir',
     download: 'Desktop indir',
     columns: { studio: 'Stüdyo', library: 'Kütüphane', connect: 'Bağlantı', openDesign: 'Open Design' },
@@ -6210,13 +6210,13 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Karşılaştırma',
       alternative: 'Claude Design alternatifi',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Cilt 01 / Sayı Nº 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Cilt 01 / Sayı Nº 26',
     bottomRightA: 'Berlin / Açık / Dünya',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
   uk: {
     summary:
-      'Відкрита альтернатива Claude Design, побудована на роботах huashu-design, guizang-ppt, multica-ai та open-codesign.',
+      'Альтернатива з доступним вихідним кодом Claude Design, побудована на роботах huashu-design, guizang-ppt, multica-ai та open-codesign.',
     downloadAria: 'Завантажити настільний застосунок Open Design',
     download: 'Завантажити desktop',
     columns: { studio: 'Студія', library: 'Бібліотека', connect: "Зв'язок", openDesign: 'Open Design' },
@@ -6235,7 +6235,7 @@ const LOCALIZED_HOME_FOOTER_COPY: Partial<
       compare: 'Порівняння',
       alternative: 'Альтернатива Claude Design',
     },
-    bottomLeft: 'Open Design · Apache-2.0 · 2026 / Том 01 / Випуск № 26',
+    bottomLeft: 'Open Design · ODCL 1.0 · 2026 / Том 01 / Випуск № 26',
     bottomRightA: 'Берлін / Відкрито / Земля',
     bottomRightB: '52.5200° N · 13.4050° E',
   },
@@ -6436,12 +6436,12 @@ function homeFallbackCopy(text: HomeFallbackText): DeepPartial<HomePageCopy> {
 
 const LOCALIZED_HOME_BODY_COPY: Partial<Record<LandingLocaleCode, DeepPartial<HomePageCopy>>> = {
   ja: homeFallbackCopy({
-    railRight: 'Open Design — 第 01 巻 · 第 26 号 · Apache-2.0',
+    railRight: 'Open Design — 第 01 巻 · 第 26 号 · ODCL 1.0',
     railLeft: 'Skill · Design System · Agent · BYOK · ローカル優先',
     discordAria: 'Open Design Discord に参加',
     joinDiscord: 'Discord に参加',
-    heroLabel: 'オープンソースのデザインスタジオ',
-    heroTitlePrefix: 'オープンソースの',
+    heroLabel: 'ソース公開型のデザインスタジオ',
+    heroTitlePrefix: 'ソース公開型の',
     heroTitleEmphasis: 'Claude Design を',
     heroTitleMiddle: '自分の',
     heroTitleSecondEmphasis: 'Agent で動かす',
@@ -6571,7 +6571,7 @@ const LOCALIZED_HOME_BODY_COPY: Partial<Record<LandingLocaleCode, DeepPartial<Ho
       label: 'Open Design よくある質問',
       titlePrefix: '',
       titleMiddle: 'と',
-      titleSuffix: 'Claude Design のオープンソース代替について',
+      titleSuffix: 'Claude Design のソース公開型代替について',
     },
     cta: {
       rule: '連絡 / 会話',
@@ -6592,12 +6592,12 @@ const LOCALIZED_HOME_BODY_COPY: Partial<Record<LandingLocaleCode, DeepPartial<Ho
 };
 
 LOCALIZED_HOME_BODY_COPY.ko = homeFallbackCopy({
-  railRight: 'Open Design — 01권 · 26호 · Apache-2.0',
+  railRight: 'Open Design — 01권 · 26호 · ODCL 1.0',
   railLeft: 'Skill · 디자인 시스템 · Agent · BYOK · 로컬 우선',
   discordAria: 'Open Design Discord 참여',
   joinDiscord: 'Discord 참여',
-  heroLabel: '오픈소스 디자인 스튜디오',
-  heroTitlePrefix: '오픈소스',
+  heroLabel: '소스 공개형 디자인 스튜디오',
+  heroTitlePrefix: '소스 공개형',
   heroTitleEmphasis: 'Claude Design을',
   heroTitleMiddle: '내',
   heroTitleSecondEmphasis: 'Agent에서 실행',
@@ -6727,7 +6727,7 @@ LOCALIZED_HOME_BODY_COPY.ko = homeFallbackCopy({
     label: 'Open Design 자주 묻는 질문',
     titlePrefix: '',
     titleMiddle: '및',
-    titleSuffix: 'Claude Design 오픈소스 대안에 관한 질문',
+    titleSuffix: 'Claude Design 소스 공개형 대안에 관한 질문',
   },
   cta: {
     rule: '연락 / 대화',
@@ -6747,11 +6747,11 @@ LOCALIZED_HOME_BODY_COPY.ko = homeFallbackCopy({
 });
 
 LOCALIZED_HOME_BODY_COPY.de = homeFallbackCopy({
-  railRight: 'Open Design — Band 01 · Ausgabe Nr. 26 · Apache-2.0',
+  railRight: 'Open Design — Band 01 · Ausgabe Nr. 26 · ODCL 1.0',
   railLeft: 'Skills · Systeme · Agents · BYOK · lokal zuerst',
   discordAria: 'Open Design Discord beitreten',
   joinDiscord: 'Discord beitreten',
-  heroLabel: 'Open-Source-Designstudio',
+  heroLabel: 'Source-available-Designstudio',
   heroTitlePrefix: 'Offenes',
   heroTitleEmphasis: 'Claude Design',
   heroTitleMiddle: 'läuft mit',
@@ -6882,7 +6882,7 @@ LOCALIZED_HOME_BODY_COPY.de = homeFallbackCopy({
     label: 'Open-Design-FAQ',
     titlePrefix: 'Fragen zu',
     titleMiddle: 'und',
-    titleSuffix: 'der Open-Source-Alternative zu Claude Design',
+    titleSuffix: 'der Source-available-Alternative zu Claude Design',
   },
   cta: {
     rule: 'Kontakt / Gespräch',
