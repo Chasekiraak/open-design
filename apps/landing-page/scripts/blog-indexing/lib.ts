@@ -163,20 +163,35 @@ export async function fetchWithRetry(
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
 /**
- * Returns a Google OAuth2 access token for the service account in
- * `GSC_SERVICE_ACCOUNT_KEY`. Caches in-process for ~50 minutes.
+ * Returns a Google OAuth2 access token. OAuth user refresh tokens are preferred,
+ * but a configured service account remains a fallback when the user token is
+ * revoked or expires.
  *
- * Tokens are JWT-signed locally (RS256) and exchanged with Google's
- * OAuth2 endpoint. We avoid the full `googleapis` package to keep the
+ * Service account tokens are JWT-signed locally (RS256) and exchanged with
+ * Google's OAuth2 endpoint. We avoid the full `googleapis` package to keep the
  * landing-page workspace dep-free for what is purely a CI surface.
  */
 export async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) {
     return cachedToken.token;
   }
-  const oauthToken = await getOAuthAccessToken();
+  const oauthToken = await getOAuthAccessTokenWithFallback();
   if (oauthToken) return oauthToken;
   return getServiceAccountAccessToken();
+}
+
+async function getOAuthAccessTokenWithFallback(): Promise<string | null> {
+  try {
+    return await getOAuthAccessToken();
+  } catch (err) {
+    if (!process.env.GSC_SERVICE_ACCOUNT_KEY) {
+      throw err;
+    }
+    console.warn(
+      `GSC OAuth token refresh failed; falling back to service account auth: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 async function getOAuthAccessToken(): Promise<string | null> {
