@@ -3187,6 +3187,7 @@ export const ja: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': '公開を取り消す',
   'fileViewer.shareEmptyStateTitle': '共有できるものがまだありません',
   'fileViewer.shareEmptyStateDescription': 'チームを作成または参加すると、このファイルをメンバーと共有できます',

@@ -3187,6 +3187,7 @@ export const ko: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': '게시 취소',
   'fileViewer.shareEmptyStateTitle': '아직 공유할 항목이 없습니다',
   'fileViewer.shareEmptyStateDescription': '팀을 만들거나 참여하면 이 파일을 동료와 공유할 수 있습니다',

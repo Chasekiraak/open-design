@@ -3187,6 +3187,7 @@ export const hu: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': 'Közzététel visszavonása',
   'fileViewer.shareEmptyStateTitle': 'Még nincs mit megosztani',
   'fileViewer.shareEmptyStateDescription': 'Hozz létre egy csapatot, vagy csatlakozz egyhez, hogy megoszthasd ezt a fájlt a kollégáiddal',

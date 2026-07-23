@@ -3187,6 +3187,7 @@ export const tr: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': 'Yayından kaldır',
   'fileViewer.shareEmptyStateTitle': 'Henüz paylaşılacak bir şey yok',
   'fileViewer.shareEmptyStateDescription': 'Bu dosyayı takım arkadaşlarınızla paylaşmak için bir takım oluşturun veya katılın',

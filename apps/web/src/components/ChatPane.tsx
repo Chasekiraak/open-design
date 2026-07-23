@@ -1564,9 +1564,10 @@ export function ChatPane({
         const formEl = lastAssistantEl?.querySelector<HTMLElement>('[data-form-id]');
         if (formEl && !scrolledToFormRef.current.has(formEl.dataset.formId!)) {
           scrolledToFormRef.current.add(formEl.dataset.formId!);
+          const distance = distanceFromBottomAfterAligningTop(el, formEl);
           formEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          pinnedToBottomRef.current = false;
-          setScrolledFromBottom(true);
+          pinnedToBottomRef.current = distance < 80;
+          setScrolledFromBottom(distance > 120);
           return;
         }
         // Already handled by the auto-scroll effect — don't bottom-scroll.
@@ -1656,9 +1657,10 @@ export function ChatPane({
         const formEl = lastAssistantEl?.querySelector<HTMLElement>('[data-form-id]');
         if (formEl && !scrolledToFormRef.current.has(formEl.dataset.formId!)) {
           scrolledToFormRef.current.add(formEl.dataset.formId!);
+          const distance = distanceFromBottomAfterAligningTop(el, formEl);
           formEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          pinnedToBottomRef.current = false;
-          setScrolledFromBottom(true);
+          pinnedToBottomRef.current = distance < 80;
+          setScrolledFromBottom(distance > 120);
           return;
         }
         // Form tag in content but the DOM element isn't ready yet (partial
@@ -1957,6 +1959,25 @@ export function ChatPane({
     const elRect = el.getBoundingClientRect();
     const msgRect = msgEl.getBoundingClientRect();
     return el.scrollTop + (msgRect.top - elRect.top);
+  }
+
+  // Predicts the post-settle "distance from bottom" (same metric `onScroll`
+  // computes) after aligning `target`'s top edge with `el`'s top edge, the
+  // way `target.scrollIntoView({ block: 'start' })` does. Reads current
+  // geometry synchronously instead of waiting on the (possibly smooth,
+  // possibly no-op) actual scroll to land: a short `target` — e.g. a
+  // question form that is also the last thing in the log — clamps to the
+  // real bottom, which never fires a native `scroll` event to correct a
+  // hardcoded "still scrolled away" guess. That stale guess is what left the
+  // jump-to-latest button stuck visible with nothing left to jump to
+  // (recvqajMdAnfmd).
+  function distanceFromBottomAfterAligningTop(el: HTMLDivElement, target: HTMLElement): number {
+    const elRect = el.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetTopInContent = el.scrollTop + (targetRect.top - elRect.top);
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const predictedScrollTop = Math.min(Math.max(0, targetTopInContent), maxScrollTop);
+    return Math.max(0, maxScrollTop - predictedScrollTop);
   }
 
   // Resize the tail spacer so the anchored message can sit at the top with

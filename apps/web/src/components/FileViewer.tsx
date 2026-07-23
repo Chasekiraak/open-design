@@ -481,6 +481,27 @@ const MAX_CACHED_PREVIEW_VIEWPORTS = 128;
 // an immediate dismiss when the pointer really leaves.
 const HOVER_CARD_DISMISS_DELAY_MS = 80;
 const htmlPreviewViewportState = new Map<string, PreviewViewportId>();
+// Desktop-preview zoom, keyed the same way as `htmlPreviewViewportState` above.
+// HtmlViewer fully unmounts whenever the workspace tab switches away from this
+// file (e.g. to the Design Files grid) and remounts when the user switches
+// back — a plain `useState(100)` would reset to a fresh auto-fit pass on every
+// such remount, silently overwriting a zoom the user had already landed on
+// (issue rec:recvqaeMAGUdN2, seen as an unexplained snap to 85%). Caching the
+// last known {zoom, zoomMode} per file lets the remount effect below restore
+// it instead of defaulting, while a genuinely new file (no cache entry yet)
+// still gets the normal auto-fit default.
+const MAX_CACHED_PREVIEW_ZOOMS = 128;
+const htmlPreviewZoomState = new Map<string, { zoom: number; zoomMode: 'auto' | 'manual' }>();
+// Last measured desktop-preview content width per file, same key/cap shape as
+// the zoom cache above. Seeding a remount from the last confirmed measurement
+// (instead of `null`) avoids re-deriving auto-fit zoom from a cold "assume no
+// overflow" guess while the fresh in-iframe measurement round-trip is still
+// pending — that cold-start window was the other half of the 85% snap
+// (rec:recvqaeMAGUdN2). A genuinely stale value still self-corrects once the
+// real measurement message arrives (see onContentSizeMessage below) or the
+// canvas-grow recovery in the auto-fit effect fires.
+const MAX_CACHED_PREVIEW_CONTENT_WIDTHS = 128;
+const htmlPreviewContentWidthState = new Map<string, number>();
 const MARKDOWN_CODE_BLOCK_ATTR = 'data-markdown-code-block';
 const MARKDOWN_CODE_LANGUAGE_ATTR = 'data-code-language';
 const MARKDOWN_COPY_BLOCK_ATTR = 'data-copy-code-block';
@@ -1324,6 +1345,26 @@ function setPreviewViewportCached(key: string, viewport: PreviewViewportId) {
   if (htmlPreviewViewportState.size > MAX_CACHED_PREVIEW_VIEWPORTS) {
     const oldest = htmlPreviewViewportState.keys().next().value;
     if (oldest != null) htmlPreviewViewportState.delete(oldest);
+  }
+}
+
+function setPreviewZoomCached(key: string, zoom: number, zoomMode: 'auto' | 'manual') {
+  htmlPreviewZoomState.set(key, { zoom, zoomMode });
+  if (htmlPreviewZoomState.size > MAX_CACHED_PREVIEW_ZOOMS) {
+    const oldest = htmlPreviewZoomState.keys().next().value;
+    if (oldest != null) htmlPreviewZoomState.delete(oldest);
+  }
+}
+
+function setPreviewContentWidthCached(key: string, width: number | null) {
+  if (width == null) {
+    htmlPreviewContentWidthState.delete(key);
+    return;
+  }
+  htmlPreviewContentWidthState.set(key, width);
+  if (htmlPreviewContentWidthState.size > MAX_CACHED_PREVIEW_CONTENT_WIDTHS) {
+    const oldest = htmlPreviewContentWidthState.keys().next().value;
+    if (oldest != null) htmlPreviewContentWidthState.delete(oldest);
   }
 }
 
@@ -6243,13 +6284,18 @@ function ReactComponentViewer({
                               type="button"
                               className="chrome-publish-primary"
                               disabled={viewerOnly || publishingPublicFile}
+                              aria-busy={publishingPublicFile}
                               title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
                               onClick={() => {
                                 void publishCurrentFilePublic();
                               }}
                             >
-                              <RemixIcon name="upload-cloud-2-line" size={15} />
-                              {t('fileViewer.publishFile')}
+                              <RemixIcon
+                                name={publishingPublicFile ? 'loader-4-line' : 'upload-cloud-2-line'}
+                                size={15}
+                                className={publishingPublicFile ? 'icon-spin' : undefined}
+                              />
+                              {publishingPublicFile ? t('fileViewer.publishingFile') : t('fileViewer.publishFile')}
                             </button>
                           )}
                         </div>
@@ -6822,9 +6868,16 @@ function HtmlViewer({
   const [serverPoweredPreviewRequired, setServerPoweredPreviewRequired] = useState(false);
   const [previewAssetWarning, setPreviewAssetWarning] = useState<PreviewAssetWarning | null>(null);
   const [inlinedSource, setInlinedSource] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(100);
-  const [zoomMode, setZoomMode] = useState<'auto' | 'manual'>('auto');
   const fileViewportKey = previewViewportStateKey(projectId, file);
+  // Lazily seed from the cache (not a hardcoded 100/'auto') so a remount that
+  // lands back on a file the user already zoomed doesn't flash the wrong
+  // value for a frame before the reset effect below corrects it.
+  const [zoom, setZoom] = useState<number>(
+    () => htmlPreviewZoomState.get(fileViewportKey)?.zoom ?? 100,
+  );
+  const [zoomMode, setZoomMode] = useState<'auto' | 'manual'>(
+    () => htmlPreviewZoomState.get(fileViewportKey)?.zoomMode ?? 'auto',
+  );
   const [previewViewport, setPreviewViewportState] = useState<PreviewViewportId>(
     () => htmlPreviewViewportState.get(fileViewportKey) ?? 'desktop',
   );
@@ -6873,8 +6926,15 @@ function HtmlViewer({
 
   useEffect(() => {
     setPreviewViewportState(htmlPreviewViewportState.get(fileViewportKey) ?? 'desktop');
-    setZoom(100);
-    setZoomMode('auto');
+    // Restore this file's last zoom instead of hard-resetting to 100/auto —
+    // this effect also fires on every HtmlViewer remount (e.g. switching to
+    // the Design Files tab and back), not just on a genuine file change, and
+    // a hardcoded reset was clobbering a zoom the user had already landed on
+    // (rec:recvqaeMAGUdN2). A file with no cache entry yet (first open) still
+    // falls back to the normal auto-fit default.
+    const cachedZoom = htmlPreviewZoomState.get(fileViewportKey);
+    setZoom(cachedZoom?.zoom ?? 100);
+    setZoomMode(cachedZoom?.zoomMode ?? 'auto');
   }, [fileViewportKey]);
   const [templateDescription, setTemplateDescription] = useState('');
   const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
@@ -7129,7 +7189,20 @@ function HtmlViewer({
   const [previewBodyRef, previewBodySize] = usePreviewCanvasSize<HTMLDivElement>();
   const [commentComposerHost, setCommentComposerHost] = useState<HTMLDivElement | null>(null);
   const [commentPreviewCanvasNode, setCommentPreviewCanvasNode] = useState<HTMLDivElement | null>(null);
-  const [desktopPreviewContentWidth, setDesktopPreviewContentWidth] = useState<number | null>(null);
+  // Seed from the cache instead of a cold `null` — see htmlPreviewContentWidthState
+  // above. A stale seed still self-corrects once a fresh measurement lands.
+  const [desktopPreviewContentWidth, setDesktopPreviewContentWidthRaw] = useState<number | null>(
+    () => htmlPreviewContentWidthState.get(fileViewportKey) ?? null,
+  );
+  const setDesktopPreviewContentWidth = useCallback((value: number | null | ((prev: number | null) => number | null)) => {
+    setDesktopPreviewContentWidthRaw((prev) => {
+      const next = typeof value === 'function'
+        ? (value as (p: number | null) => number | null)(prev)
+        : value;
+      setPreviewContentWidthCached(fileViewportKey, next);
+      return next;
+    });
+  }, [fileViewportKey]);
   // Last canvas width the desktop auto-fit effect measured against (see the
   // effect below, rec:recvq6WoJUvRXl) — lets that effect tell "canvas grew"
   // apart from "canvas shrank" without re-deriving it from React state.
@@ -7221,8 +7294,14 @@ function HtmlViewer({
   useEffect(() => {
     setManualEditSrcDocActive(false);
     setManualEditFrozenSource(null);
-    setDesktopPreviewContentWidth(null);
-  }, [projectId, file.name]);
+    // Restore this file's last measured content width instead of forcing
+    // `null` — this effect also fires on every HtmlViewer remount (tab-away
+    // and back), not only on a genuine file change, and clearing here would
+    // throw away the seed above and reopen the cold-start auto-fit window
+    // (rec:recvqaeMAGUdN2). A different file's key simply has no entry yet,
+    // so this still defaults to null for a genuinely new file.
+    setDesktopPreviewContentWidth(htmlPreviewContentWidthState.get(fileViewportKey) ?? null);
+  }, [fileViewportKey, projectId, file.name]);
   useEffect(() => {
     onCommentModeChange?.(commentPanelOpen);
   }, [commentPanelOpen, onCommentModeChange]);
@@ -12561,6 +12640,7 @@ function HtmlViewer({
                           className={`zoom-menu-item${zoomLevelActive(level) ? ' active' : ''}`}
                           role="menuitem"
                           onClick={() => {
+                            setPreviewZoomCached(fileViewportKey, level, 'manual');
                             setZoomMode('manual');
                             setZoom(level);
                             setZoomMenuOpen(false);
@@ -12722,6 +12802,7 @@ function HtmlViewer({
                             className={`viewer-toolbar-more-item${zoomLevelActive(level) ? ' active' : ''}`}
                             role="menuitem"
                             onClick={() => {
+                              setPreviewZoomCached(fileViewportKey, level, 'manual');
                               setZoomMode('manual');
                               setZoom(level);
                               setToolbarMoreOpen(false);
@@ -12974,13 +13055,18 @@ function HtmlViewer({
                             type="button"
                             className="chrome-publish-primary"
                             disabled={viewerOnly || publishingPublicFile}
+                            aria-busy={publishingPublicFile}
                             title={viewerOnly ? viewerOnlyDisabledTitle : undefined}
                             onClick={() => {
                               void publishCurrentFilePublic();
                             }}
                           >
-                            <RemixIcon name="upload-cloud-2-line" size={15} />
-                            {t('fileViewer.publishFile')}
+                            <RemixIcon
+                              name={publishingPublicFile ? 'loader-4-line' : 'upload-cloud-2-line'}
+                              size={15}
+                              className={publishingPublicFile ? 'icon-spin' : undefined}
+                            />
+                            {publishingPublicFile ? t('fileViewer.publishingFile') : t('fileViewer.publishFile')}
                           </button>
                         )}
                       </div>

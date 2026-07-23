@@ -3356,6 +3356,7 @@ export const zhCN: Dict = {
   "fileViewer.publishSingleFileDescription": "将当前单个文件设为外部可见。任何获得发布链接的人都可以在线查看。",
   "fileViewer.openFileRequired": "打开文件后可用。",
   "fileViewer.publishFile": "发布文件",
+  "fileViewer.publishingFile": "发布中…",
   "fileViewer.unpublishFile": "取消发布",
   "fileViewer.shareEmptyStateTitle": "暂时无法分享",
   "fileViewer.shareEmptyStateDescription": "创建或加入一个团队,就能把这个文件分享给同事",

@@ -3187,6 +3187,7 @@ export const ptBR: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': 'Cancelar publicação',
   'fileViewer.shareEmptyStateTitle': 'Nada para compartilhar ainda',
   'fileViewer.shareEmptyStateDescription': 'Crie ou participe de uma equipe para compartilhar este arquivo com colegas',

@@ -2515,21 +2515,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         );
         return;
       }
-      if (!prompt && staged.length === 0 && nextCommentAttachments.length === 0) {
-        const placeholderPrompt = placeholderSubmittable && placeholderScenario
-          ? placeholderScenario.text.trim()
-          : '';
-        if (!placeholderPrompt) return;
-        const placeholderMeta: ChatSendMeta | undefined = placeholderScenario?.sessionMode
-          ? {
-              ...(contextMeta ?? {}),
-              sessionMode: placeholderScenario.sessionMode,
-              entryFrom: contextMeta?.entryFrom ?? 'next_step',
-            }
-          : contextMeta;
-        sendComposedTurn(placeholderPrompt, [], [], placeholderMeta);
-        return;
-      }
+      // A truly empty composer (no typed text, no staged attachment, no
+      // comment attachment) never sends — not even when the placeholder
+      // carousel is mid-animation. The rotating scenario text is a ghost
+      // hint rendered where the editor's own placeholder would sit; letting
+      // Send silently accept it reads to the user as "I clicked Send on an
+      // empty box and it ran something I never typed" (recvqaj7eKpxH6). The
+      // dedicated "next step" toolbox cards remain the real way to act on a
+      // suggested prompt — those explicitly type it into the composer via
+      // applyDesignToolboxAction before the user ever hits Send.
+      if (!prompt && staged.length === 0 && nextCommentAttachments.length === 0) return;
       sendComposedTurn(prompt, staged, nextCommentAttachments, contextMeta);
     }
 
@@ -2653,13 +2648,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       && liveCommentAttachments.length === 0
       && !mention
       && !slash;
-    const placeholderSubmittable =
-      placeholderCarouselActive && Boolean(placeholderScenario?.text.trim());
+    // Deliberately does NOT include the placeholder carousel's rotating
+    // scenario text: that ghost text stands in for the editor's own
+    // placeholder while the composer is genuinely empty, and must never make
+    // Send (or Enter) submittable on its own — see the emptiness guard in
+    // `submit()` above (recvqaj7eKpxH6).
     const hasComposerPayload =
       draft.trim().length > 0
       || staged.length > 0
-      || liveCommentAttachments.length > 0
-      || placeholderSubmittable;
+      || liveCommentAttachments.length > 0;
     const showStopButton = streaming && !hasComposerPayload;
     const showSendButton = !streaming || hasComposerPayload;
 

@@ -4018,6 +4018,11 @@ export interface Dict {
   'fileViewer.publishSingleFileDescription': string;
   'fileViewer.openFileRequired': string;
   'fileViewer.publishFile': string;
+  /** Shown on the publish button in place of `publishFile` while the publish
+   *  request is in flight (it takes several seconds server-side) — feedback
+   *  for the "no loading state, looks like nothing happened" report
+   *  (recvqae7v8yMlk). */
+  'fileViewer.publishingFile': string;
   'fileViewer.unpublishFile': string;
   'fileViewer.shareEmptyStateTitle': string;
   'fileViewer.shareEmptyStateDescription': string;

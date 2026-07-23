@@ -3187,6 +3187,7 @@ export const ru: Dict = {
   'fileViewer.publishSingleFileDescription': 'Make the current file externally visible. Anyone with the published link can view it online.',
   'fileViewer.openFileRequired': 'Open a file to use this.',
   'fileViewer.publishFile': 'Publish file',
+  'fileViewer.publishingFile': 'Publishing…',
   'fileViewer.unpublishFile': 'Отменить публикацию',
   'fileViewer.shareEmptyStateTitle': 'Пока нечем делиться',
   'fileViewer.shareEmptyStateDescription': 'Создайте команду или присоединитесь к ней, чтобы поделиться этим файлом с коллегами',
