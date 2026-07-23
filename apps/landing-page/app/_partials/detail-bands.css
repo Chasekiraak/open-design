@@ -181,7 +181,9 @@
 
 .dbmetaband { padding: 34px 0; border-block: 1px solid var(--line); }
 
-/* "Three jobs" row on the collection page. Lives here rather than in a page
+/* The jobs row on the collection page: one equal column per category, so
+   the band stays full whatever `CODEX_COLLECTION.categories` holds. Lives
+   here rather than in a page
    <style> block: Astro's scoped styles are unreliable for these grid rules in
    this app (the same thing bit `.codex-skill-grid`). */
 .dbjobs {
@@ -189,7 +191,8 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 40px;
 }
 .dbjobs .k {
@@ -386,7 +389,7 @@
   .dbherotop { grid-template-columns: 1fr; gap: 32px; }
   .dbheroart { order: -1; }
   .dbbody { grid-template-columns: 1fr; }
-  .dbjobs { grid-template-columns: 1fr; gap: 22px; }
+  .dbjobs { grid-auto-flow: row; grid-auto-columns: auto; gap: 22px; }
   .dbfeats3 { grid-template-columns: 1fr; gap: 28px; }
   .dbin { padding: 0 24px; }
 }

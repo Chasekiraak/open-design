@@ -253,7 +253,7 @@ const en: PluginsCopy = {
   hubFeatureEyebrow: 'Curated · Codex design',
   hubFeatureTitle: 'The design plugins that make Codex ship real UI',
   hubFeatureBlurb:
-    'A hand-picked set of plugins — skills, Figma pipelines, and design-system rules — that give OpenAI Codex taste. Install one, or run them all inside Open Design.',
+    'A hand-picked set of plugins — aesthetic skills and design-system rules — that give OpenAI Codex taste. Install one, or run them all inside Open Design.',
   hubFeatureCta: 'Explore the collection',
 
   hubEyebrow: 'Plugin library',
@@ -587,7 +587,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: '精选 · Codex 设计',
     hubFeatureTitle: '让 Codex 做出真正能用的 UI 的设计插件',
     hubFeatureBlurb:
-      '一组精挑细选的插件——Skill、Figma 流水线和设计系统规则——让 OpenAI Codex 有审美。装一个，或者在 Open Design 里全部跑起来。',
+      '一组精挑细选的插件——审美类 Skill 和设计系统规则——让 OpenAI Codex 有审美。装一个，或者在 Open Design 里全部跑起来。',
     hubFeatureCta: '浏览精选合集',
     hubLabel: 'Agent 设计插件库',
     hubHeading: () => `Agent 设计插件库`,
@@ -927,7 +927,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'キュレーション · Codex デザイン',
     hubFeatureTitle: 'Codex に本物の UI を作らせるデザインプラグイン',
     hubFeatureBlurb:
-      'OpenAI Codex にセンスを与える、厳選したプラグイン集 — スキル、Figma パイプライン、デザインシステムのルール。ひとつだけ入れるのも、Open Design ですべて動かすのも自由です。',
+      'OpenAI Codex にセンスを与える、厳選したプラグイン集 — 美意識のスキルとデザインシステムのルール。ひとつだけ入れるのも、Open Design ですべて動かすのも自由です。',
     hubFeatureCta: 'コレクションを見る',
     hubMetaTitle: (n) => `Claude Skills マーケットプレイス — ${n}+ プラグイン | Open Design`,
     hubMetaDescription: 'オープンソースの Claude skills マーケットプレイス——デザイン skills、デザインシステム、テンプレート、craft を coding agent が直接実行。Claude、Codex、Cursor に対応。',
@@ -1096,7 +1096,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: '큐레이션 · Codex 디자인',
     hubFeatureTitle: 'Codex가 진짜 UI를 만들게 하는 디자인 플러그인',
     hubFeatureBlurb:
-      'OpenAI Codex에 안목을 더해 주는 엄선된 플러그인 모음 — 스킬, Figma 파이프라인, 디자인 시스템 규칙. 하나만 설치하거나, Open Design 안에서 전부 실행하세요.',
+      'OpenAI Codex에 안목을 더해 주는 엄선된 플러그인 모음 — 미감을 잡아 주는 스킬과 디자인 시스템 규칙. 하나만 설치하거나, Open Design 안에서 전부 실행하세요.',
     hubFeatureCta: '컬렉션 둘러보기',
     hubMetaTitle: (n) => `Claude Skills 마켓플레이스 — ${n}+ 플러그인 | Open Design`,
     hubMetaDescription: '오픈소스 Claude skills 마켓플레이스 둘러보기——디자인 skills, 디자인 시스템, 템플릿, craft를 coding agent가 바로 실행합니다. Claude, Codex, Cursor 지원.',
@@ -1265,7 +1265,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'Kuratiert · Codex Design',
     hubFeatureTitle: 'Die Design-Plugins, mit denen Codex echtes UI liefert',
     hubFeatureBlurb:
-      'Eine handverlesene Sammlung von Plugins — Skills, Figma-Pipelines und Design-System-Regeln —, die OpenAI Codex Geschmack geben. Installiere eines oder lass sie alle in Open Design laufen.',
+      'Eine handverlesene Sammlung von Plugins — ästhetische Skills und Design-System-Regeln —, die OpenAI Codex Geschmack geben. Installiere eines oder lass sie alle in Open Design laufen.',
     hubFeatureCta: 'Sammlung entdecken',
     hubMetaTitle: (n) => `Claude Skills Marktplatz — ${n}+ Plugins | Open Design`,
     hubMetaDescription: 'Durchstöbere den Open-Source-Marktplatz für Claude skills——Design-skills, Designsysteme, Vorlagen und craft, die dein coding agent direkt ausführt. Funktioniert mit Claude, Codex, Cursor.',
@@ -1435,7 +1435,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureTitle:
       'Les skills design qui font livrer à Codex de vraies interfaces',
     hubFeatureBlurb:
-      'Une sélection de plugins — skills, pipelines Figma et règles de design system — qui donnent du goût à OpenAI Codex. Installez-en un, ou faites-les tourner tous dans Open Design.',
+      'Une sélection de plugins — des skills esthétiques et des règles de design system — qui donnent du goût à OpenAI Codex. Installez-en un, ou faites-les tourner tous dans Open Design.',
     hubFeatureCta: 'Explorer la collection',
     hubMetaTitle: (n) => `Marketplace Claude Skills — ${n}+ plugins | Open Design`,
     hubMetaDescription: 'Explorez la marketplace open source de Claude skills——skills de design, design systems, modèles et craft que votre coding agent exécute directement. Compatible Claude, Codex, Cursor.',
@@ -1604,7 +1604,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'Подборка · дизайн с Codex',
     hubFeatureTitle: 'Дизайн-плагины, с которыми Codex выдаёт настоящий UI',
     hubFeatureBlurb:
-      'Отобранный вручную набор плагинов — скиллы, Figma-пайплайны и правила дизайн-систем, — которые дают OpenAI Codex вкус. Поставьте один или запустите их все внутри Open Design.',
+      'Отобранный вручную набор плагинов — скиллы для эстетики и правила дизайн-систем, — которые дают OpenAI Codex вкус. Поставьте один или запустите их все внутри Open Design.',
     hubFeatureCta: 'Смотреть подборку',
     hubMetaTitle: (n) => `Маркетплейс Claude Skills — ${n}+ плагинов | Open Design`,
     hubMetaDescription: 'Откройте опенсорсный маркетплейс Claude skills——дизайн-skills, дизайн-системы, шаблоны и craft, которые ваш coding agent запускает напрямую. Работает с Claude, Codex, Cursor.',
@@ -1774,7 +1774,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureTitle:
       'Las skills de diseño que hacen que Codex entregue UI de verdad',
     hubFeatureBlurb:
-      'Una selección de plugins — skills, pipelines de Figma y reglas de design system — que le dan criterio a OpenAI Codex. Instala uno o ejecútalos todos dentro de Open Design.',
+      'Una selección de plugins — skills de estética y reglas de design system — que le dan criterio a OpenAI Codex. Instala uno o ejecútalos todos dentro de Open Design.',
     hubFeatureCta: 'Explorar la colección',
     hubMetaTitle: (n) => `Marketplace de Claude Skills — ${n}+ plugins | Open Design`,
     hubMetaDescription: 'Explora el marketplace open source de Claude skills——skills de diseño, design systems, plantillas y craft que tu coding agent ejecuta directamente. Compatible con Claude, Codex, Cursor.',
@@ -1943,7 +1943,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'Curadoria · Design com Codex',
     hubFeatureTitle: 'Os plugins de design que fazem o Codex entregar UI de verdade',
     hubFeatureBlurb:
-      'Uma seleção a dedo de plugins — skills, pipelines de Figma e regras de design system — que dão bom gosto ao OpenAI Codex. Instale um ou rode todos dentro do Open Design.',
+      'Uma seleção a dedo de plugins — skills de estética e regras de design system — que dão bom gosto ao OpenAI Codex. Instale um ou rode todos dentro do Open Design.',
     hubFeatureCta: 'Explorar a coleção',
     hubMetaTitle: (n) => `Marketplace de Claude Skills — ${n}+ plugins | Open Design`,
     hubMetaDescription: 'Explore o marketplace open source de Claude skills——skills de design, design systems, templates e craft que seu coding agent executa direto. Funciona com Claude, Codex, Cursor.',
@@ -2112,7 +2112,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'Selezione curata · Codex design',
     hubFeatureTitle: 'I plugin di design che fanno spedire UI vere a Codex',
     hubFeatureBlurb:
-      'Una selezione ragionata di plugin — skill, pipeline Figma e regole di design system — che danno gusto a OpenAI Codex. Installane uno, oppure usali tutti dentro Open Design.',
+      'Una selezione ragionata di plugin — skill estetiche e regole di design system — che danno gusto a OpenAI Codex. Installane uno, oppure usali tutti dentro Open Design.',
     hubFeatureCta: 'Esplora la raccolta',
     hubMetaTitle: (n) => `Marketplace di Claude Skills — ${n}+ plugin | Open Design`,
     hubMetaDescription: 'Esplora il marketplace open source di Claude skills——skills di design, design system, template e craft che il tuo coding agent esegue direttamente. Compatibile con Claude, Codex, Cursor.',
@@ -2740,7 +2740,7 @@ const overrides: Partial<Record<LandingLocaleCode, Partial<PluginsCopy>>> = {
     hubFeatureEyebrow: 'Küratörlü · Codex tasarım',
     hubFeatureTitle: 'Codex’e gerçek arayüz çıkarttıran tasarım eklentileri',
     hubFeatureBlurb:
-      'OpenAI Codex’e zevk kazandıran, elle seçilmiş eklentiler — skill’ler, Figma hatları ve tasarım sistemi kuralları. Birini kurun ya da hepsini Open Design içinde çalıştırın.',
+      'OpenAI Codex’e zevk kazandıran, elle seçilmiş eklentiler — estetik skill’ler ve tasarım sistemi kuralları. Birini kurun ya da hepsini Open Design içinde çalıştırın.',
     hubFeatureCta: 'Koleksiyonu keşfet',
     hubMetaTitle: (n) => `Claude Skills Pazarı — ${n}+ Eklenti | Open Design`,
     hubMetaDescription: 'Açık kaynaklı Claude skills pazarına göz atın——coding agent\'ınızın doğrudan çalıştırdığı tasarım skills, tasarım sistemleri, şablonlar ve craft. Claude, Codex, Cursor ile çalışır.',
