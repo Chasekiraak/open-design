@@ -404,6 +404,117 @@ for (const goldenCase of GOLDEN_CASES) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Unit layer: rule-table invariants and evaluator semantics, imported directly.
+// ---------------------------------------------------------------------------
+
+test("rule ids are unique", async () => {
+  const { scopeRules } = await import("../../../scripts/scopes.ts");
+  const ids = scopeRules.map((rule) => rule.id);
+  assert.deepEqual(ids, [...new Set(ids)]);
+});
+
+test("certain rules must name their enforcing guard", async () => {
+  const { scopeRules } = await import("../../../scripts/scopes.ts");
+  for (const rule of scopeRules) {
+    if (rule.confidence === "certain") {
+      assert.ok(
+        rule.guard != null && rule.guard.length > 0,
+        `rule ${rule.id} is "certain" but names no guard; promotion requires the check that keeps its boundary invariant true`,
+      );
+    }
+  }
+});
+
+test("the rule table classifies every file: no path escapes both fallbacks", async () => {
+  const { scopeRules, matchesRuleMatch } = await import("../../../scripts/scopes.ts");
+  const samples = [
+    "README.md",
+    "docs/architecture.md",
+    "apps/web/src/x.ts",
+    "apps/desktop/src/main.ts",
+    "tools/pack/src/build.ts",
+    "mystery.xyz",
+    "some/deeply/nested/unknown.bin",
+    ".github/workflows/nix.yml",
+    "e2e/ui/notes.md",
+    "",
+  ];
+  for (const file of samples) {
+    const matched = scopeRules.filter((rule) => matchesRuleMatch(file, rule.match));
+    assert.ok(matched.length > 0, `no rule matched ${JSON.stringify(file)}`);
+  }
+});
+
+test("fallback matching honors excludeWhen semantics", async () => {
+  const { scopeRules, matchesRuleMatch } = await import("../../../scripts/scopes.ts");
+  const byId = new Map(scopeRules.map((rule) => [rule.id, rule]));
+  const workspaceFallback = byId.get("workspace-fallback")!;
+  const uiCriticalFallback = byId.get("ui-critical-fallback")!;
+
+  assert.equal(matchesRuleMatch("README.md", workspaceFallback.match), false);
+  assert.equal(matchesRuleMatch("mystery.xyz", workspaceFallback.match), true);
+  assert.equal(matchesRuleMatch("tools/pack/src/build.ts", workspaceFallback.match), true);
+
+  assert.equal(matchesRuleMatch("tools/pack/src/build.ts", uiCriticalFallback.match), false);
+  assert.equal(matchesRuleMatch("apps/desktop/src/main.ts", uiCriticalFallback.match), false);
+  assert.equal(matchesRuleMatch("mystery.xyz", uiCriticalFallback.match), true);
+});
+
+test("merge-queue threshold escalates medium-confidence files to the full radius", async () => {
+  const { evaluateScopeOutputs, SCOPE_EFFECTS } = await import("../../../scripts/scopes.ts");
+  const options = { deriveWorkspaceValidationFromTestScopes: true };
+
+  const atPr = evaluateScopeOutputs(["README.md"], "medium", options);
+  assert.deepEqual(
+    Object.values(atPr.outputs),
+    SCOPE_EFFECTS.map(() => false),
+  );
+  assert.equal(atPr.decisions[0]!.escalated, false);
+
+  const atQueue = evaluateScopeOutputs(["README.md"], "certain", options);
+  assert.deepEqual(
+    Object.values(atQueue.outputs),
+    SCOPE_EFFECTS.map(() => true),
+  );
+  assert.deepEqual(atQueue.decisions[0], {
+    file: "README.md",
+    matchedRules: ["exempt-surface"],
+    escalated: true,
+    reason: "below-threshold",
+  });
+});
+
+test("plan command evaluates offline at the pr threshold", () => {
+  const stdout = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", scopesScript, "plan", "--context", "pr", "--files", "README.md", "docs/a.md"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  const result = JSON.parse(stdout) as { plan: Record<string, unknown>; trace: Record<string, unknown> };
+  assertPlan(result.plan, expectedPlan({ ciMode: "hot" }));
+  assert.equal(result.trace["threshold"], "medium");
+  assert.equal(result.trace["fileCount"], 2);
+  assert.deepEqual(result.trace["escalations"], []);
+});
+
+test("plan command surfaces queue-tier escalation and the trust-all shadow column", () => {
+  const stdout = execFileSync(
+    process.execPath,
+    ["--experimental-strip-types", scopesScript, "plan", "--context", "merge-queue", "--files", "README.md"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  const result = JSON.parse(stdout) as {
+    plan: Record<string, unknown>;
+    trace: { escalations: unknown[]; plans: { applied: Record<string, unknown>; ifTrustAll: Record<string, unknown> } };
+  };
+  for (const key of SCOPE_KEYS) assert.equal(result.plan[key], true, key);
+  assert.equal(result.plan["ci_mode"], "full");
+  assert.equal(result.trace.escalations.length, 1);
+  // The shadow column shows what medium-confidence rules would have allowed.
+  for (const key of SCOPE_KEYS) assert.equal(result.trace.plans.ifTrustAll[key], false, `ifTrustAll ${key}`);
+});
+
 test("github-output writes exactly the frozen 20-key contract, in order", () => {
   const expected = GOLDEN_CASES[2]!;
   const run = runScopes("github-output", expected.context, expected.files);
