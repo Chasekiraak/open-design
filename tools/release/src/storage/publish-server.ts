@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import {
   contentType,
@@ -9,7 +9,11 @@ import {
   storageConfigFromEnv,
   writeJson,
 } from "./common.ts";
-import { putStorageObject } from "./s3-upload.ts";
+import {
+  getStorageObject,
+  putStorageObject,
+  putStorageObjectWithStatus,
+} from "./s3-upload.ts";
 
 /**
  * Publish the hosted native-server bootstrap feed layout:
@@ -79,6 +83,49 @@ async function upload(path: string, objectKey: string, cacheControl: string): Pr
   });
 }
 
+async function publishImmutableObject(
+  path: string,
+  objectKey: string,
+  cacheControl: string,
+): Promise<void> {
+  if (!publishSideEffectsEnabled) {
+    console.log(`[dry-run:${dryRunMode || "plan"}] would create immutable ${objectKey} from ${path}`);
+    return;
+  }
+  if (storage == null) {
+    throw new Error("storage config is required to upload server feed assets");
+  }
+
+  const result = await putStorageObjectWithStatus({
+    ...storage,
+    bodyPath: path,
+    cacheControl,
+    contentType: serverContentType(path),
+    headers: { "if-none-match": "*" },
+    objectKey,
+  });
+  if (result.ok) return;
+  if (result.status !== 412) {
+    throw new Error(
+      `PUT ${result.url} failed with HTTP ${result.status}${result.body.length > 0 ? `: ${result.body}` : ""}`,
+    );
+  }
+
+  const existing = await getStorageObject({ ...storage, objectKey });
+  if (existing == null) {
+    throw new Error(
+      `immutable server object disappeared after conditional PUT conflict: ${objectKey}`,
+    );
+  }
+  const body = readFileSync(path);
+  if (!existing.bytes.equals(body)) {
+    throw new Error(
+      `immutable server object already exists with different content: ${objectKey}`,
+    );
+  }
+  console.log(`reused identical immutable server object ${objectKey}`);
+}
+
 const versionRootRelative = `v${releaseVersion}`;
 const versionRoot = join(feedRoot, versionRootRelative);
 const latestVersionPath = join(feedRoot, "latest", "VERSION");
@@ -95,13 +142,17 @@ if (!existsSync(latestVersionPath) || !statSync(latestVersionPath).isFile()) {
 }
 
 const versionFiles = listFiles(versionRoot);
+const orderedVersionFiles = [
+  sha256SumsPath,
+  ...versionFiles.filter((file) => file !== sha256SumsPath),
+];
 const uploaded: Array<{ cacheControl: string; objectKey: string; url: string }> = [];
 
-for (const file of versionFiles) {
+for (const file of orderedVersionFiles) {
   const relativePath = normalizePath(relative(versionRoot, file));
   const objectKey = `${objectPrefix}/${versionRootRelative}/${relativePath}`;
   const cacheControl = "public, max-age=31536000, immutable";
-  await upload(file, objectKey, cacheControl);
+  await publishImmutableObject(file, objectKey, cacheControl);
   uploaded.push({
     cacheControl,
     objectKey,

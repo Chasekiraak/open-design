@@ -469,6 +469,199 @@ describe("packaged smoke workflow", () => {
     });
   });
 
+  it("[P1] treats the server release version as shell data", async () => {
+    const workflow = await readFile(releaseServerWorkflowPath, "utf8");
+    const posixBuildStep = sectionBetween(
+      workflow,
+      "      - name: Build native server package",
+      "      - name: Build native Windows server package",
+    );
+    const windowsBuildStep = sectionBetween(
+      workflow,
+      "      - name: Build native Windows server package",
+      "      - name: Upload server archive",
+    );
+    const prepareFeedStep = sectionBetween(
+      workflow,
+      "      - name: Prepare hosted bootstrap feed",
+      "      - name: Upload prepared server feed",
+    );
+
+    for (const step of [
+      posixBuildStep,
+      windowsBuildStep,
+      prepareFeedStep,
+    ]) {
+      expect(step).toContain(
+        "RELEASE_VERSION: ${{ inputs.release_version }}",
+      );
+      expect(step.slice(step.indexOf("        run: |"))).not.toContain(
+        "${{ inputs.release_version }}",
+      );
+    }
+
+    expect(
+      extractWorkflowRunScript(workflow, "Build native server package"),
+    ).toContain('version="$RELEASE_VERSION"');
+    expect(
+      extractWorkflowRunScript(workflow, "Build native Windows server package"),
+    ).toContain("$version = $env:RELEASE_VERSION");
+    expect(
+      extractWorkflowRunScript(workflow, "Prepare hosted bootstrap feed"),
+    ).toContain('version="$RELEASE_VERSION"');
+  });
+
+  it("[P1] writes server build results separately from inherited build logs", async () => {
+    const workflow = await readFile(releaseServerWorkflowPath, "utf8");
+    const posixBuildStep = sectionBetween(
+      workflow,
+      "      - name: Build native server package",
+      "      - name: Build native Windows server package",
+    );
+    const windowsBuildStep = sectionBetween(
+      workflow,
+      "      - name: Build native Windows server package",
+      "      - name: Upload server archive",
+    );
+
+    expect(posixBuildStep).toContain(
+      '--json-output "$RUNNER_TEMP/server-package-build.json"',
+    );
+    expect(posixBuildStep).not.toContain(
+      '--json | tee "$RUNNER_TEMP/server-package-build.json"',
+    );
+    expect(windowsBuildStep).toContain(
+      '--json-output "$env:RUNNER_TEMP/server-package-build.json"',
+    );
+    expect(windowsBuildStep).not.toContain(
+      "Tee-Object -FilePath",
+    );
+  });
+
+  it("[P1] pins published server feeds to the dispatched main SHA", async () => {
+    const workflow = await readFile(releaseServerWorkflowPath, "utf8");
+    const preflightJob = sectionBetween(
+      workflow,
+      "  preflight:",
+      "  build:",
+    );
+    const preflightRunStart = preflightJob.indexOf("        run: |\n");
+    expect(preflightRunStart).toBeGreaterThanOrEqual(0);
+    const preflight = preflightJob
+      .slice(preflightRunStart + "        run: |\n".length)
+      .split("\n")
+      .map((line) => line.replace(/^          /, ""))
+      .join("\n")
+      .trimEnd();
+
+    expect(preflight).toContain('if [ "$INPUT_PUBLISH" = "true" ]; then');
+    expect(preflight).toContain(
+      'if [ "$EVENT_NAME" != "workflow_dispatch" ]; then',
+    );
+    expect(preflight).toContain(
+      'if [ "$REPOSITORY" != "nexu-io/open-design" ]; then',
+    );
+    expect(preflight).toContain(
+      'if [ "$DISPATCH_REF" != "refs/heads/main" ]; then',
+    );
+    expect(preflight).toContain(
+      'if [ "$REF_PROTECTED" != "true" ]; then',
+    );
+    expect(preflight).toContain('if [ -n "$REF_OVERRIDE" ]; then');
+
+    const runPreflight = (env: Record<string, string>) =>
+      execFileAsync("bash", ["-c", preflight], {
+        cwd: workspaceRoot,
+        env: {
+          ...process.env,
+          DISPATCH_REF: "refs/heads/main",
+          EVENT_NAME: "workflow_dispatch",
+          INPUT_PUBLISH: "false",
+          REF_OVERRIDE: "",
+          REF_PROTECTED: "true",
+          REPOSITORY: "nexu-io/open-design",
+          ...env,
+        },
+      });
+    await expect(
+      runPreflight({
+        INPUT_PUBLISH: "false",
+        REF_OVERRIDE: "refs/heads/feature/server-dry-run",
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      runPreflight({ INPUT_PUBLISH: "true" }),
+    ).resolves.toBeDefined();
+    await expect(
+      runPreflight({
+        DISPATCH_REF: "refs/heads/feature/untrusted",
+        INPUT_PUBLISH: "true",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      runPreflight({
+        INPUT_PUBLISH: "true",
+        REPOSITORY: "attacker/open-design",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      runPreflight({
+        INPUT_PUBLISH: "true",
+        REF_PROTECTED: "false",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      runPreflight({
+        INPUT_PUBLISH: "true",
+        REF_OVERRIDE: "refs/heads/feature/untrusted",
+      }),
+    ).rejects.toThrow();
+
+    const buildJob = sectionBetween(workflow, "  build:", "  publish:");
+    const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+    const trustedCheckout =
+      "ref: ${{ inputs.publish && github.sha || inputs.ref || github.sha }}";
+    const trustedJobGate =
+      "if: ${{ !inputs.publish || (github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected && inputs.ref == '') }}";
+    expect(buildJob).toContain("needs: preflight");
+    expect(publishJob).toContain("needs: [preflight, build]");
+    expect(workflow.split(trustedJobGate)).toHaveLength(3);
+    expect(workflow.split(trustedCheckout)).toHaveLength(3);
+    expect(workflow).not.toContain(
+      "ref: ${{ inputs.ref || github.ref }}",
+    );
+
+    for (const job of [buildJob, publishJob]) {
+      const verifyIndex = job.indexOf(
+        "      - name: Verify trusted publish checkout",
+      );
+      const setupIndex = job.indexOf("      - name: Setup workspace");
+      expect(verifyIndex).toBeGreaterThanOrEqual(0);
+      expect(setupIndex).toBeGreaterThan(verifyIndex);
+      const trustedCheckoutStep = job.slice(verifyIndex, setupIndex);
+      expect(trustedCheckoutStep).toContain("if: ${{ inputs.publish }}");
+      expect(trustedCheckoutStep).toContain(
+        'checkout_sha="$(git rev-parse HEAD)"',
+      );
+      expect(trustedCheckoutStep).toContain(
+        'if [ "$checkout_sha" != "$GITHUB_SHA" ]; then',
+      );
+      expect(trustedCheckoutStep).not.toContain("git ls-remote");
+    }
+
+    const secretPublishStep = sectionBetween(
+      workflow,
+      "      - name: Publish server feed",
+      "      - name: Plan server feed publish (dry-run)",
+    );
+    expect(secretPublishStep).toContain(
+      "if: ${{ inputs.publish && github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected && inputs.ref == '' }}",
+    );
+    expect(secretPublishStep).toContain(
+      "RELEASE_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_RELEASES_SK }}",
+    );
+  });
+
   it("[P2] runs Windows launcher payload archive validation when tools-pack is touched", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     const job = sectionBetween(workflow, "  windows_tools_pack_payload_tests:", "  web_workspace_tests:");

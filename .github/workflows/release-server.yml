@@ -25,7 +25,7 @@ on:
         type: string
         default: ""
       ref:
-        description: "Optional git ref to build. Empty builds the dispatched ref."
+        description: "Optional git ref for a dry-run build. Must be empty when publishing."
         required: false
         type: string
         default: ""
@@ -38,8 +38,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Validate server release request
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate publish trust boundary
+        shell: bash
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          REF_OVERRIDE: ${{ inputs.ref }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$INPUT_PUBLISH" = "true" ]; then
+            if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+              echo "::error::server publishing requires a workflow_dispatch event"
+              exit 1
+            fi
+            if [ "$REPOSITORY" != "nexu-io/open-design" ]; then
+              echo "::error::server publishing is restricted to nexu-io/open-design"
+              exit 1
+            fi
+            if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+              echo "::error::server publishing must be dispatched from refs/heads/main"
+              exit 1
+            fi
+            if [ "$REF_PROTECTED" != "true" ]; then
+              echo "::error::server publishing requires a protected dispatch ref"
+              exit 1
+            fi
+            if [ -n "$REF_OVERRIDE" ]; then
+              echo "::error::server publishing does not allow a ref override"
+              exit 1
+            fi
+          fi
+
   build:
     name: Build server package (${{ matrix.target }})
+    needs: preflight
+    if: ${{ !inputs.publish || (github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected && inputs.ref == '') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -75,7 +116,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.publish && github.sha || inputs.ref || github.sha }}
+
+      - name: Verify trusted publish checkout
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          if [ "$checkout_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::server package checkout resolved $checkout_sha but workflow dispatch SHA is $GITHUB_SHA"
+            exit 1
+          fi
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -85,9 +137,11 @@ jobs:
       - name: Build native server package
         if: ${{ runner.os != 'Windows' }}
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          version="${{ inputs.release_version }}"
+          version="$RELEASE_VERSION"
           case "$version" in
             ''|*[!A-Za-z0-9._+-]*|*..*)
               echo "release_version must be a non-empty path-safe value" >&2
@@ -99,7 +153,8 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --app-version "$version" \
             --release-id "${version}+${GITHUB_SHA::12}" \
-            --json | tee "$RUNNER_TEMP/server-package-build.json"
+            --json \
+            --json-output "$RUNNER_TEMP/server-package-build.json"
           archive_path=$(
             node -e 'const fs=require("node:fs"); const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(j.archivePath);' \
               "$RUNNER_TEMP/server-package-build.json"
@@ -110,9 +165,11 @@ jobs:
       - name: Build native Windows server package
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "${{ inputs.release_version }}"
+          $version = $env:RELEASE_VERSION
           if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]*$' -or $version.Contains("..")) {
             throw "release_version must be a non-empty path-safe value"
           }
@@ -122,7 +179,8 @@ jobs:
             --arch "${{ matrix.arch }}" `
             --app-version $version `
             --release-id "$version+$sha" `
-            --json | Tee-Object -FilePath "$env:RUNNER_TEMP/server-package-build.json"
+            --json `
+            --json-output "$env:RUNNER_TEMP/server-package-build.json"
           if ($LASTEXITCODE -ne 0) {
             throw "tools-pack server build failed with exit code $LASTEXITCODE"
           }
@@ -142,7 +200,8 @@ jobs:
 
   publish:
     name: Assemble and publish server feed
-    needs: build
+    needs: [preflight, build]
+    if: ${{ !inputs.publish || (github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected && inputs.ref == '') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
@@ -151,7 +210,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.publish && github.sha || inputs.ref || github.sha }}
+
+      - name: Verify trusted publish checkout
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout_sha="$(git rev-parse HEAD)"
+          if [ "$checkout_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::server feed checkout resolved $checkout_sha but workflow dispatch SHA is $GITHUB_SHA"
+            exit 1
+          fi
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -167,9 +237,11 @@ jobs:
 
       - name: Prepare hosted bootstrap feed
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          version="${{ inputs.release_version }}"
+          version="$RELEASE_VERSION"
           archives_dir="$RUNNER_TEMP/server-archives"
           feed_dir="$RUNNER_TEMP/server-feed"
           pnpm tools-pack server prepare-feed \
@@ -192,7 +264,7 @@ jobs:
           retention-days: 14
 
       - name: Publish server feed
-        if: ${{ inputs.publish }}
+        if: ${{ inputs.publish && github.repository == 'nexu-io/open-design' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected && inputs.ref == '' }}
         shell: bash
         env:
           RELEASE_SERVER_FEED_DIR: ${{ runner.temp }}/server-feed

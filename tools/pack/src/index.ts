@@ -42,6 +42,7 @@ import {
   uninstallPackedLinuxHeadless,
 } from "./linux.js";
 import { buildServerPackage } from "./server/build.js";
+import { writeServerBuildResultJson } from "./server/build-result.js";
 import { resolveServerPackConfig } from "./server/config.js";
 import { prepareServerReleaseFeed } from "./server/feed.js";
 import { smokeServerPackage } from "./server/smoke.js";
@@ -283,6 +284,10 @@ cli
     "output root for the hosted server bootstrap feed layout",
   )
   .option("--json", "print JSON")
+  .option(
+    "--json-output <path>",
+    "write the final server build result to a pure JSON file",
+  )
   .option("--platform <platform>", "native target platform: darwin|linux|win32")
   .option("--release-id <id>", "immutable release identifier")
   .option("--skip-workspace-build", "reuse existing daemon and static Web build outputs")
@@ -291,11 +296,13 @@ cli
     switch (action) {
       case "build": {
         const config = resolveServerPackConfig(options);
-        printJson(
-          await buildServerPackage(config, {
-            skipWorkspaceBuild: options.skipWorkspaceBuild === true,
-          }),
-        );
+        const result = await buildServerPackage(config, {
+          skipWorkspaceBuild: options.skipWorkspaceBuild === true,
+        });
+        if (options.jsonOutput != null) {
+          await writeServerBuildResultJson(options.jsonOutput, result);
+        }
+        printJson(result);
         return;
       }
       case "smoke": {

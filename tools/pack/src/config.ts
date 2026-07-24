@@ -34,6 +34,7 @@ export type ToolPackCliOptions = {
   feedDir?: string;
   headless?: boolean;
   json?: boolean;
+  jsonOutput?: string;
   macCompression?: string;
   notarize?: boolean;
   namespace?: string;

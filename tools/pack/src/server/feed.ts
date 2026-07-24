@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import {
   copyFile,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -68,6 +70,10 @@ export async function hashFileSha256(path: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(await readFile(path));
   return hash.digest("hex");
+}
+
+function hashBytesSha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 export async function writeSha256SumsFile(
@@ -208,6 +214,91 @@ export async function collectServerFeedArchives(
   return archives;
 }
 
+function expectedServerVersionFiles(
+  archiveEntries: ReadonlyArray<ServerFeedArchiveEntry>,
+): Map<string, string> {
+  const expected = new Map<string, string>();
+  for (const entry of archiveEntries) {
+    const sidecar = formatSha256SumsEntry(entry.sha256, entry.archiveName);
+    expected.set(entry.archiveName, entry.sha256);
+    expected.set(`${entry.archiveName}.sha256`, hashBytesSha256(sidecar));
+  }
+  expected.set(
+    "SHA256SUMS",
+    hashBytesSha256(
+      formatSha256Sums(
+        archiveEntries.map((entry) => ({
+          archiveName: entry.archiveName,
+          sha256: entry.sha256,
+        })),
+      ),
+    ),
+  );
+  return expected;
+}
+
+async function existingServerVersionMatches(
+  versionRoot: string,
+  expected: ReadonlyMap<string, string>,
+): Promise<boolean> {
+  let info;
+  try {
+    info = await stat(versionRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (!info.isDirectory()) {
+    throw new Error(
+      `server feed version already exists with different content: ${versionRoot} is not a directory`,
+    );
+  }
+
+  const entries = await readdir(versionRoot, { withFileTypes: true });
+  const actualNames = entries.map((entry) => entry.name).sort();
+  const expectedNames = [...expected.keys()].sort();
+  if (
+    entries.some((entry) => !entry.isFile()) ||
+    actualNames.length !== expectedNames.length ||
+    actualNames.some((name, index) => name !== expectedNames[index])
+  ) {
+    throw new Error(
+      `server feed version already exists with different content: file set mismatch in ${versionRoot}`,
+    );
+  }
+
+  for (const name of expectedNames) {
+    const actualSha256 = await hashFileSha256(join(versionRoot, name));
+    if (actualSha256 !== expected.get(name)) {
+      throw new Error(
+        `server feed version already exists with different content: ${join(versionRoot, name)}`,
+      );
+    }
+  }
+  return true;
+}
+
+async function writeServerVersionFiles(
+  versionRoot: string,
+  archiveEntries: ReadonlyArray<ServerFeedArchiveEntry>,
+): Promise<void> {
+  for (const entry of archiveEntries) {
+    await copyFile(entry.archivePath, join(versionRoot, entry.archiveName));
+    await writeFile(
+      join(versionRoot, `${entry.archiveName}.sha256`),
+      formatSha256SumsEntry(entry.sha256, entry.archiveName),
+      "utf8",
+    );
+  }
+  await writeSha256SumsFile(
+    join(versionRoot, "SHA256SUMS"),
+    archiveEntries.map((entry) => ({
+      archiveName: entry.archiveName,
+      sha256: entry.sha256,
+    })),
+  );
+}
+
 /**
  * Materialize the hosted bootstrap feed layout expected by install.sh/install.ps1:
  *   <feedRoot>/latest/VERSION
@@ -237,24 +328,30 @@ export async function prepareServerReleaseFeed(options: {
     }
   }
 
-  await rm(versionRoot, { force: true, recursive: true });
-  await mkdir(versionRoot, { recursive: true });
-
-  for (const entry of archiveEntries) {
-    await copyFile(entry.archivePath, join(versionRoot, entry.archiveName));
-    await writeFile(
-      join(versionRoot, `${entry.archiveName}.sha256`),
-      formatSha256SumsEntry(entry.sha256, entry.archiveName),
-      "utf8",
-    );
-  }
-  await writeSha256SumsFile(
-    sha256SumsPath,
-    archiveEntries.map((entry) => ({
-      archiveName: entry.archiveName,
-      sha256: entry.sha256,
-    })),
+  const expectedFiles = expectedServerVersionFiles(archiveEntries);
+  const reusedExistingVersion = await existingServerVersionMatches(
+    versionRoot,
+    expectedFiles,
   );
+  if (!reusedExistingVersion) {
+    await mkdir(feedRoot, { recursive: true });
+    const stagingRoot = await mkdtemp(join(feedRoot, `.${versionPrefix}-`));
+    try {
+      await writeServerVersionFiles(stagingRoot, archiveEntries);
+      await existingServerVersionMatches(stagingRoot, expectedFiles);
+      try {
+        await rename(stagingRoot, versionRoot);
+      } catch (error) {
+        const concurrentVersionMatches = await existingServerVersionMatches(
+          versionRoot,
+          expectedFiles,
+        );
+        if (!concurrentVersionMatches) throw error;
+      }
+    } finally {
+      await rm(stagingRoot, { force: true, recursive: true });
+    }
+  }
 
   if (options.updateLatest !== false) {
     await writeServerLatestVersionPointer(latestVersionPath, appVersion);
