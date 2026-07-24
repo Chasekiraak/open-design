@@ -298,4 +298,4 @@ Pick the closest one to your idea and read its `SKILL.md` body before writing yo
 
 ## License
 
-For a design template governed by the root license, check the contribution-license box in the pull-request template to affirmatively submit your contribution under [additional condition 2 of the Open Design Community License 1.0](../LICENSE). Files inside [`design-templates/guizang-ppt/`](../design-templates/guizang-ppt/) retain their original MIT license and authorship attribution to [op7418](https://github.com/op7418); other components with their own `LICENSE` keep that component-specific contribution policy.
+By contributing a design template, you agree your contribution is licensed under the [Apache-2.0 License](../LICENSE) of this repository, with the exception of files inside [`design-templates/guizang-ppt/`](../design-templates/guizang-ppt/), which retain their original MIT license and authorship attribution to [op7418](https://github.com/op7418).

@@ -260,7 +260,7 @@ Table OVERRIDES ใน `maxTokens.ts` มีไว้สำหรับกรณ
 - **No squash-during-review.** Push fixups; เราจะ squash ตอน merge.
 - **No force-push to a shared branch** เว้นแต่ reviewer ขอ.
 
-ขณะนี้เราไม่กำหนดให้ลงนาม CLA แยกต่างหาก Contribution ต่อไฟล์ที่อยู่ภายใต้ root license จะได้รับการยอมรับก็ต่อเมื่อผู้ contribute ยืนยันอย่างชัดแจ้งว่าเห็นด้วยกับ [ข้อกำหนดเพิ่มเติมข้อ 2 ของ Open Design Community License 1.0](../../LICENSE) โดยทำเครื่องหมาย checkbox `contribution-license` ใน pull request template เท่านั้น Maintainer ห้าม merge pull request ที่ยังไม่ได้ทำเครื่องหมาย checkbox นี้ และ pull request ที่เปิดอยู่แล้วในขณะที่เปลี่ยน license ต้องยืนยันใหม่ ส่วน component ที่มีไฟล์ `LICENSE` ของตนเองยังคงใช้ contribution policy ของ component นั้น.
+เราไม่ enforce CLA. Apache-2.0 cover เราแล้ว; contribution ของคุณ licensed ภายใต้ license เดียวกัน.
 
 ---
 
@@ -317,7 +317,7 @@ tl;dr: ship PR ดี ๆ, review อย่างใส่ใจ, อยู่�
 
 ## License
 
-เมื่อทำเครื่องหมาย checkbox `contribution-license` ใน pull request template คุณยอมรับว่าจะส่ง contribution ภายใต้ [Open Design Community License 1.0](../../LICENSE) รวมถึงข้อกำหนดเพิ่มเติมข้อ 2 เว้นแต่ component เป้าหมายจะมีไฟล์ `LICENSE` ของตนเอง และคุณยืนยันว่ามีสิทธิ์ส่ง contribution ภายใต้เงื่อนไขเหล่านี้ ข้อยกเว้นที่ทราบว่าใช้ MIT license ได้แก่ [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) ซึ่งคง authorship attribution ของ [op7418](https://github.com/op7418) และ [`skills/web-clone/`](../../skills/web-clone/) ซึ่งคง authorship attribution ของ [Jane Xiaoer](https://github.com/Jane-xiaoer).
+เมื่อ contribute คุณยอมรับว่า contribution ของคุณ licensed ภายใต้ [Apache-2.0 License](../../LICENSE) ของ repository นี้ ยกเว้นไฟล์ใน [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) ซึ่งยังคง MIT license เดิมและ authorship attribution ของ [op7418](https://github.com/op7418).
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

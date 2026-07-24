@@ -20,85 +20,87 @@ import {
 
 /*
  * Localized share-copy template, keyed by landing locale. The brand
- * current "source-available" license descriptor is translated where
- * the locale has a familiar equivalent and otherwise stays in English.
- * The surrounding sentence ("I'm using X from @OpenDesignHQ") also
- * translates per locale so each share post reads as one coherent voice.
+ * keyword "open-source Claude Design alternative" stays in English
+ * because that's the canonical search query Google associates with
+ * the domain — translating it would split the entity claim. The
+ * surrounding sentence ("I'm using X from @OpenDesignHQ") translates
+ * per locale so the message reads as one coherent voice instead of
+ * mixing two scripts in a single share post.
  *
  * `{name}` and `{description}` are interpolated at render time.
  * `{url}` is replaced with the canonical detail-page URL.
  */
 type ShareTemplate = (vars: { name: string; description: string; url: string }) => string;
 const SHARE_COPY: Record<LandingLocaleCode, ShareTemplate> = {
-  en:      ({ name, description, url }) => `🎨 Just discovered ${name} on @OpenDesignHQ — the source-available Claude Design alternative.
+  en:      ({ name, description, url }) => `🎨 Just discovered ${name} on @OpenDesignHQ — the open-source Claude Design alternative.
 ✨ Local-first · BYOK · your agent does the design.
 
 → ${url}`,
-  zh:      ({ name, description, url }) => `🎨 安利一个：@OpenDesignHQ 上的 ${name} —— Claude Design 的源码可用替代品。
+  zh:      ({ name, description, url }) => `🎨 安利一个：@OpenDesignHQ 上的 ${name} —— Claude Design 的开源替代品。
 ✨ 本地优先 · 自带模型 · 让你自己的 agent 做设计。
 
 → ${url}`,
-  'zh-tw': ({ name, description, url }) => `🎨 推薦一個：@OpenDesignHQ 上的 ${name} —— Claude Design 的原始碼可用替代品。
+  'zh-tw': ({ name, description, url }) => `🎨 推薦一個：@OpenDesignHQ 上的 ${name} —— Claude Design 的開源替代品。
 ✨ 本地優先 · 自帶模型 · 讓你自己的 agent 做設計。
 
 → ${url}`,
-  ja:      ({ name, description, url }) => `🎨 @OpenDesignHQ で ${name} を発見 —— ソース公開の Claude Design 代替。
+  ja:      ({ name, description, url }) => `🎨 @OpenDesignHQ で ${name} を発見 —— オープンソースの Claude Design 代替。
 ✨ ローカル優先 · BYOK · あなたのエージェントが設計する。
 
 → ${url}`,
-  ko:      ({ name, description, url }) => `🎨 @OpenDesignHQ에서 ${name} 발견 —— 소스 공개 Claude Design 대안.
+  ko:      ({ name, description, url }) => `🎨 @OpenDesignHQ에서 ${name} 발견 —— 오픈 소스 Claude Design 대안.
 ✨ 로컬 우선 · BYOK · 에이전트가 디자인합니다.
 
 → ${url}`,
-  de:      ({ name, description, url }) => `🎨 Gerade entdeckt: ${name} auf @OpenDesignHQ — die Source-available-Alternative zu Claude Design.
+  de:      ({ name, description, url }) => `🎨 Gerade entdeckt: ${name} auf @OpenDesignHQ — die Open-Source-Alternative zu Claude Design.
 ✨ Local-first · BYOK · dein Agent designt.
 
 → ${url}`,
-  fr:      ({ name, description, url }) => `🎨 Découvert : ${name} sur @OpenDesignHQ — l'alternative à Claude Design dont le code source est disponible.
+  fr:      ({ name, description, url }) => `🎨 Découvert : ${name} sur @OpenDesignHQ — l'alternative open-source à Claude Design.
 ✨ Local-first · BYOK · votre agent fait le design.
 
 → ${url}`,
-  ru:      ({ name, description, url }) => `🎨 Нашёл ${name} на @OpenDesignHQ — альтернативу Claude Design с доступным исходным кодом.
+  ru:      ({ name, description, url }) => `🎨 Нашёл ${name} на @OpenDesignHQ — open-source альтернативу Claude Design.
 ✨ Локально · BYOK · агент сам делает дизайн.
 
 → ${url}`,
-  es:      ({ name, description, url }) => `🎨 Acabo de descubrir ${name} en @OpenDesignHQ — la alternativa a Claude Design con código fuente disponible.
+  es:      ({ name, description, url }) => `🎨 Acabo de descubrir ${name} en @OpenDesignHQ — la alternativa open-source a Claude Design.
 ✨ Local-first · BYOK · tu agente diseña.
 
 → ${url}`,
-  'pt-br': ({ name, description, url }) => `🎨 Acabei de descobrir ${name} no @OpenDesignHQ — a alternativa ao Claude Design com código-fonte disponível.
+  'pt-br': ({ name, description, url }) => `🎨 Acabei de descobrir ${name} no @OpenDesignHQ — a alternativa open-source ao Claude Design.
 ✨ Local-first · BYOK · seu agente faz o design.
 
 → ${url}`,
-  it:      ({ name, description, url }) => `🎨 Ho appena scoperto ${name} su @OpenDesignHQ — l'alternativa a Claude Design con codice sorgente disponibile.
+  it:      ({ name, description, url }) => `🎨 Ho appena scoperto ${name} su @OpenDesignHQ — l'alternativa open-source a Claude Design.
 ✨ Local-first · BYOK · il tuo agente progetta.
 
 → ${url}`,
-  vi:      ({ name, description, url }) => `🎨 Vừa khám phá ${name} trên @OpenDesignHQ — giải pháp thay thế Claude Design với mã nguồn có sẵn.
+  vi:      ({ name, description, url }) => `🎨 Vừa khám phá ${name} trên @OpenDesignHQ — giải pháp mã nguồn mở thay thế Claude Design.
 ✨ Ưu tiên local · BYOK · agent của bạn thiết kế.
 
 → ${url}`,
-  pl:      ({ name, description, url }) => `🎨 Właśnie odkryłem ${name} na @OpenDesignHQ — alternatywę dla Claude Design z dostępnym kodem źródłowym.
+  pl:      ({ name, description, url }) => `🎨 Właśnie odkryłem ${name} na @OpenDesignHQ — open-source'ową alternatywę dla Claude Design.
 ✨ Local-first · BYOK · twój agent projektuje.
 
 → ${url}`,
-  id:      ({ name, description, url }) => `🎨 Baru nemu ${name} di @OpenDesignHQ — alternatif Claude Design dengan kode sumber tersedia.
+  id:      ({ name, description, url }) => `🎨 Baru nemu ${name} di @OpenDesignHQ — alternatif open-source untuk Claude Design.
 ✨ Local-first · BYOK · agent kamu yang nge-desain.
 
 → ${url}`,
-  nl:      ({ name, description, url }) => `🎨 Net ontdekt: ${name} op @OpenDesignHQ — het Claude Design-alternatief met beschikbare broncode.
+  nl:      ({ name, description, url }) => `🎨 Net ontdekt: ${name} op @OpenDesignHQ — het open-source alternatief voor Claude Design.
 ✨ Local-first · BYOK · jouw agent ontwerpt.
 
 → ${url}`,
-  ar:      ({ name, description, url }) => `🎨 اكتشفت للتو ${name} على @OpenDesignHQ — البديل لـ Claude Design ذو الشفرة المصدرية المتاحة.
+  ar:      ({ name, description, url }) => `🎨 اكتشفت للتو ${name} على @OpenDesignHQ — البديل مفتوح المصدر لـ Claude Design.
 ✨ محلي أولًا · BYOK · وكيلك يصمّم.
 
 → ${url}`,
-  tr:      ({ name, description, url }) => `🎨 Yeni keşfettim: ${name} (@OpenDesignHQ) — Claude Design'a kaynak kodu erişilebilir bir alternatif.
+  tr:      ({ name, description, url }) => `🎨 Yeni keşfettim: ${name} (@OpenDesignHQ) — Claude Design'a açık kaynaklı alternatif.
 ✨ Local-first · BYOK · ajanın tasarlıyor.
 
 → ${url}`,
-  uk:      ({ name, description, url }) => `🎨 Щойно знайшов ${name} на @OpenDesignHQ — альтернативу Claude Design із доступним вихідним кодом.
+  uk:      ({ name, description, url }) => `🎨 Щойно знайшов ${name} на @OpenDesignHQ — open-source альтернативу Claude Design.
 ✨ Local-first · BYOK · ваш агент робить дизайн.
 
 → ${url}`,
@@ -298,8 +300,8 @@ const jsonLd = [
 
     {/*
       Share modal — opens a `<dialog>` containing the canonical share
-      copy (with the current source-available license descriptor baked
-      in), a one-click "Copy" button, and a row of
+      copy (with the brand keyword "open-source Claude Design
+      alternative" baked in), a one-click "Copy" button, and a row of
       platform jump buttons. Each platform button just opens the
       vendor's compose URL — the user pastes the already-copied text.
       This works around a real cross-platform pain point: LinkedIn /

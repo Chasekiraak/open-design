@@ -1693,7 +1693,7 @@ const DESIGN_SYSTEM_SURFACE_GUIDE: Record<
 // Build the SKILLS.md usage guide bundled into every downloaded design system.
 // Pure (no I/O) so it can be unit tested against fixed inputs. The guide teaches
 // a recipient how to feed the system to an AI coding tool for on-brand results
-// and attributes it to the source-available Open Design project for shareability.
+// and attributes it to the Open Design open-source project for shareability.
 export function buildDesignSystemSkillsMarkdown(input: {
   title: string;
   summary: string;
@@ -1780,8 +1780,7 @@ export function buildDesignSystemSkillsMarkdown(input: {
   lines.push('---');
   lines.push('');
   lines.push(
-    'Generated with **Open Design** — the source-available, local-first Claude Design alternative, ' +
-      'licensed under the Open Design Community License 1.0. ' +
+    'Generated with **Open Design** — the open-source, local-first Claude Design alternative. ' +
       'Generate decks, landing pages, dashboards, and brand systems with your favourite AI ' +
       'coding agent.',
   );

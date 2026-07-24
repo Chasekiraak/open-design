@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: ทางเลือกแบบ source-available แทน Claude Design</h1>
+<h1 align="center">Open Design: ทางเลือกโอเพนซอร์สแทน Claude Design</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ มาแล้ว.** เซสชันออกแบบยาว ๆ เคยสะดุดทุกครั้งที่ถูกขัดจังหวะ — การรันหลุดตำแหน่ง ตัวเลือกโมเดลทำให้ต้องเดา และการส่งออกต้องอ้อมอีกขั้น 0.13.0 ทำให้เซสชันยังคงอยู่ต่อได้: กลับมารันต่อของ Codex / OpenCode / Pi / Open Design Cloud ข้ามเทิร์น เลือกโมเดลที่ใช่ได้เร็วขึ้น และส่งมอบ PPTX / PDF ที่มีภาพหน้าจอรองรับได้โดยไม่ต้องออกจากแอป [ดาวน์โหลด 0.13.0](https://github.com/nexu-io/open-design/releases) · [บันทึกการอัปเดต](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Open Design Fellow program เปิดรับแล้ว.** ถ้าคุณเชื่อเหมือนกันว่า design ควรเปิดกว้าง มาเป็น Open Design Fellow, ร่วม shape ผลิตภัณฑ์กับ core team และช่วยให้คนมากขึ้นมีส่วนร่วมกำหนดอนาคตของ design. รายละเอียด → [`MAINTAINERS.th.md`](MAINTAINERS.th.md) และ [Discord](https://discord.gg/qhbcCH8Am4).
 
 <p align="center">
-  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
+  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/qhbcCH8Am4"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="QUICKSTART.th.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Open Design คืออะไร
 
-🎨 **ทางเลือก Claude Design แบบ local-first และ source-available.** &nbsp;🖥️ **แอป desktop native สำหรับ macOS และ Windows.** &nbsp;⚡ **functional skills 100+ รายการ + rendering-template catalog แยกต่างหาก** · ✨ **design-system packages ระดับแบรนด์ 151 ชุด** · 📦 **plugin พร้อมใช้ 277 ตัว.** &nbsp;🖼️ สร้าง **prototype สำหรับ web · desktop · mobile**, **live dashboard / artifact**, **deck**, **image**, **video** และ motion graphics ด้วย **HyperFrames**. 🔒 preview ผ่าน sandboxed iframe · export เป็น HTML / PDF / PPTX / MP4. &nbsp;🤖 **รันบน Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Amp · Hermes · Kimi · Antigravity และ local CLI executable ที่ไม่ซ้ำกัน 25 ตัว**, หรือ endpoint ที่เข้ากันได้กับ OpenAI ผ่าน BYOK.
+🎨 **ทางเลือก Claude Design แบบ local-first และโอเพนซอร์ส.** &nbsp;🖥️ **แอป desktop native สำหรับ macOS และ Windows.** &nbsp;⚡ **functional skills 100+ รายการ + rendering-template catalog แยกต่างหาก** · ✨ **design-system packages ระดับแบรนด์ 151 ชุด** · 📦 **plugin พร้อมใช้ 277 ตัว.** &nbsp;🖼️ สร้าง **prototype สำหรับ web · desktop · mobile**, **live dashboard / artifact**, **deck**, **image**, **video** และ motion graphics ด้วย **HyperFrames**. 🔒 preview ผ่าน sandboxed iframe · export เป็น HTML / PDF / PPTX / MP4. &nbsp;🤖 **รันบน Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Amp · Hermes · Kimi · Antigravity และ local CLI executable ที่ไม่ซ้ำกัน 25 ตัว**, หรือ endpoint ที่เข้ากันได้กับ OpenAI ผ่าน BYOK.
 
 Open Design คือสิ่งที่เกิดขึ้นเมื่อ loop แบบ **agent-native** ที่ Anthropic เปิดตัวกับ Claude Design — ค้นหา brief, ล็อก direction, stream artifact, critique, deliver — เลิกเป็นระบบปิด แล้วกลายเป็น **filesystem ของ functional skills, rendering design templates, design systems และ plugins** ที่ coding agent บน laptop ของคุณอ่าน เขียน และ remix ได้. CLI ของคุณกลายเป็น design engine, laptop ของคุณกลายเป็น studio, และ `DESIGN.md` ของทีมกลายเป็น brand contract.
 
@@ -49,6 +49,7 @@ Open Design คือสิ่งที่เกิดขึ้นเมื่�
 <table>
 <tr>
 <td valign="top">
+<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="หน้า Home" /><br/>
 <sub><b>Home</b> — จุดเข้าใช้งานภาพรวม. เลือก skill และ design system, พิมพ์ brief แล้วเริ่มงานทุกอย่างจากที่เดียว.</sub>
 </td>
 </tr>
@@ -260,7 +261,7 @@ Live dashboard, decision room, KPI wall — artifact หน้าเดียว
 
 > **ในเดือนเมษายน 2026, Anthropic เปิดตัว Claude Design — ครั้งแรกที่ LLM หยุดแค่เขียนข้อความ และเริ่มส่งมอบ design artifacts โดยตรง.** มัน viral มาก แต่ยังเป็น closed-source, paid-only, cloud-only, ผูกกับโมเดลของ Anthropic, skills ของ Anthropic และ surface ของ Anthropic. ไม่มี checkout, ไม่มี self-host, ไม่มี Vercel deploy, ไม่มีการสลับ agent ของคุณเอง.
 
-Open Design (OD) คือทางเลือกแบบ source-available. Loop เดียวกัน, mental model แบบ artifact-first เดียวกัน, แต่ไม่มี lock-in:
+Open Design (OD) คือทางเลือกโอเพนซอร์ส. Loop เดียวกัน, mental model แบบ artifact-first เดียวกัน, แต่ไม่มี lock-in:
 
 - 🤖 **Agent-native, model-agnostic.** เราไม่ได้ ship agent. `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` ที่มีอยู่แล้วบน `PATH` ของคุณคือ design engine. สลับได้ในคลิกเดียว.
 - 🧠 **Brand-grade เป็นค่าเริ่มต้น.** ทุก render อ่าน `DESIGN.md` ของ package ที่ active เป็น brand contract หลัก. Repo ship design-system packages 151 ชุด; package รุ่นเก่าอาจมีแค่ `DESIGN.md` ส่วน package รุ่นใหม่เพิ่ม `manifest.json`, `tokens.css`, components, assets และ provenance ได้. วาง folder เข้าไป picker ก็หาเจอ.
@@ -273,8 +274,8 @@ Open Design (OD) คือทางเลือกแบบ source-available. Lo
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| Source available | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
-| Self-host workspace แบบสมาชิกคนเดียวได้ไม่จำกัด / desktop | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| Open source | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
+| Self-host / desktop | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | Agent-native (รันใน CLI ของคุณ) | Anthropic เท่านั้น | ❌ | Cloud agent เท่านั้น | **✅ 25 CLIs + BYOK** |
 | `DESIGN.md` ระดับแบรนด์ | Proprietary | Theme JSON | Limited tokens | **✅ ship systems 151 ชุด** |
 | Skills / plugins / templates | Closed | Plugin store | Closed | **✅ 100+ functional skills · separate rendering-template catalog · 277 plugins** |
@@ -721,7 +722,7 @@ SVG ด้านบน regenerate ทุกวันโดย [`.github/workflow
 
 | Project | Role |
 |---|---|
-| Claude Design | ผลิตภัณฑ์ closed-source ที่ repo นี้เป็นทางเลือกแบบ source-available แทน. |
+| Claude Design | ผลิตภัณฑ์ closed-source ที่ repo นี้เป็นทางเลือกโอเพนซอร์สแทน. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | เข็มทิศด้าน design philosophy — workflow ของ junior designer, brand-asset protocol, anti-AI-slop checklist, critique 5 มิติ. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | Skill web PPT สไตล์ magazine ที่ bundle ตรงไว้ใต้ [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/). เป็นค่าเริ่มต้นของ deck mode. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | ตระกูล HTML PPT Studio — 15 deck templates, 36 themes, 31 page layouts, animation runtime, magnetic-card presenter mode. |
@@ -738,4 +739,4 @@ Provenance แบบละเอียด → [`docs/references.md`](../../docs/
 
 ## License
 
-[Open Design Community License 1.0](../../LICENSE) เป็น license แบบ source-available ที่ปรับแต่งจาก Apache 2.0 พร้อมเงื่อนไขเพิ่มเติมสำหรับ external hosting และ frontend branding. หากบุคคลที่สามดำเนินงานหรือดูแล Open Design อย่างต่อเนื่องให้ลูกค้าภายนอกที่ไม่เกี่ยวข้องรายใดก็ตาม ก็ต้องได้รับ commercial authorization แยกต่างหาก แม้จะมีลูกค้าเพียงรายเดียว. Component ที่ bundle มาและมี `LICENSE` แยกยังคงใช้ license ของตนเอง รวมถึง `design-templates/guizang-ppt/` (MIT, [@op7418](https://github.com/op7418)) และ `design-templates/html-ppt/` (MIT, [@lewislulu](https://github.com/lewislulu)).
+Apache-2.0. `design-templates/guizang-ppt/` ที่ bundle มายังคง [LICENSE](../../design-templates/guizang-ppt/LICENSE) เดิม (MIT, [@op7418](https://github.com/op7418)). `design-templates/html-ppt/` ที่ bundle มายังคง [LICENSE](../../design-templates/html-ppt/LICENSE) เดิม (MIT, [@lewislulu](https://github.com/lewislulu)).

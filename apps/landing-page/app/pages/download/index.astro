@@ -26,7 +26,6 @@ const SITE = Astro.site?.toString() ?? 'https://open-design.ai/';
 const REPO = 'https://github.com/nexu-io/open-design';
 const REPO_RELEASES = `${REPO}/releases`;
 const QUICKSTART_DOC = `${REPO}/blob/main/QUICKSTART.md`;
-const LICENSE_URL = `${REPO}/blob/main/LICENSE`;
 
 const title = page.title;
 const description = page.description;
@@ -136,7 +135,7 @@ const jsonLd = [
     softwareHelp: { '@type': 'CreativeWork', url: QUICKSTART_DOC },
     downloadUrl: m.macArm64Dmg?.url ?? release.releaseUrl,
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    license: LICENSE_URL,
+    license: 'https://www.apache.org/licenses/LICENSE-2.0',
   },
 ];
 ---
@@ -262,7 +261,7 @@ const jsonLd = [
       </div>
       <div class="info-cta-meta">
         <span class="stamp">● {common.live}</span>
-        <span>{release.versionLabel} · Source-available · ODCL 1.0</span>
+        <span>{release.versionLabel} · Apache-2.0</span>
         <span>{common.macWinLinux}</span>
       </div>
     </section>

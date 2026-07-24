@@ -442,7 +442,7 @@ export default function Page({
           />
           <div className='container hero-grid'>
             <div className='hero-copy'>
-              {/* Eyebrow = the competitor entry word ("Source-available Claude
+              {/* Eyebrow = the competitor entry word ("Open Source Claude
                   Design Alternative", localized per locale). Kept as real,
                   crawlable HTML text above the title so it carries the SEO
                   entry term while the H1 stays focused on the brand name and
@@ -1252,7 +1252,7 @@ export default function Page({
 
             <div className='foot-bar'>
               <div className='foot-bar-left'>
-                <span className='foot-copy'>© 2026 Powerformer, Inc. · ODCL 1.0</span>
+                <span className='foot-copy'>© 2026 Powerformer, Inc. · Apache-2.0</span>
                 <a href={href('/privacy/')}>{footL.privacy}</a>
                 <span className='foot-dot' aria-hidden='true'>·</span>
                 <a href={href('/terms/')}>{footL.terms}</a>

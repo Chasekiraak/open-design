@@ -260,7 +260,10 @@ Beyond that:
 - **No squash-during-review.** Push fixups; we'll squash on merge.
 - **No force-push to a shared branch** unless the reviewer asked.
 
-We do not currently require a separately signed CLA. Contributions to files covered by the root license are accepted only when the contributor affirmatively agrees to [additional condition 2 of the Open Design Community License 1.0](LICENSE) by checking the contribution-license box in the pull-request template. Maintainers must not merge a pull request with that box unchecked; pull requests already open when the license changed must provide a new confirmation. A component with its own `LICENSE` file keeps that component-specific contribution policy.
+We do not require a separate CLA. By submitting a contribution, you agree to
+the contributor terms in section 2 of the repository's [LICENSE](LICENSE),
+including commercial use of contributed code, and confirm that you have the
+right to grant those permissions.
 
 ---
 
@@ -321,7 +324,7 @@ The tl;dr: ship good PRs, review thoughtfully, hang out in [Discussions][discuss
 
 ## License
 
-By checking the contribution-license box in the pull-request template, you agree that your contribution is submitted under the [Open Design Community License 1.0](LICENSE), including additional condition 2, except where the target component carries its own `LICENSE` file. You represent that you have the right to submit the contribution under those terms. Known MIT-licensed exceptions include [`design-templates/guizang-ppt/`](design-templates/guizang-ppt/), which retains authorship attribution to [op7418](https://github.com/op7418), and [`skills/web-clone/`](skills/web-clone/), which retains authorship attribution to [Jane Xiaoer](https://github.com/Jane-xiaoer).
+By contributing, you agree your contribution is licensed under the [Apache-2.0 License](LICENSE) of this repository, except where a bundled skill or template carries its own `LICENSE` file. Known MIT-licensed exceptions include [`design-templates/guizang-ppt/`](design-templates/guizang-ppt/), which retains authorship attribution to [op7418](https://github.com/op7418), and [`skills/web-clone/`](skills/web-clone/), which retains authorship attribution to [Jane Xiaoer](https://github.com/Jane-xiaoer).
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

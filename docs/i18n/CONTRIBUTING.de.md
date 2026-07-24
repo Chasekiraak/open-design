@@ -234,7 +234,7 @@ Außerdem:
 - **Während Review nicht squashen.** Fixups pushen; wir squashen beim Merge.
 - **Kein Force-Push auf Shared Branches**, außer Reviewer fragen danach.
 
-Derzeit verlangen wir kein separat unterzeichnetes CLA. Beiträge zu Dateien, die unter die Root-Lizenz fallen, werden nur angenommen, wenn die beitragende Person [Zusatzbedingung 2 der Open Design Community License 1.0](../../LICENSE) ausdrücklich zustimmt, indem sie im Pull-Request-Template das Kontrollkästchen `contribution-license` aktiviert. Maintainer dürfen einen Pull Request nicht mergen, solange dieses Kontrollkästchen nicht aktiviert ist; Pull Requests, die zum Zeitpunkt der Lizenzänderung bereits offen waren, müssen die Zustimmung erneut bestätigen. Für Komponenten mit eigener `LICENSE`-Datei gilt weiterhin die komponentenspezifische Beitragsregelung.
+Wir erzwingen kein CLA. Apache-2.0 deckt Beiträge ab; Ihr Beitrag ist unter derselben Lizenz.
 
 ---
 
@@ -292,7 +292,7 @@ Das tl;dr: Liefern Sie gute PRs, prüfen Sie sorgfältig, halten Sie sich in [Di
 
 ## Lizenz
 
-Indem Sie im Pull-Request-Template das Kontrollkästchen `contribution-license` aktivieren, stimmen Sie zu, dass Ihr Beitrag unter der [Open Design Community License 1.0](../../LICENSE), einschließlich Zusatzbedingung 2, eingereicht wird, sofern die Zielkomponente keine eigene `LICENSE`-Datei besitzt. Sie bestätigen, dass Sie berechtigt sind, den Beitrag unter diesen Bedingungen einzureichen. Zu den bekannten MIT-lizenzierten Ausnahmen gehören [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/), das die Urheberangabe für [op7418](https://github.com/op7418) beibehält, und [`skills/web-clone/`](../../skills/web-clone/), das die Urheberangabe für [Jane Xiaoer](https://github.com/Jane-xiaoer) beibehält.
+Mit Ihrem Beitrag erklären Sie sich einverstanden, dass er unter der [Apache-2.0-Lizenz](../../LICENSE) dieses Repositories steht. Ausnahme sind Dateien in [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/), die ihre ursprüngliche MIT-Lizenz und Autorenschaft von [op7418](https://github.com/op7418) behalten.
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

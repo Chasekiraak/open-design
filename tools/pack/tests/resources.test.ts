@@ -128,17 +128,6 @@ describe("copyBundledResourceTrees", () => {
         "utf8",
       );
       await writeFile(communityRegistryPath, "{\"plugins\":[]}\n", "utf8");
-      await writeFile(join(workspaceRoot, "LICENSE"), "license text\n", "utf8");
-      await writeFile(
-        join(workspaceRoot, "LICENSES.md"),
-        "# Licensing map\n",
-        "utf8",
-      );
-      await writeFile(
-        join(workspaceRoot, "BRAND_NOTICE.md"),
-        "# Brand notice\n",
-        "utf8",
-      );
 
       await copyBundledResourceTrees({ workspaceRoot, resourceRoot });
 
@@ -187,15 +176,6 @@ describe("copyBundledResourceTrees", () => {
           "utf8",
         ),
       ).resolves.toBe("{\"plugins\":[]}\n");
-      await expect(readFile(join(resourceRoot, "LICENSE"), "utf8")).resolves.toBe(
-        "license text\n",
-      );
-      await expect(
-        readFile(join(resourceRoot, "LICENSES.md"), "utf8"),
-      ).resolves.toBe("# Licensing map\n");
-      await expect(
-        readFile(join(resourceRoot, "BRAND_NOTICE.md"), "utf8"),
-      ).resolves.toBe("# Brand notice\n");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

@@ -93,7 +93,7 @@ export type ToolPackConfig = {
    * daemon can read it as POSTHOG_KEY env at launch — only official Open
    * Design builds (CI with the secret set) ship with this; forks compiling
    * locally produce binaries that omit the key and the integration
-   * short-circuits cleanly. The repository is source-available, but `phc_`
+   * short-circuits cleanly. Apache-2.0 keeps the bundle public, but `phc_`
    * keys are write-only event ingest keys (cannot read your project data),
    * so embedding them in the binary is the PostHog-recommended pattern.
    */

@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: la alternativa a Claude Design con código fuente disponible</h1>
+<h1 align="center">Open Design: la alternativa de código abierto a Claude Design</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ ya está aquí.** Las sesiones de diseño largas solían romperse con cada interrupción — una ejecución perdía su lugar, un selector de modelos te hacía adivinar, una exportación necesitaba un rodeo más. 0.13.0 mantiene viva la sesión: reanuda ejecuciones de Codex / OpenCode / Pi / Open Design Cloud entre turnos, elige el modelo adecuado más rápido y entrega PPTX / PDF respaldados por capturas de pantalla sin salir de la app. [Descargar 0.13.0](https://github.com/nexu-io/open-design/releases) · [Notas de la versión](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **El programa Open Design Fellow ya está abierto.** Si tú también crees que el diseño debe ser abierto, conviértete en Open Design Fellow, da forma al producto junto al equipo principal y ayuda a que más personas participen en definir el futuro del diseño. Detalles → [`MAINTAINERS.md`](../../MAINTAINERS.md) y [Discord](https://discord.gg/mHAjSMV6gz).
 
 <p align="center">
-  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
+  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="../../QUICKSTART.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Qué es Open Design
 
-🎨 **La alternativa local-first a Claude Design con código fuente disponible.** &nbsp;🖥️ **App de escritorio nativa para macOS y Windows.** &nbsp;⚡ **Más de 100 skills funcionales + catálogo independiente de plantillas de renderizado** · ✨ **151 paquetes de sistemas de diseño** · 📦 **277 plugins listos para usar.** &nbsp;🖼️ Genera **prototipos web · escritorio · móvil**, **dashboards / artefactos en vivo**, **presentaciones**, **imágenes**, **video**, además de gráficos en movimiento con **HyperFrames**. 🔒 Vista previa en iframe en entorno aislado · exportación a HTML / PDF / PPTX / MP4. &nbsp;🤖 **Funciona sobre Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity y 25 ejecutables CLI locales distintos**, o cualquier endpoint compatible con OpenAI mediante BYOK.
+🎨 **La alternativa de código abierto y local-first a Claude Design.** &nbsp;🖥️ **App de escritorio nativa para macOS y Windows.** &nbsp;⚡ **Más de 100 skills funcionales + catálogo independiente de plantillas de renderizado** · ✨ **151 paquetes de sistemas de diseño** · 📦 **277 plugins listos para usar.** &nbsp;🖼️ Genera **prototipos web · escritorio · móvil**, **dashboards / artefactos en vivo**, **presentaciones**, **imágenes**, **video**, además de gráficos en movimiento con **HyperFrames**. 🔒 Vista previa en iframe en entorno aislado · exportación a HTML / PDF / PPTX / MP4. &nbsp;🤖 **Funciona sobre Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity y 25 ejecutables CLI locales distintos**, o cualquier endpoint compatible con OpenAI mediante BYOK.
 
 Open Design es lo que obtienes cuando ese bucle deja de estar cerrado y se convierte en un **sistema de archivos de skills funcionales, plantillas de renderizado, sistemas de diseño y plugins** que tus agentes pueden leer, escribir y remezclar.
 
@@ -49,6 +49,7 @@ Un vistazo rápido a qué es Open Design y qué hace. Comienza en **Home**, orqu
 <table>
 <tr>
 <td valign="top">
+<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Página de inicio" /><br/>
 <sub><b>Home</b> — el punto de entrada general. Elige un skill y un sistema de diseño, escribe el brief y pon todo en marcha desde un solo lugar.</sub>
 </td>
 </tr>
@@ -260,7 +261,7 @@ Cada presentación se exporta a **HTML** (un solo archivo, recursos incorporados
 
 > **En abril de 2026, Anthropic lanzó Claude Design — la primera vez que un LLM dejó de escribir prosa y empezó a entregar artefactos de diseño directamente.** Se volvió viral. Pero permaneció de código cerrado, solo de pago, solo en la nube, atado al modelo de Anthropic, a los skills de Anthropic, a la superficie de Anthropic. Sin checkout, sin self-host, sin despliegue en Vercel, sin posibilidad de cambiar a tu propio agente.
 
-Open Design (OD) es la alternativa con código fuente disponible. El mismo bucle, el mismo modelo mental centrado en el artefacto, sin nada del lock-in:
+Open Design (OD) es la alternativa de código abierto. El mismo bucle, el mismo modelo mental centrado en el artefacto, sin nada del lock-in:
 
 - 🤖 **Agent-native, agnóstico al modelo.** No distribuimos un agente. Los `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` que ya están en tu `PATH` son el motor de diseño. Cámbialos con un clic.
 - 🧠 **Calidad de marca por defecto.** Cada render lee el `DESIGN.md` del paquete activo como contrato central de marca. El repo incluye 151 paquetes de sistemas de diseño; los paquetes heredados pueden contener solo `DESIGN.md`, mientras los nuevos pueden añadir `manifest.json`, `tokens.css`, componentes, assets y procedencia. Suelta una carpeta y el selector la encuentra.
@@ -273,8 +274,8 @@ Open Design (OD) es la alternativa con código fuente disponible. El mismo bucle
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| Código fuente disponible | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
-| Autoalojamiento sin límite de espacios de trabajo con un solo miembro / escritorio | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| Código abierto | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
+| Self-host / escritorio | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | Agent-native (se ejecuta en tu CLI) | Solo Anthropic | ❌ | Solo agente en la nube | **✅ 25 CLIs + BYOK** |
 | `DESIGN.md` de calidad de marca | Propietario | JSON de tema | Tokens limitados | **✅ 151 sistemas incluidos** |
 | Skills / plugins / plantillas | Cerrado | Tienda de plugins | Cerrado | **✅ Más de 100 skills funcionales · catálogo separado de plantillas de renderizado · 277 plugins** |
@@ -717,7 +718,7 @@ Si esto te ahorró treinta minutos, dale una ★. Las estrellas no pagan el alqu
 
 | Proyecto | Rol |
 |---|---|
-| Claude Design | El producto de código cerrado del que este repo es la alternativa con código fuente disponible. |
+| Claude Design | El producto de código cerrado del que este repo es la alternativa de código abierto. |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | La brújula de la filosofía de diseño — flujo de trabajo de diseñador junior, protocolo de recursos de marca, checklist anti-AI-slop, crítica de cinco dimensiones. |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | El skill de PPT web estilo revista, empaquetado textualmente bajo [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/). Por defecto para el modo presentación. |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | La familia HTML PPT Studio — 15 plantillas de presentación, 36 temas, 31 layouts de página, runtime de animación, modo presentador de tarjetas magnéticas. |
@@ -734,4 +735,4 @@ Procedencia detallada → [`docs/references.md`](../../docs/references.md).
 
 ## Licencia
 
-[Open Design Community License 1.0](../../LICENSE), una licencia personalizada con código fuente disponible, basada en Apache 2.0 y con condiciones adicionales para el alojamiento externo y la marca del frontend. La operación o administración continuada de Open Design por un tercero para cualquier cliente externo no relacionado requiere una autorización comercial independiente, aunque se trate de un solo cliente. Los componentes incluidos con su propia `LICENSE` conservan esas licencias, entre ellos `design-templates/guizang-ppt/` (MIT, [@op7418](https://github.com/op7418)) y `design-templates/html-ppt/` (MIT, [@lewislulu](https://github.com/lewislulu)).
+Apache-2.0. El `design-templates/guizang-ppt/` incluido conserva su [LICENSE](../../design-templates/guizang-ppt/LICENSE) original (MIT, [@op7418](https://github.com/op7418)). El `design-templates/html-ppt/` incluido conserva su [LICENSE](../../design-templates/html-ppt/LICENSE) original (MIT, [@lewislulu](https://github.com/lewislulu)).

@@ -16,7 +16,6 @@ import {
 import { runElectronBuilder } from "../src/mac/builder.js";
 import { resolveSeededAppConfigPaths, seedPackagedAppConfig, writeLaunchPackagedConfig } from "../src/mac/index.js";
 import { resolveMacPaths } from "../src/mac/paths.js";
-import { createBundledRootFileFixture } from "./resource-fixtures.js";
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -176,7 +175,6 @@ describe("copyResourceTree", () => {
       for (const name of resourceNames) {
         await mkdir(join(root, name), { recursive: true });
       }
-      await createBundledRootFileFixture(root);
 
       await copyResourceTree(config, paths);
 

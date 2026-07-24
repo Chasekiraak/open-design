@@ -1,4 +1,4 @@
-<h1 align="center">Open Design: ソースアベイラブルな Claude Design 代替ツール</h1>
+<h1 align="center">Open Design: オープンソースの Claude Design 代替ツール</h1>
 
 > 🔥 **Open Design 0.13.0 — _Stay in Flow_ が登場。** 長いデザインセッションは、これまで中断のたびに途切れていました——実行は現在地を見失い、モデルピッカーは推測を強い、エクスポートはもうひと手間の遠回りを求めました。0.13.0 はセッションを生かし続けます：Codex / OpenCode / Pi / Open Design Cloud の実行をターンをまたいで再開し、適切なモデルをより速く選び、スクリーンショット付きの PPTX / PDF をアプリを離れずに受け渡せます。[0.13.0 をダウンロード](https://github.com/nexu-io/open-design/releases) · [リリースノート](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Open Design Fellow プログラムの募集を開始しました。** あなたもデザインはオープンであるべきだと信じるなら——Open Design Fellow となり、コアチームとともにプロダクトを形づくり、より多くの人がデザインの未来を定義することに参加できるよう手助けしてください。詳細 → [`MAINTAINERS.md`](../../MAINTAINERS.md) と [Discord](https://discord.gg/mHAjSMV6gz)。
 
 <p align="center">
-  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
+  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="QUICKSTART.ja-JP.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## Open Design とは
 
-🎨 **ローカルファーストでソースアベイラブルな Claude Design 代替ツール。** &nbsp;🖥️ **macOS と Windows 向けのネイティブデスクトップアプリ。** &nbsp;⚡ **100 種類以上の機能スキル + 独立したレンダリングテンプレートカタログ** · ✨ **151 のデザインシステムパッケージ** · 📦 **277 のすぐ使えるプラグイン。** &nbsp;🖼️ **ウェブ · デスクトップ · モバイルのプロトタイプ**、**ライブダッシュボード／アーティファクト**、**スライド**、**画像**、**動画**、さらに **HyperFrames** のモーショングラフィックスを生成。🔒 サンドボックス化された iframe プレビュー · HTML / PDF / PPTX / MP4 エクスポート。&nbsp;🤖 **25 種類のローカル CLI 実行ファイル上で動作**、もしくは BYOK 経由で任意の OpenAI 互換エンドポイント上でも動作します。
+🎨 **ローカルファーストでオープンソースの Claude Design 代替ツール。** &nbsp;🖥️ **macOS と Windows 向けのネイティブデスクトップアプリ。** &nbsp;⚡ **100 種類以上の機能スキル + 独立したレンダリングテンプレートカタログ** · ✨ **151 のデザインシステムパッケージ** · 📦 **277 のすぐ使えるプラグイン。** &nbsp;🖼️ **ウェブ · デスクトップ · モバイルのプロトタイプ**、**ライブダッシュボード／アーティファクト**、**スライド**、**画像**、**動画**、さらに **HyperFrames** のモーショングラフィックスを生成。🔒 サンドボックス化された iframe プレビュー · HTML / PDF / PPTX / MP4 エクスポート。&nbsp;🤖 **25 種類のローカル CLI 実行ファイル上で動作**、もしくは BYOK 経由で任意の OpenAI 互換エンドポイント上でも動作します。
 
 Open Design は、そのループをエージェントが読み書きできる **機能スキル・レンダリングデザインテンプレート・デザインシステム・プラグインのファイルシステム** にします。
 
@@ -49,6 +49,7 @@ Open Design が何であり、何ができるのかを手早く見ていきま�
 <table>
 <tr>
 <td valign="top">
+<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Home page" /><br/>
 <sub><b>Home</b> — 概観のエントリーポイント。スキルとデザインシステムを選び、ブリーフを入力して、すべてを一か所から始められます。</sub>
 </td>
 </tr>
@@ -260,7 +261,7 @@ Runtime 定義は [`apps/daemon/src/runtimes/defs/`](../../apps/daemon/src/runti
 
 > **2026 年 4 月、Anthropic は Claude Design をリリースしました——LLM が散文を書くのをやめ、デザインアーティファクトを直接納品し始めた初めての出来事でした。** これは一気に広まりました。しかし、それはクローズドソースのまま、有料のみ、クラウドのみで、Anthropic のモデル、Anthropic のスキル、Anthropic のサーフェスに縛られていました。チェックアウトもなく、セルフホストもなく、Vercel デプロイもなく、自前のエージェントへの差し替えもできません。
 
-Open Design (OD) はそのソースアベイラブルな代替ツールです。同じループ、同じアーティファクトファーストのメンタルモデル、ロックインは一切なし:
+Open Design (OD) はそのオープンソースの代替ツールです。同じループ、同じアーティファクトファーストのメンタルモデル、ロックインは一切なし:
 
 - 🤖 **エージェントネイティブ、モデル非依存。** 私たちはエージェントを同梱しません。すでにあなたの `PATH` にある `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` がデザインエンジンです。ワンクリックで差し替えられます。
 - 🧠 **デフォルトでブランドグレード。** すべてのレンダリングは、アクティブなパッケージの `DESIGN.md` を中核のブランド契約として読み取ります。151 のデザインシステムパッケージが同梱され、従来のパッケージは `DESIGN.md` だけでも、新しいパッケージは `manifest.json`、`tokens.css`、コンポーネント、アセット、出典情報を追加できます。フォルダをドロップすればピッカーが見つけます。
@@ -273,8 +274,8 @@ Open Design (OD) はそのソースアベイラブルな代替ツールです。
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| ソースアベイラブル | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
-| メンバー 1 人のワークスペースを無制限にセルフホスト／デスクトップ | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| オープンソース | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
+| セルフホスト／デスクトップ | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | エージェントネイティブ（あなたの CLI で動作） | Anthropic のみ | ❌ | クラウドエージェントのみ | **✅ 25 CLI + BYOK** |
 | ブランドグレードの `DESIGN.md` | プロプライエタリ | テーマ JSON | 限定的なトークン | **✅ 151 システム同梱** |
 | スキル／プラグイン／テンプレート | クローズド | プラグインストア | クローズド | **✅ 100 種類以上の機能スキル · 独立したレンダリングテンプレートカタログ · 277 プラグイン** |
@@ -717,7 +718,7 @@ gh pr create --fill
 
 | プロジェクト | 役割 |
 |---|---|
-| Claude Design | このリポジトリがソースアベイラブルな代替ツールとなっている、クローズドソースのプロダクト。 |
+| Claude Design | このリポジトリがオープンソースの代替ツールとなっている、クローズドソースのプロダクト。 |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | デザイン哲学の羅針盤——ジュニアデザイナーのワークフロー、ブランドアセットのプロトコル、アンチ AI スロップのチェックリスト、5 次元の批評。 |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | 雑誌風のウェブ PPT スキルで、[`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) の下にそのままバンドルされています。deck モードのデフォルト。 |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | HTML PPT Studio ファミリー——15 のスライドテンプレート、36 のテーマ、31 のページレイアウト、アニメーションランタイム、マグネティックカードのプレゼンターモード。 |
@@ -734,4 +735,4 @@ gh pr create --fill
 
 ## ライセンス
 
-[Open Design Community License 1.0](../../LICENSE)。Apache 2.0 を基礎とし、外部向けホスティングとフロントエンドのブランド表示に追加条件を設けた、独自のソースアベイラブルライセンスです。第三者が無関係な外部顧客のために Open Design を継続的に運用または管理する場合は、顧客が 1 者だけであっても別途の商用許可が必要です。独自の `LICENSE` を持つ同梱コンポーネントは、それぞれのライセンスを維持します。これには `design-templates/guizang-ppt/`（MIT、[@op7418](https://github.com/op7418)）と `design-templates/html-ppt/`（MIT、[@lewislulu](https://github.com/lewislulu)）が含まれます。
+Apache-2.0。同梱の `design-templates/guizang-ppt/` は元の [LICENSE](../../design-templates/guizang-ppt/LICENSE)（MIT、[@op7418](https://github.com/op7418)）を保持しています。同梱の `design-templates/html-ppt/` は元の [LICENSE](../../design-templates/html-ppt/LICENSE)（MIT、[@lewislulu](https://github.com/lewislulu)）を保持しています。

@@ -1,4 +1,4 @@
-<h1 align="center">Open Design：原始碼可用的 Claude Design 替代方案</h1>
+<h1 align="center">Open Design：開源的 Claude Design 替代方案</h1>
 
 > 🔥 **Open Design 0.13.0 —— _Stay in Flow_ 正式發布。** 過去，長時間的設計工作階段總在每一次中斷時斷裂——執行遺失了進度，模型選擇器讓你只能用猜的，匯出還得多繞一道彎。0.13.0 讓工作階段持續存活：跨回合恢復 Codex / OpenCode / Pi / Open Design Cloud 的執行，更快選中合適的模型，並在不離開應用程式的情況下交付有截圖佐證的 PPTX / PDF。[下載 0.13.0](https://github.com/nexu-io/open-design/releases) · [發行說明](https://github.com/nexu-io/open-design/releases/tag/open-design-v0.13.0)
 >
@@ -7,7 +7,7 @@
 > 🏅 **Open Design Fellow 計畫現已開放。** 如果你也相信設計應該是開放的——歡迎成為 Open Design Fellow，與核心團隊一同形塑這項產品，並協助更多人參與定義設計的未來。詳情請見 → [`MAINTAINERS.md`](../../MAINTAINERS.md) 與 [Discord](https://discord.gg/mHAjSMV6gz)。
 
 <p align="center">
-  <img src="../../apps/web/public/logo-03.svg" alt="Open Design" width="46%" />
+  <img src="https://repo-assets.open-design.ai/resources/images/hero.png" alt="Open Design hero banner" width="100%" />
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/nexu-io/open-design/releases"><img alt="release" src="https://img.shields.io/github/v/release/nexu-io/open-design?style=flat&color=blueviolet&label=release&include_prereleases&display_name=tag" /></a>
-  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Open%20Design%20Community%201.0-blue.svg?style=flat" /></a>
+  <a href="../../LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat" /></a>
   <a href="https://discord.gg/mHAjSMV6gz"><img alt="discord" src="https://img.shields.io/discord/1479002485040480266?style=flat&logo=discord&logoColor=white&label=discord&color=5865F2&cacheSeconds=3600" /></a>
   <a href="QUICKSTART.zh-TW.md"><img alt="quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-green?style=flat" /></a>
 </p>
@@ -31,7 +31,7 @@
 
 ## 什麼是 Open Design
 
-🎨 **本地優先、原始碼可用的 Claude Design 替代方案。** &nbsp;🖥️ **macOS 與 Windows 的原生桌面應用程式。** &nbsp;⚡ **100+ 個功能 skills + 獨立渲染範本型錄** · ✨ **151 套品牌級設計系統套件** · 📦 **277 個開箱即用的外掛。** &nbsp;🖼️ 可生成 **網頁 · 桌面 · 行動裝置原型**、**即時儀表板／artifacts**、**簡報**、**圖片**、**影片**，外加 **HyperFrames** 動態圖像。🔒 沙箱化 iframe 預覽 · 支援 HTML / PDF / PPTX / MP4 匯出。 &nbsp;🤖 **可在 Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity 等 25 個不同的本地 CLI 可執行檔上執行**，或透過 BYOK 接上任何相容 OpenAI 的端點。
+🎨 **本地優先、開源的 Claude Design 替代方案。** &nbsp;🖥️ **macOS 與 Windows 的原生桌面應用程式。** &nbsp;⚡ **100+ 個功能 skills + 獨立渲染範本型錄** · ✨ **151 套品牌級設計系統套件** · 📦 **277 個開箱即用的外掛。** &nbsp;🖼️ 可生成 **網頁 · 桌面 · 行動裝置原型**、**即時儀表板／artifacts**、**簡報**、**圖片**、**影片**，外加 **HyperFrames** 動態圖像。🔒 沙箱化 iframe 預覽 · 支援 HTML / PDF / PPTX / MP4 匯出。 &nbsp;🤖 **可在 Claude Code · OpenClaw · Codex · Cursor · OpenCode · Qwen · Copilot · Hermes · Kimi · Antigravity 等 25 個不同的本地 CLI 可執行檔上執行**，或透過 BYOK 接上任何相容 OpenAI 的端點。
 
 Open Design 是這樣誕生的：當 Anthropic 隨 Claude Design 推出的那套 **agent 原生** 迴圈——釐清需求、鎖定方向、串流產出 artifact、評析、交付——不再封閉，而是化為一個由 **功能 skills、渲染設計範本、設計系統與外掛組成的檔案系統**，讓你筆電上既有的編碼 agent 都能讀取、寫入、再混搭。你的 CLI 成為設計引擎，你的筆電成為工作室，而你團隊的 `DESIGN.md` 則成為品牌契約。
 
@@ -49,6 +49,7 @@ Open Design 是這樣誕生的：當 Anthropic 隨 Claude Design 推出的那套
 <table>
 <tr>
 <td valign="top">
+<img src="https://repo-assets.open-design.ai/resources/images/product/home.png" alt="Home page" /><br/>
 <sub><b>首頁</b>——總覽入口。選一個 skill 與一套設計系統，輸入需求，從一處啟動一切。</sub>
 </td>
 </tr>
@@ -260,7 +261,7 @@ Runtime 定義位於 [`apps/daemon/src/runtimes/defs/`](../../apps/daemon/src/ru
 
 > **2026 年 4 月，Anthropic 發表了 Claude Design——這是 LLM 首次不再撰寫散文，而是直接交付設計 artifact。** 它爆紅。但它始終封閉原始碼、僅限付費、僅限雲端，並被綁死在 Anthropic 的模型、Anthropic 的 skills、Anthropic 的介面上。無法結帳、無法自架、無法部署到 Vercel、無法換上你自己的 agent。
 
-Open Design（OD）就是那個原始碼可用的替代方案。同樣的迴圈、同樣以 artifact 為先的思維模式，卻沒有任何鎖定：
+Open Design（OD）就是那個開源的替代方案。同樣的迴圈、同樣以 artifact 為先的思維模式，卻沒有任何鎖定：
 
 - 🤖 **agent 原生、模型無關。** 我們不附帶 agent。你 `PATH` 上既有的 `claude` / `codex` / `cursor-agent` / `copilot` / `hermes` / `kimi` 就是設計引擎。一鍵即可切換。
 - 🧠 **預設即品牌級。** 每次渲染都把目前套件的 `DESIGN.md` 當作核心品牌契約讀取。儲存庫隨附 151 套設計系統套件；舊套件可以只含 `DESIGN.md`，新套件還可加入 `manifest.json`、`tokens.css`、元件、資產與來源資訊。放進資料夾，選擇器就會找到它。
@@ -273,8 +274,8 @@ Open Design（OD）就是那個原始碼可用的替代方案。同樣的迴圈�
 
 | | Claude Design | Figma | Lovable / v0 / Bolt | **Open Design** |
 |---|---|---|---|---|
-| 原始碼可用 | ❌ | ❌ | ❌ | **✅ Open Design Community License 1.0** |
-| 不限數量的單一成員 Workspace 自架／桌面 | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
+| 開源 | ❌ | ❌ | ❌ | **✅ Apache-2.0** |
+| 自架／桌面 | ❌ | ❌ | ❌ | **✅ macOS + Windows + Docker** |
 | agent 原生（在你的 CLI 中執行） | 僅限 Anthropic | ❌ | 僅限雲端 agent | **✅ 25 個 CLI + BYOK** |
 | 品牌級 `DESIGN.md` | 專有 | Theme JSON | 有限的 token | **✅ 隨附 151 套系統** |
 | skills／外掛／範本 | 封閉 | 外掛商店 | 封閉 | **✅ 100+ 個功能 skills · 獨立渲染範本型錄 · 277 個外掛** |
@@ -729,7 +730,7 @@ gh pr create --fill
 
 | 專案 | 角色 |
 |---|---|
-| Claude Design | 本儲存庫作為原始碼可用替代方案所對應的那個閉源產品。 |
+| Claude Design | 本儲存庫作為開源替代方案所對應的那個閉源產品。 |
 | [`alchaincyf/huashu-design`](https://github.com/alchaincyf/huashu-design) | 設計哲學的指南針——junior 設計師工作流程、品牌素材協定、反 AI-slop 檢查清單、五維評析。 |
 | [`op7418/guizang-ppt-skill`](https://github.com/op7418/guizang-ppt-skill) | 雜誌風格網頁 PPT skill，原封不動地內建於 [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) 之下。為簡報模式的預設。 |
 | [`lewislulu/html-ppt-skill`](https://github.com/lewislulu/html-ppt-skill) | HTML PPT Studio 家族——15 套簡報範本、36 種主題、31 種頁面版面、動畫執行期、磁吸卡片簡報模式。 |
@@ -746,4 +747,4 @@ gh pr create --fill
 
 ## 授權
 
-[Open Design Community License 1.0](../../LICENSE)。這是以 Apache 2.0 為基礎、加入對外託管與前端品牌條件的自訂原始碼可用授權。第三方為任何無關聯的外部客戶持續營運或管理 Open Design，都必須另行取得商業授權，即使只有一個客戶。具有獨立 `LICENSE` 的內建元件繼續適用各自授權，包括 `design-templates/guizang-ppt/`（MIT，[@op7418](https://github.com/op7418)）與 `design-templates/html-ppt/`（MIT，[@lewislulu](https://github.com/lewislulu)）。
+Apache-2.0。內建的 `design-templates/guizang-ppt/` 保留其原始 [LICENSE](../../design-templates/guizang-ppt/LICENSE)（MIT，[@op7418](https://github.com/op7418)）。內建的 `design-templates/html-ppt/` 保留其原始 [LICENSE](../../design-templates/html-ppt/LICENSE)（MIT，[@lewislulu](https://github.com/lewislulu)）。

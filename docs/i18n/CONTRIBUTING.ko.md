@@ -260,7 +260,7 @@ node --experimental-strip-types scripts/sync-litellm-models.ts
 - **리뷰 중에는 squash하지 마세요.** fixup 커밋을 푸시하면 머지할 때 우리가 squash합니다.
 - **공유 브랜치에 force-push하지 마세요.** 리뷰어가 요청한 경우는 예외입니다.
 
-현재 별도로 서명하는 CLA는 요구하지 않습니다. 루트 라이선스가 적용되는 파일에 대한 기여는 pull request 템플릿의 `contribution-license` 체크박스를 선택하여 [Open Design Community License 1.0 추가 조건 2](../../LICENSE)에 명시적으로 동의한 경우에만 허용됩니다. Maintainer는 이 체크박스가 선택되지 않은 pull request를 merge해서는 안 됩니다. 라이선스 변경 당시 이미 열려 있던 pull request는 새로 확인해야 합니다. 자체 `LICENSE` 파일이 있는 구성 요소에는 해당 구성 요소의 기여 정책이 계속 적용됩니다.
+CLA는 요구하지 않습니다. Apache-2.0으로 충분하며, 당신의 기여도 같은 라이선스를 따릅니다.
 
 ---
 
@@ -317,7 +317,7 @@ node --experimental-strip-types scripts/sync-litellm-models.ts
 
 ## 라이선스
 
-pull request 템플릿의 `contribution-license` 체크박스를 선택하면 대상 구성 요소에 자체 `LICENSE` 파일이 없는 한 [Open Design Community License 1.0](../../LICENSE)의 추가 조건 2를 포함한 조건에 따라 기여를 제출하는 데 동의하는 것입니다. 또한 해당 조건으로 기여를 제출할 권리가 있음을 진술합니다. 알려진 MIT 라이선스 예외에는 [op7418](https://github.com/op7418)에 대한 저작자 표기를 유지하는 [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/)와 [Jane Xiaoer](https://github.com/Jane-xiaoer)에 대한 저작자 표기를 유지하는 [`skills/web-clone/`](../../skills/web-clone/)이 있습니다.
+기여하면, 당신의 기여가 이 저장소의 [Apache-2.0 License](../../LICENSE)를 따른다는 데 동의하는 것입니다. 단 [`design-templates/guizang-ppt/`](../../design-templates/guizang-ppt/) 안의 파일은 예외로, 원래의 MIT 라이선스와 [op7418](https://github.com/op7418)에 대한 저작자 표기를 그대로 유지합니다.
 
 [skill]: https://docs.anthropic.com/en/docs/claude-code/skills
 [guizang]: https://github.com/op7418/guizang-ppt-skill

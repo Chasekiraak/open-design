@@ -8,7 +8,6 @@ import { ToolPackCache } from "../src/cache.js";
 import type { ToolPackConfig } from "../src/config.js";
 import { prepareResourceTree } from "../src/win/resources.js";
 import type { WinPaths } from "../src/win/types.js";
-import { createBundledRootFileFixture } from "./resource-fixtures.js";
 
 const RESOURCE_TREE_CACHE_TEST_TIMEOUT_MS = 15_000;
 
@@ -24,7 +23,6 @@ async function writeFakeOpenCodeCompanion(
 }
 
 async function createWorkspaceFixture(workspaceRoot: string): Promise<void> {
-  await createBundledRootFileFixture(workspaceRoot);
   await mkdir(join(workspaceRoot, "skills", "sample"), { recursive: true });
   await mkdir(join(workspaceRoot, "design-templates", "orbit-general"), {
     recursive: true,

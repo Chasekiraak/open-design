@@ -45,7 +45,7 @@ Clip pages, design systems, screenshots, images, and Figma import JSON into your
 
 ### Detailed description (max 16,000)
 ```
-Open Design Web Clipper saves anything you find on the web straight into your Open Design Library — the local asset registry of the source-available Open Design app. One click, no account, no pairing, no tokens.
+Open Design Web Clipper saves anything you find on the web straight into your Open Design Library — the local asset registry of the open-source Open Design app. One click, no account, no pairing, no tokens.
 
 Built for designers, researchers, and builders who collect references all day: drop a full page, a design-system capture, a screenshot, a set of images, or an editable Figma import JSON into your Library and keep working.
 
@@ -86,13 +86,13 @@ Built for designers, researchers, and builders who collect references all day: d
 
 ━━ HOW TO USE ━━
 
-1. Install the source-available Open Design app — https://open-design.ai
+1. Install the open-source Open Design app — https://open-design.ai
 2. Start it so the local daemon is running.
 3. Click the Open Design Web Clipper toolbar icon and capture. That's it.
 
-Open Design is the local-first, source-available alternative to Claude Design and a Figma alternative for the agent era. The Web Clipper is how the web gets into it.
+Open Design is the local-first, open-source alternative to Claude Design and a Figma alternative for the agent era. The Web Clipper is how the web gets into it.
 
-Source available under the Open Design Community License 1.0: https://github.com/nexu-io/open-design
+Open source: https://github.com/nexu-io/open-design
 ```
 
 ### Category
