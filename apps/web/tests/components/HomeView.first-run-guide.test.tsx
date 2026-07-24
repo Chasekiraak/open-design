@@ -59,14 +59,11 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-// #5517 removed the inline template rail from Home, so beat 1 of the guide no
-// longer has a chip card to sheen; the stage still arms on mount and advances
-// when a template is picked from the composer footer's radial picker.
+// The guide arms on mount and advances when the user picks a product card.
 async function pickHomeTemplate(id: string) {
-  const trigger = await screen.findByTestId('home-hero-template-trigger');
-  await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(trigger);
-  fireEvent.click(await screen.findByTestId(`home-hero-template-wedge-${id}`));
+  const card = await screen.findByTestId(`home-hero-rail-${id}`) as HTMLButtonElement;
+  await waitFor(() => expect(card.disabled).toBe(false));
+  fireEvent.click(card);
 }
 
 describe('Home first-run guide trail', () => {

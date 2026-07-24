@@ -112,13 +112,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// #5517 removed the inline template rail from Home; scenario templates are
-// picked from the composer footer's radial Template picker instead.
+// Product types stay visible below the Home composer.
 async function pickHomeTemplate(id: string) {
-  const trigger = await screen.findByTestId('home-hero-template-trigger');
-  await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(trigger);
-  fireEvent.click(await screen.findByTestId(`home-hero-template-wedge-${id}`));
+  const card = await screen.findByTestId(`home-hero-rail-${id}`) as HTMLButtonElement;
+  await waitFor(() => expect(card.disabled).toBe(false));
+  fireEvent.click(card);
+  await waitFor(() => expect(card).toHaveClass('is-active'));
 }
 
 describe('HomeView context picker', () => {
@@ -346,7 +345,7 @@ describe('HomeView context picker', () => {
 
     await pickHomeTemplate('prototype');
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('UI Mockup');
+      expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
     });
 
     screen.getByTestId('home-hero-input');
@@ -356,10 +355,7 @@ describe('HomeView context picker', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('home-hero-active-skill')).toBeTruthy();
-      // Round-4 skin: the cleared template pill shows the gray creation-type
-      // kicker instead of a "None" placeholder label.
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Creation type');
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('Slide deck');
+      expect(screen.getByTestId('home-hero-rail-prototype')).not.toHaveClass('is-active');
     });
 
     fireEvent.click(screen.getByTestId('home-hero-submit'));
@@ -429,7 +425,7 @@ describe('HomeView context picker', () => {
 
     await pickHomeTemplate('prototype');
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('UI Mockup');
+      expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
       expect(screen.queryByTestId('home-hero-active-skill')).toBeNull();
     });
 

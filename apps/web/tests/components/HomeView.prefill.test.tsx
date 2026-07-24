@@ -830,7 +830,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('prototype');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+      expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
     });
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-web-prototype/apply')
@@ -928,7 +928,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('document');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Document');
+      expect(screen.getByTestId('home-hero-rail-document')).toHaveClass('is-active');
     });
     await setPromptAndSettle('Write a crisp launch memo for the new analytics product.');
     const submit = screen.getByTestId('home-hero-submit') as HTMLButtonElement;
@@ -996,7 +996,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('prototype');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+      expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
     });
     // Round-4 skin: the unset trigger reads "Design system" (the field name)
     // instead of the "No design system" placeholder.
@@ -1133,7 +1133,7 @@ describe('HomeView prompt handoff', () => {
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-web-prototype/apply')
     ))).toBe(false);
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+    expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
     // The design-system picker is now the persistent control below the composer.
     expect(
       screen.getByTestId('home-hero-design-system-trigger').textContent,
@@ -1242,7 +1242,7 @@ describe('HomeView prompt handoff', () => {
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/apply')
     ))).toBe(false);
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Live artifact');
+    expect(screen.getByTestId('home-hero-rail-live-artifact')).toHaveClass('is-active');
     expect(screen.queryByTestId('plugin-inputs-form')).toBeNull();
 
     fireEvent.click(screen.getByTestId('home-hero-submit'));
@@ -1301,7 +1301,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('live-artifact');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Live artifact');
+      expect(screen.getByTestId('home-hero-rail-live-artifact')).toHaveClass('is-active');
     });
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-live-artifact/apply')
@@ -1371,7 +1371,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('deck');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Slide deck');
+      expect(screen.getByTestId('home-hero-rail-deck')).toHaveClass('is-active');
     });
     expect(screen.queryByTestId('home-hero-footer-option-speakerNotes')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-slideCount')).toBeNull();
@@ -1425,7 +1425,7 @@ describe('HomeView prompt handoff', () => {
     await pickHomeTemplate('prototype');
 
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Prototype');
+      expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-active');
     });
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-web-prototype/apply')
@@ -1473,7 +1473,7 @@ describe('HomeView prompt handoff', () => {
     await clearActiveTypeChip();
     await pickHomeTemplate('deck');
     await waitFor(() => {
-      expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Slide deck');
+      expect(screen.getByTestId('home-hero-rail-deck')).toHaveClass('is-active');
     });
     expect(screen.getByTestId('home-hero-plugin-presets')).toBeTruthy();
     expect(screen.getByTestId('home-hero-plugin-presets').textContent).toContain('Simple Deck');
@@ -2029,29 +2029,18 @@ async function setPromptAndSettle(value: string): Promise<void> {
 }
 
 async function clearActiveTypeChip() {
-  // Reset the Template selection back to "None" via the radial's center Clear
-  // (#5517 replaced the dropdown Clear with the radial menu's center button).
-  const trigger = screen.queryByTestId('home-hero-template-trigger');
-  if (!trigger) return;
-  fireEvent.click(trigger);
-  const clear = screen.queryByTestId('home-hero-template-radial-clear');
-  if (clear) fireEvent.click(clear);
-  fireEvent.keyDown(document, { key: 'Escape' });
+  const activeCard = document.querySelector<HTMLButtonElement>(
+    '[data-testid^="home-hero-rail-"][aria-selected="true"]',
+  );
+  if (activeCard) fireEvent.click(activeCard);
 }
 
-// #5517 removed the inline template rail (and the "Start with a template…"
-// bar that held it) from Home. Scenario templates are now picked from the
-// composer footer's radial Template picker.
+// Product types remain visible under the composer, including after a choice.
 async function pickHomeTemplate(id: string) {
-  const trigger = await screen.findByTestId('home-hero-template-trigger');
-  await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(trigger);
-  const wedge = await screen.findByTestId(`home-hero-template-wedge-${id}`);
-  await waitFor(() =>
-    expect(screen.getByTestId(`home-hero-template-wedge-${id}`).getAttribute('aria-disabled'))
-      .not.toBe('true'),
-  );
-  fireEvent.click(wedge);
+  const card = await screen.findByTestId(`home-hero-rail-${id}`) as HTMLButtonElement;
+  await waitFor(() => expect(card.disabled).toBe(false));
+  fireEvent.click(card);
+  await waitFor(() => expect(card).toHaveClass('is-active'));
 }
 
 // The migrate shortcuts (plugin authoring / Figma / template) left the Home

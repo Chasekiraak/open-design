@@ -112,16 +112,7 @@ const NEUTRAL_MODERN: DesignSystemSummary = {
   status: 'published',
 };
 
-// First-time Home renders the catalog inline. Returning users use the exact
-// same cards after expanding the composer footer trigger.
-function openTemplateGrid() {
-  if (!screen.queryByTestId('home-hero-type-tabs')) {
-    fireEvent.click(screen.getByTestId('home-hero-template-trigger'));
-  }
-}
-
 function pickTemplate(chipId: string) {
-  openTemplateGrid();
   fireEvent.click(screen.getByTestId(`home-hero-rail-${chipId}`));
 }
 
@@ -213,7 +204,7 @@ describe('HomeHero intent rail', () => {
   it('offers every scenario template as a readable first-time card', () => {
     renderHero();
     expect(screen.queryByTestId('home-hero-template-trigger')).toBeNull();
-    expect(screen.getByTestId('home-hero-template-entry-hint').textContent).toContain('Creation type');
+    expect(screen.getByTestId('home-hero-template-section')).toBeTruthy();
     for (const chip of HOME_HERO_CHIPS) {
       const card = screen.queryByTestId(`home-hero-rail-${chip.id}`);
       if (chip.group === 'create' && chip.action.kind === 'apply-scenario') {
@@ -238,12 +229,10 @@ describe('HomeHero intent rail', () => {
     expect(ids).toContain('deck');
   });
 
-  it('keeps returning Home compact, then expands into the same readable catalog', () => {
+  it('keeps product types visible below the composer for returning Home', () => {
     window.localStorage.setItem('open-design:home-template-recommendation:v1', '1');
     renderHero();
 
-    expect(screen.queryByTestId('home-hero-template-section')).toBeNull();
-    fireEvent.click(screen.getByTestId('home-hero-template-trigger'));
     expect(screen.getByTestId('home-hero-template-section')).toBeTruthy();
     expect(screen.getByTestId('home-hero-rail-prototype').textContent).toContain('UI Mockup');
   });
@@ -258,8 +247,6 @@ describe('HomeHero intent rail', () => {
   it('surfaces a first-run recommendation on its matching template cards', () => {
     renderHero({ onboardingRole: 'designer' });
 
-    const picker = screen.getByTestId('home-hero-template-picker');
-    expect(picker).toHaveClass('is-inline-catalog');
     expect(screen.queryByTestId('home-hero-template-trigger')).toBeNull();
 
     expect(screen.getByTestId('home-hero-rail-prototype')).toHaveClass('is-recommended');
@@ -287,12 +274,10 @@ describe('HomeHero intent rail', () => {
     expect(onPickChip).toHaveBeenCalledWith(findChip('image'));
   });
 
-  it('moves the active creation chip into the composer and hides the tab row', () => {
+  it('keeps product types below the composer and marks the active card', () => {
     renderHero({ activeChipId: 'video' });
-    expect(screen.queryByTestId('home-hero-type-tabs')).toBeNull();
-    expect(screen.queryByTestId('home-hero-rail-video')).toBeNull();
-    const node = screen.getByTestId('home-hero-template-trigger');
-    expect(node.textContent).toContain('Video');
+    expect(screen.getByTestId('home-hero-type-tabs')).toBeTruthy();
+    expect(screen.getByTestId('home-hero-rail-video')).toHaveClass('is-active');
   });
 
   it('does not reserve an empty active-context row for a hidden chip-bound plugin', () => {
@@ -304,19 +289,16 @@ describe('HomeHero intent rail', () => {
     });
 
     expect(document.querySelector('.home-hero__active')).toBeNull();
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Wireframe');
+    expect(screen.getByTestId('home-hero-rail-wireframe')).toHaveClass('is-active');
   });
 
-  it('lets the active creation chip be removed from the composer', () => {
+  it('lets the active creation chip be removed from its selected card', () => {
     const { onClearActiveChip } = renderHero({ activeChipId: 'prototype' });
-    fireEvent.click(screen.getByTestId('home-hero-template-reset'));
+    fireEvent.click(screen.getByTestId('home-hero-rail-prototype'));
     expect(onClearActiveChip).toHaveBeenCalledTimes(1);
   });
 
-  it('tracks the committed template on the footer pill and resets it on clear', () => {
-    // The pill mirrors the committed chip: it must pick the label up when a
-    // template becomes active and fall back to the empty "Template" kicker the
-    // moment the chip is cleared (issue: the pill stayed "Slide deck").
+  it('marks only the committed product type as active', () => {
     const baseProps = {
       prompt: '',
       onPromptChange: () => undefined,
@@ -337,18 +319,15 @@ describe('HomeHero intent rail', () => {
     } as React.ComponentProps<typeof HomeHero>;
 
     const { rerender } = render(<HomeHero {...baseProps} activeChipId={null} />);
-    expect(screen.getByTestId('home-hero-template-entry-hint').textContent).toContain('Creation type');
+    expect(screen.getByTestId('home-hero-rail-deck')).not.toHaveClass('is-active');
 
-    // Picking a template commits the chip through the host.
+    // Picking a type keeps the cards in place and marks the committed card.
     rerender(<HomeHero {...baseProps} activeChipId="deck" />);
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).toContain('Slide deck');
+    expect(screen.getByTestId('home-hero-rail-deck')).toHaveClass('is-active');
 
-    // Clear nulls the active chip — the pill must fall back to the empty
-    // first-run state, where the inline card catalog remains the only picker.
+    // Clearing drops the active treatment without hiding the product types.
     rerender(<HomeHero {...baseProps} activeChipId={null} />);
-    const hint = screen.getByTestId('home-hero-template-entry-hint');
-    expect(hint.textContent).toContain('Creation type');
-    expect(hint.textContent).not.toContain('Slide deck');
+    expect(screen.getByTestId('home-hero-rail-deck')).not.toHaveClass('is-active');
   });
 
   it('uses the active creation chip as the only clear control for a chip-bound plugin', () => {
@@ -361,7 +340,7 @@ describe('HomeHero intent rail', () => {
     });
 
     expect(screen.getByTestId('home-hero-active-plugin')).toBeTruthy();
-    expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None');
+    expect(screen.getByTestId('home-hero-rail-image')).toHaveClass('is-active');
     expect(screen.queryByLabelText('Clear active plugin')).toBeNull();
   });
 
@@ -586,7 +565,6 @@ describe('HomeHero intent rail', () => {
       pendingPluginId: 'od-figma-migration',
       pendingChipId: 'figma',
     });
-    openTemplateGrid();
     const scenarioChips = HOME_HERO_CHIPS.filter(
       (item) => item.group === 'create' && item.action.kind === 'apply-scenario',
     );

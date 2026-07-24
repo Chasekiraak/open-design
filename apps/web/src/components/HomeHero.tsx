@@ -95,7 +95,6 @@ import { ComposerPlusMenu, PLUS_SUBMENU_RESOURCE_KIND } from './ComposerPlusMenu
 import { ContextChipHoverCard } from './ContextChipHoverCard';
 import { workspaceContextDetailLine, workspaceContextKindLabel } from './workspace-context';
 import { FigmaHelpModal } from './FigmaHelpModal';
-import { TemplatePicker } from './home-hero/TemplatePicker';
 import { LibraryPicker } from './LibraryPicker';
 import { ComposerModePicker } from './ComposerModePicker';
 import { assetTitle } from './LibraryAssetMeta';
@@ -450,14 +449,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [showTemplateRecommendation, setShowTemplateRecommendation] = useState(
     () => !hasSeenHomeTemplateRecommendation(),
   );
-  // The initial visit exposes readable, illustrated output cards. Returning
-  // users keep the same catalog behind the composer trigger so Home remains
-  // compact without introducing a different selection model.
-  const [templateGridOpen, setTemplateGridOpen] = useState(
-    () => !activeChipId && !hasSeenHomeTemplateRecommendation(),
-  );
   const homeHeroRef = useRef<HTMLElement | null>(null);
-  const templatePickerRef = useRef<HTMLDivElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
   const [sendAttention, setSendAttention] = useState(false);
@@ -551,7 +543,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const dismissTemplateRecommendation = useCallback(() => {
     if (!showTemplateRecommendation) return;
     setShowTemplateRecommendation(false);
-    setTemplateGridOpen(false);
     markHomeTemplateRecommendationSeen();
   }, [showTemplateRecommendation]);
 
@@ -562,7 +553,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   useEffect(() => {
     if (demoStateKey === null) return;
     setShowTemplateRecommendation(true);
-    setTemplateGridOpen(true);
   }, [demoStateKey]);
 
   useEffect(() => {
@@ -613,12 +603,11 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       void onPickWorkingDir?.();
       return;
     }
-    setTemplateGridOpen(true);
-    const trigger = templatePickerRef.current?.querySelector<HTMLButtonElement>(
-      '[data-testid="home-hero-template-trigger"]',
+    const templateSection = homeHeroRef.current?.querySelector<HTMLElement>(
+      '[data-testid="home-hero-template-section"]',
     );
-    templatePickerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    trigger?.focus();
+    templateSection?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    templateSection?.querySelector<HTMLButtonElement>('[data-chip-id]')?.focus();
   }
   const mentionActive = Boolean(mentionTrigger);
   const mentionQuery = mentionTrigger?.query ?? '';
@@ -1407,8 +1396,14 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // The task-type rail (原型 / 幻灯片 / HyperFrames / 视频 / …). Records which
   // task type the user picked before delegating to the host's chip handler.
   function handlePickTaskChip(chip: HomeHeroChip) {
+    // The cards are the only visible type control now. Clicking the active
+    // card again returns Home to its neutral, no-type state.
+    if (chip.id === activeChipId) {
+      setPreviewTemplateId(null);
+      onClearActiveChip();
+      return;
+    }
     dismissTemplateRecommendation();
-    setTemplateGridOpen(false);
     onCreateIntent();
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
@@ -2228,32 +2223,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             {figmaHelpOpen ? (
               <FigmaHelpModal onClose={() => setFigmaHelpOpen(false)} />
             ) : null}
-            <div ref={templatePickerRef}>
-              <TemplatePicker
-                templates={templateChips}
-                activeChipId={activeChipId}
-                previewChipId={previewTemplateId}
-                disabled={pluginsLoading}
-                pickDisabled={pluginsLoading || pendingChipId !== null || pendingPluginId !== null}
-                recommendedChipId={showTemplateRecommendation ? templateRecommendation.primaryChipId : null}
-                secondaryRecommendedChipId={showTemplateRecommendation ? templateRecommendation.secondaryChipId : null}
-                staticEntry={templateGridOpen && !activeChipId}
-                open={templateGridOpen}
-                onOpenChange={(open) => {
-                  setTemplateGridOpen(open);
-                }}
-                labelFor={(id) => homeHeroChipLabel(id, t)}
-                descriptionFor={(id) => homeHeroChipDescription(id, t)}
-                onPick={handlePickTaskChip}
-                onClear={() => {
-                  // Drop any lingering hover-preview too: when the rail card was
-                  // hovered but the active chip is still null, clearing the chip
-                  // alone is a no-op and the pill would stay on the preview.
-                  setPreviewTemplateId(null);
-                  onClearActiveChip();
-                }}
-              />
-            </div>
             {footerInputFields.length > 0 ? (
               <div className="home-hero__footer-options" data-testid="home-hero-footer-options">
                 {footerInputFields.map((field) => (
@@ -2398,35 +2367,33 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
       {recommendationSlot}
 
-      {!templateGridOpen ? null : (
-        <section
-          className="home-hero__template-section is-expanded"
-          data-testid="home-hero-template-section"
-        >
-          {showTemplateRecommendation ? (
-            <div className="home-hero__template-recommendation" data-testid="home-hero-template-recommendation">
-              {templateRecommendation.primaryChipId ? (
-                <span className="home-hero__template-recommendation-label">Recommended for you</span>
-              ) : (
-                <span>{templateRecommendation.emptyStateMessage}</span>
-              )}
-            </div>
-          ) : null}
-          <RailGroup
-            group="create"
-            chips={templateChips}
-            activeChipId={activeChipId}
-            pendingChipId={pendingChipId}
-            pendingPluginId={pendingPluginId}
-            pluginsLoading={pluginsLoading}
-            onPickChip={handlePickTaskChip}
-            onHoverChip={setPreviewTemplateId}
-            recommendedChipId={showTemplateRecommendation ? templateRecommendation.primaryChipId : null}
-            secondaryRecommendedChipId={showTemplateRecommendation ? templateRecommendation.secondaryChipId : null}
-            variant="tabs"
-          />
-        </section>
-      )}
+      <section
+        className="home-hero__template-section is-expanded"
+        data-testid="home-hero-template-section"
+      >
+        {showTemplateRecommendation ? (
+          <div className="home-hero__template-recommendation" data-testid="home-hero-template-recommendation">
+            {templateRecommendation.primaryChipId ? (
+              <span className="home-hero__template-recommendation-label">Recommended for you</span>
+            ) : (
+              <span>{templateRecommendation.emptyStateMessage}</span>
+            )}
+          </div>
+        ) : null}
+        <RailGroup
+          group="create"
+          chips={templateChips}
+          activeChipId={activeChipId}
+          pendingChipId={pendingChipId}
+          pendingPluginId={pendingPluginId}
+          pluginsLoading={pluginsLoading}
+          onPickChip={handlePickTaskChip}
+          onHoverChip={setPreviewTemplateId}
+          recommendedChipId={showTemplateRecommendation ? templateRecommendation.primaryChipId : null}
+          secondaryRecommendedChipId={showTemplateRecommendation ? templateRecommendation.secondaryChipId : null}
+          variant="tabs"
+        />
+      </section>
       {activeSubChips.length > 0 && isSubChipParent(activeChipId) ? (
         <SubTypeRow
           subChips={activeSubChips}

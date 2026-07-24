@@ -181,12 +181,10 @@ describe('home composer sending state', () => {
       </I18nProvider>,
     );
 
-    // #5517 removed the inline template rail; templates are picked from the
-    // composer footer's radial Template picker.
-    fireEvent.click(await screen.findByTestId('home-hero-template-trigger'));
+    // Product types are selected directly from the cards below the composer.
     // Seeding through a fallback prompt-example card is what arms the
     // examplePromptContext marker.
-    fireEvent.click(await screen.findByTestId('home-hero-template-wedge-prototype'));
+    fireEvent.click(await screen.findByTestId('home-hero-rail-prototype'));
     const exampleCards = await screen.findAllByTestId('home-hero-prompt-example');
     fireEvent.click(exampleCards[0]!);
 

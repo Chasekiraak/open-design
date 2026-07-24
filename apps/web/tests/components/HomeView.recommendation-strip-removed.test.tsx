@@ -70,7 +70,7 @@ describe('HomeView — recommended-start strip', () => {
 
     // The composer is up, so this is a real paint of Home and not an empty
     // render that would pass the negative assertions for the wrong reason.
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('home-hero-template-section')).toBeTruthy());
 
     expect(screen.queryByTestId('home-recommendation-start')).toBeNull();
     expect(screen.queryByText('Start with your first project')).toBeNull();
@@ -78,15 +78,12 @@ describe('HomeView — recommended-start strip', () => {
     expect(screen.queryByText('All types')).toBeNull();
   });
 
-  it('keeps the template control that sat below it', async () => {
+  it('keeps product types below the composer after removing the strip', async () => {
     stubPluginsFetch();
     renderHomeWithRecommendation();
 
-    // 「Start with a template…」 is a DIFFERENT control from the strip and must
-    // survive its removal — the strip was the row ABOVE it.
-    const trigger = await screen.findByTestId('home-hero-template-trigger');
-    expect(trigger).toBeTruthy();
-    expect(screen.getByTestId('home-hero-template-picker')).toBeTruthy();
-    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+    expect(await screen.findByTestId('home-hero-template-section')).toBeTruthy();
+    const card = screen.getByTestId('home-hero-rail-prototype') as HTMLButtonElement;
+    await waitFor(() => expect(card.disabled).toBe(false));
   });
 });

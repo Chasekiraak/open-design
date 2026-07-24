@@ -101,13 +101,11 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-// #5517 removed the inline template rail from Home; scenario templates are
-// picked from the composer footer's radial Template picker instead.
+// Product types are selected directly from the cards below the composer.
 async function pickHomeTemplate(id: string) {
-  const trigger = await screen.findByTestId('home-hero-template-trigger');
-  await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(trigger);
-  fireEvent.click(await screen.findByTestId(`home-hero-template-wedge-${id}`));
+  const card = await screen.findByTestId(`home-hero-rail-${id}`) as HTMLButtonElement;
+  await waitFor(() => expect(card.disabled).toBe(false));
+  fireEvent.click(card);
 }
 
 describe('web-clone example-card tracking', () => {

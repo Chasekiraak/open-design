@@ -148,7 +148,6 @@ describe('HomeView media composer options', () => {
     expect(screen.queryByTestId('home-hero-selected-design-system')).toBeNull();
 
     await clickHomeRailChip('image');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(promptIsEmpty()).toBe(true);
     expect(screen.queryByTestId('home-hero-footer-option-designSystem')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-model')).toBeNull();
@@ -157,7 +156,6 @@ describe('HomeView media composer options', () => {
     expect(screen.queryByTestId('home-hero-footer-option-duration')).toBeNull();
 
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(promptIsEmpty()).toBe(true);
     expect(screen.queryByTestId('home-hero-footer-option-designSystem')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-model')).toBeNull();
@@ -167,14 +165,12 @@ describe('HomeView media composer options', () => {
 
     // HyperFrames / Audio keep no pre-flight pills at all.
     await clickHomeRailChip('hyperframes');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(promptIsEmpty()).toBe(true);
     expect(screen.queryByTestId('home-hero-footer-option-ratio')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-duration')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-model')).toBeNull();
 
     await clickHomeRailChip('audio');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(promptIsEmpty()).toBe(true);
     expect(screen.queryByTestId('home-hero-footer-option-audioType')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-model')).toBeNull();
@@ -260,12 +256,10 @@ describe('HomeView media composer options', () => {
     renderHome();
 
     await clickHomeRailChip('image');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(screen.queryByRole('dialog', { name: /replace current prompt/i })).toBeNull();
 
     await setHomePrompt('Make this prompt personally tuned.');
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(screen.queryByRole('dialog', { name: /replace current prompt/i })).toBeNull();
   });
 
@@ -276,7 +270,6 @@ describe('HomeView media composer options', () => {
     // Audio type / model / duration / voice are no longer footer pills — the
     // agent asks for them during the run. The composer just stays empty.
     await clickHomeRailChip('audio');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(promptIsEmpty()).toBe(true);
     expect(screen.queryByTestId('home-hero-footer-option-audioType')).toBeNull();
     expect(screen.queryByTestId('home-hero-footer-option-duration')).toBeNull();
@@ -289,20 +282,17 @@ describe('HomeView media composer options', () => {
     renderHome();
 
     await clickHomeRailChip('image');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(screen.queryByRole('combobox', { name: 'Template' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Ratio' })).toBeNull();
 
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     expect(screen.queryByRole('combobox', { name: 'Duration' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Template' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Model' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Ratio' })).toBeNull();
 
     await clickHomeRailChip('audio');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     // No audio pills/combobox at all now — those questions moved to the agent.
     expect(screen.queryByTestId('home-hero-footer-option-audioType')).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Audio type' })).toBeNull();
@@ -348,7 +338,6 @@ describe('HomeView media composer options', () => {
     const view = render(<HomeView {...props} />);
 
     await clickHomeRailChip('image');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     await setHomePrompt('Create a campaign image.');
     await submitHome();
     await waitFor(() => {
@@ -384,7 +373,6 @@ describe('HomeView media composer options', () => {
     });
 
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     await chooseOption('designSystem', 'brand-alpha', 'Brand Alpha');
     setHomePrompt('Create a launch teaser.');
     await submitHome();
@@ -417,7 +405,6 @@ describe('HomeView media composer options', () => {
     renderHome({ onSubmit });
 
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     await setHomePrompt('Create a launch teaser.');
     await submitHome();
 
@@ -443,7 +430,6 @@ describe('HomeView media composer options', () => {
     renderHome({ onSubmit });
 
     await clickHomeRailChip('video');
-    await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
     await setHomePrompt('Create a launch teaser.');
     await submitHome();
 
@@ -581,16 +567,10 @@ async function openOption(name: string) {
 }
 
 async function clickHomeRailChip(id: string) {
-  // New users see the readable inline catalog; returning users reach the exact
-  // same cards through the composer trigger.
-  const cardId = `home-hero-rail-${id}`;
-  if (!screen.queryByTestId(cardId)) {
-    const trigger = await screen.findByTestId('home-hero-template-trigger');
-    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(trigger);
-  }
-  await waitFor(() => expect((screen.getByTestId(cardId) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByTestId(cardId));
+  const card = await screen.findByTestId(`home-hero-rail-${id}`) as HTMLButtonElement;
+  await waitFor(() => expect(card.disabled).toBe(false));
+  fireEvent.click(card);
+  await waitFor(() => expect(card).toHaveClass('is-active'));
 }
 
 // Drive the Lexical editor and let the OnChange -> onPromptChange -> setPrompt
