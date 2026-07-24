@@ -625,6 +625,7 @@ import { EmptyTranscriptError, synthesizeHandoffPrompt } from './design/index.js
 import { TranscriptExportLockedError } from './transcript-export.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerRunRoutes } from './routes/runs.js';
+import { registerByokCredentialRoutes } from './routes/byok-credentials.js';
 import { registerTerminalRoutes } from './routes/terminal.js';
 import { createTerminalService } from './terminals.js';
 import { registerSocialShareRoutes } from './routes/social-share.js';
@@ -690,6 +691,7 @@ import { apiTokenFromEnv, isApiAuthDisabled, isApiTokenMiddlewareEnabled } from 
 import { createOpenDesignPublicMetadataService } from './services/open-design-public-metadata.js';
 import { createWhatsNewService } from './services/whats-new.js';
 import { execCommandViaLoginShell } from './services/login-shell.js';
+import { ByokCredentialService } from './byok/credential-service.js';
 import {
   OFFICIAL_MARKETPLACE_ID,
   createMarketplaceSeedHelpers,
@@ -849,6 +851,9 @@ const {
 const SANDBOX_MODE_ENABLED = isSandboxModeEnabled(process.env);
 const RUNTIME_DATA_DIR = resolveDataDir(process.env.OD_DATA_DIR, PROJECT_ROOT, {
   requireExplicit: SANDBOX_MODE_ENABLED,
+});
+const byokCredentialService = new ByokCredentialService({
+  dataDir: RUNTIME_DATA_DIR,
 });
 const SANDBOX_RUNTIME = resolveSandboxRuntimeConfig(SANDBOX_MODE_ENABLED, RUNTIME_DATA_DIR);
 ensureSandboxRuntimeDirs(SANDBOX_RUNTIME);
@@ -2973,6 +2978,11 @@ export async function startServer({
     http: httpDeps,
     paths: pathDeps,
   });
+  registerByokCredentialRoutes(app, {
+    http: { requireLocalDaemonRequest, sendApiError },
+    byokCredentials: byokCredentialService,
+    connectionTest: testProviderConnection,
+  });
   // Project workspace
   registerActiveContextRoutes(app, {
     db,
@@ -4301,7 +4311,7 @@ export async function startServer({
       research,
       context,
       titleGeneration,
-      byokProvider,
+      byokProfileId,
       byokMediaDefaults,
     } = chatBody;
     lifecycle.mark('prompt_build_start');
@@ -4342,10 +4352,22 @@ export async function startServer({
       );
     if (!def.bin)
       return design.runs.fail(run, 'AGENT_UNAVAILABLE', 'agent has no binary');
+    let resolvedByokCredential = null;
+    if (def.id === 'byok-opencode') {
+      try {
+        resolvedByokCredential =
+          typeof byokProfileId === 'string' && byokProfileId
+            ? await byokCredentialService.resolve(byokProfileId)
+            : null;
+      } catch {
+        resolvedByokCredential = null;
+      }
+    }
     const byokOpenCodeProvider = def.id === 'byok-opencode'
       ? buildOpenCodeByokProviderConfig(
-          byokProvider,
-          typeof model === 'string' ? model : null,
+          resolvedByokCredential?.provider,
+          resolvedByokCredential?.profile.model
+            ?? (typeof model === 'string' ? model : null),
         )
       : null;
     if (def.id === 'byok-opencode' && !byokOpenCodeProvider) {
@@ -4355,6 +4377,9 @@ export async function startServer({
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
+    const requestedRuntimeModel = def.id === 'byok-opencode'
+      ? resolvedByokCredential?.profile.model ?? null
+      : model;
     // Validate the checked-in `inactivityTimeoutMs` hint immediately
     // after the runtime def is selected and before any side-effectful
     // setup (auto-memory extract, `.mcp.json` write/unlink,
@@ -4927,10 +4952,10 @@ export async function startServer({
         : null;
     let safeModel = resolveModelForAgent(
       def,
-      typeof model === 'string'
-        ? isKnownModel(def, model, requestedLiveModelScope)
-          ? model
-          : sanitizeCustomModel(model)
+      typeof requestedRuntimeModel === 'string'
+        ? isKnownModel(def, requestedRuntimeModel, requestedLiveModelScope)
+          ? requestedRuntimeModel
+          : sanitizeCustomModel(requestedRuntimeModel)
         : configuredModel,
       process.env,
       requestedLiveModelScope,
@@ -6728,12 +6753,9 @@ export async function startServer({
       // mini extraction in the background just because the user has
       // an OpenAI key parked in media-config.
       //
-      // Also normalize the BYOK provider shape: web side sends
-      // `{ protocol, ... }` via the chat body as `byokProvider`,
-      // but memory-llm.pickProvider expects `{ provider, ... }`
-      // with `provider` being a PROVIDER_DEFAULTS key. We apply the
-      // same mapping the web pre-turn path does (ProjectView.tsx
-      // constructs `{ provider: byokOpenCodeProvider.protocol, ... }`).
+      // Normalize the spawn-resolved BYOK profile shape for the memory
+      // extractor. The raw secret never entered the persisted run body; it is
+      // held only by this run closure while the child is alive.
       const memoryChatProvider: {
         provider?: string;
         apiKey?: string;
@@ -6741,14 +6763,14 @@ export async function startServer({
         apiVersion?: string;
         model?: string;
         requiresApiKey?: boolean;
-      } | null = byokProvider
+      } | null = resolvedByokCredential
         ? {
-            provider: (byokProvider as { protocol?: string }).protocol ?? undefined,
-            apiKey: (byokProvider as { apiKey?: string }).apiKey,
-            baseUrl: (byokProvider as { baseUrl?: string }).baseUrl,
-            apiVersion: (byokProvider as { apiVersion?: string }).apiVersion,
-            model: (byokProvider as { model?: string }).model,
-            requiresApiKey: (byokProvider as { requiresApiKey?: boolean }).requiresApiKey,
+            provider: resolvedByokCredential.profile.protocol,
+            apiKey: resolvedByokCredential.apiKey,
+            baseUrl: resolvedByokCredential.profile.baseUrl,
+            apiVersion: resolvedByokCredential.profile.apiVersion,
+            model: resolvedByokCredential.profile.model,
+            requiresApiKey: resolvedByokCredential.profile.requiresApiKey,
           }
         : null;
       const memoryOptions = {
@@ -8465,6 +8487,7 @@ export async function startServer({
     paths: { PROJECTS_DIR, RUNTIME_DATA_DIR },
     agents: { detectAgents, getAgentDef },
     chat: { startChatRun },
+    byokCredentials: byokCredentialService,
     lifecycle: { isDaemonShuttingDown: () => daemonShuttingDown },
     plugins: {
       connectorService,
@@ -8883,6 +8906,7 @@ export async function startServer({
     finalize: finalizeDeps,
     handoff: handoffDeps,
     chat: { startChatRun },
+    byokCredentials: byokCredentialService,
     messages: {
       pinAssistantMessageOnRunCreate,
       reconcileAssistantMessageOnRunEnd,

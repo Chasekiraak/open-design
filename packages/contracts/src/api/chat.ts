@@ -93,6 +93,11 @@ export interface ChatRequest {
    */
   byokProvider?: ByokChatProviderConfig;
   /**
+   * Non-secret reference to a daemon-owned BYOK profile. Runtime credentials
+   * are resolved from OS secure storage immediately before child spawn.
+   */
+  byokProfileId?: string;
+  /**
    * Run-scoped BYOK media defaults selected in the chat UI. The daemon uses
    * these to guide OpenCode-backed `od media generate` calls for this run only.
    */
