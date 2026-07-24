@@ -10,7 +10,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DesignSystemSummary, InstalledPluginRecord } from '@open-design/contracts';
+import type { InstalledPluginRecord } from '@open-design/contracts';
 
 vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
   PlaceholderCarousel: () => null,
@@ -21,10 +21,12 @@ import {
   HOME_HERO_CHIPS,
   findChip,
 } from '../../src/components/home-hero/chips';
+import { setHomeHeroPrompt } from '../helpers/home-hero-lexical';
 
 afterEach(() => {
   cleanup();
   window.localStorage.removeItem('open-design:home-template-recommendation:v1');
+  window.localStorage.removeItem('open-design:home-design-system-guide:v1');
 });
 
 function makePlugin(
@@ -78,7 +80,7 @@ function renderHero(overrides: Partial<React.ComponentProps<typeof HomeHero>> = 
   const onPickExamplePlugin = vi.fn();
   const onOpenPluginDetails = vi.fn();
   const onClearActiveChip = vi.fn();
-  render(
+  const view = render(
     <HomeHero
       prompt=""
       onPromptChange={() => undefined}
@@ -100,17 +102,15 @@ function renderHero(overrides: Partial<React.ComponentProps<typeof HomeHero>> = 
       {...overrides}
     />,
   );
-  return { onPickChip, onPickPlugin, onPickExamplePlugin, onOpenPluginDetails, onClearActiveChip };
+  return {
+    onPickChip,
+    onPickPlugin,
+    onPickExamplePlugin,
+    onOpenPluginDetails,
+    onClearActiveChip,
+    unmount: view.unmount,
+  };
 }
-
-const NEUTRAL_MODERN: DesignSystemSummary = {
-  id: 'neutral-modern',
-  title: 'Neutral Modern',
-  category: 'Starter',
-  summary: 'A neutral fallback system.',
-  source: 'built-in',
-  status: 'published',
-};
 
 function pickTemplate(chipId: string) {
   fireEvent.click(screen.getByTestId(`home-hero-rail-${chipId}`));
@@ -141,64 +141,68 @@ describe('HomeHero intent rail', () => {
     }
   });
 
-  it('cues a prefilled Design mode before its selected design system, then stops after interaction', () => {
-    vi.useFakeTimers();
-    try {
-      renderHero({
-        sessionMode: 'design',
-        selectedSessionMode: 'design',
-        designSystems: [NEUTRAL_MODERN],
-        selectedDesignSystemId: NEUTRAL_MODERN.id,
-        onDesignSystemChange: vi.fn(),
-        prefilledDesignModeAttentionKey: 'new:designer:neutral-modern',
-      });
+  it('shows the one-time design-system guide on the persistent entry for a new user', () => {
+    renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
 
-      const modeIcon = screen.getByTestId('composer-mode-icon');
-      const designSystemIcon = screen.getByTestId('home-hero-selected-design-system-icon');
-      expect(modeIcon).toHaveClass('is-prefill-attention');
-      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
-
-      act(() => {
-        vi.advanceTimersByTime(180);
-      });
-      expect(modeIcon).not.toHaveClass('is-prefill-attention');
-      expect(designSystemIcon).toHaveClass('is-prefill-attention');
-
-      // Any composer control ends the one-shot hint and prevents a later
-      // timer phase from restarting it.
-      fireEvent.pointerDown(screen.getByTestId('home-hero-plus-trigger'));
-      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
-      act(() => {
-        vi.advanceTimersByTime(500);
-      });
-      expect(modeIcon).not.toHaveClass('is-prefill-attention');
-      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(screen.getByTestId('home-hero-design-system-trigger')).toHaveTextContent('Add design system');
+    expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
+      'Add a design system here to keep your design work consistent.',
+    );
+    expect(screen.getByTestId('home-hero-design-system-trigger-icon')).toHaveClass('is-first-run-guide');
+    expect(window.localStorage.getItem('open-design:home-design-system-guide:v1')).toBe('1');
   });
 
-  it('cancels the prefilled attention before a user starts typing', () => {
-    vi.useFakeTimers();
-    try {
-      renderHero({
-        sessionMode: 'design',
-        selectedSessionMode: 'design',
-        designSystems: [NEUTRAL_MODERN],
-        selectedDesignSystemId: NEUTRAL_MODERN.id,
-        onDesignSystemChange: vi.fn(),
-        prefilledDesignModeAttentionKey: 'new:designer:neutral-modern',
-      });
+  it('ends the one-time design-system guide after opening the entry, typing, or choosing a product', () => {
+    const { unmount } = renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+    fireEvent.click(screen.getByTestId('home-hero-design-system-trigger'));
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+    expect(screen.getByTestId('project-ds-picker-popover')).toBeTruthy();
 
-      fireEvent.input(screen.getByTestId('home-hero-input'));
-      expect(screen.getByTestId('composer-mode-icon')).not.toHaveClass('is-prefill-attention');
-      act(() => {
-        vi.advanceTimersByTime(500);
-      });
-      expect(screen.getByTestId('home-hero-selected-design-system-icon')).not.toHaveClass('is-prefill-attention');
-    } finally {
-      vi.useRealTimers();
-    }
+    unmount();
+    window.localStorage.removeItem('open-design:home-design-system-guide:v1');
+    renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+    setHomeHeroPrompt('Build a focused brief');
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+
+    cleanup();
+    window.localStorage.removeItem('open-design:home-design-system-guide:v1');
+    renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+    pickTemplate('prototype');
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+  });
+
+  it('does not show the first-run design-system guide for a selected personal system', () => {
+    renderHero({
+      firstRunGuide: true,
+      designSystems: [{
+        id: 'user:acme',
+        title: 'Acme System',
+        category: 'Product',
+        summary: 'The team system.',
+        source: 'user',
+        status: 'published',
+      }],
+      selectedDesignSystemId: 'user:acme',
+      onDesignSystemChange: vi.fn(),
+    });
+
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+  });
+
+  it('explains the benefit of a design system only for visual product types', () => {
+    const { unmount } = renderHero({
+      activeChipId: 'prototype',
+      onDesignSystemChange: vi.fn(),
+    });
+
+    expect(screen.getByTestId('home-hero-context-starter')).toHaveTextContent(
+      'A design system keeps visual details and components consistent in this UI Mockup.',
+    );
+    expect(screen.getByRole('button', { name: 'Add design system' })).toBeTruthy();
+
+    unmount();
+    renderHero({ activeChipId: 'image', onDesignSystemChange: vi.fn() });
+    expect(screen.queryByText(/A design system keeps visual details/i)).toBeNull();
   });
 
   it('offers every scenario template as a readable first-time card', () => {

@@ -125,7 +125,6 @@ import {
 import { AnimatePresence } from 'motion/react';
 
 const HOME_DEMO_STATE_PANEL_ENABLED = process.env.NODE_ENV === 'development';
-const DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID = 'default';
 
 export interface ActivePlugin {
   record: InstalledPluginRecord;
@@ -873,18 +872,12 @@ export function HomeView({
     () => selectableHomeDesignSystems(designSystems, defaultDesignSystemId),
     [defaultDesignSystemId, designSystems],
   );
-  // The Demo panel gives designers a neutral fallback system without changing
-  // the user's saved composer choice. It is deliberately a default, not a
-  // personalized recommendation.
-  const designerDemoDefaultDesignSystemId = designSystemPickerSystems.some(
-    (system) => system.id === DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID,
-  )
-    ? DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID
-    : null;
+  // Demo state can temporarily override a designer's explicit picker change,
+  // but it must never manufacture a default system. A user's saved personal
+  // system remains the source of truth until they pick a different one.
   const selectedHomeDesignSystemId = homeDemoState?.role === 'designer'
-    ? homeDemoState.designSystemId === undefined
-      ? designerDemoDefaultDesignSystemId
-      : homeDemoState.designSystemId
+    && homeDemoState.designSystemId !== undefined
+    ? homeDemoState.designSystemId
     : designSystemId;
   // Re-seed the default selection when the catalogue or the user's default
   // resolves after mount (async load), unless the user already picked one.
@@ -2279,13 +2272,6 @@ export function HomeView({
         onboardingRole={onboardingRole}
         recentChipId={homeRecentChipId}
         demoStateKey={homeDemoState ? `${homeDemoState.journey}:${homeDemoState.role ?? 'neutral'}` : null}
-        prefilledDesignModeAttentionKey={
-          homeDemoState?.role === 'designer'
-          && homeDemoState.designSystemId === undefined
-          && selectedHomeDesignSystemId
-            ? `${homeDemoState.journey}:designer:${selectedHomeDesignSystemId}`
-            : null
-        }
         onCreateIntent={useCreateModeForVisualIntent}
         modeSuggestion={modeSuggestion}
         onAcceptModeSuggestion={acceptHomeModeSuggestion}

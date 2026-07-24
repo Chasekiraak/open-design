@@ -70,6 +70,12 @@ interface Props {
    * value is rendered separately in the composer beside the add button.
    */
   showSelectedLabel?: boolean;
+  /** Optional empty-state copy for the persistent Home entry. */
+  homeEmptyLabel?: string;
+  /** One-shot attention cue for the palette icon in the Home entry. */
+  homeIconAttention?: boolean;
+  /** Called when the persistent Home entry is opened. */
+  onHomeOpen?: () => void;
 }
 
 export function DesignSystemPicker({
@@ -83,6 +89,9 @@ export function DesignSystemPicker({
   recommendedId = null,
   showCreateAction = true,
   showSelectedLabel = true,
+  homeEmptyLabel,
+  homeIconAttention = false,
+  onHomeOpen,
 }: Props) {
   const { locale, t } = useI18n();
   const triggerDisabled = Boolean(loading || disabled);
@@ -491,7 +500,7 @@ export function DesignSystemPicker({
   if (variant === 'home') {
     const homeTriggerLabel = showSelectedLabel && selected
       ? selected.title
-      : t('newproj.designSystem');
+      : homeEmptyLabel ?? t('newproj.designSystem');
     return (
       <div
         ref={wrapRef}
@@ -506,10 +515,18 @@ export function DesignSystemPicker({
           aria-haspopup="listbox"
           aria-expanded={open}
           disabled={triggerDisabled}
-          title={selected?.title ?? t('newproj.designSystem')}
-          onClick={() => setOpen((v) => !v)}
+          title={selected?.title ?? homeTriggerLabel}
+          onClick={() => {
+            if (!open) onHomeOpen?.();
+            setOpen((value) => !value);
+          }}
         >
-          <Icon name="palette" size={13} className="home-hero__ds-row-trigger-icon" />
+          <Icon
+            name="palette"
+            size={13}
+            className={`home-hero__ds-row-trigger-icon${homeIconAttention ? ' is-first-run-guide' : ''}`}
+            data-testid="home-hero-design-system-trigger-icon"
+          />
           <span className="home-hero__ds-row-trigger-label">
             {loading
               ? t('designSystemPicker.loading')

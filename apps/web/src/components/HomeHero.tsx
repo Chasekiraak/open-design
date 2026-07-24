@@ -268,12 +268,6 @@ interface Props {
   onDismissModeSuggestion?: () => void;
   /** Development-only state-switcher token; a change restores Home's recommendation surface. */
   demoStateKey?: string | null;
-  /**
-   * One-shot attention token for a Demo state that automatically prefilled
-   * both Design mode and a design system. A new token replays the short,
-   * ordered hint; user interaction cancels the current token immediately.
-   */
-  prefilledDesignModeAttentionKey?: string | null;
   // Personalized first-run starting point (spec §7). Rendered directly under
   // the composer card — before the template section — so a brand-new user sees
   // their recommended entry without scrolling.
@@ -324,6 +318,15 @@ const EMPTY_MCP_OPTIONS: McpServerConfig[] = [];
 const EMPTY_CONNECTOR_OPTIONS: ConnectorDetail[] = [];
 const EMPTY_WORKSPACE_ITEMS: WorkspaceContextItem[] = [];
 const HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY = 'open-design:home-template-recommendation:v1';
+const HOME_DESIGN_SYSTEM_GUIDE_SEEN_KEY = 'open-design:home-design-system-guide:v1';
+const DESIGN_SYSTEM_RELEVANT_TASK_IDS = new Set([
+  'prototype',
+  'web-clone',
+  'landing-page',
+  'wireframe',
+  'mobile',
+  'deck',
+]);
 
 function hasSeenHomeTemplateRecommendation(): boolean {
   if (typeof window === 'undefined') return false;
@@ -341,6 +344,25 @@ function markHomeTemplateRecommendationSeen(): void {
   } catch {
     // Persistence is an enhancement. If storage is unavailable, the current
     // mounted Home still dismisses the recommendation after one interaction.
+  }
+}
+
+function hasSeenHomeDesignSystemGuide(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(HOME_DESIGN_SYSTEM_GUIDE_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markHomeDesignSystemGuideSeen(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HOME_DESIGN_SYSTEM_GUIDE_SEEN_KEY, '1');
+  } catch {
+    // The current Home session still dismisses the guide when storage is not
+    // available (for example, a private browsing context).
   }
 }
 
@@ -430,7 +452,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onAcceptModeSuggestion,
     onDismissModeSuggestion,
     demoStateKey = null,
-    prefilledDesignModeAttentionKey = null,
     recommendationSlot,
   },
   ref,
@@ -449,19 +470,11 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [showTemplateRecommendation, setShowTemplateRecommendation] = useState(
     () => !hasSeenHomeTemplateRecommendation(),
   );
+  const [showFirstRunDesignSystemGuide, setShowFirstRunDesignSystemGuide] = useState(false);
   const homeHeroRef = useRef<HTMLElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
   const [sendAttention, setSendAttention] = useState(false);
-  // A prefilled Design mode and design system are two separate decisions.
-  // Briefly cue them in order so the user can notice both without a looping or
-  // distracting affordance. Any composer interaction makes the hint moot.
-  const [prefilledAttentionStage, setPrefilledAttentionStage] = useState<
-    'mode' | 'design-system' | null
-  >(null);
-  const activePrefilledAttentionKeyRef = useRef<string | null>(null);
-  const dismissedPrefilledAttentionKeysRef = useRef(new Set<string>());
-  const playedPrefilledAttentionKeysRef = useRef(new Set<string>());
   // First-run guidance trail (see home-hero/firstRunGuide.ts): which rail
   // chip is pulsing, and whether the first example-prompt card is pulsing.
   const [guidePulseChipId, setGuidePulseChipId] = useState<string | null>(null);
@@ -555,39 +568,26 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     setShowTemplateRecommendation(true);
   }, [demoStateKey]);
 
+  const dismissFirstRunDesignSystemGuide = useCallback(() => {
+    markHomeDesignSystemGuideSeen();
+    setShowFirstRunDesignSystemGuide(false);
+  }, []);
+
   useEffect(() => {
-    activePrefilledAttentionKeyRef.current = prefilledDesignModeAttentionKey;
-    const key = prefilledDesignModeAttentionKey;
+    // A user's personal system always wins over first-run teaching. Once this
+    // entry has been shown, retain that fact so a later Home visit never
+    // repeats the nudge.
     if (
-      key === null
-      || dismissedPrefilledAttentionKeysRef.current.has(key)
-      || playedPrefilledAttentionKeysRef.current.has(key)
+      firstRunGuide !== true
+      || selectedDesignSystemId !== null
+      || hasSeenHomeDesignSystemGuide()
     ) {
-      setPrefilledAttentionStage(null);
+      setShowFirstRunDesignSystemGuide(false);
       return;
     }
-
-    setPrefilledAttentionStage('mode');
-    const designSystemTimer = window.setTimeout(() => {
-      if (!dismissedPrefilledAttentionKeysRef.current.has(key)) {
-        setPrefilledAttentionStage('design-system');
-      }
-    }, 180);
-    const completeTimer = window.setTimeout(() => {
-      playedPrefilledAttentionKeysRef.current.add(key);
-      setPrefilledAttentionStage(null);
-    }, 460);
-    return () => {
-      window.clearTimeout(designSystemTimer);
-      window.clearTimeout(completeTimer);
-    };
-  }, [prefilledDesignModeAttentionKey]);
-
-  const dismissPrefilledAttention = useCallback(() => {
-    const key = activePrefilledAttentionKeyRef.current;
-    if (key !== null) dismissedPrefilledAttentionKeysRef.current.add(key);
-    setPrefilledAttentionStage(null);
-  }, []);
+    setShowFirstRunDesignSystemGuide(true);
+    markHomeDesignSystemGuideSeen();
+  }, [firstRunGuide, selectedDesignSystemId]);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
     dismissTemplateRecommendation();
@@ -867,6 +867,11 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ? chipsForGroup('create').find((chip) => chip.id === activeChipId) ?? null
       : null,
     [activeChipId],
+  );
+  const activeTaskBenefitsFromDesignSystem = Boolean(
+    activeCreateChip
+    && selectedDesignSystemId === null
+    && DESIGN_SYSTEM_RELEVANT_TASK_IDS.has(activeCreateChip.id),
   );
   // The full create catalog stays intact. On an explicitly reported first-run
   // role, only the two most relevant types move to the front of the readable
@@ -1242,6 +1247,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }
 
   function openDesignSystemPicker() {
+    dismissFirstRunDesignSystemGuide();
     const trigger = homeHeroRef.current?.querySelector<HTMLButtonElement>(
       '[data-testid="home-hero-design-system-trigger"]',
     );
@@ -1396,6 +1402,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // The task-type rail (原型 / 幻灯片 / HyperFrames / 视频 / …). Records which
   // task type the user picked before delegating to the host's chip handler.
   function handlePickTaskChip(chip: HomeHeroChip) {
+    dismissFirstRunDesignSystemGuide();
     // The cards are the only visible type control now. Clicking the active
     // card again returns Home to its neutral, no-type state.
     if (chip.id === activeChipId) {
@@ -1455,11 +1462,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ref={homeHeroRef}
       className="home-hero"
       data-testid="home-hero"
-      onPointerDownCapture={dismissPrefilledAttention}
-      onInputCapture={dismissPrefilledAttention}
-      onKeyDownCapture={(event) => {
-        if (event.key !== 'Tab') dismissPrefilledAttention();
-      }}
     >
       <span className="home-hero__logo-wrap">
         <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
@@ -1839,7 +1841,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 // inputs from the seeded text. Real user edits always differ
                 // from the current prompt.
                 if (plainText === prompt) return;
-                dismissPrefilledAttention();
+                dismissFirstRunDesignSystemGuide();
                 dismissTemplateRecommendation();
                 onPromptChange(plainText);
                 if (selectedPromptExample && plainText !== selectedPromptExample.promptText) {
@@ -2170,7 +2172,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 <Icon
                   name="palette"
                   size={14}
-                  className={`home-hero__selected-design-system-icon${prefilledAttentionStage === 'design-system' ? ' is-prefill-attention' : ''}`}
+                  className="home-hero__selected-design-system-icon"
                   data-testid="home-hero-selected-design-system-icon"
                   aria-hidden
                 />
@@ -2189,6 +2191,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                       area: 'chat_composer',
                       element: 'design_system_clear',
                     });
+                    dismissFirstRunDesignSystemGuide();
                     dismissTemplateRecommendation();
                     onDesignSystemChange(null);
                   }}
@@ -2247,7 +2250,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             <ComposerModePicker
               mode={sessionMode}
               selectedMode={selectedSessionMode}
-              iconAttention={prefilledAttentionStage === 'mode'}
               onClearSelection={onClearSessionModeSelection}
               onModeChange={(next) => {
                 if (next !== sessionMode) {
@@ -2312,18 +2314,32 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ) : null}
 
       {onDesignSystemChange || onPickWorkingDir ? (
-        <div className="home-hero__workdir-row">
+        <div className={`home-hero__workdir-row${showFirstRunDesignSystemGuide ? ' is-design-system-guided' : ''}`}>
           {onDesignSystemChange ? (
-            <DesignSystemPicker
-              variant="home"
-              designSystems={designSystems}
-              selectedId={selectedDesignSystemId}
-              showSelectedLabel={false}
-              onChange={(id) => {
-                dismissTemplateRecommendation();
-                onDesignSystemChange(id);
-              }}
-            />
+            <div className="home-hero__design-system-entry">
+              <DesignSystemPicker
+                variant="home"
+                designSystems={designSystems}
+                selectedId={selectedDesignSystemId}
+                showSelectedLabel={false}
+                homeEmptyLabel={showFirstRunDesignSystemGuide ? t('homeHero.designSystemGuide.add') : undefined}
+                homeIconAttention={showFirstRunDesignSystemGuide}
+                onHomeOpen={dismissFirstRunDesignSystemGuide}
+                onChange={(id) => {
+                  dismissFirstRunDesignSystemGuide();
+                  dismissTemplateRecommendation();
+                  onDesignSystemChange(id);
+                }}
+              />
+              {showFirstRunDesignSystemGuide ? (
+                <p
+                  className="home-hero__design-system-guide"
+                  data-testid="home-hero-design-system-guide"
+                >
+                  {t('homeHero.designSystemGuide.description')}
+                </p>
+              ) : null}
+            </div>
           ) : null}
           {onDesignSystemChange && onPickWorkingDir ? (
             <span className="home-hero__workdir-divider" aria-hidden="true" />
@@ -2424,7 +2440,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
       {activeCreateChip ? (
         <div className="home-hero__context-starter" data-testid="home-hero-context-starter">
-          {hasContextForNewbie ? (
+          {selectedDesignSystemId !== null ? (
             <span className="home-hero__context-summary">
               Will use: {[
                 selectedDesignSystem?.title,
@@ -2434,18 +2450,36 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             </span>
           ) : (
             <>
-              <span className="home-hero__context-kicker">Optional context</span>
-              <Button
-                variant="ghost"
-                className="home-hero__context-action"
-                onClick={() => {
-                  dismissTemplateRecommendation();
-                  openDesignSystemPicker();
-                }}
-              >
-                <Icon name="palette" size={13} />
-                Select design system
-              </Button>
+              {activeTaskBenefitsFromDesignSystem ? (
+                <span className="home-hero__design-system-task-hint">
+                  <Icon name="palette" size={13} aria-hidden />
+                  <span>
+                    {t('homeHero.designSystemGuide.taskHint', {
+                      task: homeHeroChipLabel(activeCreateChip.id, t),
+                    })}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    className="home-hero__context-action"
+                    onClick={() => {
+                      dismissTemplateRecommendation();
+                      openDesignSystemPicker();
+                    }}
+                  >
+                    {t('homeHero.designSystemGuide.add')}
+                  </Button>
+                </span>
+              ) : (
+                <span className="home-hero__context-kicker">Optional context</span>
+              )}
+              {stagedFiles.length > 0 ? (
+                <span className="home-hero__context-summary">
+                  Will use: {[
+                    referenceImageCount > 0 ? `${referenceImageCount} reference image${referenceImageCount === 1 ? '' : 's'}` : null,
+                    stagedFiles.length > referenceImageCount ? `${stagedFiles.length - referenceImageCount} brand asset${stagedFiles.length - referenceImageCount === 1 ? '' : 's'}` : null,
+                  ].filter(Boolean).join(' · ')}
+                </span>
+              ) : null}
               <Button
                 variant="ghost"
                 className="home-hero__context-action"
