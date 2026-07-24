@@ -938,6 +938,7 @@ export function DesignSystemCreationFlow({
         description: [state.company.trim(), state.notes.trim()].filter(Boolean).join('\n\n'),
         designMd: designMdForExtraction,
         throwOnError: true,
+        workspaceContext,
       });
       if (!result) {
         setVisibleError(t('dsCreate.extractionAlreadyStarting'));
