@@ -18,6 +18,7 @@ import {
   updateSkill,
   type SkillFileEntry,
 } from '../providers/registry';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 
 // Functional skills only — design templates render in EntryView's
 // Templates tab and are managed under their own daemon registry. See
@@ -88,6 +89,7 @@ function skillMatchesSearch(skill: SkillSummary, q: string, locale: Locale): boo
 
 export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }: Props) {
   const { locale, t } = useI18n();
+  const { context: workspaceContext } = useWorkspaceContext();
 
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [search, setSearch] = useState('');
@@ -134,10 +136,10 @@ export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }:
   >(null);
 
   const refresh = useCallback(async () => {
-    const list = await fetchSkills();
+    const list = await fetchSkills(workspaceContext);
     setSkills(list);
     return list;
-  }, []);
+  }, [workspaceContext]);
 
   useEffect(() => {
     void refresh();
@@ -353,8 +355,8 @@ export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }:
     setDraftError(null);
     const result =
       editingId
-        ? await updateSkill(editingId, payload)
-        : await importSkill(payload);
+        ? await updateSkill(editingId, payload, workspaceContext)
+        : await importSkill(payload, workspaceContext);
     setDraftSaving(false);
     if ('error' in result) {
       setDraftError(result.error.message);
@@ -377,7 +379,7 @@ export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }:
     setCreating(false);
     setDraft(EMPTY_DRAFT);
     onSkillsChanged?.(updated.id);
-  }, [draft, draftSaving, editingId, onSkillsChanged, onSkillsRefresh, refresh]);
+  }, [draft, draftSaving, editingId, onSkillsChanged, onSkillsRefresh, refresh, workspaceContext]);
 
   const armDelete = useCallback((id: string) => {
     setConfirmDeleteId(id);
@@ -389,7 +391,7 @@ export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }:
 
   const commitDelete = useCallback(
     async (id: string) => {
-      const result = await deleteSkill(id);
+      const result = await deleteSkill(id, workspaceContext);
       if ('error' in result) {
         setDraftError(result.error.message);
         return;
@@ -421,7 +423,7 @@ export function SkillsSection({ cfg, setCfg, onSkillsRefresh, onSkillsChanged }:
       }
       onSkillsChanged?.(id);
     },
-    [editingId, expandedId, onSkillsChanged, onSkillsRefresh, refresh, setCfg],
+    [editingId, expandedId, onSkillsChanged, onSkillsRefresh, refresh, setCfg, workspaceContext],
   );
 
   const toggleEnabled = useCallback(
