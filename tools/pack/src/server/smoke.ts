@@ -22,6 +22,8 @@ import {
   resolve,
 } from "node:path";
 
+import { createCommandInvocation } from "@open-design/platform";
+
 import type { ServerPackConfig } from "./config.js";
 import { SERVER_PRIVATE_NODE_VERSION } from "./build.js";
 import { SERVER_DEPLOY_HASH_PROBE_ENTRYPOINT } from "./bundle.js";
@@ -500,10 +502,15 @@ async function smokeInstalledArchive(options: {
     "--port",
     String(port),
   ];
-  const daemon = spawn(launcher, daemonArgs, {
+  const daemonInvocation = createCommandInvocation({
+    args: daemonArgs,
+    command: launcher,
     env,
-    shell: options.config.target.platform === "win32",
+  });
+  const daemon = spawn(daemonInvocation.command, daemonInvocation.args, {
+    env,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsVerbatimArguments: daemonInvocation.windowsVerbatimArguments,
     windowsHide: true,
   });
   let daemonOutput = "";
