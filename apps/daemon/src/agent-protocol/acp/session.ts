@@ -47,6 +47,7 @@ import {
   acpToolName,
   acpToolInput,
   acpToolResultContent,
+  acpSafeToolResultContent,
   promotedAmrRetryStatusPayload,
   promotedAmrStderrPayload,
 } from './updates.js';
@@ -231,7 +232,9 @@ export function attachAcpSession({
     send('agent', {
       type: 'tool_result',
       toolUseId: toolCallId,
-      content: st.resultContent,
+      // Bash/execute stdout can dump private files (cat .env). Langfuse only
+      // lexically masks Bash, so redact before the canonical transcript ships.
+      content: acpSafeToolResultContent(st.name, st.resultContent),
       isError,
     });
     // Concrete only on terminal tool_result for a real (non-think) tool.

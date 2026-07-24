@@ -582,6 +582,41 @@ export function acpToolResultContent(update: JsonObject, maxChars = 8000): strin
 }
 
 /**
+ * Execute-family tools whose stdout can contain arbitrary private file content
+ * (`cat .env`, dumps of secrets, etc.). Normalized ACP names for these kinds
+ * are Claude-shaped `Bash` plus common aliases.
+ */
+const ACP_EXECUTE_TOOL_NAMES_LOWER: ReadonlySet<string> = new Set([
+  'bash',
+  'shell',
+  'execute',
+  'terminal',
+]);
+
+/** True when `toolName` is an ACP execute/bash-family tool. */
+export function isAcpExecuteToolName(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized) return false;
+  return ACP_EXECUTE_TOOL_NAMES_LOWER.has(normalized);
+}
+
+/**
+ * Sanitizes ACP tool_result content for the canonical agent transcript.
+ *
+ * Content tools (Read/Write/…) keep full bodies so the local UI and Langfuse
+ * content-tool redactor can each do their job. Execute/Bash is different:
+ * Langfuse only applies lexical secret+path masking to Bash, and ACP only
+ * started forwarding execute results with the full-transcript change — so a
+ * `cat .env` body would ship to telemetry almost intact. Replace raw stdout
+ * with a length summary before emit.
+ */
+export function acpSafeToolResultContent(toolName: string, content: string): string {
+  if (!content) return content;
+  if (!isAcpExecuteToolName(toolName)) return content;
+  return `[REDACTED:acp_bash_output:${content.length}_chars]`;
+}
+
+/**
  * Best-effort extraction of a concrete file path from an ACP tool-call update,
  * checking three sources in priority order:
  * 1. `locations` or `content` array entries with a `path` field.

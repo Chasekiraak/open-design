@@ -952,7 +952,11 @@ test('terminal status-only frame keeps earlier rawOutput content', () => {
     .map((e) => ({ event: 'agent', data: e.payload }));
   const toolResult = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_result');
   assert.ok(toolResult);
-  assert.equal((toolResult.data as { content?: string }).content, 'hi\n');
+  // Earlier rawOutput is retained, then redacted at emit for execute tools.
+  assert.equal(
+    (toolResult.data as { content?: string }).content,
+    `[REDACTED:acp_bash_output:${'hi\n'.length}_chars]`,
+  );
 });
 
 test('an ACP write whose title names a NON-artifact file is not counted', () => {
@@ -1038,8 +1042,64 @@ test('attachAcpSession mirrors bash-like ACP tools with command input and rawOut
       (e.data as { toolUseId?: string }).toolUseId === 'bash-1',
   );
   assert.ok(toolResult);
-  assert.equal((toolResult.data as { content?: string }).content, 'total 0\n.');
+  // Execute stdout is replaced with a length summary so private dumps (cat .env)
+  // never enter the canonical tool_result transcript / Langfuse path.
+  assert.equal(
+    (toolResult.data as { content?: string }).content,
+    `[REDACTED:acp_bash_output:${'total 0\n.'.length}_chars]`,
+  );
   assert.equal(countNewArtifacts(runEvents), 0);
+});
+
+test('ACP execute tool_result redacts private stdout (cat .env)', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+  const secretDump = 'API_KEY=super-secret\nPASSWORD=also-secret\n';
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'cat secrets',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'bash-secret-1',
+    kind: 'execute',
+    status: 'completed',
+    rawInput: { command: 'cat .env' },
+    rawOutput: secretDump,
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'bash-secret-1',
+  );
+  const toolResult = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === 'bash-secret-1',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
+  // Command stays for observability; only stdout is redacted.
+  assert.equal(
+    (toolUse.payload as { input?: { command?: string } }).input?.command,
+    'cat .env',
+  );
+  assert.ok(toolResult);
+  const content = String((toolResult.payload as { content?: string }).content ?? '');
+  assert.equal(content, `[REDACTED:acp_bash_output:${secretDump.length}_chars]`);
+  assert.doesNotMatch(content, /API_KEY|PASSWORD|super-secret/);
 });
 
 test('ACP title Image.open must not become file_path', () => {
