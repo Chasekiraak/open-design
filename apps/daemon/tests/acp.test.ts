@@ -836,6 +836,80 @@ test('exactly-once emission: repeated terminal frames for same toolCallId emit o
   assert.equal(toolResults.length, 1);
 });
 
+test('flush retains tool ids so late terminal cannot emit a second contradictory pair', () => {
+  // Regression: flushOpenAcpTools must not clear acpToolRunEventState. A racy
+  // completed tool_call_update after abort/timeout flush must not recreate the
+  // same id as a fresh open tool and emit a successful pair after isError=true.
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  const session = attachAcpSession({
+    child: child as never,
+    prompt: 'run a long bash',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'flush-race-1',
+    kind: 'execute',
+    title: 'bash',
+    status: 'in_progress',
+    rawInput: { command: 'sleep 999' },
+  });
+  // Abort flushes the open tool as isError=true and must retain the map entry.
+  session.abort();
+
+  const afterAbortUses = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('flush-race-1'),
+  );
+  const afterAbortResults = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('flush-race-1'),
+  );
+  assert.equal(afterAbortUses.length, 1, 'abort must flush exactly one tool_use');
+  assert.equal(afterAbortResults.length, 1, 'abort must flush exactly one tool_result');
+  assert.equal((afterAbortResults[0]?.payload as { isError?: boolean }).isError, true);
+
+  // Late terminal (buffered agent stdout racing cancel). Must not add a second pair.
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'flush-race-1',
+    status: 'completed',
+    content: [{ type: 'content', content: { type: 'text', text: 'should not win' } }],
+  });
+
+  const finalUses = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('flush-race-1'),
+  );
+  const finalResults = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('flush-race-1'),
+  );
+  assert.equal(finalUses.length, 1, 'late terminal must not emit a second tool_use');
+  assert.equal(finalResults.length, 1, 'late terminal must not emit a second tool_result');
+  assert.equal(
+    (finalResults[0]?.payload as { isError?: boolean }).isError,
+    true,
+    'flushed failure must not be replaced by a successful late terminal',
+  );
+});
+
 test('sticky kind name: kind:read pending then title-only completed stays Read', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];

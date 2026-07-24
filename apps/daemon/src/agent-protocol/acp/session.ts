@@ -251,12 +251,17 @@ export function attachAcpSession({
   // completion uses isError=false (best-effort close); fail paths use
   // isError=true so Langfuse/PostHog and the persisted transcript keep the
   // open tool as an errored result instead of dropping it entirely.
+  //
+  // Do not clear the map after flush. Emitted entries must stay until the
+  // session ends so a late/racy terminal `tool_call_update` (timeout/abort/
+  // prompt-response flush racing buffered stdout) cannot recreate the same
+  // id as a fresh open tool and emit a second, possibly contradictory
+  // tool_use/tool_result pair. `st.emitted` already suppresses re-emission.
   const flushOpenAcpTools = (isError = false) => {
     for (const [toolCallId, st] of acpToolRunEventState) {
       if (st.emitted) continue;
       emitTerminalToolPair(toolCallId, st, isError);
     }
-    acpToolRunEventState.clear();
   };
 
   const stageWatchdogDisabled = stageTimeoutMs <= 0;
