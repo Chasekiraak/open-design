@@ -9031,7 +9031,15 @@ function HtmlViewer({
     const win = target?.contentWindow;
     if (!win) return;
     const runtimeState = previewRuntimeStateRef.current;
-    if (runtimeState) {
+    if (
+      runtimeState &&
+      target === srcDocPreviewIframeRef.current &&
+      !useUrlLoadPreview
+    ) {
+      // This snapshot only bridges the first URL -> srcDoc handoff. Consume it
+      // before posting so later srcDoc reloads cannot overwrite newer source
+      // attributes or runtime navigation with stale transition state.
+      previewRuntimeStateRef.current = null;
       win.postMessage({ type: 'od:preview-runtime-state-restore', state: runtimeState }, '*');
     }
     win.postMessage({

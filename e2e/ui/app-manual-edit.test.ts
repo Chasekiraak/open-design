@@ -181,6 +181,35 @@ test('[P0] manual edit mode preserves the current page in a multi-page mobile ap
   await expect(preview.getByTestId('mobile-page-profile')).toBeVisible();
   await preview.getByRole('button', { name: 'Home' }).click();
   await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-profile')).toBeHidden();
+
+  await page.getByTestId('manual-edit-mode-toggle').click();
+  await expect(page.getByTestId('manual-edit-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await preview.locator('[data-od-id="mobile-page-home"]').evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    }));
+  });
+
+  const selectedHtml = page.locator('.manual-edit-modal label')
+    .filter({ hasText: 'Selected element HTML' })
+    .locator('textarea');
+  await expect(selectedHtml).toBeVisible();
+  const currentHtml = await selectedHtml.inputValue();
+  const editedHtml = currentHtml.replace(
+    'data-page="home"',
+    'data-page="home" data-edit-revision="fresh"',
+  );
+  expect(editedHtml).not.toBe(currentHtml);
+  await selectedHtml.fill(editedHtml);
+  await inspectSaveButton(page).click();
+
+  await expectFileSource(page, projectId, 'mobile-app.html', ['data-edit-revision="fresh"']);
+  await expect(preview.locator('[data-edit-revision="fresh"]')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-profile')).toBeHidden();
 });
 
 async function selectPreviewElementThroughBridge(
@@ -1355,10 +1384,10 @@ function multiPageMobileHtml(): string {
     </style>
   </head>
   <body>
-    <main data-testid="mobile-page-home" data-page="home">
+    <main data-testid="mobile-page-home" data-od-id="mobile-page-home" data-page="home">
       <h1>Home page</h1>
     </main>
-    <main data-testid="mobile-page-profile" data-page="profile" hidden>
+    <main data-testid="mobile-page-profile" data-od-id="mobile-page-profile" data-page="profile" hidden>
       <h1>Profile page</h1>
     </main>
     <nav aria-label="Mobile navigation">

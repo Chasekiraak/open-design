@@ -1364,7 +1364,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.getByRole('menuitem', { name: /export as image/i })).toBeTruthy();
   });
 
-  it('captures URL preview state before activating the pre-mounted edit transport', async () => {
+  it('restores captured URL preview state only on the first edit transport load', async () => {
     const file = baseFile({
       name: 'page.html',
       path: 'page.html',
@@ -1453,6 +1453,14 @@ describe('FileViewer SVG artifacts', () => {
     expect(srcDocFrameAfter?.srcdoc).toContain('__odArtifactBootCount');
     expect(srcDocFrameAfter?.srcdoc).toContain('data-od-edit-bridge');
     expect(srcDocPostSpy).toHaveBeenCalledWith(
+      { type: 'od:preview-runtime-state-restore', state: capturedState },
+      '*',
+    );
+
+    srcDocPostSpy.mockClear();
+    fireEvent.load(srcDocFrameAfter!);
+
+    expect(srcDocPostSpy).not.toHaveBeenCalledWith(
       { type: 'od:preview-runtime-state-restore', state: capturedState },
       '*',
     );
