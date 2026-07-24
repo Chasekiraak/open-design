@@ -232,14 +232,24 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
     };
   }, []);
 
-  const loadBilling = useCallback(async (clearOnFailure: boolean) => {
+  // `force` mirrors `loadContext`'s `markLoading`/`loadFull`'s `force`: an
+  // explicit identity-change refresh (sign-in) must bypass a settled cached
+  // answer via `forceCoalescedGet`, or `notifyWorkspaceBillingRefresh()`
+  // fires the event but every mounted consumer just replays the pre-sign-in
+  // cached summary — no new request, so the surface never actually updates.
+  // Ambient triggers (focus/pageshow/visibility) stay on plain `coalescedGet`
+  // and tolerate sub-second staleness, same as context/team-projects.
+  const loadBilling = useCallback(async (clearOnFailure: boolean, force = false) => {
     try {
-      const summary = await coalescedGet('workspace-billing', async () => {
+      const fetchBilling = async () => {
         const res = await fetch('/api/workspace/billing', { cache: 'no-store' });
         if (!res.ok) throw new Error(`billing ${res.status}`);
         const body = (await res.json()) as WorkspaceBillingResponse;
         return body.summary ?? null;
-      });
+      };
+      const summary = force
+        ? await forceCoalescedGet('workspace-billing', fetchBilling)
+        : await coalescedGet('workspace-billing', fetchBilling);
       if (mountedRef.current) setSummary(summary);
     } catch {
       if (clearOnFailure && mountedRef.current) setSummary(null);
@@ -271,21 +281,30 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
     const refresh = () => {
       void loadBilling(true);
     };
+    // Same distinction as useWorkspaceContext's refresh vs
+    // refreshAfterIdentityChange: WORKSPACE_BILLING_REFRESH_EVENT (and its
+    // cross-tab storage twin) is the deliberate "identity just changed"
+    // signal notifyWorkspaceBillingRefresh() fires — it must force past a
+    // settled cache entry. Focus/pageshow/visibility are ambient revalidation
+    // and stay on the plain cache-tolerant path.
+    const refreshAfterIdentityChange = () => {
+      void loadBilling(true, true);
+    };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') refresh();
     };
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WORKSPACE_BILLING_REFRESH_STORAGE_KEY) refresh();
+      if (event.key === WORKSPACE_BILLING_REFRESH_STORAGE_KEY) refreshAfterIdentityChange();
     };
     window.addEventListener('focus', refresh);
     window.addEventListener('pageshow', refresh);
-    window.addEventListener(WORKSPACE_BILLING_REFRESH_EVENT, refresh);
+    window.addEventListener(WORKSPACE_BILLING_REFRESH_EVENT, refreshAfterIdentityChange);
     window.addEventListener('storage', onStorage);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pageshow', refresh);
-      window.removeEventListener(WORKSPACE_BILLING_REFRESH_EVENT, refresh);
+      window.removeEventListener(WORKSPACE_BILLING_REFRESH_EVENT, refreshAfterIdentityChange);
       window.removeEventListener('storage', onStorage);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
