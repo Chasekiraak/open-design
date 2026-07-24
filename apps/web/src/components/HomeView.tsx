@@ -280,6 +280,16 @@ const EMPTY_PROMPT_TEMPLATES: PromptTemplateSummary[] = [];
 // desktop auth token that cannot round-trip through JSON safely.
 const HOME_COMPOSER_PROMPT_KEY = 'open-design:home-composer:prompt';
 const HOME_COMPOSER_DESIGN_SYSTEM_KEY = 'open-design:home-composer:design-system';
+// `EntryShell` keeps `HomeView` permanently mounted and toggles it with CSS
+// visibility instead of unmounting it on every Home/Community/... view
+// switch (unlike the EntryView<->ProjectView swap described above, which
+// still does a real unmount). The localStorage draft above is therefore
+// read only once, on the very first mount, and a later `seedHomeComposerPrompt`
+// call (from e.g. Community's "使用提示词"/Prompt button) has nothing left to
+// remount into — it writes the draft key but nobody re-reads it. Dispatch a
+// live event too so an already-mounted HomeView can pick up the seed
+// directly; the draft key stays as the true-cold-mount fallback.
+const HOME_COMPOSER_SEED_EVENT = 'open-design:home-composer:seed';
 
 function readHomeComposerDraft(key: string): string | null {
   if (typeof window === 'undefined') return null;
@@ -309,14 +319,17 @@ function clearHomeComposerDraft(): void {
 }
 
 /**
- * Seed the Home composer's prompt for its next mount — used when another surface
- * hands the user into Home with a starting prompt (e.g. "Remix" a community
- * template). It writes the same draft key the composer restores from, so the
- * text appears (as a user-edited draft) when Home next mounts. Navigate to Home
- * right after so the fresh mount picks it up.
+ * Seed the Home composer's prompt — used when another surface hands the user
+ * into Home with a starting prompt (e.g. Community's "使用提示词"/Prompt
+ * button). Writes the draft key (covers a true cold mount) AND dispatches a
+ * live event (covers the common case where `HomeView` is already mounted and
+ * just gets toggled visible — see the `HOME_COMPOSER_SEED_EVENT` note above).
  */
 export function seedHomeComposerPrompt(prompt: string): void {
   writeHomeComposerDraft(HOME_COMPOSER_PROMPT_KEY, prompt);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(HOME_COMPOSER_SEED_EVENT, { detail: { prompt } }));
+  }
 }
 
 export function HomeView({
@@ -485,6 +498,21 @@ export function HomeView({
   useEffect(() => {
     writeHomeComposerDraft(HOME_COMPOSER_DESIGN_SYSTEM_KEY, designSystemId);
   }, [designSystemId]);
+  // Live counterpart to the draft-key restore above (see the
+  // `HOME_COMPOSER_SEED_EVENT` module note) — picks up a `seedHomeComposerPrompt`
+  // call that fires while this HomeView instance is already mounted, which is
+  // the common case now that EntryShell keeps Home mounted across view
+  // switches instead of tearing it down.
+  useEffect(() => {
+    function onSeed(event: Event) {
+      const prompt = (event as CustomEvent<{ prompt: string }>).detail?.prompt;
+      if (typeof prompt !== 'string') return;
+      setPrompt(prompt);
+      setPromptEditedByUser(prompt.trim().length > 0);
+    }
+    window.addEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
+    return () => window.removeEventListener(HOME_COMPOSER_SEED_EVENT, onSeed);
+  }, []);
   const [figmaModalOpen, setFigmaModalOpen] = useState(false);
   const examplePromptInfoRef = useRef<ExamplePromptInfo | null>(null);
   const handleExamplePromptStatusChange = useCallback((info: ExamplePromptInfo | null) => {

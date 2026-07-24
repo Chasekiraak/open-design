@@ -74,7 +74,6 @@ import type {
 } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
 import {
-  trackArtifactHeaderClick,
   trackByokPreflightBlocked,
   trackComposerBarClick,
   trackDesignSystemApplyResult,
@@ -217,7 +216,6 @@ import {
 import { historyWithApiAttachmentContext } from '../api-attachment-context';
 import { filterImplicitProducedFiles } from '../produced-files';
 import { AvatarMenu } from './AvatarMenu';
-import { EntrySettingsMenu } from './EntrySettingsMenu';
 import { Icon } from './Icon';
 import { localizePluginTitle } from './plugins-home/localization';
 import { DesignSystemPicker } from './DesignSystemPicker';
@@ -1470,7 +1468,6 @@ export function ProjectView({
   // mount-local guard would let the funnel events re-fire on a later
   // conversation/run of the same project.
   const iframeKeepAlivePool = useIframeKeepAlivePool();
-  const handleThemeChange = onThemeChange ?? (() => {});
   // Team collaboration: presence for a shared project. Dormant (no heartbeat,
   // renders nothing) unless the workspace context marks the viewer an active
   // team member — safe to mount unconditionally.
@@ -9149,32 +9146,6 @@ export function ProjectView({
           onAuthorizeAndRetry={handleSwitchToAmrAndRetry}
           onLaunchTerminalAuth={handleLaunchAntigravityOauth}
           conversationId={activeConversationId}
-          headerActions={(
-            <>
-              {/* Hand-off lives in the share popover's 发送到… tab (the #5517
-                  shape) — a second standalone trigger here duplicated it, so
-                  the top bar keeps only settings. Message center is a
-                  Home-only entry point (recvqaeVCLVzNp) — it must not also
-                  surface inside a project's toolbar. */}
-              <EntrySettingsMenu
-                config={config}
-                onThemeChange={handleThemeChange}
-                onOpenSettings={onOpenSettings}
-                trackingPageName="artifact"
-                onTrackTriggerClick={() => {
-                  // Spec row 52: the settings gear in the artifact header.
-                  // Carry the active artifact so settings slices line up with
-                  // the rest of the artifact_header funnel.
-                  trackArtifactHeaderClick(analytics.track, {
-                    page_name: 'artifact',
-                    area: 'artifact_header',
-                    element: 'settings',
-                    ...headerArtifact,
-                  });
-                }}
-              />
-            </>
-          )}
         />
       </div>
       {contextPluginDetails ? (
