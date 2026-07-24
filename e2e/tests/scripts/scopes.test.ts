@@ -536,8 +536,8 @@ test("merge-queue threshold trusts the certain-exempt core without escalation", 
   });
 });
 
-test("the consumption guard flags repo-resolving literals and tolerates test fixtures", async () => {
-  const { collectCertainExemptConsumptionFromSource, isFixtureTolerantPath } = await import(
+test("the consumption guard distinguishes repo readers from sandbox fixture writers", async () => {
+  const { collectCertainExemptConsumptionFromSource } = await import(
     "../../../scripts/check-certain-exempt-consumption.ts"
   );
 
@@ -555,13 +555,26 @@ test("the consumption guard flags repo-resolving literals and tolerates test fix
   );
   assert.deepEqual(bareInSource.map((violation) => violation.literal), ["docs/CHANGELOG"]);
 
-  // ...but fixture data in tests (sandboxed project paths, never repo docs/).
-  assert.ok(isFixtureTolerantPath("apps/daemon/tests/example.test.ts"));
-  const bareInTest = collectCertainExemptConsumptionFromSource(
-    "apps/daemon/tests/example.test.ts",
-    `await writeProjectFile("docs/empty.md", "");`,
+  // ...and in tests when a repo-root helper reads them.
+  const repoReadInTest = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/tests/runtimes/trae-cli.test.ts",
+    `await readRepoFile("docs/agent-adapters.md");`,
   );
-  assert.deepEqual(bareInTest, []);
+  assert.deepEqual(repoReadInTest.map((violation) => violation.literal), [
+    "docs/agent-adapters.md",
+  ]);
+
+  // Known project writers resolve the same-looking path inside a sandbox.
+  for (const source of [
+    `await writeProjectFile("docs/empty.md", "");`,
+    `await fixture.writeProjectFile("docs/empty.md", "");`,
+  ]) {
+    const fixtureWrite = collectCertainExemptConsumptionFromSource(
+      "apps/daemon/tests/example.test.ts",
+      source,
+    );
+    assert.deepEqual(fixtureWrite, []);
+  }
 
   // Prose that merely mentions a docs path does not start with the prefix.
   const prose = collectCertainExemptConsumptionFromSource(

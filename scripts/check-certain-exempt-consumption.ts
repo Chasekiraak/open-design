@@ -15,12 +15,10 @@ import { CERTAIN_EXEMPT_EXACT, CERTAIN_EXEMPT_PREFIXES } from "./scopes.ts";
 // - a dot-relative literal (`../../docs/...`) that resolves from the file's
 //   repo location into the certain-exempt surface: flagged everywhere — it can
 //   only mean the repository surface.
-// - a bare repo-relative literal (`docs/CHANGELOG`): flagged only in non-test
-//   sources. In tests, bare `docs/...` strings are overwhelmingly project
-//   fixture paths inside sandboxed workspaces (and Vitest's cwd is the package
-//   dir, so a bare relative read could not reach repository docs/ anyway);
-//   real repo consumption in source code is a repo-root-resolved config
-//   default, which this level catches.
+// - a bare repo-relative literal (`docs/CHANGELOG`): flagged everywhere unless
+//   it is an argument to a known sandbox-fixture writer. Test files can also
+//   contain repo-root helpers, so exempting them wholesale would hide real
+//   consumption.
 // Template literals with substitutions are not statically resolvable and are
 // out of scope.
 //
@@ -50,13 +48,54 @@ const skippedRepositoryPrefixes = ["apps/landing-page/"];
 
 const checkedExtensions = new Set([".ts", ".tsx"]);
 
+// These helpers interpret their path argument inside a temporary project
+// workspace. Keep this list narrow: repo-root readers used by tests must remain
+// visible to the guard.
+const sandboxFixtureWriterNames = new Set(["writeProjectFile"]);
+
 // File-level exceptions. Every entry must explain why the reference is not
 // gate-lane consumption of exempt-file *content*; revisit the entry if the
 // file's relationship to the exempt surface changes.
 const allowedConsumers = new Map<string, string>([
   [
+    "apps/daemon/tests/claude-design-import.test.ts",
+    "archive-entry and extracted-project fixture paths; every docs/ literal names data inside a temporary project",
+  ],
+  [
+    "apps/daemon/tests/design-systems/file-score.test.ts",
+    "path-classification fixture strings; the test does not open the editor configuration files",
+  ],
+  [
+    "apps/daemon/tests/project-classifiers.test.ts",
+    "file-kind classifier input; the LICENSE literal is never resolved or opened",
+  ],
+  [
+    "apps/daemon/tests/runtimes/trae-cli.test.ts",
+    "reads docs/agent-adapters.md from the repository, but this test file is not selected by any ci.yml daemon-test lane",
+  ],
+  [
+    "apps/web/tests/components/ChatPane.imported-folder-artifacts.test.tsx",
+    "imported-project artifact fixture paths rendered from in-memory test data",
+  ],
+  [
+    "apps/web/tests/components/file-viewer-markdown-copy.test.tsx",
+    "project-relative markdown path inputs used to test URL construction, not repository reads",
+  ],
+  [
+    "apps/web/tests/utils/inlineMentions.test.ts",
+    "in-memory mention parser fixture paths; no filesystem access occurs",
+  ],
+  [
     "tools/release/src/release-note/prepare.ts",
     "docs/CHANGELOG feeds release-note preparation, which runs only in release workflows; @open-design/tools-release tests run in no ci.yml lane",
+  ],
+  [
+    "e2e/tests/packaged-smoke-workflow.test.ts",
+    "scope-planner and workflow-text assertion fixtures; certain-exempt literals are passed as data and never opened",
+  ],
+  [
+    "e2e/tests/scripts/product-neutrality.test.ts",
+    "virtual source path passed to the product-neutrality collector; it does not access the repository file",
   ],
   [
     "e2e/tests/scripts/scopes.test.ts",
@@ -81,21 +120,25 @@ function landsInCertainExemptSurface(repositoryPath: string): boolean {
   );
 }
 
-export function isFixtureTolerantPath(repositoryPath: string): boolean {
-  return (
-    /\.test\.tsx?$/.test(repositoryPath) ||
-    repositoryPath.includes("/tests/") ||
-    repositoryPath.startsWith("e2e/")
-  );
-}
-
 function literalConsumesCertainExemptSurface(fromRepositoryPath: string, literal: string): boolean {
   if (literal.startsWith("./") || literal.startsWith("../")) {
     const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(fromRepositoryPath), literal));
     return landsInCertainExemptSurface(resolved);
   }
-  if (isFixtureTolerantPath(fromRepositoryPath)) return false;
   return landsInCertainExemptSurface(literal);
+}
+
+function isSandboxFixtureWriterArgument(node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral): boolean {
+  const call = node.parent;
+  if (!ts.isCallExpression(call) || !call.arguments.includes(node)) return false;
+
+  const callee = call.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+      ? callee.name.text
+      : undefined;
+  return name !== undefined && sandboxFixtureWriterNames.has(name);
 }
 
 export function collectCertainExemptConsumptionFromSource(
@@ -113,7 +156,10 @@ export function collectCertainExemptConsumptionFromSource(
 
   const visit = (node: ts.Node): void => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      if (literalConsumesCertainExemptSurface(repositoryPath, node.text)) {
+      if (
+        !isSandboxFixtureWriterArgument(node) &&
+        literalConsumesCertainExemptSurface(repositoryPath, node.text)
+      ) {
         violations.push({
           filePath: repositoryPath,
           lineNumber: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
