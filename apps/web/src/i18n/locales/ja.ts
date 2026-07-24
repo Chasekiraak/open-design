@@ -2210,7 +2210,7 @@ export const ja: Dict = {
   'chat.mode.plan.costNote': '生成の前に、編集可能なプラン文書を1つ作成します。',
   'chat.mode.design.cost': '多め',
   'chat.mode.design.costNote': 'ファイルやマルチモーダルな成果物を生成するため、1回の消費量が最も多くなります。',
-  'chat.modePicker.choose': 'モードを選択',
+  'chat.modePicker.choose': '作業方法を選択',
   'chat.modePicker.current': 'モード: {name}',
   'chat.modePicker.clear': 'モードをクリア',
   'chat.modePicker.mode': 'モード',

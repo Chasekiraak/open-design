@@ -2210,7 +2210,7 @@ export const ar: Dict = {
   'chat.mode.plan.costNote': 'ينشئ مستند خطة قابلاً للتعديل قبل أي عملية إنشاء.',
   'chat.mode.design.cost': 'مرتفع',
   'chat.mode.design.costNote': 'ينشئ ملفات ووسائط متعددة الأنماط، لذا قد يستهلك التشغيل الواحد أكبر قدر.',
-  'chat.modePicker.choose': 'اختر وضعًا',
+  'chat.modePicker.choose': 'اختر طريقة العمل',
   'chat.modePicker.current': 'الوضع: {name}',
   'chat.modePicker.clear': 'مسح الوضع',
   'chat.modePicker.mode': 'الوضع',

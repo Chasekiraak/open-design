@@ -2210,7 +2210,7 @@ export const ru: Dict = {
   'chat.mode.plan.costNote': 'Сначала создаёт редактируемый документ плана, а затем переходит к генерации.',
   'chat.mode.design.cost': 'Высокий',
   'chat.mode.design.costNote': 'Создаёт файлы и мультимодальный контент, поэтому один запуск может расходовать больше всего.',
-  'chat.modePicker.choose': 'Выбрать режим',
+  'chat.modePicker.choose': 'Выберите способ работы',
   'chat.modePicker.current': 'Режим: {name}',
   'chat.modePicker.clear': 'Сбросить режим',
   'chat.modePicker.mode': 'Режим',

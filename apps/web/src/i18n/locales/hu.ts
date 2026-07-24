@@ -2210,7 +2210,7 @@ export const hu: Dict = {
   'chat.mode.plan.costNote': 'Előbb egy szerkeszthető tervdokumentumot készít, mielőtt bármit generálna.',
   'chat.mode.design.cost': 'Magas',
   'chat.mode.design.costNote': 'Fájlokat és multimodális tartalmat hoz létre, így egy futás fogyaszthat a legtöbbet.',
-  'chat.modePicker.choose': 'Válassz módot',
+  'chat.modePicker.choose': 'Válaszd ki, hogyan dolgozz',
   'chat.modePicker.current': 'Mód: {name}',
   'chat.modePicker.clear': 'Mód törlése',
   'chat.modePicker.mode': 'Mód',

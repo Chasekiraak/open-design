@@ -2210,7 +2210,7 @@ export const uk: Dict = {
   'chat.mode.plan.costNote': 'Спершу створює редагований документ плану, а потім переходить до генерації.',
   'chat.mode.design.cost': 'Високе',
   'chat.mode.design.costNote': 'Створює файли та мультимодальний контент, тож один запуск може споживати найбільше.',
-  'chat.modePicker.choose': 'Вибрати режим',
+  'chat.modePicker.choose': 'Виберіть спосіб роботи',
   'chat.modePicker.current': 'Режим: {name}',
   'chat.modePicker.clear': 'Скинути режим',
   'chat.modePicker.mode': 'Режим',

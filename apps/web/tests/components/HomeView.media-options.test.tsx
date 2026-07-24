@@ -68,7 +68,7 @@ describe('HomeView media composer options', () => {
 
     await screen.findByTestId('home-hero-input');
 
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose how to work');
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
 
     await setHomePrompt('Create a clean loading animation');
@@ -90,7 +90,7 @@ describe('HomeView media composer options', () => {
     await screen.findByTestId('home-hero-input');
     expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
     fireEvent.click(screen.getByTestId('composer-mode-clear'));
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose how to work');
     await setHomePrompt('Give me advice about this flow');
     await submitHome();
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));

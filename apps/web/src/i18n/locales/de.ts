@@ -2210,7 +2210,7 @@ export const de: Dict = {
   'chat.mode.plan.costNote': 'Erstellt zuerst ein bearbeitbares Plandokument, bevor etwas generiert wird.',
   'chat.mode.design.cost': 'Hoch',
   'chat.mode.design.costNote': 'Generiert Dateien und multimodale Inhalte – ein Lauf kann am meisten verbrauchen.',
-  'chat.modePicker.choose': 'Modus wählen',
+  'chat.modePicker.choose': 'Arbeitsweise wählen',
   'chat.modePicker.current': 'Modus: {name}',
   'chat.modePicker.clear': 'Modus zurücksetzen',
   'chat.modePicker.mode': 'Modus',

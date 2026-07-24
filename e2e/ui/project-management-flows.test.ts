@@ -1751,7 +1751,7 @@ test('[P1] project detail session mode switch carries Ask and Plan semantics int
 
   const modeTrigger = page.getByTestId('composer-mode-trigger');
   // Design is the app default, so the picker starts on its neutral trigger.
-  await expect(modeTrigger).toHaveAttribute('aria-label', 'Choose a mode');
+  await expect(modeTrigger).toHaveAttribute('aria-label', 'Choose how to work');
 
   await modeTrigger.click();
   await page.getByTestId('composer-mode-menu-plan').click();

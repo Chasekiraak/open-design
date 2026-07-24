@@ -2322,7 +2322,7 @@ export const zhTW: Dict = {
   "chat.mode.plan.costNote": "先產生一份可編輯的方案文件，再進入產生階段。",
   "chat.mode.design.cost": "較高",
   "chat.mode.design.costNote": "會產生檔案和多模態內容，單次執行消耗可能最高。",
-  "chat.modePicker.choose": "選擇模式",
+  "chat.modePicker.choose": "選擇工作方式",
   "chat.modePicker.current": "模式：{name}",
   "chat.modePicker.clear": "清除模式",
   "chat.modePicker.mode": "模式",

@@ -2314,7 +2314,7 @@ export const zhCN: Dict = {
   "chat.mode.plan.costNote": "先生成一份可编辑的方案文档，再进入生成阶段。",
   "chat.mode.design.cost": "较高",
   "chat.mode.design.costNote": "会生成文件和多模态内容，单次运行消耗可能最高。",
-  "chat.modePicker.choose": "选择模式",
+  "chat.modePicker.choose": "选择工作方式",
   "chat.modePicker.current": "模式：{name}",
   "chat.modePicker.clear": "清除模式",
   "chat.modePicker.mode": "模式",

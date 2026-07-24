@@ -87,8 +87,8 @@ describe('ComposerModePicker', () => {
     fireEvent.click(screen.getByTestId('composer-mode-clear'));
     expect(onModeChange).not.toHaveBeenCalled();
     const trigger = screen.getByTestId('composer-mode-trigger');
-    expect(trigger.getAttribute('aria-label')).toBe('Choose a mode');
-    expect(trigger.getAttribute('data-tooltip')).toBe('Choose a mode');
+    expect(trigger.getAttribute('aria-label')).toBe('Choose how to work');
+    expect(trigger.getAttribute('data-tooltip')).toBe('Choose how to work');
     expect(trigger.className).toContain('od-tooltip');
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
 
@@ -110,7 +110,7 @@ describe('ComposerModePicker', () => {
 
     rerender(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose how to work');
 
     rerender(<ComposerModePicker mode="design" onModeChange={vi.fn()} labelHidden />);
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
@@ -128,7 +128,7 @@ describe('ComposerModePicker', () => {
       />,
     );
 
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose how to work');
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
 
     fireEvent.click(screen.getByTestId('composer-mode-trigger'));

@@ -2210,7 +2210,7 @@ export const fa: Dict = {
   'chat.mode.plan.costNote': 'پیش از هر تولیدی، یک سند طرح قابل‌ویرایش می‌سازد.',
   'chat.mode.design.cost': 'زیاد',
   'chat.mode.design.costNote': 'فایل‌ها و محتوای چندوجهی تولید می‌کند، بنابراین هر اجرا ممکن است بیشترین مصرف را داشته باشد.',
-  'chat.modePicker.choose': 'انتخاب حالت',
+  'chat.modePicker.choose': 'شیوه کار را انتخاب کنید',
   'chat.modePicker.current': 'حالت: {name}',
   'chat.modePicker.clear': 'پاک کردن حالت',
   'chat.modePicker.mode': 'حالت',

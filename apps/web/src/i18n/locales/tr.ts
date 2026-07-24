@@ -2210,7 +2210,7 @@ export const tr: Dict = {
   'chat.mode.plan.costNote': 'Üretime geçmeden önce düzenlenebilir bir plan belgesi oluşturur.',
   'chat.mode.design.cost': 'Yüksek',
   'chat.mode.design.costNote': 'Dosyalar ve çok biçimli içerik üretir; bu nedenle tek çalıştırma en fazla kaynağı kullanabilir.',
-  'chat.modePicker.choose': 'Mod seç',
+  'chat.modePicker.choose': 'Çalışma şeklini seç',
   'chat.modePicker.current': 'Mod: {name}',
   'chat.modePicker.clear': 'Modu temizle',
   'chat.modePicker.mode': 'Mod',

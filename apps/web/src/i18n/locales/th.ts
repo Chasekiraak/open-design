@@ -2210,7 +2210,7 @@ export const th: Dict = {
   'chat.mode.plan.costNote': 'สร้างเอกสารแผนที่แก้ไขได้หนึ่งฉบับก่อนเริ่มสร้างงานจริง',
   'chat.mode.design.cost': 'สูง',
   'chat.mode.design.costNote': 'สร้างไฟล์และสื่อหลายรูปแบบ การทำงานหนึ่งครั้งจึงอาจใช้ทรัพยากรมากที่สุด',
-  'chat.modePicker.choose': 'เลือกโหมด',
+  'chat.modePicker.choose': 'เลือกวิธีทำงาน',
   'chat.modePicker.current': 'โหมด: {name}',
   'chat.modePicker.clear': 'ล้างโหมด',
   'chat.modePicker.mode': 'โหมด',

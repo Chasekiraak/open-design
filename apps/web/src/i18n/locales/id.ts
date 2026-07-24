@@ -2210,7 +2210,7 @@ export const id: Dict = {
   'chat.mode.plan.costNote': 'Membuat satu dokumen rencana yang dapat diedit sebelum proses pembuatan.',
   'chat.mode.design.cost': 'Berat',
   'chat.mode.design.costNote': 'Membuat berkas dan media multimoda, jadi satu kali proses bisa paling banyak menggunakan.',
-  'chat.modePicker.choose': 'Pilih mode',
+  'chat.modePicker.choose': 'Pilih cara bekerja',
   'chat.modePicker.current': 'Mode: {name}',
   'chat.modePicker.clear': 'Hapus mode',
   'chat.modePicker.mode': 'Mode',

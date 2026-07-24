@@ -2210,7 +2210,7 @@ export const esES: Dict = {
   'chat.mode.plan.costNote': 'Crea primero un documento de plan editable antes de generar nada.',
   'chat.mode.design.cost': 'Alto',
   'chat.mode.design.costNote': 'Genera archivos y contenido multimodal, por lo que una ejecución puede consumir más.',
-  'chat.modePicker.choose': 'Elegir un modo',
+  'chat.modePicker.choose': 'Elige cómo trabajar',
   'chat.modePicker.current': 'Modo: {name}',
   'chat.modePicker.clear': 'Quitar el modo',
   'chat.modePicker.mode': 'Modo',

@@ -2210,7 +2210,7 @@ export const ko: Dict = {
   'chat.mode.plan.costNote': '생성에 앞서 편집 가능한 계획 문서를 먼저 만듭니다.',
   'chat.mode.design.cost': '높음',
   'chat.mode.design.costNote': '파일과 멀티모달 결과물을 생성하므로 한 번 실행에 사용량이 가장 많을 수 있습니다.',
-  'chat.modePicker.choose': '모드 선택',
+  'chat.modePicker.choose': '작업 방식 선택',
   'chat.modePicker.current': '모드: {name}',
   'chat.modePicker.clear': '모드 지우기',
   'chat.modePicker.mode': '모드',
