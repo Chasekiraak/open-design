@@ -1138,6 +1138,60 @@ test('ACP execute tool_result redacts private stdout (cat .env)', () => {
   assert.doesNotMatch(content, /API_KEY|PASSWORD|super-secret/);
 });
 
+test('ACP path-like toolCallId is hashed before tool_use/tool_result emission', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+  // Adapter-derived id that embeds a user home path / secret file name.
+  const rawToolCallId = 'read:/home/alice/.env';
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read env',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: rawToolCallId,
+    kind: 'read',
+    status: 'completed',
+    locations: [{ path: '/home/alice/.env' }],
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  const toolResult = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_result',
+  );
+  assert.ok(toolUse, 'expected tool_use for path-like toolCallId');
+  assert.ok(toolResult, 'expected tool_result for path-like toolCallId');
+  const useId = (toolUse.payload as { id?: string }).id ?? '';
+  const resultId = (toolResult.payload as { toolUseId?: string }).toolUseId ?? '';
+  // Transcript/telemetry must not carry the raw path-bearing adapter id.
+  assert.notEqual(useId, rawToolCallId);
+  assert.notEqual(resultId, rawToolCallId);
+  assert.equal(useId, resultId, 'tool_use and tool_result stay paired');
+  assert.match(useId, /^acp_[0-9a-f]{24}$/);
+  assert.doesNotMatch(useId, /alice|\.env|\/home\//);
+  // Safe identifier-like ids still pass through unchanged.
+  assert.equal(
+    events.some(
+      (e) =>
+        e.event === 'agent' &&
+        (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+        String((e.payload as { id?: string }).id ?? '').includes('alice'),
+    ),
+    false,
+  );
+});
+
 test('ACP title Image.open must not become file_path', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];

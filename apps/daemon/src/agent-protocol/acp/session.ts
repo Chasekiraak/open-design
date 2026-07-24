@@ -48,6 +48,7 @@ import {
   acpToolInput,
   acpToolResultContent,
   acpSafeToolResultContent,
+  acpTelemetryToolCallId,
   promotedAmrRetryStatusPayload,
   promotedAmrStderrPayload,
 } from './updates.js';
@@ -220,9 +221,13 @@ export function attachAcpSession({
     // Think/reason frames are activity noise for AMR no-output detection and
     // must not appear as concrete tool_use/tool_result events.
     if (st.thinkOnly) return;
+    // Raw ACP toolCallId stays as the local Map key for frame correlation; the
+    // transcript/telemetry id is opaque so path-like adapter ids never leak
+    // into Langfuse span ids or metadata.toolCallId.
+    const telemetryToolCallId = acpTelemetryToolCallId(toolCallId);
     send('agent', {
       type: 'tool_use',
-      id: toolCallId,
+      id: telemetryToolCallId,
       name: st.name,
       input: buildToolUseInput(st),
       // Wall-clock start of the first ACP frame for this toolCallId so analytics
@@ -231,7 +236,7 @@ export function attachAcpSession({
     });
     send('agent', {
       type: 'tool_result',
-      toolUseId: toolCallId,
+      toolUseId: telemetryToolCallId,
       // Bash/execute stdout can dump private files (cat .env). Langfuse only
       // lexically masks Bash, so redact before the canonical transcript ships.
       content: acpSafeToolResultContent(st.name, st.resultContent),

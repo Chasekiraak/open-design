@@ -4,6 +4,7 @@
  * event-shape diagnostics. Depends on acp/types, acp/json, and the vela-errors
  * integration; consumed exclusively by acp/session.ts.
  */
+import { createHash } from 'node:crypto';
 import type { JsonObject } from './types.js';
 import { asObject, acpValueKind, objectKeys, extractAcpUpdateText } from './json.js';
 import { classifyAmrAccountFailure, amrAccountFailureDetails } from '../../integrations/vela-errors.js';
@@ -475,6 +476,30 @@ export function sanitizeAcpCustomToolName(raw: string): string {
     return 'Other';
   }
   return trimmed;
+}
+
+/**
+ * Maps an ACP adapter `toolCallId` to a transcript/telemetry-safe id.
+ *
+ * Adapters may embed user paths or secrets in toolCallId (for example
+ * `read:/home/alice/.env`). Those values would otherwise flow into
+ * tool_use/tool_result events, then into Langfuse span ids and
+ * `metadata.toolCallId`. Identifier-like ids (UUID, call-1, …) pass through
+ * so local correlation stays readable; everything else is replaced with a
+ * stable opaque hash. Session-local maps may still key off the raw id.
+ */
+export function acpTelemetryToolCallId(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return 'acp_empty';
+  // Safe adapter/local ids: alphanumeric with limited separators, no paths.
+  if (
+    trimmed.length <= 128 &&
+    /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(trimmed) &&
+    !trimmed.includes('..')
+  ) {
+    return trimmed;
+  }
+  return `acp_${createHash('sha256').update(trimmed, 'utf8').digest('hex').slice(0, 24)}`;
 }
 
 /**
