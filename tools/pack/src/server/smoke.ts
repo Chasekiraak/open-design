@@ -574,10 +574,9 @@ async function smokeInstalledArchive(options: {
     const terminalBody = (await terminal.json()) as { terminal?: { id?: unknown } };
     const terminalId = terminalBody.terminal?.id;
     if (typeof terminalId !== "string") throw new Error("node-pty smoke returned no terminal id");
-    await fetch(
-      `${baseUrl}/api/projects/${projectId}/terminals/${encodeURIComponent(terminalId)}/kill`,
-      { headers: { origin: baseUrl }, method: "POST" },
-    );
+    // Keep the PTY active so the final daemon shutdown deterministically
+    // exercises native-terminal cleanup instead of depending on whether a
+    // preceding kill event happens to settle first on this runner.
 
     const releaseRoot = await installedReleaseRoot(installRoot, options.config);
     const selectedNode =
@@ -619,7 +618,12 @@ async function smokeInstalledArchive(options: {
     }
     throw probeError;
   }
-  if (shutdownError != null) throw shutdownError;
+  if (shutdownError != null) {
+    throw new Error(
+      `${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}\nDaemon output:\n${daemonOutput}`,
+      { cause: shutdownError },
+    );
+  }
   if (result == null) throw new Error("server smoke produced no result");
   return result;
 }
