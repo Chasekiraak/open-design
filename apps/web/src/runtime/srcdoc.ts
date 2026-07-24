@@ -2141,9 +2141,114 @@ function meaningfulDomFallbackTarget(el) {
     rebuildStyleSheet();
     postOverrides();
   }
+  // Reapply the bounded UI state captured from the URL-loaded twin before
+  // Manual Edit became active. data-od-* stays owned by this srcDoc's bridges.
+  function runtimeStateAttributeAllowed(name){
+    return name === 'class' ||
+      name === 'style' ||
+      name === 'hidden' ||
+      name === 'open' ||
+      name.indexOf('aria-') === 0 ||
+      (name.indexOf('data-') === 0 && name.indexOf('data-od-') !== 0);
+  }
+  function applyRuntimeStateAttributes(el, attrs){
+    if (!el || !attrs || typeof attrs !== 'object') return;
+    var current = Array.prototype.slice.call(el.attributes || []);
+    for (var i = 0; i < current.length; i++) {
+      var currentName = current[i] && current[i].name;
+      if (
+        currentName &&
+        runtimeStateAttributeAllowed(currentName) &&
+        !Object.prototype.hasOwnProperty.call(attrs, currentName)
+      ) {
+        try { el.removeAttribute(currentName); } catch (_) {}
+      }
+    }
+    var names = Object.keys(attrs).slice(0, 64);
+    for (var a = 0; a < names.length; a++) {
+      var name = names[a];
+      var value = attrs[name];
+      if (!runtimeStateAttributeAllowed(name) || typeof value !== 'string' || value.length > 20000) continue;
+      try { el.setAttribute(name, value); } catch (_) {}
+    }
+  }
+  function runtimeStateElementAtPath(path){
+    if (!Array.isArray(path) || path.length > 64) return null;
+    var node = document.body;
+    for (var i = 0; node && i < path.length; i++) {
+      var index = Number(path[i]);
+      if (!Number.isInteger(index) || index < 0 || index > 100000) return null;
+      node = node.children && node.children[index];
+    }
+    return node || null;
+  }
+  function runtimeStateElement(entry){
+    var el = null;
+    if (entry && typeof entry.id === 'string' && entry.id.length <= 4096) {
+      try { el = document.getElementById(entry.id); } catch (_) { el = null; }
+    }
+    if (!el && entry && typeof entry.odId === 'string' && entry.odId.length <= 4096) {
+      try { el = document.querySelector('[data-od-id="' + esc(entry.odId) + '"]'); } catch (_) { el = null; }
+    }
+    if (!el) el = runtimeStateElementAtPath(entry && entry.path);
+    if (!el || String(el.tagName || '').toLowerCase() !== String(entry && entry.tag || '').toLowerCase()) return null;
+    return el;
+  }
+  function restoreRuntimeState(state){
+    if (
+      !state ||
+      state.version !== 1 ||
+      !Array.isArray(state.entries) ||
+      state.entries.length > 3500
+    ) return;
+    applyRuntimeStateAttributes(document.documentElement, state.htmlAttrs);
+    applyRuntimeStateAttributes(document.body, state.bodyAttrs);
+    for (var i = 0; i < state.entries.length; i++) {
+      var entry = state.entries[i];
+      if (!entry || typeof entry !== 'object') continue;
+      var el = runtimeStateElement(entry);
+      if (!el) continue;
+      applyRuntimeStateAttributes(el, entry.attrs);
+      var tag = String(el.tagName || '').toLowerCase();
+      if (
+        (tag === 'input' || tag === 'textarea' || tag === 'select') &&
+        typeof entry.value === 'string' &&
+        entry.value.length <= 100000
+      ) {
+        try { el.value = entry.value; } catch (_) {}
+      }
+      if (tag === 'input' && typeof entry.checked === 'boolean') {
+        try { el.checked = entry.checked; } catch (_) {}
+      }
+      if (tag === 'select' && Number.isInteger(entry.selectedIndex)) {
+        try { el.selectedIndex = entry.selectedIndex; } catch (_) {}
+      }
+      if (Number.isFinite(entry.scrollLeft)) {
+        try { el.scrollLeft = entry.scrollLeft; } catch (_) {}
+      }
+      if (Number.isFinite(entry.scrollTop)) {
+        try { el.scrollTop = entry.scrollTop; } catch (_) {}
+      }
+    }
+    if (typeof state.hash === 'string' && state.hash.length <= 4096 && state.hash !== window.location.hash) {
+      try { window.history.replaceState(null, '', state.hash || 'about:srcdoc'); } catch (_) {}
+    }
+    if (active()) setTimeout(postTargets, 0);
+  }
+  function scheduleRuntimeStateRestore(state){
+    restoreRuntimeState(state);
+    window.requestAnimationFrame(function(){
+      restoreRuntimeState(state);
+      window.setTimeout(function(){ restoreRuntimeState(state); }, 80);
+    });
+  }
   window.addEventListener('message', function(ev){
     var data = ev && ev.data;
     if (!data || !data.type) return;
+    if (data.type === 'od:preview-runtime-state-restore') {
+      scheduleRuntimeStateRestore(data.state);
+      return;
+    }
     if (data.type === 'od:comment-mode') {
       commentEnabled = !!data.enabled;
       mode = data.mode === 'pod' ? 'pod' : 'picker';

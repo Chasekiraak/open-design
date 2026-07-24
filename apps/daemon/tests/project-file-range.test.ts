@@ -370,6 +370,7 @@ describe('GET /api/projects/:id/raw/* range request route', () => {
     const html = await bridged.text();
     expect(html).toContain('data-od-url-selection-bridge');
     expect(html).toContain("type: 'od:comment-target'");
+    expect(html).toContain("type: 'od:preview-runtime-state-captured'");
     expect(html).not.toContain('data-od-url-scroll-bridge');
   });
 

@@ -347,11 +347,77 @@ const POWERED_PREVIEW_SANDBOX =
 const POWERED_PREVIEW_ALLOW =
   'accelerometer; autoplay; camera; cross-origin-isolated; fullscreen; gamepad; gyroscope; microphone; xr-spatial-tracking';
 const PREVIEW_BRIDGE_QUERY = 'odPreviewBridge=scroll&odPreviewBridge=selection&odPreviewBridge=snapshot';
+// Generic runtime UI state carried across the URL-load -> srcDoc transport
+// switch. This preserves the current page of multi-page prototypes while
+// leaving artifact scripts and business state inside their sandboxed frames.
+const PREVIEW_RUNTIME_STATE_MAX_ELEMENTS = 3500;
+type PreviewRuntimeStateEntry = {
+  path: number[];
+  tag: string;
+  id?: string;
+  odId?: string;
+  attrs: Record<string, string>;
+  value?: string;
+  checked?: boolean;
+  selectedIndex?: number;
+  scrollLeft?: number;
+  scrollTop?: number;
+};
+type PreviewRuntimeState = {
+  version: 1;
+  hash: string;
+  htmlAttrs: Record<string, string>;
+  bodyAttrs: Record<string, string>;
+  entries: PreviewRuntimeStateEntry[];
+};
 const HTML_PASSIVE_PREVIEW_FULL_TEXT_LIMIT = 2 * 1024 * 1024;
 const HTML_ROUTING_TEXT_PREVIEW_LIMIT = 96 * 1024;
 const HTML_PREVIEW_ASSET_PREFLIGHT_LIMIT = 32;
 type HtmlSourceLoadMode = 'full' | 'routing-preview';
 type PreviewAssetWarning = { filePath: string };
+
+function isPreviewRuntimeAttributeMap(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 64 && entries.every(([name, attrValue]) => (
+    name.length <= 128 &&
+    typeof attrValue === 'string' &&
+    attrValue.length <= 20_000
+  ));
+}
+
+function isPreviewRuntimeState(value: unknown): value is PreviewRuntimeState {
+  if (!value || typeof value !== 'object') return false;
+  const state = value as Partial<PreviewRuntimeState>;
+  if (
+    state.version !== 1 ||
+    typeof state.hash !== 'string' ||
+    state.hash.length > 4096 ||
+    !isPreviewRuntimeAttributeMap(state.htmlAttrs) ||
+    !isPreviewRuntimeAttributeMap(state.bodyAttrs) ||
+    !Array.isArray(state.entries) ||
+    state.entries.length > PREVIEW_RUNTIME_STATE_MAX_ELEMENTS
+  ) {
+    return false;
+  }
+  return state.entries.every((entry) => (
+    !!entry &&
+    typeof entry === 'object' &&
+    typeof entry.tag === 'string' &&
+    entry.tag.length <= 32 &&
+    Array.isArray(entry.path) &&
+    entry.path.length <= 64 &&
+    entry.path.every((index) => Number.isInteger(index) && index >= 0 && index <= 100_000) &&
+    (entry.id === undefined || (typeof entry.id === 'string' && entry.id.length <= 4096)) &&
+    (entry.odId === undefined || (typeof entry.odId === 'string' && entry.odId.length <= 4096)) &&
+    isPreviewRuntimeAttributeMap(entry.attrs) &&
+    (entry.value === undefined || (typeof entry.value === 'string' && entry.value.length <= 100_000)) &&
+    (entry.checked === undefined || typeof entry.checked === 'boolean') &&
+    (entry.selectedIndex === undefined || Number.isInteger(entry.selectedIndex)) &&
+    (entry.scrollLeft === undefined || Number.isFinite(entry.scrollLeft)) &&
+    (entry.scrollTop === undefined || Number.isFinite(entry.scrollTop))
+  ));
+}
 
 function previewTextNeedsFullSourceForSafeInline(source: string | null): boolean {
   if (!source) return false;
@@ -7276,6 +7342,11 @@ function HtmlViewer({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const urlPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const srcDocPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const previewRuntimeStateRef = useRef<PreviewRuntimeState | null>(null);
+  const previewRuntimeStateRequestSequenceRef = useRef(0);
+  const manualEditActivationPendingRef = useRef(false);
+  const previewFileIdentityRef = useRef(`${projectId}\u0000${file.name}`);
+  previewFileIdentityRef.current = `${projectId}\u0000${file.name}`;
   const activatedSrcDocTransportHtmlRef = useRef<string | null>(null);
   // Tracks the iframe DOM node whose dedupe ref was last reset by the
   // srcDoc onLoad handler. We reset the dedupe exactly once per freshly
@@ -7294,6 +7365,36 @@ function HtmlViewer({
       source === urlPreviewIframeRef.current?.contentWindow ||
       source === srcDocPreviewIframeRef.current?.contentWindow
     );
+  }, []);
+  const capturePreviewRuntimeState = useCallback((target: HTMLIFrameElement | null) => {
+    const source = target?.contentWindow;
+    if (!source) return Promise.resolve<PreviewRuntimeState | null>(null);
+    previewRuntimeStateRequestSequenceRef.current += 1;
+    const id = `runtime-state-${Date.now()}-${previewRuntimeStateRequestSequenceRef.current}`;
+    return new Promise<PreviewRuntimeState | null>((resolve) => {
+      let settled = false;
+      const finish = (state: PreviewRuntimeState | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        resolve(state);
+      };
+      const onMessage = (event: MessageEvent) => {
+        if (event.source !== source) return;
+        const data = event.data as { type?: unknown; id?: unknown; state?: unknown } | null;
+        if (
+          data?.type !== 'od:preview-runtime-state-captured' ||
+          data.id !== id
+        ) {
+          return;
+        }
+        finish(isPreviewRuntimeState(data.state) ? data.state : null);
+      };
+      const timeout = window.setTimeout(() => finish(null), 500);
+      window.addEventListener('message', onMessage);
+      source.postMessage({ type: 'od:preview-runtime-state-capture', id }, '*');
+    });
   }, []);
   const setCommentComposerHostRef = useCallback((node: HTMLDivElement | null) => {
     setCommentComposerHost((current) => (current === node ? current : node));
@@ -7360,6 +7461,7 @@ function HtmlViewer({
   useEffect(() => {
     setManualEditSrcDocActive(false);
     setManualEditFrozenSource(null);
+    previewRuntimeStateRef.current = null;
     // Restore this file's last measured content width instead of forcing
     // `null` — this effect also fires on every HtmlViewer remount (tab-away
     // and back), not only on a genuine file change, and clearing here would
@@ -8928,6 +9030,10 @@ function HtmlViewer({
   function syncBridgeModes(target: HTMLIFrameElement | null = iframeRef.current) {
     const win = target?.contentWindow;
     if (!win) return;
+    const runtimeState = previewRuntimeStateRef.current;
+    if (runtimeState) {
+      win.postMessage({ type: 'od:preview-runtime-state-restore', state: runtimeState }, '*');
+    }
     win.postMessage({
       type: 'od:comment-mode',
       enabled: boardMode,
@@ -11131,17 +11237,35 @@ function HtmlViewer({
     fireArtifactToolbarClick('edit');
     capturePreviewScrollPosition();
     if (!manualEditMode) {
-      setCommentPanelOpen(false);
-      setCommentCreateMode(false);
-      setBoardMode(false);
-      clearBoardComposer();
-      setInspectMode(false);
-      setDrawOverlayOpen(false);
-      setMode('preview');
-      setManualEditViewportWidth(previewBodyRef.current?.clientWidth ?? null);
-      setManualEditSrcDocActive(true);
-      setManualEditMode(true);
-      closeArtifactToolMenus();
+      if (manualEditActivationPendingRef.current) return;
+      const enterManualEditMode = () => {
+        setCommentPanelOpen(false);
+        setCommentCreateMode(false);
+        setBoardMode(false);
+        clearBoardComposer();
+        setInspectMode(false);
+        setDrawOverlayOpen(false);
+        setMode('preview');
+        setManualEditViewportWidth(previewBodyRef.current?.clientWidth ?? null);
+        setManualEditSrcDocActive(true);
+        setManualEditMode(true);
+        closeArtifactToolMenus();
+      };
+      if (!useUrlLoadPreview) {
+        enterManualEditMode();
+        return;
+      }
+      const activationFileIdentity = previewFileIdentityRef.current;
+      manualEditActivationPendingRef.current = true;
+      void capturePreviewRuntimeState(urlPreviewIframeRef.current)
+        .then((state) => {
+          if (previewFileIdentityRef.current !== activationFileIdentity) return;
+          if (state) previewRuntimeStateRef.current = state;
+          enterManualEditMode();
+        })
+        .finally(() => {
+          manualEditActivationPendingRef.current = false;
+        });
       return;
     }
     closeArtifactToolMenus();

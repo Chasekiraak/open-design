@@ -712,11 +712,89 @@ const URL_PREVIEW_SELECTION_BRIDGE = `<script data-od-url-selection-bridge>
       postStroke('od:pod-stroke');
     });
   }
+  // The host switches a plain URL preview to a bridge-enabled srcDoc when
+  // Manual Edit opens. Capture only mutable UI state so the second document
+  // can show the same app page without copying or evaluating artifact code.
+  function runtimeStateAttributeAllowed(name){
+    return name === 'class' ||
+      name === 'style' ||
+      name === 'hidden' ||
+      name === 'open' ||
+      name.indexOf('aria-') === 0 ||
+      (name.indexOf('data-') === 0 && name.indexOf('data-od-') !== 0);
+  }
+  function runtimeStateAttributes(el){
+    var attrs = Object.create(null);
+    if (!el || !el.attributes) return attrs;
+    for (var i = 0; i < el.attributes.length; i++) {
+      var attr = el.attributes[i];
+      if (!attr || !runtimeStateAttributeAllowed(attr.name)) continue;
+      attrs[attr.name] = String(attr.value || '');
+    }
+    return attrs;
+  }
+  function runtimeStatePath(el){
+    var path = [];
+    var node = el;
+    while (node && node !== document.body) {
+      var parent = node.parentElement;
+      if (!parent) return null;
+      var index = Array.prototype.indexOf.call(parent.children, node);
+      if (index < 0) return null;
+      path.unshift(index);
+      node = parent;
+    }
+    return node === document.body ? path : null;
+  }
+  function captureRuntimeState(){
+    var entries = [];
+    var nodes = document.body ? document.body.querySelectorAll('*') : [];
+    var count = Math.min(nodes.length, 3500);
+    for (var i = 0; i < count; i++) {
+      var el = nodes[i];
+      var path = runtimeStatePath(el);
+      if (!path) continue;
+      var entry = {
+        path: path,
+        tag: String(el.tagName || '').toLowerCase(),
+        attrs: runtimeStateAttributes(el)
+      };
+      if (el.id) entry.id = String(el.id);
+      var odId = el.getAttribute && el.getAttribute('data-od-id');
+      if (odId) entry.odId = String(odId);
+      var tag = entry.tag;
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        entry.value = String(el.value == null ? '' : el.value);
+      }
+      if (tag === 'input' && (el.type === 'checkbox' || el.type === 'radio')) {
+        entry.checked = !!el.checked;
+      }
+      if (tag === 'select') entry.selectedIndex = Number(el.selectedIndex);
+      if (el.scrollLeft) entry.scrollLeft = Number(el.scrollLeft);
+      if (el.scrollTop) entry.scrollTop = Number(el.scrollTop);
+      entries.push(entry);
+    }
+    return {
+      version: 1,
+      hash: String(window.location.hash || ''),
+      htmlAttrs: runtimeStateAttributes(document.documentElement),
+      bodyAttrs: runtimeStateAttributes(document.body),
+      entries: entries
+    };
+  }
   window.addEventListener('message', function(ev){
     var data = ev && ev.data;
     if (!data || !data.type) return;
     if (data.type === 'od:url-selection-bridge-probe') {
       window.parent.postMessage({ type: 'od:url-selection-bridge-ready' }, '*');
+      return;
+    }
+    if (data.type === 'od:preview-runtime-state-capture' && data.id) {
+      window.parent.postMessage({
+        type: 'od:preview-runtime-state-captured',
+        id: String(data.id),
+        state: captureRuntimeState()
+      }, '*');
       return;
     }
     if (data.type === 'od:comment-mode') {

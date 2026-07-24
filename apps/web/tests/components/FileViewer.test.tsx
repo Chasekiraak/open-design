@@ -1364,7 +1364,7 @@ describe('FileViewer SVG artifacts', () => {
     expect(screen.getByRole('menuitem', { name: /export as image/i })).toBeTruthy();
   });
 
-  it('keeps inactive HTML preview transports mounted without booting the artifact', async () => {
+  it('captures URL preview state before activating the pre-mounted edit transport', async () => {
     const file = baseFile({
       name: 'page.html',
       path: 'page.html',
@@ -1399,17 +1399,63 @@ describe('FileViewer SVG artifacts', () => {
     expect(srcDocFrame?.srcdoc).toContain('data-od-lazy-srcdoc-transport');
     expect(srcDocFrame?.srcdoc).not.toContain('__odArtifactBootCount');
 
+    const urlPostSpy = vi.spyOn(urlFrame!.contentWindow!, 'postMessage');
+    const srcDocPostSpy = vi.spyOn(srcDocFrame!.contentWindow!, 'postMessage');
     fireEvent.click(screen.getByTestId('manual-edit-mode-toggle'));
 
+    const captureRequest = await waitFor(() => {
+      const message = urlPostSpy.mock.calls
+        .map(([value]) => value)
+        .find((value) => (
+          typeof value === 'object' &&
+          value !== null &&
+          (value as { type?: unknown }).type === 'od:preview-runtime-state-capture'
+        )) as { type: string; id: string } | undefined;
+      expect(message?.id).toBeTruthy();
+      return message!;
+    });
+    const capturedState = {
+      version: 1 as const,
+      hash: '',
+      htmlAttrs: {},
+      bodyAttrs: {},
+      entries: [
+        {
+          path: [1],
+          tag: 'main',
+          odId: 'hero',
+          attrs: { class: 'profile-page' },
+        },
+      ],
+    };
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: urlFrame!.contentWindow,
+        data: {
+          type: 'od:preview-runtime-state-captured',
+          id: captureRequest.id,
+          state: capturedState,
+        },
+      }));
+    });
+
     const urlFrameAfter = container.querySelector('iframe[data-od-render-mode="url-load"]') as HTMLIFrameElement | null;
-    const srcDocFrameAfter = container.querySelector('iframe[data-od-render-mode="srcdoc"]') as HTMLIFrameElement | null;
+    const srcDocFrameAfter = await waitFor(() => {
+      const frame = container.querySelector('iframe[data-od-render-mode="srcdoc"]') as HTMLIFrameElement | null;
+      expect(frame?.getAttribute('data-od-active')).toBe('true');
+      return frame;
+    });
+    fireEvent.load(srcDocFrameAfter!);
 
     expect(urlFrameAfter).toBe(urlFrame);
     expect(urlFrameAfter?.getAttribute('data-od-active')).toBe('false');
     expect(urlFrameAfter?.getAttribute('src')).toBe('about:blank');
-    expect(srcDocFrameAfter?.getAttribute('data-od-active')).toBe('true');
     expect(srcDocFrameAfter?.srcdoc).toContain('__odArtifactBootCount');
     expect(srcDocFrameAfter?.srcdoc).toContain('data-od-edit-bridge');
+    expect(srcDocPostSpy).toHaveBeenCalledWith(
+      { type: 'od:preview-runtime-state-restore', state: capturedState },
+      '*',
+    );
   });
 
   it('keeps the srcDoc edit transport active after canceling manual edit', async () => {
