@@ -195,10 +195,15 @@ async function validateNodePty(
     return;
   }
 
-  const helperPath = join(nativeRoot, "spawn-helper");
-  await assertNonEmptyFile(helperPath, "node-pty spawn-helper");
-  await chmod(helperPath, 0o755);
-  await access(helperPath, constants.X_OK);
+  // node-pty only builds spawn-helper for macOS (binding.gyp OS=="mac").
+  // Linux ships pty.node alone after node-gyp rebuild; darwin prebuilds
+  // include both pty.node and spawn-helper.
+  if (target.platform === "darwin") {
+    const helperPath = join(nativeRoot, "spawn-helper");
+    await assertNonEmptyFile(helperPath, "node-pty spawn-helper");
+    await chmod(helperPath, 0o755);
+    await access(helperPath, constants.X_OK);
+  }
 }
 
 async function validateRuntimeDependencies(

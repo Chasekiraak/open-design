@@ -78,13 +78,17 @@ async function writeRuntimeFixture(
     "node-pty",
     options.nodePtyVersion ?? "1.1.0",
   );
-  const nodePtyNativeRoot = join(
-    nodePty,
-    "prebuilds",
-    `${target.platform}-${target.arch}`,
-  );
+  // Mirror real node-pty layouts: linux rebuilds into build/Release with only
+  // pty.node; darwin/win32 also ship prebuilds/<platform>-<arch>/ assets, and
+  // darwin additionally needs spawn-helper (binding.gyp builds it only on mac).
+  const nodePtyNativeRoot =
+    target.platform === "linux"
+      ? join(nodePty, "build", "Release")
+      : join(nodePty, "prebuilds", `${target.platform}-${target.arch}`);
   await mkdir(nodePtyNativeRoot, { recursive: true });
-  await writeFile(join(nodePtyNativeRoot, "pty.node"), "native");
+  if (!(options.omitPtyAsset === true && target.platform === "linux")) {
+    await writeFile(join(nodePtyNativeRoot, "pty.node"), "native");
+  }
   if (target.platform === "win32") {
     for (const file of [
       "conpty.node",
@@ -95,10 +99,12 @@ async function writeRuntimeFixture(
       if (options.omitPtyAsset === true && file === "conpty.node") continue;
       await writeFile(join(nodePtyNativeRoot, file), "native");
     }
-  } else if (options.omitPtyAsset !== true) {
-    const helper = join(nodePtyNativeRoot, "spawn-helper");
-    await writeFile(helper, "#!/bin/sh\nexit 0\n", "utf8");
-    await chmod(helper, 0o644);
+  } else if (target.platform === "darwin") {
+    if (options.omitPtyAsset !== true) {
+      const helper = join(nodePtyNativeRoot, "spawn-helper");
+      await writeFile(helper, "#!/bin/sh\nexit 0\n", "utf8");
+      await chmod(helper, 0o644);
+    }
   }
 
   if (target.platform === "darwin") {
@@ -195,7 +201,7 @@ describe("server runtime dependencies", () => {
         ),
       ),
     ).resolves.toBeUndefined();
-    if (target.platform !== "win32") {
+    if (target.platform === "darwin") {
       await expect(
         access(
           join(
@@ -209,6 +215,32 @@ describe("server runtime dependencies", () => {
           constants.X_OK,
         ),
       ).resolves.toBeUndefined();
+    } else if (target.platform === "linux") {
+      await expect(
+        access(
+          join(
+            releaseRoot,
+            "node_modules",
+            "node-pty",
+            "build",
+            "Release",
+            "pty.node",
+          ),
+        ),
+      ).resolves.toBeUndefined();
+      // Linux node-pty does not ship/build spawn-helper (binding.gyp OS=="mac" only).
+      await expect(
+        access(
+          join(
+            releaseRoot,
+            "node_modules",
+            "node-pty",
+            "build",
+            "Release",
+            "spawn-helper",
+          ),
+        ),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     }
     await expect(
       access(
@@ -290,7 +322,9 @@ describe("server runtime dependencies", () => {
     ).rejects.toThrow(
       target.platform === "win32"
         ? /node-pty Windows asset conpty\.node is missing or empty/
-        : /node-pty spawn-helper is missing or empty/,
+        : target.platform === "darwin"
+          ? /node-pty spawn-helper is missing or empty/
+          : /node-pty has no native assets for linux-/,
     );
   });
 
