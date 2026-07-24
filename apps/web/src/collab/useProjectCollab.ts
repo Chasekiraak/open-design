@@ -198,6 +198,19 @@ export function useProjectCollab(
     projectId: projectId ?? null,
     member,
     enabled: decision.enabled,
+    // Let the status poll (`/collab/status`) start in parallel with
+    // `/api/workspace/context` instead of waiting for it — the poll doesn't
+    // need `member`/`context` (the daemon resolves the caller's own identity
+    // server-side; see useCollab's `statusEnabled` doc). While the context
+    // read is still in flight we don't yet know whether collab applies at
+    // all, so poll optimistically, same as the surrounding fail-closed UI
+    // already assumes "maybe yes" during this exact window (see
+    // `relationshipUnknown` below). Once the read resolves, fall back to the
+    // real decision: a CONFIRMED permission-denied reason (no-workspace-
+    // context / member-removed / lifecycle-xxx — see collab-session.ts) is an
+    // identity/permission gate, not a "haven't read the response yet"
+    // problem, so it must stop the poll same as before this change.
+    statusEnabled: Boolean(projectId) && (workspaceContextLoading || decision.enabled),
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
     ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),

@@ -69,6 +69,72 @@ describe('useCollab', () => {
     expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/collab/publish'))).toBe(true);
   });
 
+  it('starts status polling via statusEnabled before member resolves, and heartbeats once it does', async () => {
+    const { fetchImpl, calls } = makeFetch([{ memberId: 'm1' }], 7);
+    type Props = { member: { memberId: string; name?: string } | null };
+    const { result, rerender } = renderHook(
+      ({ member }: Props) =>
+        useCollab({
+          projectId: 'p1',
+          member,
+          // Mirrors useProjectCollab's real gate: presence (enabled) still
+          // needs a resolved member; status polling (statusEnabled) does not.
+          enabled: Boolean(member),
+          statusEnabled: true,
+          fetch: fetchImpl,
+        }),
+      { initialProps: { member: null } as Props },
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(calls.some((c) => c.method === 'GET' && c.url.endsWith('/collab/status'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(false);
+    expect(result.current.publishedVersion).toBe(7);
+
+    rerender({ member: { memberId: 'm1', name: 'Author' } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(calls.some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(true);
+    expect(result.current.present).toEqual([{ memberId: 'm1' }]);
+  });
+
+  it('does not send a presence leave on unmount when member never resolved', async () => {
+    const { fetchImpl, calls } = makeFetch([], null);
+    const { unmount } = renderHook(() =>
+      useCollab({ projectId: 'p1', member: null, enabled: false, statusEnabled: true, fetch: fetchImpl }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(calls.some((c) => c.url.endsWith('/collab/status'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/presence/leave'))).toBe(false);
+  });
+
+  it('falls back to enabled when statusEnabled is not provided (no behavior change for existing callers)', async () => {
+    const { fetchImpl, calls } = makeFetch([], null);
+    renderHook(() =>
+      useCollab({ projectId: 'p1', member: null, enabled: true, fetch: fetchImpl }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // enabled=true but member=null: statusEnabled defaults to `enabled`
+    // (true), so status polling still starts even without member — matching
+    // CollabClient's own member-less status contract.
+    expect(calls.some((c) => c.url.endsWith('/collab/status'))).toBe(true);
+    expect(calls.some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(false);
+  });
+
   it('stops polling on unmount', async () => {
     const { fetchImpl, calls } = makeFetch([{ memberId: 'm1' }], 1);
     const { unmount } = renderHook(() =>

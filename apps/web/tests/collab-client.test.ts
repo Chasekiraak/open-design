@@ -205,4 +205,80 @@ describe('CollabClient', () => {
 
     client.stop();
   });
+
+  // GET /collab/status is a plain project-keyed read — the daemon resolves the
+  // caller's own identity server-side from request headers/cookies, not from
+  // this payload — so a client can run status polling before it has a
+  // presence identity at all. Presence (heartbeat/leave) must stay off the
+  // whole time.
+  describe('member-less status polling (setMember)', () => {
+    it('polls status with no identity; presence starts only once setMember supplies one', async () => {
+      const { fetchImpl, calls } = makeFetch({ syncState: 'synced', publishedVersion: 5 });
+      const client = new CollabClient({ projectId: 'p1', member: null, fetch: fetchImpl });
+
+      client.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls.some((c) => c.method === 'GET' && c.url.endsWith('/collab/status'))).toBe(true);
+      expect(calls.some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(false);
+      expect(client.getSnapshot().publishedVersion).toBe(5);
+      expect(client.getSnapshot().syncState).toBe('synced');
+
+      client.setMember({ memberId: 'm1', name: 'Author' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const heartbeat = calls.find((c) => c.url.endsWith('/presence/heartbeat'));
+      expect(heartbeat?.method).toBe('POST');
+      expect(heartbeat?.body).toMatchObject({ memberId: 'm1', name: 'Author' });
+
+      client.stop();
+    });
+
+    it('does not send a leave POST on stop when no identity was ever supplied', async () => {
+      const { fetchImpl, calls } = makeFetch();
+      const client = new CollabClient({ projectId: 'p1', member: null, fetch: fetchImpl });
+
+      client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      client.stop();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls.some((c) => c.url.endsWith('/presence/leave'))).toBe(false);
+    });
+
+    it('leaveBeacon no-ops when no identity was ever supplied', () => {
+      const { fetchImpl, calls } = makeFetch();
+      const sendBeacon = vi.fn(() => true);
+      vi.stubGlobal('navigator', { sendBeacon });
+      const client = new CollabClient({ projectId: 'p1', member: null, fetch: fetchImpl });
+
+      client.leaveBeacon();
+
+      expect(sendBeacon).not.toHaveBeenCalled();
+      expect(calls.some((c) => c.url.endsWith('/presence/leave'))).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    it('setMember(null) clears the identity and stops future heartbeats', async () => {
+      const { fetchImpl, calls } = makeFetch();
+      const client = new CollabClient({
+        projectId: 'p1',
+        member: { memberId: 'm1' },
+        fetch: fetchImpl,
+        heartbeatMs: 10_000,
+      });
+
+      client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls.some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(true);
+
+      client.setMember(null);
+      const afterClear = calls.length;
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(calls.slice(afterClear).some((c) => c.url.endsWith('/presence/heartbeat'))).toBe(false);
+
+      client.stop();
+    });
+  });
 });
