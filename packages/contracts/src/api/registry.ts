@@ -301,6 +301,16 @@ export interface DesignSystemSummary {
   provenance?: DesignSystemProvenance;
   projectId?: string;
   teamSynced?: boolean;
+  /**
+   * Whether the current caller may mutate (edit / publish-toggle / delete)
+   * this design system, mirroring the daemon's own `canMutateUserDesignSystem`
+   * gate exactly (recvqb6mfyqXLD): true for anything the caller authored
+   * themselves, and for a `teamSynced` copy true only when the caller is the
+   * original sharer or a workspace owner/admin. Only the single-item GET
+   * (`/api/design-systems/:id`) response computes this per-caller verdict —
+   * treat a missing value (e.g. from the bulk list) as `true`.
+   */
+  canMutate?: boolean;
 }
 
 export interface DesignSystemDetail extends DesignSystemSummary {

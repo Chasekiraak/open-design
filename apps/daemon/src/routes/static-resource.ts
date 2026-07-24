@@ -108,6 +108,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     listAllSkillLikeEntries,
     listAllDesignSystems,
     resolveWorkspaceScope,
+    canMutateUserDesignSystem,
     mimeFor,
   } = ctx.resources;
   const { isLocalSameOrigin, resolvedPortRef, sendApiError } = ctx.http;
@@ -465,7 +466,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     }
   });
 
-  app.get('/api/design-systems', async (_req, res) => {
+  app.get('/api/design-systems', async (req, res) => {
     try {
       // The library CATALOG is workspace-scoped (#145): user design systems all
       // share one directory on disk, so without this the systems authored in
@@ -474,9 +475,26 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
       const systems = await listAllDesignSystems({
         workspaceId: (await resolveWorkspaceScope?.()) ?? null,
       });
-      res.json({
-        designSystems: systems.map(({ body, ...rest }) => rest),
-      });
+      // recvqb6mfyqXLD: decorate every teamSynced entry with the same
+      // mutate verdict the PATCH/DELETE routes enforce, so any surface that
+      // renders straight off this list (e.g. `ProjectView`'s in-project
+      // Design System tab, which resolves its own `designSystemEditable`
+      // from this exact array rather than the single-item detail fetch) can
+      // gate its Publish toggle / delete affordances on it too — not just
+      // the detail route. Skipped for anything not `teamSynced` (the
+      // overwhelming majority: every built-in preset plus the caller's own
+      // systems) so a hot, frequently-polled list read does not pay a
+      // per-item disk/hub round trip it already knows the answer to.
+      const designSystems = canMutateUserDesignSystem
+        ? await Promise.all(
+            systems.map(async ({ body, ...rest }) => (
+              rest.teamSynced
+                ? { ...rest, canMutate: await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, rest.id, req) }
+                : rest
+            )),
+          )
+        : systems.map(({ body, ...rest }) => rest);
+      res.json({ designSystems });
     } catch (err: any) {
       res.status(500).json({ error: String(err) });
     }

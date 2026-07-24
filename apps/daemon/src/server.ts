@@ -4615,6 +4615,43 @@ export async function startServer({
     validation: validationDeps,
   });
 
+  // Whether the caller may mutate (edit / publish-toggle / delete) a design
+  // system. A system pulled from a teammate's team share (`teamSynced` in its
+  // metadata.json — see `isTeamSyncedUserDesignSystem`) is only mutable by
+  // whoever `canManageSharedResource` says may manage the share — the same
+  // principal check `unshare` already enforces. Anything not teamSynced is
+  // the caller's own, so it stays unrestricted.
+  //
+  // Spec 9.2: on top of that existing rule, a workspace the caller's own
+  // request marks as locked/deleted (billing lapse, deletion in progress)
+  // blocks mutation unconditionally — the one real gap design system had
+  // that project/plugin already closed via `enforceWorkspaceResourceMutation`.
+  // Reuses that module's own `workspaceResourceContextFromRequest`/
+  // `isWorkspaceResourceLocked` rather than re-deriving the header contract
+  // here.
+  //
+  // Hoisted out of `registerDesignSystemRoutes`'s deps (recvqb6mfyqXLD) so
+  // `registerStaticResourceRoutes`'s design-system LIST route can decorate
+  // every teamSynced entry with the same verdict — any detail surface a
+  // design system's summary reaches (not just the single-item GET) can then
+  // gate its own edit/publish/delete affordances on the authority the
+  // backend actually enforces, instead of re-deriving (or forgetting to
+  // derive) an equivalent check per surface.
+  const canMutateUserDesignSystem = async (
+    root: string,
+    id: string,
+    req: any,
+  ): Promise<boolean> => {
+    const requestCtx = workspaceResourceContextFromRequest(req);
+    if (requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx)) {
+      return false;
+    }
+    const synced = await isTeamSyncedUserDesignSystem(root, id);
+    if (!synced) return true;
+    const resources = await designSystemsTeamShare.sharedResources();
+    return resources.find((resource) => resource.id === id)?.canUnshare === true;
+  };
+
   // Resource catalog
   registerStaticResourceRoutes(app, {
     db,
@@ -4627,6 +4664,7 @@ export async function startServer({
       listAllSkillLikeEntries,
       listAllDesignSystems,
       resolveWorkspaceScope: resolveDesignSystemWorkspaceScope,
+      canMutateUserDesignSystem,
       mimeFor,
     },
     tokenContractRebuild: {
@@ -4652,29 +4690,9 @@ export async function startServer({
     projectFiles: projectFileDeps,
     designSystems: {
       buildUserDesignSystemArchive,
-      // recvqb6mfyqXLD: a system pulled from a teammate's team share
-      // (`teamSynced` in its metadata.json — see `isTeamSyncedUserDesignSystem`)
-      // is only mutable by whoever `canManageSharedResource` says may manage
-      // the share — the same principal check `unshare` already enforces.
-      // Anything not teamSynced is the caller's own, so it stays unrestricted.
-      //
-      // Spec 9.2: on top of that existing rule, a workspace the caller's own
-      // request marks as locked/deleted (billing lapse, deletion in
-      // progress) blocks mutation unconditionally — the one real gap design
-      // system had that project/plugin already closed via
-      // `enforceWorkspaceResourceMutation`. Reuses that module's own
-      // `workspaceResourceContextFromRequest`/`isWorkspaceResourceLocked`
-      // rather than re-deriving the header contract here.
-      canMutateUserDesignSystem: async (root, id, req) => {
-        const requestCtx = workspaceResourceContextFromRequest(req);
-        if (requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx)) {
-          return false;
-        }
-        const synced = await isTeamSyncedUserDesignSystem(root, id);
-        if (!synced) return true;
-        const resources = await designSystemsTeamShare.sharedResources();
-        return resources.find((resource) => resource.id === id)?.canUnshare === true;
-      },
+      // Hoisted above (before `registerStaticResourceRoutes`) so the
+      // design-system LIST route can reuse the exact same verdict.
+      canMutateUserDesignSystem,
       createUserDesignSystem: createWorkspaceOwnedDesignSystem,
       deleteUserDesignSystem,
       // spec 04 §11: unshare `id` from the team hub before DELETE proceeds

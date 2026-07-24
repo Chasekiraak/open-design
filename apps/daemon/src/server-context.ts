@@ -54,6 +54,14 @@ export interface ResourceDeps {
   // explicit local pin first and the workspace context otherwise; null when
   // signed out / single-player.
   resolveWorkspaceScope?: () => Promise<string | null>;
+  // Whether the caller may mutate (edit / publish-toggle / delete) design
+  // system `id` — the same verdict the PATCH/DELETE routes enforce (see
+  // `registerDesignSystemRoutes`'s identically-named dep). Optional so a
+  // caller that never renders a design-system list (e.g. a route-only test
+  // fixture) does not have to supply it; the design-system LIST route below
+  // treats a missing implementation as "always mutable" (skips decorating
+  // `canMutate` rather than defaulting every entry to false).
+  canMutateUserDesignSystem?: (root: string, id: string, req: any) => Promise<boolean>;
   // `workspaceId` scopes user-imported skills to one workspace, same
   // one-way "unclaimed visible everywhere, claimed elsewhere hidden" rule
   // as `listAllDesignSystems` above. Omit it to resolve a skill by id (or

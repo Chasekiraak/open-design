@@ -1770,10 +1770,6 @@ export function ProjectView({
       ? brandExtractionStatusOverride.status
       : polledBrandExtractionStatus;
   const terminalBrandPreviewRefreshRef = useRef<string | null>(null);
-  const designSystemEditable =
-    !projectIsProgrammaticBrandExtraction ||
-    brandExtractionAllowsEditing(effectiveBrandExtractionStatus) ||
-    Boolean(brandReady);
   const pendingBrandDesignSystemOpenRef = useRef<string | null>(null);
   const handledBrandReadyDesignSystemRef = useRef<string | null>(null);
   const missingDesignSystemRefreshRef = useRef<string | null>(null);
@@ -7639,6 +7635,40 @@ export function ProjectView({
     if (!projectIsDesignSystemProject || !projectDesignSystemId) return null;
     return designSystems.find((d) => d.id === projectDesignSystemId) ?? null;
   }, [designSystems, projectDesignSystemId, projectIsDesignSystemProject]);
+  // recvqb6mfyqXLD: `designSystemProject.teamSynced`/`canMutate` come off the
+  // exact same `GET /api/design-systems` list this project's design-system
+  // tab already reads (via the `designSystems` prop) — this is a genuinely
+  // separate signal from `projectCollab.viewerOnly` above. Team-sharing a
+  // design system does NOT also register its backing project with the
+  // project-level collab/hub (`/api/projects/:id/collab/status` stays
+  // `local_only` for a teammate's synced copy), so `viewerOnly` alone never
+  // catches this: a plain member opening a teammate's team-synced design
+  // system through this in-project tab (reachable once `DesignSystemFlow`'s
+  // `ensureUserDesignSystemWorkspaceProject` materializes a local project for
+  // it) used to see a fully-live Publish toggle, DESIGN.md editor, and the
+  // logo/image/color edit + delete-project affordances below with no
+  // ownership check at all. `canMutate` mirrors the daemon's own
+  // `canMutateUserDesignSystem` PATCH/DELETE verdict, so this stays in
+  // lockstep with whatever the backend actually allows; `undefined` (not
+  // `teamSynced`, i.e. the caller's own system or a built-in preset) reads as
+  // editable, matching every other consumer of this field.
+  const designSystemEditable =
+    designSystemProject?.canMutate !== false &&
+    (
+      !projectIsProgrammaticBrandExtraction ||
+      brandExtractionAllowsEditing(effectiveBrandExtractionStatus) ||
+      Boolean(brandReady)
+    );
+  // The brand-extraction-only half of the formula above, kept separate from
+  // ownership: FileWorkspace's "Extracting design system…" status pill must
+  // key off whether generation is genuinely still running, not off whether
+  // the caller happens to own the (possibly fully-published) design system —
+  // conflating the two would show a non-owner "still extracting" over a
+  // finished, published teammate's system just because they cannot manage it.
+  const designSystemExtractionInProgress =
+    projectIsProgrammaticBrandExtraction &&
+    !brandExtractionAllowsEditing(effectiveBrandExtractionStatus) &&
+    !brandReady;
   useEffect(() => {
     if (!projectIsDesignSystemProject || !projectDesignSystemId) {
       missingDesignSystemRefreshRef.current = null;
@@ -9120,6 +9150,7 @@ export function ProjectView({
           designSystemProject={designSystemProject}
           designSystemBrandId={designSystemBrandId}
           designSystemEditable={designSystemEditable}
+          designSystemExtractionInProgress={designSystemExtractionInProgress}
           defaultDesignSystemId={config.designSystemId}
           onSetDefaultDesignSystem={onChangeDefaultDesignSystem}
           onDesignSystemsRefresh={onDesignSystemsRefresh}

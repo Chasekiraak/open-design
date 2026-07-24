@@ -246,8 +246,21 @@ interface Props {
   onFocusModeChange?: (next: boolean) => void;
   designSystemProject?: DesignSystemSummary | null;
   designSystemBrandId?: string | null;
-  /** False while a brand-extraction design system is still running. */
+  /**
+   * False while a brand-extraction design system is still running, OR
+   * (recvqb6mfyqXLD) the caller may not manage a team-synced design system
+   * (`designSystemProject.canMutate === false`) — gates the Publish toggle,
+   * DESIGN.md save, delete, and asset edit affordances below.
+   */
   designSystemEditable?: boolean;
+  /**
+   * True only while a brand extraction is genuinely still generating —
+   * distinct from `designSystemEditable` above, which also folds in
+   * ownership. Drives the "Extracting design system…" status pill, which
+   * must not read as "still extracting" over a finished, published design
+   * system just because the viewer cannot manage it.
+   */
+  designSystemExtractionInProgress?: boolean;
   defaultDesignSystemId?: string | null;
   onSetDefaultDesignSystem?: (id: string | null) => Promise<void> | void;
   onDesignSystemsRefresh?: () => Promise<void> | void;
@@ -1271,6 +1284,7 @@ export function FileWorkspace({
   designSystemProject = null,
   designSystemBrandId = null,
   designSystemEditable = true,
+  designSystemExtractionInProgress = false,
   defaultDesignSystemId = null,
   onSetDefaultDesignSystem,
   onDesignSystemsRefresh,
@@ -3660,6 +3674,7 @@ export function FileWorkspace({
             system={designSystemProject}
             brandId={designSystemBrandId}
             editable={designSystemEditable}
+            extractionInProgress={designSystemExtractionInProgress}
             files={visibleFiles}
             streaming={Boolean(streaming)}
             activityEvents={designSystemActivityEvents}
@@ -3990,6 +4005,7 @@ function DesignSystemProjectPanel({
   system,
   brandId,
   editable,
+  extractionInProgress,
   files,
   streaming,
   activityEvents,
@@ -4012,6 +4028,7 @@ function DesignSystemProjectPanel({
   system: DesignSystemSummary;
   brandId?: string | null;
   editable: boolean;
+  extractionInProgress?: boolean;
   files: ProjectFile[];
   streaming: boolean;
   activityEvents: AgentEvent[];
@@ -4228,7 +4245,7 @@ function DesignSystemProjectPanel({
   // navigates home — so the panel unmounts on success and there's no busy reset
   // to do in the happy path.
   async function deleteDesignSystemProject() {
-    if (kitActionBusy || !onDeleteDesignSystemProject) return;
+    if (kitActionBusy || !onDeleteDesignSystemProject || !editable) return;
     const ok = window.confirm(
       t('ds.deleteProjectConfirm', { title: system.title }),
     );
@@ -4714,7 +4731,11 @@ function DesignSystemProjectPanel({
   // header's "More" dropdown so the sticky row reads as one clear action.
   const repoCopy = repoConnectCopy(t, githubConnected);
   const publishActionLabel = published ? t('ds.unpublishDesignSystem') : t('ds.publishDesignSystem');
-  const extractionRunning = !editable || streaming;
+  // recvqb6mfyqXLD: keyed off `extractionInProgress` (brand-extraction-only),
+  // NOT `!editable` — `editable` also folds in ownership now, and a
+  // non-owning member of a finished, published team-synced design system
+  // must not see this pill read "still extracting".
+  const extractionRunning = extractionInProgress || streaming;
   const actionsSlot = (
     <span
       className="ds-project-publish-trigger"
@@ -4776,6 +4797,10 @@ function DesignSystemProjectPanel({
           } satisfies HeaderMenuAction,
         ]
       : []),
+    // recvqb6mfyqXLD: deleting a design system the caller does not own must
+    // be unavailable here the same way it already is for refresh/download/
+    // default above — `editable` folds in `canMutate` (ProjectView.tsx), the
+    // daemon's own team-share ownership verdict.
     ...(onDeleteDesignSystemProject
       ? [
           {
@@ -4783,7 +4808,7 @@ function DesignSystemProjectPanel({
             label: t('ds.deleteProjectAction', { title: system.title }),
             icon: 'trash' as IconName,
             onClick: () => void deleteDesignSystemProject(),
-            disabled: Boolean(kitActionBusy) || statusBusy || defaultBusy,
+            disabled: !editable || Boolean(kitActionBusy) || statusBusy || defaultBusy,
             loading: kitActionBusy === 'delete',
           } satisfies HeaderMenuAction,
         ]
