@@ -1734,6 +1734,76 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       syncState: 'synced',
     });
   }
+  /**
+   * Give a project with NO local `workspace_projects` row a chance to learn it
+   * is actually a team resource before `/move` defaults it to personal.
+   *
+   * `ensureWorkspaceProjection(project, ctx, 'personal')` (below, in the move
+   * route) unconditionally binds a brand-new row as `visibility: 'personal'`.
+   * That default is harmless for a "move to team" request — canMoveToTeam
+   * requires exactly that starting visibility — but it is fatal for a "move to
+   * personal" request: the code has just invented the very state
+   * (`visibility: 'personal'`) that makes canMoveToPersonal impossible, then
+   * rejects the request for contradicting the state it invented one line
+   * earlier (PROJECT_DELETE_FORBIDDEN, recvqfNnRETNtM / recvqgejeqK2OJ).
+   *
+   * A project reaches `/move` with no local row for reasons that have nothing
+   * to do with whether it is genuinely a team resource: the brand/design-system
+   * extraction pipeline (`brands/index.ts`) inserts its backing project without
+   * ever calling `ensureWorkspaceProject` or registering it with the hub's own
+   * team-project catalog, and a project shared to this team from a different
+   * device/session never gets a row written into THIS daemon's own sqlite
+   * until something reconciles it. The web client's own "shared" badge and its
+   * "move out of team" affordance (`createSharedProjectPredicate`,
+   * `RecentProjectsStrip.tsx`) already read this exact catalog
+   * (`GET /api/workspace/projects/team` → `createTeamProjectsLister` →
+   * `velaCliTeamProjectCatalog`, the same instance threaded into this route as
+   * `teamProjectCatalog`) — so whenever that affordance is visible at all, the
+   * hub already knows this project is team-visible, whether or not this
+   * exact daemon's local sqlite has caught up.
+   *
+   * Deliberately NOT gated on "is this caller the hub's registered owner of
+   * this specific project", unlike `reconcileLocalRowWithRemoteTeamAccess`
+   * above: that check exists to decide whether a READER discovering a
+   * teammate's shared project may adopt local edit rights over it (the list
+   * endpoint's question). Here the question is narrower — is this project
+   * really 'team' at all — and the answer to "may THIS caller move it back to
+   * personal" is left entirely to the existing `canMoveToPersonal` /
+   * `canMutate` gate below, which already grants a privileged workspace
+   * owner/admin authority over any team-visibility project regardless of who
+   * locally created it. Gating the reconciliation itself on owner-attribution
+   * would leave a genuine workspace owner stuck exactly like before whenever
+   * the hub's `ownerMemberId` for an orphaned project does not name them
+   * specifically (the brand-extraction project is never registered with an
+   * owner at all, since nothing ever calls the hub on its behalf).
+   *
+   * Deliberately best-effort: a catalog outage must not turn an unshare
+   * attempt into a 500. Falling through to the pre-existing personal default
+   * is exactly the answer this function would give anyway if the hub had no
+   * record for the project.
+   */
+  async function reconcileUnboundProjectBeforeMove(projectId: string, ctx: WorkspaceProjectContext): Promise<void> {
+    if (!teamProjectCatalog) return;
+    let remoteProjects: VelaTeamProjectRecord[];
+    try {
+      remoteProjects = await teamProjectCatalog.list(workspaceProjectPrincipal(ctx));
+    } catch {
+      return;
+    }
+    const remote = remoteProjects.find((item) => item.projectId === projectId && item.access.canView);
+    if (!remote) return;
+    ensureWorkspaceProject(db, {
+      projectId,
+      workspaceId: ctx.workspaceId,
+      visibility: 'team',
+      resourceState: remote.access.frozen ? 'frozen' : 'active',
+      createdByWorkspaceMemberId: remote.ownerMemberId ?? null,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      resourceHubResourceId: remote.resourceId,
+      cloudTombstonedAt: null,
+      syncState: 'synced',
+    });
+  }
   async function listRemoteTeamProjectSummaries(localRows: any[], ctx: WorkspaceProjectContext) {
     if (!teamProjectCatalog) return [];
     const localResourceIds = new Set(localRows.map((row) => row.resourceHubResourceId).filter(Boolean));
@@ -2347,6 +2417,15 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       if (visibility === 'team') {
         const refusal = teamShareRefusalFor(ctx, workspaceTypes);
         if (refusal) return sendTeamShareScopeRefused(res, ctx, refusal);
+      }
+      // A "move to personal" request on a project this daemon has never
+      // locally bound must not be judged against a 'personal' default this
+      // same request is about to invent — see
+      // `reconcileUnboundProjectBeforeMove`'s doc comment. Scoped to the
+      // 'personal' direction only: 'team' already matches the fresh default
+      // and must keep behaving exactly as before.
+      if (visibility === 'personal' && ctx.workspaceType === 'team' && !getWorkspaceProjectByProjectId(db, project.id)) {
+        await reconcileUnboundProjectBeforeMove(project.id, ctx);
       }
       const wp = ensureWorkspaceProjection(project, ctx, 'personal');
       const row = listWorkspaceProjects(db, ctx.workspaceId).find((item: any) => item.id === project.id);
