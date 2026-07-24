@@ -1189,6 +1189,29 @@ function emitWorkspaceEvent(payload: { type: string; at?: number }): boolean {
   return true;
 }
 
+/**
+ * Hub → daemon handling for the `workspace-context-changed` event (see
+ * `startHubEventsSubscriber`'s `onEvent` below). Vela sends this same event
+ * both for an ordinary workspace switch AND for "your membership just
+ * changed" (e.g. removed from the team) — so besides forwarding the thin
+ * signal to the web, this must ALSO kick one immediate workspace-invalidation
+ * poll cycle, the same catch-up `onReconnect` already runs. Without it, the
+ * mutation gate's last-known-membership cache (`getLastKnownMembership` in
+ * `collab/workspace-resource-mutation.ts`) only refreshes on the poller's
+ * normal ~15s cadence, so a removed member keeps passing the gate for up to
+ * that long even though the hub already told this daemon something changed.
+ *
+ * Extracted as its own named, exported step (rather than inlined in the
+ * switch) so this invariant is directly unit-testable without standing up a
+ * real hub connection.
+ */
+export function handleHubWorkspaceContextChanged(
+  pollWorkspaceInvalidation: () => Promise<void>,
+): void {
+  emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+  void pollWorkspaceInvalidation().catch(() => undefined);
+}
+
 // Windows ENAMETOOLONG mitigation constants
 const CMD_BAT_RE = /\.(cmd|bat)$/i;
 const PROMPT_TEMP_FILE = () =>
@@ -3457,7 +3480,7 @@ export async function startServer({
           break;
         }
         case 'workspace-context-changed':
-          emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+          handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
           break;
         case 'billing-changed':
           emitWorkspaceEvent({ type: 'billing-changed', at: Date.now() });
