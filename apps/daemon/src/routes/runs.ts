@@ -34,8 +34,8 @@ import type { ConnectorService } from '../connectors/service.js';
 import {
   conversationTurnIndexForRun,
   getConversation,
+  getInitialProjectConversation,
   getProject,
-  listConversations,
   normalizeConversationSessionMode,
   updateProject,
   upsertMessage,
@@ -115,11 +115,6 @@ interface ProjectRecord {
   designSystemId?: string | null;
   metadata?: ProjectMetadata;
   appliedPluginSnapshotId?: string | null;
-}
-
-interface ConversationRecord {
-  id: string;
-  createdAt?: number;
 }
 
 interface RunEventRecord
@@ -384,14 +379,6 @@ function isProjectEnrichableDesignSystem(project: ProjectRecord): boolean {
   }
   const metadata = project.metadata;
   return metadata?.importedFrom === 'brand-extraction' || metadata?.importedFrom === 'design-system';
-}
-
-function toConversationRecords(value: unknown): ConversationRecord[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is ConversationRecord =>
-        Boolean(item && typeof item === 'object' && typeof (item as JsonRecord).id === 'string'),
-      )
-    : [];
 }
 
 function toProjectFiles(value: unknown): ProjectFileEntry[] {
@@ -684,17 +671,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       (typeof meta.conversationId !== 'string' || !meta.conversationId)
     ) {
       try {
-        const convs = toConversationRecords(listConversations(db, meta.projectId));
-        const defaultConv = convs.length > 0
-          ? [...convs].sort((a, b) => {
-              const aCreated = Number(a?.createdAt);
-              const bCreated = Number(b?.createdAt);
-              if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
-                return aCreated - bCreated;
-              }
-              return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
-            })[0]
-          : null;
+        const defaultConv = getInitialProjectConversation(db, meta.projectId);
         if (defaultConv && typeof defaultConv.id === 'string' && defaultConv.id) {
           meta.conversationId = defaultConv.id;
           if (typeof meta.assistantMessageId !== 'string' || !meta.assistantMessageId) {
