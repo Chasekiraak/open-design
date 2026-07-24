@@ -68,5 +68,6 @@ describe('EntryNavRail settings entry', () => {
     );
 
     expect(screen.queryByTestId('entry-settings-button')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open settings' })).toBeNull();
   });
 });
