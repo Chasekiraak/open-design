@@ -161,6 +161,16 @@ describe('ComposerModePicker', () => {
     expect(menu.textContent).toContain('For quick answers, edits, planning, and discussion');
   });
 
+  it('shows expected consumption for Plan and Ask, not Design', () => {
+    render(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId('composer-mode-trigger'));
+
+    expect(screen.getByTestId('composer-mode-menu-plan-cost').textContent).toBe('Typical usage · Standard');
+    expect(screen.getByTestId('composer-mode-menu-chat-cost').textContent).toBe('Typical usage · Light');
+    expect(screen.queryByTestId('composer-mode-menu-design-cost')).toBeNull();
+  });
+
   it('shows localized copy', () => {
     render(
       <I18nProvider initial="zh-CN">
@@ -175,5 +185,8 @@ describe('ComposerModePicker', () => {
     expect(menu.textContent).toContain('先生成可编辑的规划文档');
     expect(menu.textContent).toContain('适合创建或修改具体设计产物');
     expect(menu.textContent).toContain('适合快速问答、修改建议、规划和讨论');
+    expect(screen.getByTestId('composer-mode-menu-plan-cost').textContent).toBe('预计消耗 · 中等');
+    expect(screen.getByTestId('composer-mode-menu-chat-cost').textContent).toBe('预计消耗 · 较低');
+    expect(screen.queryByTestId('composer-mode-menu-design-cost')).toBeNull();
   });
 });

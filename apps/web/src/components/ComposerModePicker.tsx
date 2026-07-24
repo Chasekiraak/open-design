@@ -64,10 +64,15 @@ type ModeCopyKey =
   | 'chat.mode.chat.label'
   | 'chat.mode.chat.summary';
 
+type ModeCostKey = 'chat.mode.plan.cost' | 'chat.mode.chat.cost';
+
 interface ModeDef {
   id: ChatSessionMode;
   nameKey: ModeCopyKey;
   descKey: ModeCopyKey;
+  /** Design is the primary creation path, so cost is only framed for the
+   * lighter alternatives rather than as a deterrent to making something. */
+  costKey?: ModeCostKey;
   icon: ReactElement;
 }
 
@@ -78,6 +83,7 @@ const MODES: ModeDef[] = [
     id: 'plan',
     nameKey: 'chat.mode.plan.label',
     descKey: 'chat.mode.plan.summary',
+    costKey: 'chat.mode.plan.cost',
     icon: ICON_PLAN,
   },
   {
@@ -90,6 +96,7 @@ const MODES: ModeDef[] = [
     id: 'chat',
     nameKey: 'chat.mode.chat.label',
     descKey: 'chat.mode.chat.summary',
+    costKey: 'chat.mode.chat.cost',
     icon: ICON_ASK,
   },
 ];
@@ -288,6 +295,14 @@ export function ComposerModePicker({
                     ) : null}
                   </span>
                   <span className="composer-mode-menu__desc">{t(m.descKey)}</span>
+                  {m.costKey ? (
+                    <span
+                      className="composer-mode-menu__meta"
+                      data-testid={`composer-mode-menu-${m.id}-cost`}
+                    >
+                      {t('chat.mode.cardCost')} · {t(m.costKey)}
+                    </span>
+                  ) : null}
                 </button>
               ))}
             </div>,
