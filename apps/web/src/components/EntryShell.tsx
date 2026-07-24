@@ -96,7 +96,7 @@ import { DesignSystemsTab } from './DesignSystemsTab';
 import { BrandsTab } from './BrandsTab';
 import { EntryNavRail, type EntryView as EntryViewKind } from './EntryNavRail';
 import { ProjectSearchModal } from './ProjectSearchModal';
-import { CloudSignInTip } from './CloudSignInTip';
+import { CloudSignInTip, RailAccountSyncTip } from './CloudSignInTip';
 import { LibrarySection } from './LibrarySection';
 import { UpdaterPopup } from './UpdaterPopup';
 import { WhatsNewPopup } from './WhatsNewPopup';
@@ -1188,7 +1188,19 @@ export function EntryShell({
           onInvite={() => changeView('members')}
           onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}
           footerExtra={railFooterActions}
-          footerNotice={!workspaceContext && !workspaceLoading ? <CloudSignInTip /> : null}
+          // recvqgpXSYFNTq: `workspaceLoading` is only ever true while
+          // `workspaceContext` is null (see `useWorkspaceContext`'s
+          // `markLoading`, which promotes "no context" to "loading" and never
+          // touches an already-resolved context) — so this is the exact
+          // window between a just-finished sign-in and the re-read landing.
+          // Swap the callout for a same-slot loading state there instead of
+          // rendering nothing, which used to read as the rail silently
+          // forgetting the user just signed in.
+          footerNotice={
+            !workspaceContext ? (
+              workspaceLoading ? <RailAccountSyncTip /> : <CloudSignInTip />
+            ) : null
+          }
         />
         {projectSearchOpen ? (
           <ProjectSearchModal

@@ -55,6 +55,39 @@ export function resetCloudSignInTipDismissal(): void {
 type TipState = 'idle' | 'signing' | 'error';
 
 /**
+ * recvqgpXSYFNTq: the rail's bottom-left callout slot goes visibly blank
+ * between "sign-in just succeeded" and "the workspace context resolved" —
+ * `CloudSignInTip` unmounts the instant `finishSignedIn()` fires (see
+ * `useWorkspaceContext`'s `markLoading`), but the account row above only
+ * appears once `GET /api/workspace/context` answers, which is a real vela
+ * round trip and not instantaneous. `EntryShell` renders THIS in the exact
+ * same footer slot for that one window (`!workspaceContext && workspaceLoading`)
+ * so the callout hands off to a loading state instead of disappearing into
+ * nothing. Deliberately inert (no button semantics, no dismiss, no click
+ * handler) — this is a status readout, not another affordance to interact
+ * with while the real re-read is already in flight.
+ */
+export function RailAccountSyncTip() {
+  const { t } = useI18n();
+  return (
+    <div
+      className="entry-local-mode-tip is-signing"
+      role="status"
+      aria-live="polite"
+      data-testid="entry-rail-account-sync-tip"
+    >
+      <div className="entry-local-mode-tip__head">
+        <span className="entry-local-mode-tip__icon" aria-hidden>
+          <Icon name="spinner" size={14} />
+        </span>
+        <strong>{t('entry.cloudCalloutTitle')}</strong>
+      </div>
+      <p>{t('common.loading')}</p>
+    </div>
+  );
+}
+
+/**
  * The signed-out rail's bottom callout (#5517 "Open Design Cloud 版" card).
  * The demo's card jumps to a mock sign-in; the product card IS the sign-in:
  * clicking it kicks off the same vela device-auth flow the onboarding/AMR
