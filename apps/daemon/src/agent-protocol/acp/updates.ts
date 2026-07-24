@@ -449,6 +449,27 @@ function acpToolNameFromTitle(title: string): string | null {
 }
 
 /**
+ * Execute-family names that Langfuse treats as partial-redact only (secret+path
+ * lexical masking, not full payload replacement). Custom `kind:other` tools must
+ * never inherit these labels — a malicious or misconfigured MCP adapter can
+ * otherwise place private content in `rawInput` and bypass fail-closed redaction.
+ * Keep in sync with `PARTIAL_REDACT_TOOL_NAMES_LOWER` in langfuse-trace.ts.
+ */
+const ACP_PARTIAL_REDACT_TOOL_NAMES_LOWER: ReadonlySet<string> = new Set([
+  'bash',
+  'shell',
+  'execute',
+  'terminal',
+]);
+
+/** True when a tool name would enter Langfuse's Bash-like partial-redact allowlist. */
+export function isAcpPartialRedactToolName(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized) return false;
+  return ACP_PARTIAL_REDACT_TOOL_NAMES_LOWER.has(normalized);
+}
+
+/**
  * Sanitizes an ACP custom/adapter tool name before it enters the transcript.
  *
  * Kind `other` tools may ship free-text `name` values that embed paths, URLs,
@@ -457,6 +478,10 @@ function acpToolNameFromTitle(title: string): string | null {
  * telemetry is off). Only identifier-like names are kept; everything else
  * collapses to the opaque family label `Other`. Langfuse additionally
  * canonicalizes non-allowlisted names at the telemetry boundary.
+ *
+ * Callers that resolve names under trusted `kind:other` must also reject
+ * Bash-like partial-redact labels via `isAcpPartialRedactToolName` so custom
+ * tools cannot impersonate the sole non-fail-closed family.
  */
 export function sanitizeAcpCustomToolName(raw: string): string {
   const trimmed = raw.trim();
@@ -502,7 +527,9 @@ export function acpTelemetryToolCallId(raw: string): string {
  * title "update …" stays Read). That keeps content-tool redaction and analytics
  * families aligned with Langfuse's canonical name set. Kind `other` is the
  * exception: it is recognized for stickiness but is not a family, so an
- * explicit identifier-like name still wins there for UI/transcript. Untrusted
+ * explicit identifier-like name still wins there for UI/transcript — except
+ * Bash-like partial-redact labels, which collapse to `Other` so custom MCP
+ * tools cannot bypass Langfuse fail-closed payload redaction. Untrusted
  * free-text names (paths, tokens, titles) are collapsed to `Other` before the
  * event is emitted so Langfuse span labels cannot carry user-specific strings.
  * Payloads for unknown tools still fail closed in Langfuse
@@ -529,6 +556,12 @@ export function acpToolName(update: JsonObject): string {
     // kind:other / custom: keep only identifier-like adapter names. Paths,
     // tokens, and free text collapse to Other before the event is emitted.
     name = sanitizeAcpCustomToolName(update.name);
+    // Fail closed: kind:other must not claim Bash/shell/execute/terminal.
+    // Those names unlock Langfuse partial-redact (lexical masking only);
+    // custom MCP tools can put arbitrary private content in rawInput.
+    if (kindToken === 'other' && isAcpPartialRedactToolName(name)) {
+      name = 'Other';
+    }
   } else if (recognizedKind && kindName) {
     // kind:other without an explicit name (title-case "Other"), or remaining
     // recognized kinds without a preferred name.
@@ -537,6 +570,10 @@ export function acpToolName(update: JsonObject): string {
     const fromTitle = acpToolNameFromTitle(update.title);
     // Title heuristics can still surface path-like first tokens; sanitize.
     name = fromTitle ? sanitizeAcpCustomToolName(fromTitle) : null;
+    // Same fail-closed rule when kind:other reaches title (no name field).
+    if (name && kindToken === 'other' && isAcpPartialRedactToolName(name)) {
+      name = 'Other';
+    }
   } else if (kindName) {
     name = kindName;
   }

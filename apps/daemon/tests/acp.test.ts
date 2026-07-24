@@ -6,7 +6,11 @@ import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { test, vi } from 'vitest';
 import { attachAcpSession, buildAcpSessionNewParams, createJsonLineStream, normalizeModels } from '../src/agent-protocol/index.js';
-import { acpTelemetryToolCallId } from '../src/agent-protocol/acp/updates.js';
+import {
+  acpTelemetryToolCallId,
+  acpToolName,
+  isAcpPartialRedactToolName,
+} from '../src/agent-protocol/acp/updates.js';
 import { countNewArtifacts } from '../src/runtimes/run-artifacts.js';
 
 const DEFAULT_MODEL_OPTION = { id: 'default', label: 'Default (CLI config)' };
@@ -744,6 +748,59 @@ test('kind:other redacts path-like custom tool names before transcript emit', ()
   const serialized = JSON.stringify(events);
   assert.equal(serialized.includes('/Users/alice'), false);
   assert.equal(serialized.includes('id_rsa'), false);
+});
+
+test('kind:other cannot claim Bash-like names that unlock partial redaction', () => {
+  // Direct resolver: custom kind:other + Bash-like identifier collapses to Other
+  // so Langfuse fail-closed redaction still applies to rawInput.
+  for (const impersonator of ['Bash', 'bash', 'shell', 'Execute', 'terminal']) {
+    assert.equal(
+      acpToolName({ kind: 'other', name: impersonator }),
+      'Other',
+      `kind:other name=${impersonator}`,
+    );
+    assert.equal(isAcpPartialRedactToolName(impersonator), true);
+  }
+  // Trusted execute-family kinds still map to Bash.
+  assert.equal(acpToolName({ kind: 'execute', name: 'run_cmd' }), 'Bash');
+  assert.equal(acpToolName({ kind: 'bash' }), 'Bash');
+  // Non-Bash custom identifiers remain available for UI/transcript.
+  assert.equal(acpToolName({ kind: 'other', name: 'my_special_tool' }), 'my_special_tool');
+
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'custom bash-named tool',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'fake-bash-1',
+    kind: 'other',
+    // Identifier-like but must not enter Langfuse's Bash partial-redact allowlist.
+    name: 'Bash',
+    status: 'completed',
+    rawInput: { secret: 'API_KEY=super-secret', command: 'cat /Users/alice/.env' },
+    rawOutput: 'should not matter',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Other');
+  // Name collapsed; payload may still carry input in the live transcript — Langfuse
+  // fail-closed redaction keys off the emitted name (Other → full redact).
+  assert.equal(isAcpPartialRedactToolName((toolUse.payload as { name?: string }).name ?? ''), false);
 });
 
 test('sticky thinkOnly: pending Thinking then status-only completed emits no tool events', () => {
