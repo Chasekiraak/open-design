@@ -1521,20 +1521,26 @@ button.home-hero__capability-word:focus-visible {
   justify-content: flex-start;
   gap: 4px;
 }
-/* Thin separator between the persistent design-system picker and the
-   working-directory picker when both share the row. */
-.home-hero__workdir-divider {
-  flex: 0 0 auto;
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  opacity: 0.7;
-}
+/* Match the stable design-system entry in the composer: the directory is
+   context, not a primary pill, so it keeps the same quiet icon, type and
+   borderless trigger treatment. */
 .home-hero__working-dir-picker [data-testid='working-dir-trigger'] {
-  min-height: 26px;
-  padding: 4px 5px;
+  min-height: 36px;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 0;
   border-radius: 999px;
+  background: transparent;
   color: var(--text-muted);
+  font-size: 13px;
+}
+.home-hero__working-dir-picker [data-testid='working-dir-trigger'] svg {
+  width: 13px;
+  height: 13px;
+}
+.home-hero__working-dir-picker [data-testid='working-dir-trigger'] svg:last-child {
+  width: 11px;
+  height: 11px;
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:hover,
 .home-hero__working-dir-picker [data-testid='working-dir-trigger']:focus-visible {

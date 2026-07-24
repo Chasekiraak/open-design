@@ -2106,6 +2106,18 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 openDesignSystemPicker();
               } : undefined}
             />
+            {onDesignSystemChange ? (
+              <DesignSystemPicker
+                variant="home"
+                designSystems={designSystems}
+                selectedId={selectedDesignSystemId}
+                recommendedId={recommendedDesignSystemId}
+                onChange={(id) => {
+                  dismissTemplateRecommendation();
+                  onDesignSystemChange(id);
+                }}
+              />
+            ) : null}
             {libraryPickerOpen ? (
               <LibraryPicker
                 onClose={() => setLibraryPickerOpen(false)}
@@ -2245,56 +2257,39 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         </div>
       ) : null}
 
-      {onDesignSystemChange || onPickWorkingDir ? (
+      {onPickWorkingDir ? (
         <div className="home-hero__workdir-row">
-          {onDesignSystemChange ? (
-            <DesignSystemPicker
-              variant="home"
-              designSystems={designSystems}
-              selectedId={selectedDesignSystemId}
-              recommendedId={recommendedDesignSystemId}
-              onChange={(id) => {
-                dismissTemplateRecommendation();
-                onDesignSystemChange(id);
-              }}
-            />
-          ) : null}
-          {onDesignSystemChange && onPickWorkingDir ? (
-            <span className="home-hero__workdir-divider" aria-hidden />
-          ) : null}
-          {onPickWorkingDir ? (
-            <WorkingDirPicker
-              className="home-hero__working-dir-picker"
-              placement="up"
-              emptyLabel={t('homeWorkingDir.triggerShort')}
-              workingDir={workingDir}
-              recentDirs={recentDirs}
-              onPickDirectory={() => {
-                trackHomeChatComposerClick(analytics.track, {
-                  page_name: 'home',
-                  area: 'chat_composer',
-                  element: 'working_dir',
-                });
-                void onPickWorkingDir();
-              }}
-              onSelectRecent={(dir) => {
-                trackHomeChatComposerClick(analytics.track, {
-                  page_name: 'home',
-                  area: 'chat_composer',
-                  element: 'working_dir_recent',
-                });
-                onSelectRecentWorkingDir?.(dir);
-              }}
-              onClear={() => {
-                trackHomeChatComposerClick(analytics.track, {
-                  page_name: 'home',
-                  area: 'chat_composer',
-                  element: 'working_dir_clear',
-                });
-                onClearWorkingDir?.();
-              }}
-            />
-          ) : null}
+          <WorkingDirPicker
+            className="home-hero__working-dir-picker"
+            placement="up"
+            emptyLabel={t('homeWorkingDir.triggerShort')}
+            workingDir={workingDir}
+            recentDirs={recentDirs}
+            onPickDirectory={() => {
+              trackHomeChatComposerClick(analytics.track, {
+                page_name: 'home',
+                area: 'chat_composer',
+                element: 'working_dir',
+              });
+              void onPickWorkingDir();
+            }}
+            onSelectRecent={(dir) => {
+              trackHomeChatComposerClick(analytics.track, {
+                page_name: 'home',
+                area: 'chat_composer',
+                element: 'working_dir_recent',
+              });
+              onSelectRecentWorkingDir?.(dir);
+            }}
+            onClear={() => {
+              trackHomeChatComposerClick(analytics.track, {
+                page_name: 'home',
+                area: 'chat_composer',
+                element: 'working_dir_clear',
+              });
+              onClearWorkingDir?.();
+            }}
+          />
         </div>
       ) : null}
       </div>

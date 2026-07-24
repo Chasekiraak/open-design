@@ -122,11 +122,15 @@ describe('HomeView media composer options', () => {
     stubFetch();
     renderHome();
 
-    // The design-system picker is now the persistent row below the composer, so
-    // it is present for every kind and no longer a footer pill. Image/Video add
+    // The design-system picker is a persistent companion to the + context
+    // control, so it remains reachable in every output state. Image/Video add
     // no inline footer pills either; ratio / duration / model / resolution are
     // asked for during the run (mirroring prototype/deck).
-    expect(screen.getByTestId('home-hero-design-system-trigger')).toBeTruthy();
+    const plusTrigger = screen.getByTestId('home-hero-plus-trigger');
+    const designSystemTrigger = screen.getByTestId('home-hero-design-system-trigger');
+    expect(designSystemTrigger.closest('.home-hero__input-foot')).toBeTruthy();
+    expect(plusTrigger.compareDocumentPosition(designSystemTrigger) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     await clickHomeRailChip('image');
     await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
