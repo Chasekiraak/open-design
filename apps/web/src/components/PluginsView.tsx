@@ -1884,11 +1884,6 @@ export function ExtensionsMarketplace({
                 <h2 id="plugin-create-title">
                   {t('pluginsView.createTitle', { kind: pluginKindLabel(createKind, t) })}
                 </h2>
-                <p>
-                  {createKind === 'plugin'
-                    ? t('pluginsView.createPluginBody')
-                    : t('pluginsView.createSkillBody')}
-                </p>
               </div>
               <button type="button" aria-label={t('pluginsView.createClose')} onClick={closeCreateDialog}>
                 <Icon name="close" size={15} />
@@ -1939,28 +1934,29 @@ export function ExtensionsMarketplace({
                 <div>
                   <h3>{t('pluginsView.importFromUrl')}</h3>
                   <p>{t('pluginsView.importUrlBody', { kind: pluginKindLabel(createKind, t) })}</p>
-                  <label>
-                    <span>{t('pluginsView.importUrlLabel')}</span>
+                  {/* Input and button sit side by side in one row, matching
+                      the demo's `url-import-row` shape — not a labelled
+                      block with the button stacked below it (issue #110's
+                      original placement still applies: this row lives
+                      inside the content column, not as a direct <article>
+                      child). */}
+                  <div className="plugin-marketplace__url-import-row">
                     <input
+                      aria-label={t('pluginsView.importUrlLabel')}
                       value={createUrl}
                       onChange={(event) => setCreateUrl(event.target.value)}
                       disabled={createBusy !== null}
                       placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'https://example.com/skill'}
                     />
-                  </label>
-                  {/* Inside the content column, below the URL field. As a
-                      direct <article> child this button fell into the card
-                      grid's second row and rendered dangling outside the
-                      card (issue #110). */}
-                  <button
-                    type="button"
-                    className="plugin-marketplace__create-action"
-                    data-testid="plugin-create-import-url"
-                    disabled={createBusy !== null || createUrl.trim().length === 0}
-                    onClick={() => void handleCreateImportUrl()}
-                  >
-                    {createBusy === 'import' ? t('pluginsView.importing') : t('pluginsView.importAndUpload')}
-                  </button>
+                    <button
+                      type="button"
+                      data-testid="plugin-create-import-url"
+                      disabled={createBusy !== null || createUrl.trim().length === 0}
+                      onClick={() => void handleCreateImportUrl()}
+                    >
+                      {createBusy === 'import' ? t('pluginsView.importing') : t('pluginsView.importAndUpload')}
+                    </button>
+                  </div>
                 </div>
               </article>
               <article>

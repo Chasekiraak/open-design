@@ -834,13 +834,6 @@
   gap: var(--spacing-10);
 }
 
-/* Card action button that sits inside the content column below its field
-   (the 从链接导入 card's 导入并上传). It follows the URL <label> directly, which
-   has no bottom margin of its own, so the breathing room lives here. */
-.plugin-marketplace__create-action {
-  margin-top: 10px;
-}
-
 .plugin-marketplace__create-options input,
 .plugin-marketplace__skill-form input,
 .plugin-marketplace__skill-form textarea {
@@ -864,7 +857,6 @@
 .plugin-marketplace__create-options article > button,
 .plugin-marketplace__url-import-row button,
 .plugin-marketplace__folder-action-row > button:not(.plugin-marketplace__folder-pick),
-.plugin-marketplace__create-action,
 .plugin-marketplace__skill-form > button {
   appearance: none;
   min-height: 34px;

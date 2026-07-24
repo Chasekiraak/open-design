@@ -75,14 +75,20 @@ describe('ExtensionsMarketplace create dialog layout (#110)', () => {
     }
   });
 
-  it('renders 导入并上传 in the URL card content, below the link field', async () => {
+  it('renders 导入并上传 beside the URL input in the card content, not as a direct article child', async () => {
     await openCreateDialog();
 
     const importButton = screen.getByTestId('plugin-create-import-url');
-    const contentColumn = importButton.parentElement!;
-    // Same content column as the URL input's label — not the article grid.
+    // #5517-aligned shape: input and button share one row (matches the
+    // demo's `url-import-row`), not a labelled block with the button
+    // stacked below it.
+    const row = importButton.closest('.plugin-marketplace__url-import-row');
+    expect(row).not.toBeNull();
+    expect(row!.querySelector('input')).not.toBeNull();
+    // That row still lives inside the card's content column — not the
+    // article grid directly (issue #110).
+    const contentColumn = row!.parentElement!;
     expect(contentColumn.tagName).toBe('DIV');
-    expect(contentColumn.querySelector('input')).not.toBeNull();
     expect(contentColumn.querySelector('h3')).not.toBeNull();
   });
 
