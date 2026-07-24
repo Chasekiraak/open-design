@@ -5,11 +5,14 @@ import {
   buildTracePayload,
   deriveLangfuseDeliveryState,
   isContentToolName,
+  isPartialRedactToolName,
   readLangfuseConfig,
   readRunTelemetrySinkConfig,
   readTelemetrySinkConfig,
   reportRunCompleted,
   reportRunFeedback,
+  shouldFullyRedactToolPayload,
+  toolPayloadRedactionPlaceholder,
   type FeedbackReportContext,
   type LangfuseConfig,
   type ReportContext,
@@ -327,6 +330,40 @@ describe('isContentToolName', () => {
   });
 });
 
+describe('shouldFullyRedactToolPayload (fail-closed)', () => {
+  it('allows only bash-like execute tools to keep partial redaction', () => {
+    expect(isPartialRedactToolName('Bash')).toBe(true);
+    expect(isPartialRedactToolName('shell')).toBe(true);
+    expect(isPartialRedactToolName('execute')).toBe(true);
+    expect(isPartialRedactToolName('Terminal')).toBe(true);
+    expect(shouldFullyRedactToolPayload('Bash')).toBe(false);
+    expect(shouldFullyRedactToolPayload('shell')).toBe(false);
+  });
+
+  it('fully redacts known content tools and unknown/custom ACP names', () => {
+    expect(shouldFullyRedactToolPayload('Read')).toBe(true);
+    expect(shouldFullyRedactToolPayload('Write')).toBe(true);
+    // kind:other custom / MCP filesystem-style names must not leak raw I/O.
+    expect(shouldFullyRedactToolPayload('mcp__filesystem__read_file')).toBe(true);
+    expect(shouldFullyRedactToolPayload('my_special_tool')).toBe(true);
+    expect(shouldFullyRedactToolPayload('Other')).toBe(true);
+    expect(shouldFullyRedactToolPayload('')).toBe(true);
+    expect(shouldFullyRedactToolPayload('unknown')).toBe(true);
+  });
+
+  it('labels known content tools vs unknown custom names in placeholders', () => {
+    expect(toolPayloadRedactionPlaceholder('Read', 'output')).toBe(
+      '[REDACTED:tool_output:content_tool:Read]',
+    );
+    expect(toolPayloadRedactionPlaceholder('mcp__filesystem__read_file', 'output')).toBe(
+      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
+    );
+    expect(toolPayloadRedactionPlaceholder('  ', 'input')).toBe(
+      '[REDACTED:tool_input:unknown_tool:unnamed]',
+    );
+  });
+});
+
 describe('buildTracePayload', () => {
   it('emits a trace with nested agent + generation observations', () => {
     const batch = buildTracePayload(makeCtx());
@@ -391,6 +428,35 @@ describe('buildTracePayload', () => {
     expect(tool.output).toBe('total 0');
     expect(write.input).toBe('[REDACTED:tool_input:content_tool:Write]');
     expect(write.output).toBe('[REDACTED:tool_output:content_tool:Write]');
+  });
+
+  it('fail-closed redacts unknown/custom ACP tool payloads when content gate is on', () => {
+    const batch = buildTracePayload(
+      makeCtx({
+        prefs: { metrics: true, content: true, artifactManifest: false },
+        tools: [
+          {
+            id: 'custom-1',
+            name: 'mcp__filesystem__read_file',
+            startedAt: 1_700_000_001_000,
+            endedAt: 1_700_000_001_800,
+            input: '{"path":"/Users/alice/secrets.env"}',
+            output: 'API_KEY=super-secret\nPASSWORD=also-secret\n',
+          },
+        ],
+      }),
+    );
+    const custom = bodyOf(batch, 'span-create', 'tool:mcp__filesystem__read_file');
+    expect(custom.input).toBe(
+      '[REDACTED:tool_input:unknown_tool:mcp__filesystem__read_file]',
+    );
+    expect(custom.output).toBe(
+      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
+    );
+    const payload = JSON.stringify(batch);
+    expect(payload).not.toContain('super-secret');
+    expect(payload).not.toContain('also-secret');
+    expect(payload).not.toContain('/Users/alice/secrets.env');
   });
 
   it('adds full prompt-stack content once on generation input and flat metadata elsewhere', () => {

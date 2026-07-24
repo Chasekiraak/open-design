@@ -39,7 +39,8 @@ import {
   type TraceObjectSummary,
   type ToolCallSummary,
   type TurnInfo,
-  isContentToolName,
+  shouldFullyRedactToolPayload,
+  toolPayloadRedactionPlaceholder,
 } from './langfuse-trace.js';
 import type { PromptStackTelemetry } from './prompt-telemetry.js';
 import { redactSecrets } from './redact.js';
@@ -377,8 +378,11 @@ function serializeToolPayload(
   opts: { toolName: string; direction: 'input' | 'output' },
 ): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (isContentToolName(opts.toolName)) {
-    return `[REDACTED:tool_${opts.direction}:content_tool:${opts.toolName}]`;
+  // Fail-closed: known content tools AND unknown/custom ACP tool names
+  // (kind:other MCP readers, etc.) fully redact. Only bash-like execute
+  // tools keep secret+path lexical masking.
+  if (shouldFullyRedactToolPayload(opts.toolName)) {
+    return toolPayloadRedactionPlaceholder(opts.toolName, opts.direction);
   }
   if (typeof value === 'string') return redactLocalPaths(redactSecrets(value));
   try {

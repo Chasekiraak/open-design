@@ -1469,6 +1469,87 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(payload).not.toContain('<html>SECRET</html>');
   });
 
+  it('fail-closed redacts kind:other custom ACP tool payloads (unknown tool names)', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-1',
+      telemetry: { metrics: true, content: true, artifactManifest: true },
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 207 }));
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    const now = Date.now();
+    try {
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({
+          'conv-1': [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'Read secrets via MCP.',
+              attachments: [],
+            },
+            {
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'Done.',
+              producedFiles: [],
+            },
+          ],
+        }),
+        dataDir,
+        run: makeRun({
+          createdAt: now - 2000,
+          updatedAt: now,
+          events: [
+            {
+              id: 1,
+              event: 'agent',
+              data: {
+                type: 'tool_use',
+                id: 'custom-mcp-1',
+                // ACP kind:other preserves arbitrary adapter/MCP names.
+                name: 'mcp__filesystem__read_file',
+                input: {
+                  path: '/Users/alice/secrets.env',
+                },
+              },
+            },
+            {
+              id: 2,
+              event: 'agent',
+              data: {
+                type: 'tool_result',
+                toolUseId: 'custom-mcp-1',
+                content: 'API_KEY=super-secret\nPASSWORD=also-secret\n',
+                isError: false,
+              },
+            },
+          ],
+        }) as any,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const batch = JSON.parse(init.body as string).batch as any[];
+    const custom = bodyOf(batch, 'span-create', 'tool:mcp__filesystem__read_file');
+    expect(custom.input).toBe(
+      '[REDACTED:tool_input:unknown_tool:mcp__filesystem__read_file]',
+    );
+    expect(custom.output).toBe(
+      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
+    );
+    const payload = JSON.stringify(batch);
+    expect(payload).not.toContain('super-secret');
+    expect(payload).not.toContain('also-secret');
+    expect(payload).not.toContain('/Users/alice/secrets.env');
+  });
+
   it('forwards run prompt telemetry into trace and generation metadata', async () => {
     await writeAppCfg({
       installationId: 'install-uuid-1',

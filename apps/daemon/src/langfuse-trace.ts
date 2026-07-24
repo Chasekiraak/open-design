@@ -1320,9 +1320,14 @@ function redactArtifactBlocks(value: string | undefined): string | undefined {
 }
 
 /**
- * Tool names whose input/output payloads are fully redacted in Langfuse
- * (content-bearing read/write/search/think tools, including ACP aliases).
- * Bash stays on secret+path redaction only.
+ * Tool names known to be content-bearing (read/write/search/think tools,
+ * including ACP aliases). Used for redaction reason labels and docs.
+ *
+ * Full redaction policy is fail-closed via `shouldFullyRedactToolPayload`:
+ * only bash-like execute tools keep secret+path lexical masking; known
+ * content tools AND any unknown/custom ACP tool name (e.g. kind:other MCP
+ * filesystem readers) fully redact so private file bodies cannot leak to
+ * Langfuse under best-effort masking alone.
  *
  * Matching is case-insensitive. Canonical Claude-shaped names are listed
  * here; lowercase ACP kind tokens (read/write/edit/…) are covered via the
@@ -1358,11 +1363,55 @@ const CONTENT_TOOL_NAMES_LOWER: ReadonlySet<string> = new Set(
   [...CONTENT_TOOL_NAMES].map((name) => name.toLowerCase()),
 );
 
-/** True when tool payloads should be fully content-redacted for telemetry. */
+/**
+ * Execute-family tools allowed to keep secret+path-only redaction (not full
+ * payload replacement). Everything else fails closed to a placeholder.
+ */
+const PARTIAL_REDACT_TOOL_NAMES_LOWER: ReadonlySet<string> = new Set([
+  'bash',
+  'shell',
+  'execute',
+  'terminal',
+]);
+
+/** True when the tool is a known content-bearing family name. */
 export function isContentToolName(toolName: string): boolean {
   const normalized = toolName.trim().toLowerCase();
   if (!normalized) return false;
   return CONTENT_TOOL_NAMES_LOWER.has(normalized);
+}
+
+/**
+ * True when tool I/O may keep lexical (secret+path) redaction for telemetry.
+ * Only bash-like execute tools qualify; empty/unknown/custom names do not.
+ */
+export function isPartialRedactToolName(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized) return false;
+  return PARTIAL_REDACT_TOOL_NAMES_LOWER.has(normalized);
+}
+
+/**
+ * Fail-closed telemetry gate: fully redact tool input/output unless the tool
+ * is an allowlisted bash-like execute family. Unknown/custom ACP names
+ * (kind:other, MCP tools, etc.) must not ship raw payloads to Langfuse.
+ */
+export function shouldFullyRedactToolPayload(toolName: string): boolean {
+  return !isPartialRedactToolName(toolName);
+}
+
+/**
+ * Builds the fixed placeholder used when tool I/O is fully redacted for
+ * content telemetry. Known content families keep `content_tool`; everything
+ * else (including custom ACP/MCP names) uses `unknown_tool`.
+ */
+export function toolPayloadRedactionPlaceholder(
+  toolName: string,
+  direction: 'input' | 'output',
+): string {
+  const label = toolName.trim() || 'unnamed';
+  const reason = isContentToolName(label) ? 'content_tool' : 'unknown_tool';
+  return `[REDACTED:tool_${direction}:${reason}:${label}]`;
 }
 
 function redactLocalPaths(value: string | undefined): string | undefined {
@@ -1378,8 +1427,8 @@ function traceSafeToolPayload(
   value: string | undefined,
 ): string | undefined {
   if (value === undefined) return undefined;
-  if (isContentToolName(toolName)) {
-    return `[REDACTED:tool_${direction}:content_tool:${toolName}]`;
+  if (shouldFullyRedactToolPayload(toolName)) {
+    return toolPayloadRedactionPlaceholder(toolName, direction);
   }
   return redactLocalPaths(redactArtifactBlocks(value));
 }
