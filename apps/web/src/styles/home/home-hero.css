@@ -3396,17 +3396,46 @@ button.home-hero__capability-word:focus-visible {
 }
 .home-hero__recommendation-badge {
   display: inline-flex;
+  align-items: center;
+  gap: 3px;
   position: absolute;
   z-index: 1;
   top: 8px;
   left: 8px;
   padding: 3px 6px;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--accent-tint) 76%, var(--bg-panel));
+  background: var(--green, #00aa54);
+  color: var(--accent-contrast, #fff);
+  box-shadow: 0 2px 7px color-mix(in srgb, var(--green, #00aa54) 34%, transparent);
   font-size: 10px;
+  font-weight: 700;
   line-height: 1.1;
   letter-spacing: 0.01em;
   pointer-events: none;
+  white-space: nowrap;
+}
+.home-hero__recommendation-badge::before {
+  content: '✦';
+  display: inline-block;
+  font-size: 9px;
+  line-height: 1;
+  animation: home-hero-recommendation-glint 1.6s cubic-bezier(0.23, 1, 0.32, 1) 2;
+}
+@keyframes home-hero-recommendation-glint {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translateY(0) rotate(0deg);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(-1px) rotate(18deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-hero__recommendation-badge::before {
+    animation: none;
+  }
 }
 .home-hero__scenario-card-art {
   display: flex;
