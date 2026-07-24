@@ -22,10 +22,20 @@ import { buildProjectRawFileUrl } from '@open-design/contracts';
 import { randomUUID } from 'node:crypto';
 
 import { postCreateArtifactRequest } from './artifacts/create.js';
+import {
+  createLocalMcpBriefStore as createBriefStore,
+  type LocalMcpBriefStore,
+} from './mcp-brief.js';
+import {
+  OPEN_DESIGN_BRIEF_APP_HTML,
+  OPEN_DESIGN_BRIEF_APP_VERSION,
+} from './mcp-apps/brief-resource.js';
 
 const SERVER_NAME = 'open-design';
 const SERVER_VERSION = '0.2.0';
 const MCP_STDIO_IDLE_EXIT_MS = 30 * 60 * 1000;
+const OPEN_DESIGN_BRIEF_APP_RESOURCE =
+  'ui://open-design-cloud/artifact-card-v1.html';
 
 type JsonObject = Record<string, unknown>;
 interface RunMcpOptions { daemonUrl: string | URL }
@@ -40,10 +50,17 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
 interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
 type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
 interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
-interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown }
+interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown }
 interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
 interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; active: ActiveContext | null; resolved?: ResolvedProject | null }
 interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
+interface HandleMcpToolCallOptions { briefStore?: LocalMcpBriefStore }
+interface McpToolCallResult {
+  [key: string]: unknown;
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: JsonObject;
+  isError?: boolean;
+}
 
 interface McpIdleExitControllerOptions {
   idleMs: number;
@@ -151,6 +168,82 @@ const PROJECT_ARG = {
 } as const;
 
 export const TOOL_DEFS = [
+  {
+    name: 'collect_brief',
+    description:
+      'Open an interactive Open Design brief card for a new artifact. Use the returned human-readable confirmation with any explicit execution mode; never ask the user to copy an internal draft id or nonce.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        artifactType: {
+          type: 'string',
+          enum: [
+            'website',
+            'product-prototype',
+            'presentation',
+            'document',
+            'image',
+            'video',
+            'audio',
+            'design-system',
+          ],
+          description: 'Artifact workflow whose brief should be collected.',
+        },
+        projectTitle: {
+          type: 'string',
+          description: 'Concise human-readable project title.',
+        },
+        knownAnswers: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Optional stable question-id answers already supplied by the user.',
+        },
+        skip: {
+          type: 'boolean',
+          description: 'Use recommended defaults without asking. Defaults to false.',
+        },
+      },
+      required: ['artifactType'],
+      additionalProperties: false,
+    },
+    annotations: { ...WRITE_ANNOTATIONS, title: 'Collect Open Design brief' },
+    _meta: {
+      ui: { resourceUri: OPEN_DESIGN_BRIEF_APP_RESOURCE },
+      'ui/resourceUri': OPEN_DESIGN_BRIEF_APP_RESOURCE,
+      'openai/outputTemplate': OPEN_DESIGN_BRIEF_APP_RESOURCE,
+    },
+  },
+  {
+    name: 'confirm_brief',
+    description:
+      'Confirm the choices from the rendered Open Design brief card. Returns a readable summary; draft ids and nonces are internal widget data, never user-facing copy.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        briefDraftId: {
+          type: 'string',
+          description: 'Internal draft id returned by collect_brief.',
+        },
+        nonce: {
+          type: 'string',
+          description: 'Internal nonce returned by collect_brief.',
+        },
+        answers: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Question-id to selected stable option values.',
+        },
+      },
+      required: ['briefDraftId', 'nonce', 'answers'],
+      additionalProperties: false,
+    },
+    annotations: { ...WRITE_ANNOTATIONS, title: 'Confirm Open Design brief' },
+    _meta: {
+      ui: { resourceUri: OPEN_DESIGN_BRIEF_APP_RESOURCE },
+      'ui/resourceUri': OPEN_DESIGN_BRIEF_APP_RESOURCE,
+      'openai/outputTemplate': OPEN_DESIGN_BRIEF_APP_RESOURCE,
+    },
+  },
   {
     name: 'list_projects',
     description: 'List every Open Design project on this daemon.',
@@ -514,8 +607,45 @@ export const TOOL_DEFS = [
   },
 ];
 
+export function localMcpToolDefinitions() {
+  return TOOL_DEFS;
+}
+
+export function localMcpResourceDefinitions() {
+  return [
+    {
+      uri: OPEN_DESIGN_BRIEF_APP_RESOURCE,
+      name: 'Open Design brief',
+      title: 'Choose the artifact direction',
+      description:
+        'Interactive local Open Design brief card shared by Cloud, Local Codex, and Local BYOK modes.',
+      mimeType: 'text/html;profile=mcp-app',
+      _meta: {
+        ui: {
+          prefersBorder: true,
+          csp: {
+            connectDomains: [],
+            resourceDomains: [],
+          },
+        },
+        'ui/prefersBorder': true,
+        'ui/csp': {
+          connectDomains: [],
+          resourceDomains: [],
+        },
+        'openai/widgetPrefersBorder': true,
+      },
+    },
+  ];
+}
+
+export function createLocalMcpBriefStore() {
+  return createBriefStore();
+}
+
 export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
   const baseUrl = String(daemonUrl).replace(/\/$/, '');
+  const briefStore = createLocalMcpBriefStore();
   let closeTransportForIdle: (() => void) | null = null;
   const idleExit = _createMcpIdleExitController({
     idleMs: MCP_STDIO_IDLE_EXIT_MS,
@@ -571,6 +701,11 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
         '',
         'To make Open Design GENERATE or refine a design (rather than just',
         'read/edit files), commission a run - you do not run skills yourself:',
+        ' - collect_brief first for a new artifact unless the user explicitly',
+        '    asks to skip questions. Let the user complete the rendered card;',
+        '    confirm_brief returns the readable brief to reuse with Cloud,',
+        '    Local Codex, or Local BYOK. Never print or ask the user to copy',
+        '    briefDraftId, nonce, or any other internal correlation value.',
         ' - list_skills / list_plugins to see what you can ask OD to make.',
         ' - for agent:"amr" (Open Design Cloud / Vela), call',
         '    get_vela_login_status first. If signed out, call',
@@ -638,6 +773,7 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
       getJson<DesignSystemsPayload>(`${baseUrl}/api/design-systems`).catch((): DesignSystemsPayload => ({ designSystems: [] })),
     ]);
     const resources = [
+      ...localMcpResourceDefinitions(),
       {
         uri: 'od://focus/active',
         name: 'Active Open Design context',
@@ -666,6 +802,20 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
 
   server.setRequestHandler(ReadResourceRequestSchema, withMcpActivity(async (req) => {
     const uri = req.params?.uri;
+    if (uri === OPEN_DESIGN_BRIEF_APP_RESOURCE) {
+      return {
+        contents: [
+          {
+            uri,
+            mimeType: 'text/html;profile=mcp-app',
+            text: OPEN_DESIGN_BRIEF_APP_HTML,
+            _meta: {
+              version: OPEN_DESIGN_BRIEF_APP_VERSION,
+            },
+          },
+        ],
+      };
+    }
     if (uri === 'od://focus/active') {
       const data = await getJson<ActiveContext>(`${baseUrl}/api/active`);
       return {
@@ -709,7 +859,7 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, withMcpActivity(async (req) => {
     const name = req.params?.name;
     const args: McpArgs = (req.params?.arguments ?? {}) as McpArgs;
-    return handleMcpToolCall(baseUrl, name, args);
+    return handleMcpToolCall(baseUrl, name, args, { briefStore });
   }));
 
   const transport = new StdioServerTransport();
@@ -754,13 +904,13 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
   }
 }
 
-function ok(payload: unknown) {
+function ok(payload: unknown): McpToolCallResult {
   const text =
     typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
   return { content: [{ type: 'text', text }] };
 }
 
-function errorResult(message: string) {
+function errorResult(message: string): McpToolCallResult {
   return { isError: true, content: [{ type: 'text', text: message }] };
 }
 
@@ -776,9 +926,51 @@ function publicVelaLoginStatus(status: unknown): unknown {
   return publicStatus;
 }
 
-async function handleMcpToolCall(baseUrl: string, name: unknown, args: McpArgs) {
+async function handleMcpToolCall(
+  baseUrl: string,
+  name: unknown,
+  args: McpArgs,
+  options: HandleMcpToolCallOptions = {},
+): Promise<McpToolCallResult> {
   try {
     switch (name) {
+      case 'collect_brief': {
+        const collected = (options.briefStore ?? createLocalMcpBriefStore())
+          .collect(args);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                'Complete the rendered Open Design brief card. The confirmation will return a readable summary; do not expose its internal draft id or nonce.',
+            },
+          ],
+          structuredContent: collected as unknown as JsonObject,
+        };
+      }
+      case 'confirm_brief': {
+        if (!options.briefStore) {
+          throw new Error(
+            'confirm_brief requires the same local MCP session that created the draft',
+          );
+        }
+        const confirmed = options.briefStore.confirm(args);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: [
+                'Brief confirmed.',
+                '',
+                confirmed.summary,
+                '',
+                'Continue with this brief.',
+              ].join('\n'),
+            },
+          ],
+          structuredContent: confirmed as unknown as JsonObject,
+        };
+      }
       case 'list_projects':
         return ok(await getJson<ProjectsPayload>(`${baseUrl}/api/projects`));
       case 'get_active_context': {
@@ -1565,8 +1757,8 @@ async function getFile(baseUrl: string, project: string, relPath: string, active
   }
   return {
     content: [
-      ...extra.map((t) => ({ type: 'text', text: t })),
-      { type: 'text', text: slice.join('\n') },
+      ...extra.map((t) => ({ type: 'text' as const, text: t })),
+      { type: 'text' as const, text: slice.join('\n') },
     ],
   };
 }
