@@ -781,10 +781,14 @@ describe('GET /api/integrations/vela/status', () => {
     expect(body.user?.name).toBe('杨瑾龙');
   });
 
-  it('blocks the first signed-in /status on a cold cache and surfaces the fetched plan + balance', async () => {
-    // Regression: the new account surfaces read /status once and do not
-    // re-poll, so a cold cache must resolve live billing BEFORE the first
-    // response — otherwise plan/balance stay hidden until the user refocuses.
+  it('resolves live billing on a cold cache within the wait budget and surfaces the fetched plan + balance', async () => {
+    // Regression: several account surfaces read /status once per mount/open
+    // and do not re-poll on a fixed interval, so a cold cache should still
+    // resolve live billing before the first response WHEN billing answers
+    // promptly (the common case — fake-vela here has no delay configured).
+    // A billing read slower than the wait budget is covered separately by
+    // "does not block /status on a cold cache when billing is slow, …" below,
+    // which asserts the response is never held hostage to a slow probe.
     clearAllVelaLiveAccounts();
     process.env.FAKE_VELA_BILLING_TIER = 'plus';
     process.env.FAKE_VELA_BILLING_BALANCE_USD = '247.51';
@@ -801,6 +805,48 @@ describe('GET /api/integrations/vela/status', () => {
     // Env-/config-identity stays on `user`; live billing rides on `account`.
     expect(body.account?.plan).toBe('plus');
     expect(body.account?.balanceUsd).toBe('247.51');
+  });
+
+  it('does not block /status on a cold cache when billing is slow, and applies the account on a later poll once it resolves', async () => {
+    // Regression for the "sign out then sign back in" cold-cache path: every
+    // logout clears the live-account cache (clearAllVelaLiveAccounts), so a
+    // slow (or hung) `vela billing summary` must not delay the login-status
+    // check itself — that check is what the avatar/menu/settings surfaces
+    // need FIRST. The fetch is left running in the background and the next
+    // /status read (every consumer already re-reads on mount, window
+    // focus/visibilitychange, or the sign-in event) picks up the resolved
+    // plan/balance instead.
+    clearAllVelaLiveAccounts();
+    process.env.FAKE_VELA_BILLING_TIER = 'plus';
+    process.env.FAKE_VELA_BILLING_BALANCE_USD = '19.99';
+    process.env.FAKE_VELA_BILLING_DELAY_MS = '2000';
+    seedLogin('local', {
+      user: { id: 'slow-billing-1', email: 'slow-billing@example.com', plan: undefined },
+    });
+
+    const startedAt = Date.now();
+    const first = await getJson<{
+      loggedIn: boolean;
+      account?: { plan?: string; balanceUsd?: string | null };
+    }>(`${baseUrl}/api/integrations/vela/status`);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(first.body.loggedIn).toBe(true);
+    // Well under the 2s billing delay — proves /status did not block on it.
+    expect(elapsedMs).toBeLessThan(1800);
+    expect(first.body.account).toBeUndefined();
+
+    // Give the still-running background billing fetch time to resolve and
+    // populate the live-account cache.
+    await new Promise((resolve) => setTimeout(resolve, 2300));
+
+    const second = await getJson<{
+      loggedIn: boolean;
+      account?: { plan?: string; balanceUsd?: string | null };
+    }>(`${baseUrl}/api/integrations/vela/status`);
+    expect(second.body.loggedIn).toBe(true);
+    expect(second.body.account?.plan).toBe('plus');
+    expect(second.body.account?.balanceUsd).toBe('19.99');
   });
 
   it('normalizes a successful billing summary without a tier to free (upgradeable)', async () => {

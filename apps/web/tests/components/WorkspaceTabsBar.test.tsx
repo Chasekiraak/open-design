@@ -893,3 +893,183 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     });
   });
 });
+
+describe('WorkspaceTabsBar identity-scope tab reset', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('does not disturb a restored session the first time identityScopeKey resolves (upgrade compatibility)', async () => {
+    // A session persisted by a build that predates this feature: tabs with no
+    // `scopeKey` field at all. The very first resolved identityScopeKey must
+    // be adopted silently, not treated as a change to reconcile against.
+    window.localStorage.setItem(
+      'open-design:workspace-tabs:v1',
+      JSON.stringify({
+        tabs: [
+          { id: 'entry:home:a', kind: 'entry', view: 'home', createdAt: 1, lastActiveAt: 1 },
+          {
+            id: 'project:project-alpha:b',
+            kind: 'project',
+            projectId: 'project-alpha',
+            conversationId: null,
+            fileName: null,
+            createdAt: 2,
+            lastActiveAt: 2,
+          },
+        ],
+        activeTabId: 'project:project-alpha:b',
+      }),
+    );
+
+    render(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-personal-1"
+      />,
+    );
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels).toHaveLength(2);
+      expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
+    });
+
+    // The now-known scope key is backfilled into storage so a later, REAL
+    // change has something to compare against.
+    await waitFor(() => {
+      const raw = window.localStorage.getItem('open-design:workspace-tabs:v1');
+      const parsed = JSON.parse(raw ?? '{}') as { scopeKey?: string };
+      expect(parsed.scopeKey).toBe('user-1::ws-personal-1');
+    });
+  });
+
+  it('closes every open tab down to a single fresh Home tab on sign-out', async () => {
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={{ kind: 'home', view: 'home' }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-personal-1"
+      />,
+    );
+    // Open a project tab under this (already-adopted) scope.
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-personal-1"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+
+    // Sign out: the account bucket flips to the fixed anon::none scope.
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="anon::none"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(1);
+      expect(screen.getByTestId('workspace-home-rail-toggle')).toBeTruthy();
+    });
+    // Route/tab-strip consistency: closing every tab down to Home also lands
+    // the app ON Home, matching what closing the last remaining tab already
+    // does elsewhere in this file — a stale route pointing at the project the
+    // user just signed out of would otherwise keep rendering underneath.
+    expect(navigate).toHaveBeenLastCalledWith(homeRoute);
+  });
+
+  it('closes every open tab on a workspace switch, even for the same account', async () => {
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={{ kind: 'home', view: 'home' }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-team-a"
+      />,
+    );
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-team-a"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-team-b"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(1);
+      expect(screen.getByTestId('workspace-home-rail-toggle')).toBeTruthy();
+    });
+    expect(navigate).toHaveBeenLastCalledWith(homeRoute);
+  });
+
+  it('does not reset while onboarding is active, even if the scope changes underneath it', async () => {
+    const onboardingRoute: Route = { kind: 'home', view: 'onboarding' };
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={onboardingRoute}
+        projects={[project]}
+        onboardingCompleted={false}
+        identityScopeKey="anon::none"
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(1);
+      expect(storedEntryTabView()).toBe('onboarding');
+    });
+
+    // Signing in mid-onboarding flips the scope key — this must NOT eject the
+    // user from the Connect step before they finish it.
+    rerender(
+      <WorkspaceTabsBar
+        route={onboardingRoute}
+        projects={[project]}
+        onboardingCompleted={false}
+        identityScopeKey="user-1::ws-personal-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(1);
+      expect(storedEntryTabView()).toBe('onboarding');
+    });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('never resets while identityScopeKey stays unresolved (default prop, back-compat)', async () => {
+    const { rerender } = render(
+      <WorkspaceTabsBar route={{ kind: 'home', view: 'home' }} projects={[project]} />,
+    );
+    rerender(<WorkspaceTabsBar route={{ ...projectRoute }} projects={[project]} />);
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+    // No identityScopeKey passed at all across any render — tabs must behave
+    // exactly as they did before this feature existed.
+    rerender(<WorkspaceTabsBar route={{ ...projectRoute }} projects={[projectBeta]} />);
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+  });
+});

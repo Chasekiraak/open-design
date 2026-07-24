@@ -1488,6 +1488,16 @@ export function ProjectView({
       ? t('workspace.readonlyNoticeBy', { owner: projectCollab.ownerDisplayName })
       : t('workspace.readonlyNotice')
     : undefined;
+  // Team-share file-sync badge for the design-files tab bar + empty state
+  // (recvqghymxqQQq). A member downloads (their local mirror trails the
+  // published head); the owner uploads (a local edit hasn't published yet).
+  // The two are mutually exclusive — a project has exactly one writer — so at
+  // most one of these is ever true.
+  const fileSyncBadge: 'downloading' | 'uploading' | null = projectCollab.downloadPending
+    ? 'downloading'
+    : projectCollab.enabled && projectCollab.isOwner && projectCollab.syncState === 'pending_upload'
+      ? 'uploading'
+      : null;
   const projectDetail = useProjectDetail(project.id);
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
   const currentProject =
@@ -9055,6 +9065,7 @@ export function ProjectView({
           projectName={project.name}
           viewerOnly={projectCollab.viewerOnly}
           readonlyNotice={readonlyNoticeText}
+          fileSyncBadge={fileSyncBadge}
           projectKind={projectKindFromMetadataToTracking(currentProject.metadata) ?? 'prototype'}
           rootDirName={(() => {
             const baseDir = currentProject.metadata?.baseDir;

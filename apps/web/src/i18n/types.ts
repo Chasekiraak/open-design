@@ -3577,6 +3577,8 @@ export interface Dict {
   'workspace.deleteFileConfirm': string;
   'workspace.readonlyNotice': string;
   'workspace.readonlyNoticeBy': string;
+  'workspace.fileSyncDownloading': string;
+  'workspace.fileSyncUploading': string;
   'workspace.deleteSelectedFilesConfirm': string;
   'workspace.deleteSelectedFilesPartial': string;
   'workspace.openFromDesignFiles': string;
@@ -3612,6 +3614,7 @@ export interface Dict {
   'designFiles.newDocument': string;
   'designFiles.newDocumentTitle': string;
   'designFiles.empty': string;
+  'designFiles.syncing': string;
   'designFiles.refresh': string;
   'designFiles.delete': string;
   'designFiles.searchPlaceholder': string;
@@ -4027,12 +4030,18 @@ export interface Dict {
    *  (recvqae7v8yMlk). */
   'fileViewer.publishingFile': string;
   'fileViewer.unpublishFile': string;
+  /** @deprecated Orphaned (recvqgif6Xa7Wb): rendered the "no team to share
+   *  with yet" bridge card with its create-team CTA in the share panel.
+   *  Product ruled that card out entirely — it was never a designed surface,
+   *  just a stopgap added for recvqae3pK5hyx/recvq6W8GX8NaH to avoid a blank
+   *  tab. A personal workspace's share tab is now allowed to show only the
+   *  cards that legitimately apply (or nothing, if none do). */
   'fileViewer.shareEmptyStateTitle': string;
+  /** @deprecated Orphaned (recvqgif6Xa7Wb): see `shareEmptyStateTitle`. */
   'fileViewer.shareEmptyStateDescription': string;
+  /** @deprecated Orphaned (recvqgif6Xa7Wb): see `shareEmptyStateTitle`. */
   'fileViewer.shareEmptyStateCreateTeam': string;
-  /** Same empty-state card as `shareEmptyStateTitle`, used instead of it when the
-   *  public-publish card above already answered "is there anything to share" —
-   *  avoids the two cards contradicting each other (recvqae3pK5hyx). */
+  /** @deprecated Orphaned (recvqgif6Xa7Wb): see `shareEmptyStateTitle`. */
   'fileViewer.shareTeamMissingTitle': string;
   /** @deprecated Orphaned: the public-file gate is no longer team-scoped.
    *  `fileViewer.publishFileRequiresWorkspace` replaced it. */

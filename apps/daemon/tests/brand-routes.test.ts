@@ -6,7 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { registerBrandRoutes, type BrandRoutesDeps } from '../src/brand-routes.js';
-import { closeDatabase, insertConversation, insertProject, listMessages, openDatabase, upsertMessage } from '../src/db.js';
+import {
+  closeDatabase,
+  getWorkspaceProjectByProjectId,
+  insertConversation,
+  insertProject,
+  listMessages,
+  openDatabase,
+  upsertMessage,
+} from '../src/db.js';
 import type { PrefetchResult } from '../src/brands/prefetch.js';
 
 const NO_LOGO_FALLBACK = async () => ({ changed: false });
@@ -527,6 +535,66 @@ describe('brand routes', () => {
         status: 'extracting',
       });
       expect(continued.body.conversationId).toEqual(expect.any(String));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('binds a freshly extracted brand project into the caller\'s ACTIVE team workspace', async () => {
+    // Red-spec for the gap `d7f3546d8`'s commit message already named but did
+    // not close: `startBrandExtraction` (brands/index.ts) inserts its backing
+    // project row directly and never calls `ensureWorkspaceProject`. Before
+    // this fix, that left the project with NO `workspace_projects` row even
+    // when the request that created it plainly named a team workspace member —
+    // and POST /api/runs + POST /api/chat's workspace mutation gate
+    // (`enforceWorkspaceResourceMutation`) unconditionally denies a run against
+    // ANY unbound project once the caller's client sends workspace headers at
+    // all (`row === null` short-circuits `canMutate` to false regardless of
+    // who created it). A team member's own just-created design system could
+    // never get its first agent turn to run, so the agent could never write
+    // the `assets/logo.svg` spec 04 §9.3's sync depends on.
+    const server = await startBrandServer({
+      logoFallback: NO_LOGO_FALLBACK,
+      imageryFallback: NO_IMAGERY_FALLBACK,
+    });
+    try {
+      const started = await server.requestJson('/api/brands', {
+        method: 'POST',
+        body: { url: 'https://example.com', description: 'Aurora Grove is a minimal interior-design studio.' },
+        headers: {
+          'x-od-workspace-id': 'ws-team-1',
+          'x-od-workspace-member-id': 'member-owner',
+          'x-od-workspace-type': 'team',
+          'x-od-workspace-role': 'member',
+          'x-od-workspace-member-status': 'active',
+        },
+      });
+      expect(started.status).toBe(200);
+
+      const binding = getWorkspaceProjectByProjectId(db, started.body.projectId);
+      expect(binding).toMatchObject({
+        workspaceId: 'ws-team-1',
+        visibility: 'personal',
+        resourceState: 'active',
+        createdByWorkspaceMemberId: 'member-owner',
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('leaves a signed-out / single-player brand extraction unbound, exactly as before this fix', async () => {
+    const server = await startBrandServer({
+      logoFallback: NO_LOGO_FALLBACK,
+      imageryFallback: NO_IMAGERY_FALLBACK,
+    });
+    try {
+      const started = await server.requestJson('/api/brands', {
+        method: 'POST',
+        body: { url: 'https://example.com', description: 'Signed-out single-player brand.' },
+      });
+      expect(started.status).toBe(200);
+      expect(getWorkspaceProjectByProjectId(db, started.body.projectId)).toBeUndefined();
     } finally {
       await server.close();
     }
@@ -1280,6 +1348,7 @@ describe('brand routes', () => {
   type RequestOptions = {
     method?: string;
     body?: unknown;
+    headers?: Record<string, string>;
   };
 
   async function startBrandServer(extraDeps: Partial<BrandRoutesDeps> = {}) {
@@ -1300,9 +1369,9 @@ describe('brand routes', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('server did not bind to a TCP port');
     const requestTextFromServer = async (route: string, options: RequestOptions = {}) => {
-      const init: RequestInit = { method: options.method ?? 'GET' };
+      const init: RequestInit = { method: options.method ?? 'GET', headers: { ...options.headers } };
       if (Object.hasOwn(options, 'body')) {
-        init.headers = { 'content-type': 'application/json' };
+        init.headers = { ...init.headers, 'content-type': 'application/json' };
         init.body = JSON.stringify(options.body);
       }
       const response = await fetch(`http://127.0.0.1:${address.port}${route}`, init);

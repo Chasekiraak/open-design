@@ -249,7 +249,31 @@ export function shouldUseVelaCliResourceTransport(env: NodeJS.ProcessEnv = proce
     env.OD_COLLAB_TRANSPORT?.trim() === 'vela-cli';
 }
 
-/** Derive the resource-identity gate from the one workspace context. */
+/**
+ * Derive the resource-identity gate from the one workspace context: does this
+ * daemon's live vela session currently belong to an ACTIVE member of the
+ * project's team?
+ *
+ * `workspaceContextHasTeamIdentity` alone is not enough here. It only proves
+ * the context can ADDRESS the resource hub — `workspaceType`/`workspaceId`/
+ * `workspaceMemberId` all resolve — and those fields keep resolving for a
+ * member B has already removed from the team; only `memberStatus` flips to
+ * `'removed'`. The publish/pull/syncLatest/unpublish operations this gates all
+ * shell out to `vela resource …`, authenticated by the same vela CLI login
+ * session AMR uses, which does not itself re-derive OD's team membership per
+ * call. Without the explicit `memberStatus` check below, a member removed
+ * from a team while their daemon keeps running would keep passing this gate
+ * on every project they used to own, and the file watcher in
+ * `collab-publish-watcher.ts` would keep pushing their local edits to the
+ * team's resource hub through a vela session that is still locally valid.
+ *
+ * `hasTeamIdentity` is re-evaluated fresh on every publish/pull/syncLatest/
+ * unpublish attempt (see `selectResourcePublishAdapter` in `runtime.ts`,
+ * which calls `workspaceContext.current({})` per invocation rather than
+ * caching it), so this closes the gap live — the very next sync attempt after
+ * a removal is confirmed by B refuses, without needing to tear down the
+ * already-attached file watcher.
+ */
 export function contextHasTeamIdentity(context: WorkspaceCollabContext | null): boolean {
-  return workspaceContextHasTeamIdentity(context);
+  return workspaceContextHasTeamIdentity(context) && context?.memberStatus === 'active';
 }

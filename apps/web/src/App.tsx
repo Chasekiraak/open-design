@@ -82,6 +82,7 @@ import { AMR_LOGIN_STATUS_EVENT } from './components/amrLoginPolling';
 import { CollabDemoView } from './collab/CollabDemoView';
 import { useWorkspaceBilling, useWorkspaceContext } from './collab/useWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
+import { deriveTabIdentityScope, UNSET_ACCOUNT_BUCKET } from './collab/tab-scope';
 import { CommunityView } from './components/CommunityView';
 import { seedHomeComposerPrompt } from './components/HomeView';
 import { goBack, navigate, useRoute, type Route } from './router';
@@ -811,6 +812,30 @@ function AppInner() {
       restartAmrPolling();
     }
   }, [restartAmrPolling]);
+
+  // Tab-scope identity key, fed to WorkspaceTabsBar so it can close every open
+  // tab down to a single fresh Home tab whenever the caller's identity
+  // changes — signing out, signing in as a different account, switching
+  // workspace, or simply never having signed into AMR at all are each their
+  // own scope, and a tab opened under one must not silently keep pointing at
+  // a project/section the next identity has no standing to see (see
+  // WorkspaceTabsBar's own doc, and deriveTabIdentityScope's, for the full
+  // design rationale — notably why the workspace half of the key LATCHES
+  // across a null `workspaceContext` instead of reacting to it directly).
+  const tabScopeWorkspaceIdRef = useRef<string>('none');
+  const tabScopeAccountIdRef = useRef<string>(UNSET_ACCOUNT_BUCKET);
+  const {
+    scopeKey: identityScopeKey,
+    nextWorkspaceBucket: nextTabScopeWorkspaceId,
+    nextAccountBucket: nextTabScopeAccountId,
+  } = deriveTabIdentityScope({
+    amrLoginStatus,
+    workspaceContext,
+    previousWorkspaceBucket: tabScopeWorkspaceIdRef.current,
+    previousAccountBucket: tabScopeAccountIdRef.current,
+  });
+  tabScopeWorkspaceIdRef.current = nextTabScopeWorkspaceId;
+  tabScopeAccountIdRef.current = nextTabScopeAccountId;
 
   // v2 analytics requires every event to carry the configure-state
   // triplet (has_available_configure_cli / configure_type /
@@ -2878,6 +2903,7 @@ function AppInner() {
           route={route}
           projects={projects}
           onboardingCompleted={config.onboardingCompleted === true}
+          identityScopeKey={identityScopeKey}
         />
         <div className="workspace-shell__body">
           {appMain}

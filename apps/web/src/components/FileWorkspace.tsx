@@ -125,6 +125,7 @@ import { designSystemGithubEvidenceState, repoConnectCopy } from './design-syste
 import { APP_CHROME_FILE_ACTIONS_ID } from './AppChromeHeader';
 import { FileViewer, LiveArtifactViewer } from './FileViewer';
 import { Icon, type IconName } from './Icon';
+import { FileSyncBadge, type FileSyncBadgeState } from '../collab/FileSyncBadge';
 import { Toast } from './Toast';
 import { TabLauncherMenu } from './workspace/TabLauncherMenu';
 import { buildLauncherActions, type LauncherContext } from './workspace/tab-launcher';
@@ -324,6 +325,14 @@ interface Props {
   viewerOnly?: boolean;
   /** Optional override for the read-only notice text. */
   readonlyNotice?: string;
+  /**
+   * Team-share file-sync state for every open design-file tab (not terminal /
+   * side-chat / browser tabs). `downloading` — a non-owner member's local copy
+   * has not caught up to the published head. `uploading` — the owner's local
+   * edits have not yet been published. Null once caught up / not a shared
+   * project. See `FileSyncBadge` for the rendered icon.
+   */
+  fileSyncBadge?: FileSyncBadgeState | null;
 }
 
 interface SketchState {
@@ -1303,6 +1312,7 @@ export function FileWorkspace({
   headerActions,
   viewerOnly = false,
   readonlyNotice,
+  fileSyncBadge = null,
 }: Props) {
   const { locale, t } = useI18n();
   const { context: workspaceContext } = useWorkspaceContext();
@@ -3459,11 +3469,20 @@ export function FileWorkspace({
                 ? 'comment'
                 : undefined;
             const handlers = tabHandlersFor(name);
+            // The sync badge only makes sense on a real design-file tab: a
+            // terminal / side-chat tab has no on-disk content to sync, and a
+            // live artifact is baked output, not the source file being pulled
+            // or published.
+            const tabSyncBadge =
+              fileSyncBadge && !isTerminal && !isSideChat && !liveArtifact
+                ? fileSyncBadge
+                : null;
             return (
               <Tab
                 key={name}
                 label={label}
                 iconNameOverride={iconNameOverride}
+                syncBadge={tabSyncBadge}
                 active={activeTab === name}
                 onActivate={handlers.onActivate}
                 onClose={handlers.onClose}
@@ -3664,6 +3683,7 @@ export function FileWorkspace({
             key={projectId}
             projectId={projectId}
             viewerOnly={viewerOnly}
+            downloadPending={fileSyncBadge === 'downloading'}
             rootDirName={rootDirName}
             reloading={reloading}
             running={Boolean(streaming)}
@@ -7562,6 +7582,7 @@ const Tab = memo(function Tab({
   closable = true,
   kind,
   iconNameOverride,
+  syncBadge,
   liveArtifact,
   draggable = false,
   dragging = false,
@@ -7582,6 +7603,9 @@ const Tab = memo(function Tab({
   kind?: ProjectFile['kind'] | 'live-artifact' | 'browser';
   /** Force a specific icon (e.g. non-file tabs like terminal:<id> / chat:<id>). */
   iconNameOverride?: IconName;
+  /** Team-share sync state for this tab's file. Replaces the file-type icon
+   *  with an animated downloading/uploading badge while set. */
+  syncBadge?: FileSyncBadgeState | null;
   liveArtifact?: LiveArtifactWorkspaceEntry;
   draggable?: boolean;
   dragging?: boolean;
@@ -7594,7 +7618,13 @@ const Tab = memo(function Tab({
 }) {
   const t = useT();
   const iconName = iconNameOverride ?? kindIconName(kind);
+  const syncBadgeLabel = syncBadge
+    ? syncBadge === 'downloading'
+      ? t('workspace.fileSyncDownloading')
+      : t('workspace.fileSyncUploading')
+    : null;
   const tabTitle = title ?? (meta ? `${label} ${meta}` : label);
+  const tabTooltip = syncBadgeLabel ? `${tabTitle} · ${syncBadgeLabel}` : tabTitle;
   return (
     <div
       className={[
@@ -7618,8 +7648,8 @@ const Tab = memo(function Tab({
       role="tab"
       aria-selected={active}
       tabIndex={0}
-      title={tabTitle}
-      data-tooltip={tabTitle}
+      title={tabTooltip}
+      data-tooltip={tabTooltip}
       data-tooltip-placement="bottom"
       draggable={draggable}
       onDragStart={draggable ? onDragStart : undefined}
@@ -7628,7 +7658,11 @@ const Tab = memo(function Tab({
       onDrop={draggable ? onDrop : undefined}
       onDragEnd={draggable ? onDragEnd : undefined}
     >
-      {iconName ? (
+      {syncBadge ? (
+        <span className="tab-icon">
+          <FileSyncBadge state={syncBadge} size={13} />
+        </span>
+      ) : iconName ? (
         <span className="tab-icon" aria-hidden>
           <Icon name={iconName} size={13} />
         </span>

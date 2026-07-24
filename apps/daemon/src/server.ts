@@ -685,6 +685,7 @@ import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
 import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
+import { createShouldPublish } from './collab/should-publish.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
@@ -701,6 +702,12 @@ import {
 import { createCollabCloudClientFromEnv } from './integrations/collab-cloud.js';
 import { createCollabCloudService } from './collab/collab-cloud-service.js';
 import { createWorkspaceInvalidationPoller } from './collab/workspace-invalidation-poller.js';
+import {
+  handleHubTeamProjectsChanged,
+  handlePolledWorkspaceInvalidation,
+  reconcileWorkspaceProjectsWithRemote,
+  type LocalTeamProjectBinding,
+} from './collab/workspace-projects-reconciler.js';
 import { createVelaCliCollabClientFromEnv } from './collab/vela-cli-collab-client.js';
 import {
   createVelaCliTeamProjectCatalogClientFromEnv,
@@ -1186,6 +1193,29 @@ function emitWorkspaceEvent(payload: { type: string; at?: number }): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Hub → daemon handling for the `workspace-context-changed` event (see
+ * `startHubEventsSubscriber`'s `onEvent` below). Vela sends this same event
+ * both for an ordinary workspace switch AND for "your membership just
+ * changed" (e.g. removed from the team) — so besides forwarding the thin
+ * signal to the web, this must ALSO kick one immediate workspace-invalidation
+ * poll cycle, the same catch-up `onReconnect` already runs. Without it, the
+ * mutation gate's last-known-membership cache (`getLastKnownMembership` in
+ * `collab/workspace-resource-mutation.ts`) only refreshes on the poller's
+ * normal ~15s cadence, so a removed member keeps passing the gate for up to
+ * that long even though the hub already told this daemon something changed.
+ *
+ * Extracted as its own named, exported step (rather than inlined in the
+ * switch) so this invariant is directly unit-testable without standing up a
+ * real hub connection.
+ */
+export function handleHubWorkspaceContextChanged(
+  pollWorkspaceInvalidation: () => Promise<void>,
+): void {
+  emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+  void pollWorkspaceInvalidation().catch(() => undefined);
 }
 
 // Windows ENAMETOOLONG mitigation constants
@@ -3148,6 +3178,59 @@ export async function startServer({
   };
   const teamProjectsForDisplay = async (): Promise<TeamProject[]> =>
     withoutLocallyUnsharedProjects(await teamProjectsDisplayCache());
+  // Collab realtime reconciliation: react to a `team-projects-changed` signal
+  // (hub push OR the 15s poller's own diff, wired below) by actually
+  // re-checking this daemon's `workspace_projects` rows against the remote
+  // catalog, not just refreshing the display cache. See
+  // `collab/workspace-projects-reconciler.ts` for the full design and its
+  // relationship to `reconcileUnboundProjectBeforeMove` /
+  // `reconcileLocalRowWithRemoteTeamAccess` (routes/project/index.ts), which
+  // this does NOT replace.
+  const reconcileWorkspaceProjectsFromRemote = () =>
+    reconcileWorkspaceProjectsWithRemote({
+      getWorkspaceIdentity: async () => {
+        const context = await collab.workspaceContext.current({});
+        if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
+        return { workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+      },
+      listRemoteTeamProjects: async () =>
+        (await teamProjectsForDisplay()).map((project) => ({
+          projectId: project.projectId,
+          ownerMemberId: project.ownerMemberId,
+        })),
+      listLocalTeamRows: (workspaceId): LocalTeamProjectBinding[] =>
+        listWorkspaceProjects(db, workspaceId)
+          .filter((row: any) => row.workspaceVisibility === 'team')
+          .map((row: any) => ({
+            projectId: row.id,
+            workspaceId: row.workspaceId,
+            visibility: row.workspaceVisibility,
+            createdByWorkspaceMemberId: row.createdByWorkspaceMemberId ?? null,
+            resourceHubResourceId: row.resourceHubResourceId ?? null,
+          })),
+      getLocalBinding: (projectId): LocalTeamProjectBinding | null => {
+        const row = getWorkspaceProjectByProjectId(db, projectId) as any;
+        if (!row) return null;
+        return {
+          projectId,
+          workspaceId: row.workspaceId,
+          visibility: row.visibility,
+          createdByWorkspaceMemberId: row.createdByWorkspaceMemberId ?? null,
+          resourceHubResourceId: row.resourceHubResourceId ?? null,
+        };
+      },
+      applyBind: (projectId, patch) => {
+        // `rebindWorkspaceProject` only corrects an EXISTING row (it never
+        // inserts — see its own doc comment in db.ts); a project this daemon
+        // has never locally bound at all needs `ensureWorkspaceProject`
+        // instead, seeded with the same patch so the fresh row is correct on
+        // arrival.
+        if (rebindWorkspaceProject(db, projectId, patch)) return;
+        ensureWorkspaceProject(db, { projectId, ...patch });
+      },
+      applyDemote: (workspaceId, projectId, patch) => updateWorkspaceProject(db, workspaceId, projectId, patch),
+      onError: (error) => console.warn('[od] workspace-projects reconciliation error:', error),
+    });
   const resolveSharedProject = async (projectId: string) => {
     const list = await withoutLocallyUnsharedProjects(await teamProjectsLister());
     return list.find((entry) => entry.projectId === projectId) ?? null;
@@ -3210,15 +3293,11 @@ export async function startServer({
   const collabPublishWatcher = createCollabPublishWatcher({
     notifyChanged: (projectId) => collab.scheduler.notifyChanged(projectId, 'file-change'),
     listProjectIds: () => listProjects(db).map((project: { id: string }) => project.id),
-    shouldPublish: async (projectId) => {
-      const owner = await resolveSharedProjectOwner(projectId);
-      if (!owner) return false;
-      const ctx = await collab.workspaceContext.current({});
-      const principal = contextToResourceHubPrincipal(ctx);
-      if (!principal || owner !== principal.memberId) return false;
-      collab.rememberTeamShare(projectId, principal);
-      return true;
-    },
+    shouldPublish: createShouldPublish({
+      resolveSharedProjectOwner,
+      workspaceContext: collab.workspaceContext,
+      rememberTeamShare: collab.rememberTeamShare,
+    }),
     subscribeFiles: (projectId, onChange) => {
       const watchProject = getProject(db, projectId);
       const sub = subscribeFileEvents(PROJECTS_DIR, projectId, (evt) => {
@@ -3362,7 +3441,13 @@ export async function startServer({
     },
     listTeamProjects: teamProjectsForDisplay,
     listMembers: teamMembersCache ? () => teamMembersCache() : async () => [],
-    emit: (payload) => emitWorkspaceEvent(payload),
+    // `handlePolledWorkspaceInvalidation` forwards every signal to
+    // `emitWorkspaceEvent` unchanged, then ALSO runs a real
+    // `workspace_projects` reconciliation pass for `team-projects-changed` —
+    // the poller's own ~15s-cadence path to the same fix the hub push gets
+    // below via `handleHubTeamProjectsChanged`. See
+    // `collab/workspace-projects-reconciler.ts`.
+    emit: (payload) => handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote),
     onError: (error) => console.warn('[od] workspace invalidation poll error:', error),
   });
   workspaceInvalidationPoller.start();
@@ -3407,13 +3492,20 @@ export async function startServer({
     },
     onEvent: (event) => {
       switch (event.type) {
-        case 'team-projects-changed':
+        case 'team-projects-changed': {
+          // Catalog changed (share/unshare). Refresh the display cache and
+          // signal the web, AND run a real `workspace_projects`
+          // reconciliation pass — see `collab/workspace-projects-reconciler.ts`.
+          handleHubTeamProjectsChanged(emitTeamProjectsChangedDeduped, reconcileWorkspaceProjectsFromRemote);
+          break;
+        }
         case 'project-metadata-changed': {
-          // Catalog changed (share/unshare/rename). Refresh the display cache
-          // then signal the web; the metadata variant additionally pings the
-          // open project view so its title can follow a rename.
+          // A rename only — refresh the display cache/signal the web (same
+          // as team-projects-changed) and additionally ping the open project
+          // view so its title can follow the rename. No reconciliation pass:
+          // a rename never changes WHICH projects are team-shared.
           emitTeamProjectsChangedDeduped();
-          if (event.type === 'project-metadata-changed' && event.projectId) {
+          if (event.projectId) {
             emitProjectEvent(event.projectId, {
               type: 'project-metadata-changed',
               projectId: event.projectId,
@@ -3460,7 +3552,7 @@ export async function startServer({
           break;
         }
         case 'workspace-context-changed':
-          emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+          handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
           break;
         case 'billing-changed':
           emitWorkspaceEvent({ type: 'billing-changed', at: Date.now() });

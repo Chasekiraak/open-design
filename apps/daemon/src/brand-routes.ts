@@ -16,6 +16,7 @@ import path from 'node:path';
 import type { Application, Request, Response } from 'express';
 
 import {
+  ensureWorkspaceProject,
   getProject,
   listFirstConversationRunStatuses,
   listConversationsAwaitingInput,
@@ -40,6 +41,7 @@ import {
   startBrandExtraction,
 } from './brands/index.js';
 import { patchMeta } from './brands/store.js';
+import { headerValue, workspaceResourceContext } from './collab/workspace-resource-mutation.js';
 import type { BrandDetailResponse, BrandMeta, BrandSummary } from '@open-design/contracts';
 
 export interface BrandRoutesDeps {
@@ -101,6 +103,55 @@ type ProgrammaticExtractionAbortResult = 'none' | 'settled' | 'timeout';
 export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): void {
   const { brandsRoot, userDesignSystemsRoot, projectsRoot, skillsRoot, dataDir, db, randomId } = deps;
   const activeProgrammaticBrandExtractions = new Map<string, ActiveProgrammaticBrandExtraction>();
+
+  /**
+   * Bind a freshly started brand-extraction project into the SAME workspace
+   * the request that created it is acting in — mirroring `POST /api/projects`
+   * (`routes/project/index.ts`'s `workspaceIdForCreate` handling) and
+   * `bindDuplicateIntoRequestWorkspace` (the same file's duplicate/design-
+   * system-copy routes).
+   *
+   * `startBrandExtraction` (`brands/index.ts`) inserts its backing project row
+   * directly and has never called `ensureWorkspaceProject`: the function takes
+   * a plain options object, not an Express `Request`, so it has no workspace
+   * headers to bind against, and nothing downstream filled the gap. A project
+   * with no `workspace_projects` row is not a harmless default — as of the
+   * POST /api/runs and POST /api/chat workspace-identity gate
+   * (`enforceWorkspaceResourceMutation`, resourceType 'project'), an unbound
+   * project is UNCONDITIONALLY denied a run whenever the caller's client
+   * carries any workspace headers at all (`row === null` short-circuits to
+   * `canMutate: false` regardless of who created it), not merely "ungated
+   * either way" as pre-existing call sites assumed. A team member who just
+   * asked the composer to extract a brand/design system could never get the
+   * agent to write anything into it — including the very `assets/` write
+   * spec 04 §9.3's asset sync depends on — because their own first chat turn
+   * 403s before the agent ever runs.
+   *
+   * Scoped to an ACTIVE member only, matching `POST /api/projects`: a caller
+   * with no workspace context at all (signed out / single-player) leaves the
+   * project unbound, exactly as before this fix — unbound-and-headerless is
+   * the case `enforceWorkspaceResourceMutation` already passes straight
+   * through (see its `requestCtx === null` branch).
+   */
+  function bindBrandProjectIntoRequestWorkspace(req: Request, projectId: string, now: number): void {
+    const workspaceIdForCreate = headerValue(req, 'x-od-workspace-id');
+    if (!workspaceIdForCreate) return;
+    const ctx = workspaceResourceContext(req, workspaceIdForCreate);
+    if (!ctx || ctx.memberStatus !== 'active') return;
+    ensureWorkspaceProject(db, {
+      projectId,
+      workspaceId: ctx.workspaceId,
+      visibility: 'personal',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: ctx.workspaceMemberId,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      syncState: 'local_only',
+      resourceHubResourceId: null,
+      cloudTombstonedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   function trackProgrammaticBrandExtraction(
     brandId: string,
@@ -261,6 +312,7 @@ export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): vo
       const transcriptAgent = await deps.resolveTranscriptAgent?.().catch(() => null);
       if (transcriptAgent) startOptions.transcriptAgent = transcriptAgent;
       const result = await startBrandExtraction(startOptions);
+      bindBrandProjectIntoRequestWorkspace(req, result.projectId, Date.now());
       const backgroundExtraction = backgroundExtractionRef.current;
       trackProgrammaticBrandExtraction(result.id, programmaticAbortController, backgroundExtraction);
       res.json(result);
