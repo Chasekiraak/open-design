@@ -621,6 +621,18 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(defaultDirective).not.toContain('## Canonical skeleton');
   });
 
+  it('requires a purposeful closing while preserving meaningful thank-you endings', () => {
+    const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
+    const legacy = renderDeckPromptDirective('current', 'filesystem');
+
+    expect(outcomeOnly).toContain('**End with a purposeful closing slide.**');
+    expect(outcomeOnly).toContain('make the intended next step explicit');
+    expect(outcomeOnly).toContain('gratitude itself carries clear relational, ceremonial, or brand value');
+    expect(outcomeOnly).toContain('do not add a generic "Thank you" slide with no information gain');
+    expect(outcomeOnly).toContain('A strict slide count includes this closing');
+    expect(legacy).not.toContain('**End with a purposeful closing slide.**');
+  });
+
   it('renders the two experimental deck directive variants from shared blocks', () => {
     const currentWithOutcome = renderDeckPromptDirective(
       'current_outcome',
