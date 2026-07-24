@@ -637,7 +637,7 @@ import { registerLiveArtifactRoutes } from './routes/live-artifact.js';
 import { registerDesignSystemToolRoutes } from './routes/design-system-tool.js';
 import { registerDeployRoutes, registerDeploymentCheckRoutes } from './routes/deploy.js';
 import { registerMediaRoutes } from './routes/media.js';
-import { registerProjectRoutes, registerProjectArtifactRoutes, registerProjectFileRoutes, registerProjectUploadRoutes } from './routes/project/index.js';
+import { registerProjectRoutes, registerProjectArtifactRoutes, registerProjectFileRoutes, registerProjectUploadRoutes, createEnforceWorkspaceProjectMutation } from './routes/project/index.js';
 import { registerVelaRoutes } from './routes/vela.js';
 import { registerFinalizeRoutes, registerImportRoutes, registerProjectExportRoutes } from './import-export-routes.js';
 import { registerHandoffRoutes } from './routes/handoff.js';
@@ -9880,6 +9880,13 @@ export async function startServer({
       pinAssistantMessageOnRunCreate,
       reconcileAssistantMessageOnRunEnd,
     },
+    // POST /api/runs and POST /api/chat are this file's "create a run" entry
+    // points — see RegisterRunRoutesDeps.enforceWorkspaceProjectMutation.
+    // Same provider `collab` was built with (collab.workspaceContext ===
+    // workspaceContext), matching the cross-check `registerProjectRoutes`
+    // wires up for its own mutation routes above.
+    enforceWorkspaceProjectMutation: createEnforceWorkspaceProjectMutation(collab.workspaceContext),
+    projectStore: { getWorkspaceProject, getWorkspaceProjectByProjectId },
   });
 
   // Each routine fire resolves an agent, prepares project/conversation state,

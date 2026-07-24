@@ -217,8 +217,15 @@ function projectAccess(
  * upload) calls this once with its own `ctx.workspaceContext` — never wired
  * up in most unit tests, in which case the gate falls back to trusting the
  * header alone, exactly like before this cross-check existed.
+ *
+ * Exported so `server.ts` can build a SECOND instance (same shape, same
+ * cross-check) for `registerRunRoutes` — POST /api/runs and POST /api/chat
+ * had ZERO `enforceWorkspace*` coverage until that fix, unlike every other
+ * project-mutation route this file itself registers. Run creation borrows
+ * this instance rather than a bespoke copy so its semantics can never drift
+ * from rename/delete/duplicate/writeFiles/comments.
  */
-function createEnforceWorkspaceProjectMutation(
+export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
   const getLastKnownWorkspaceMembership: GetLastKnownWorkspaceMembership | undefined = workspaceContext
