@@ -626,15 +626,23 @@ jobs:
   assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowOnly), [narrowCommand]);
   assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowOnly), true);
 
-  const narrowPlusBroader = `${narrowOnly}
-      - name: Full daemon suite
-        run: pnpm --filter @open-design/daemon test
-`;
-  assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowPlusBroader), [
-    narrowCommand,
+  for (const broaderCommand of [
     "pnpm --filter @open-design/daemon test",
-  ]);
-  assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowPlusBroader), false);
+    "pnpm -F @open-design/daemon test",
+    "pnpm --filter=@open-design/daemon test",
+    "pnpm --dir apps/daemon test",
+    "pnpm -C apps/daemon test",
+  ]) {
+    const narrowPlusBroader = `${narrowOnly}
+      - name: Full daemon suite
+        run: ${broaderCommand}
+`;
+    assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowPlusBroader), [
+      narrowCommand,
+      "pnpm --filter @open-design/daemon test",
+    ]);
+    assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowPlusBroader), false);
+  }
 });
 
 test("the rule table classifies every file: no path escapes both fallbacks", async () => {

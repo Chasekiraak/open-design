@@ -123,9 +123,15 @@ export function daemonTestInvocationsFromWorkflow(workflow: string): string[] {
     .map((line) => line.trim())
     .filter((line) => !line.startsWith("#"))
     .map((line) => line.replace(/^run:\s*/, ""))
-    .filter((line) =>
-      /\bpnpm\s+--filter\s+@open-design\/daemon\s+(?:test\b|(?:exec\s+)?vitest\b)/.test(line),
-    );
+    .map((line) => {
+      const invocation = line.match(
+        /\bpnpm\s+(?:(?:--filter(?:=|\s+)|-F(?:=|\s+))@open-design\/daemon|(?:--dir(?:=|\s+)|-C(?:=|\s+))apps\/daemon)\s+((?:test\b|(?:exec\s+)?vitest\b).*)/,
+      );
+      return invocation === null
+        ? undefined
+        : `pnpm --filter @open-design/daemon ${invocation[1]}`;
+    })
+    .filter((line): line is string => line !== undefined);
 }
 
 export function workflowRunsOnlyAllowedDaemonTest(workflow: string): boolean {
