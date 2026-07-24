@@ -3386,13 +3386,13 @@ button.home-hero__capability-word:focus-visible {
 .home-hero__scenario-card.home-hero__type-tab.is-active {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
-.home-hero__scenario-card.home-hero__type-tab.is-recommended {
-  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent), var(--shadow-sm);
-  animation: home-hero-recommendation-enter 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
-}
+.home-hero__scenario-card.home-hero__type-tab.is-recommended,
 .home-hero__scenario-card.home-hero__type-tab.is-secondary-recommended {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  /* Recommendations are peers, not a preselected output. Keep their treatment
+     lighter than `.is-active`, and give both cards the exact same affordance. */
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent-tint) 26%, var(--bg-panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 7%, transparent), var(--shadow-xs);
 }
 .home-hero__recommendation-badge {
   display: inline-flex;
@@ -3408,11 +3408,6 @@ button.home-hero__capability-word:focus-visible {
   letter-spacing: 0.01em;
   pointer-events: none;
 }
-@keyframes home-hero-recommendation-enter {
-  from { opacity: 0.5; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 .home-hero__scenario-card-art {
   display: flex;
   align-items: center;

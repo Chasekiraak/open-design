@@ -3611,7 +3611,8 @@ interface RailGroupProps {
   // Hover-preview hook: the create rail reports which chip the pointer is over
   // (or null on leave) so the footer Template picker can preview it.
   onHoverChip?: (chipId: string | null) => void;
-  /** One-time Home recommendation: primary receives the label, border and motion; secondary remains deliberately quieter. */
+  /** One-time Home recommendations share one visual treatment; the primary
+   * additionally carries the compact “For you” label for orientation. */
   recommendedChipId?: string | null;
   secondaryRecommendedChipId?: string | null;
   children?: ReactNode;
