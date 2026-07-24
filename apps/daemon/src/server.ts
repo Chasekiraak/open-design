@@ -274,6 +274,7 @@ import {
   resolveSandboxRuntimeConfig,
 } from './sandbox-mode.js';
 import {
+  backfillDesignSystemWorkspaceResources,
   buildUserDesignSystemArchive,
   createUserDesignSystem,
   deleteUserDesignSystem,
@@ -655,7 +656,12 @@ import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
 import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
-import { headerValue, workspaceResourceContext } from './collab/workspace-resource-mutation.js';
+import {
+  headerValue,
+  isWorkspaceResourceLocked,
+  workspaceResourceContext,
+  workspaceResourceContextFromRequest,
+} from './collab/workspace-resource-mutation.js';
 import { withLastKnownWorkspaceContext } from './collab/workspace-context.js';
 import {
   createWorkspaceTypeRegistry,
@@ -2681,13 +2687,27 @@ export async function startServer({
    * A signed-out / single-player daemon resolves no workspace and writes no
    * claim, which leaves the system visible everywhere — the correct answer when
    * there are no workspaces to isolate.
+   *
+   * Envelope double-write (spec 9.2): `metadata.json` stays the only thing
+   * `listDesignSystems`'s filter reads, but a claimed system also gets a row
+   * in the generic `workspace_resources` table — the same table plugin/skill
+   * already bind into — so design systems stop being the one resource type
+   * with zero rows there. Both writes happen from this single call site, so
+   * they can never drift apart.
    */
   const createWorkspaceOwnedDesignSystem: typeof createUserDesignSystem = async (root, input) => {
     const workspaceId = await resolveDesignSystemWorkspaceScope();
-    return createUserDesignSystem(root, {
+    const created = await createUserDesignSystem(root, {
       ...input,
       ...(workspaceId ? { workspaceId } : {}),
     });
+    if (workspaceId) {
+      ensureWorkspaceResource(db, 'design_system', workspaceId, created.id, {
+        visibility: 'personal',
+        resourceState: 'active',
+      });
+    }
+    return created;
   };
   // Persistent half of the sync design: a cheap digest GET decides whether the
   // catalog / member payload this daemon already has on disk is still current,
@@ -2921,6 +2941,15 @@ export async function startServer({
   };
   void reconcileImpossibleTeamShares().catch((error) => {
     console.warn('[od] team-share scope reconciliation failed:', error);
+  });
+  // Spec 9.2 one-time backfill: claim every pre-existing user design system
+  // whose metadata.json already names a workspace into the generic
+  // `workspace_resources` table too. Idempotent (see
+  // `backfillDesignSystemWorkspaceResources`'s own doc comment), so running
+  // it unconditionally on every startup is deliberate, same as
+  // `reconcileImpossibleTeamShares` just above.
+  void backfillDesignSystemWorkspaceResources(db, USER_DESIGN_SYSTEMS_DIR).catch((error) => {
+    console.warn('[od] design-system workspace-resource backfill failed:', error);
   });
   const collabCloudClient = velaCliCollabClient ?? createCollabCloudClientFromEnv();
 
@@ -3571,6 +3600,19 @@ export async function startServer({
         )}\n`,
         'utf8',
       );
+      // Envelope double-write (spec 9.2): stamp the same claim into
+      // `workspace_resources` as `visibility: 'team'`, mirroring what
+      // syncSharedTeamSkill's own markTeamSynced already does for skill.
+      if (workspaceId) {
+        ensureWorkspaceResource(db, 'design_system', workspaceId, resource.id, {
+          visibility: 'team',
+          resourceState: 'active',
+        });
+        updateWorkspaceResource(db, 'design_system', workspaceId, resource.id, {
+          visibility: 'team',
+          resourceState: 'active',
+        });
+      }
     }
     if (isOwnedByCurrentMember) return;
     if (
@@ -4505,7 +4547,19 @@ export async function startServer({
       // is only mutable by whoever `canManageSharedResource` says may manage
       // the share — the same principal check `unshare` already enforces.
       // Anything not teamSynced is the caller's own, so it stays unrestricted.
-      canMutateUserDesignSystem: async (root, id) => {
+      //
+      // Spec 9.2: on top of that existing rule, a workspace the caller's own
+      // request marks as locked/deleted (billing lapse, deletion in
+      // progress) blocks mutation unconditionally — the one real gap design
+      // system had that project/plugin already closed via
+      // `enforceWorkspaceResourceMutation`. Reuses that module's own
+      // `workspaceResourceContextFromRequest`/`isWorkspaceResourceLocked`
+      // rather than re-deriving the header contract here.
+      canMutateUserDesignSystem: async (root, id, req) => {
+        const requestCtx = workspaceResourceContextFromRequest(req);
+        if (requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx)) {
+          return false;
+        }
         const synced = await isTeamSyncedUserDesignSystem(root, id);
         if (!synced) return true;
         const resources = await designSystemsTeamShare.sharedResources();

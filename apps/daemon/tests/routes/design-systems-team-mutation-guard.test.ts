@@ -5,19 +5,37 @@
 // affordances (DesignSystemsTab.tsx `canManageTeamSynced`), but nothing
 // stopped a direct PATCH/DELETE call before this guard: `canMutateUserDesignSystem`
 // is the server-side enforcement point these specs pin down.
+//
+// Spec 9.2 adds a second, independent gate on top: a locked/deleted workspace
+// (billing lapse, deletion in progress) must refuse every PATCH/DELETE
+// regardless of what `canMutateUserDesignSystem` itself would say — see the
+// "workspace lock" describe block below. That gate lives in the route, not
+// inside the (here mocked) `canMutateUserDesignSystem`, precisely so it holds
+// no matter what a caller-supplied mutation predicate decides.
 
 import type http from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import express from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerDesignSystemRoutes } from '../../src/routes/design-systems.js';
 import type { DesignSystemSummary } from '../../src/design-systems/index.js';
+import { closeDatabase, openDatabase } from '../../src/db.js';
 
 let server: http.Server | null = null;
+let tempDir: string | null = null;
 
 afterEach(async () => {
-  if (!server) return;
-  await new Promise<void>((resolve) => server?.close(() => resolve()));
-  server = null;
+  if (server) {
+    await new Promise<void>((resolve) => server?.close(() => resolve()));
+    server = null;
+  }
+  closeDatabase();
+  if (tempDir) {
+    rmSync(tempDir, { recursive: true, force: true });
+    tempDir = null;
+  }
 });
 
 function listen(app: express.Express): Promise<string> {
@@ -42,11 +60,13 @@ const designSystemSummary: DesignSystemSummary = {
   isEditable: true,
 };
 
-function registerRoutes(app: express.Express, canMutate: (root: string, id: string) => Promise<boolean>) {
+function registerRoutes(app: express.Express, canMutate: (root: string, id: string, req: any) => Promise<boolean>) {
+  tempDir = mkdtempSync(path.join(os.tmpdir(), 'od-ds-mutation-guard-'));
+  const db = openDatabase(tempDir, { dataDir: tempDir });
   const updateUserDesignSystem = vi.fn(async () => ({ ...designSystemSummary, status: 'published' as const }));
   const deleteUserDesignSystem = vi.fn(async () => true);
   registerDesignSystemRoutes(app, {
-    db: {} as never,
+    db,
     paths: {
       CRAFT_DIR: '',
       USER_DESIGN_SYSTEMS_DIR: '',
@@ -139,6 +159,82 @@ describe('design system PATCH/DELETE team-share mutation guard', () => {
     const baseUrl = await listen(app);
 
     const res = await fetch(`${baseUrl}/api/design-systems/user:mine`, { method: 'DELETE' });
+
+    expect(res.status).toBe(204);
+    expect(deleteUserDesignSystem).toHaveBeenCalledOnce();
+  });
+});
+
+describe('design system PATCH/DELETE workspace-lock guard (spec 9.2)', () => {
+  const lockedHeaders = {
+    'x-od-workspace-id': 'ws-locked',
+    'x-od-workspace-member-id': 'member-1',
+    'x-od-workspace-lifecycle-state': 'locked',
+  };
+
+  it('rejects publishing/editing when the caller workspace is locked, even if otherwise permitted', async () => {
+    const app = express();
+    app.use(express.json());
+    // canMutate itself says yes — the lock gate must still win.
+    const { updateUserDesignSystem } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:mine`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...lockedHeaders },
+      body: JSON.stringify({ status: 'published' }),
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('WORKSPACE_LOCKED');
+    expect(updateUserDesignSystem).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting when the caller workspace is locked, even if otherwise permitted', async () => {
+    const app = express();
+    app.use(express.json());
+    const { deleteUserDesignSystem } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:mine`, {
+      method: 'DELETE',
+      headers: lockedHeaders,
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('WORKSPACE_LOCKED');
+    expect(deleteUserDesignSystem).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting when the caller workspace is deleted', async () => {
+    const app = express();
+    app.use(express.json());
+    const { deleteUserDesignSystem } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:mine`, {
+      method: 'DELETE',
+      headers: { ...lockedHeaders, 'x-od-workspace-lifecycle-state': 'deleted' },
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('WORKSPACE_LOCKED');
+    expect(deleteUserDesignSystem).not.toHaveBeenCalled();
+  });
+
+  it('still allows deleting an active (unlocked) workspace resource', async () => {
+    const app = express();
+    app.use(express.json());
+    const { deleteUserDesignSystem } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:mine`, {
+      method: 'DELETE',
+      headers: { ...lockedHeaders, 'x-od-workspace-lifecycle-state': 'active' },
+    });
 
     expect(res.status).toBe(204);
     expect(deleteUserDesignSystem).toHaveBeenCalledOnce();

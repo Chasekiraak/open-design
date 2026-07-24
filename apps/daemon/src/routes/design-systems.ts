@@ -16,7 +16,11 @@ import type {
   DesignSystemRevisionInput,
   DesignSystemTokenContractRebuildInput,
 } from '../design-systems/generation-jobs.js';
-import type { openDatabase } from '../db.js';
+import { deleteWorkspaceResourceByResourceId, type openDatabase } from '../db.js';
+import {
+  isWorkspaceResourceLocked,
+  workspaceResourceContextFromRequest,
+} from '../collab/workspace-resource-mutation.js';
 import type { Project, ProjectFile } from '@open-design/contracts';
 
 type DbHandle = ReturnType<typeof openDatabase>;
@@ -49,8 +53,12 @@ export interface RegisterDesignSystemRoutesDeps extends RouteDeps<'db' | 'paths'
      * copy could PATCH/DELETE a design system that was never theirs
      * (recvqb6mfyqXLD): the UI hides the affordances, but nothing stopped a
      * direct API call.
+     *
+     * `req` (spec 9.2) lets the implementation also refuse when the caller's
+     * own workspace is locked/deleted (billing lapse, deletion in progress)
+     * — a check design system never had, unlike project/plugin.
      */
-    canMutateUserDesignSystem: (root: string, id: string) => Promise<boolean>;
+    canMutateUserDesignSystem: (root: string, id: string, req: any) => Promise<boolean>;
     createUserDesignSystem: (root: string, input: UserDesignSystemInput) => Promise<DesignSystemSummary>;
     deleteUserDesignSystem: (root: string, id: string) => Promise<boolean>;
     ensureUserDesignSystemWorkspaceProject: (db: DbHandle, id: string) => Promise<DesignSystemWorkspaceProject | null>;
@@ -115,6 +123,21 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
     updateUserDesignSystemRevisionStatus,
   } = ctx.designSystems;
   const designSystemGenerationJobs = ctx.generationJobs;
+
+  // Workspace-lock gate (spec 9.2), unconditional and independent of
+  // `canMutateUserDesignSystem`'s own teamSynced/canUnshare verdict — a
+  // locked/deleted workspace (billing lapse, deletion in progress) must
+  // refuse every PATCH/DELETE regardless of who the caller is, the same
+  // guarantee `enforceWorkspaceResourceMutation` gives project/plugin/skill.
+  // Reuses that module's own `workspaceResourceContextFromRequest`/
+  // `isWorkspaceResourceLocked` rather than re-deriving the header contract
+  // here. Checked at the route rather than folded silently into
+  // `canMutateUserDesignSystem`'s boolean so it applies no matter what a
+  // caller-supplied implementation of that hook decides.
+  function isRequestWorkspaceLocked(req: any): boolean {
+    const requestCtx = workspaceResourceContextFromRequest(req);
+    return Boolean(requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx));
+  }
 
   app.post('/api/design-systems', async (req, res) => {
     try {
@@ -355,7 +378,10 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
 
   app.patch('/api/design-systems/:id', async (req, res) => {
     try {
-      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id))) {
+      if (isRequestWorkspaceLocked(req)) {
+        return res.status(403).json({ error: 'WORKSPACE_LOCKED' });
+      }
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req))) {
         return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
       }
       const updated = await updateUserDesignSystem(
@@ -374,13 +400,22 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
 
   app.delete('/api/design-systems/:id', async (req, res) => {
     try {
-      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id))) {
+      if (isRequestWorkspaceLocked(req)) {
+        return res.status(403).json({ error: 'WORKSPACE_LOCKED' });
+      }
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req))) {
         return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
       }
       const ok = await deleteUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id);
       if (!ok) {
         return res.status(404).json({ error: 'editable design system not found' });
       }
+      // Envelope cleanup (spec 9.2): drop the `workspace_resources` binding
+      // row too, mirroring skill's DELETE route (routes/static-resource.ts)
+      // and plugin uninstall (plugins/installer.ts) — the generic table has
+      // no ON DELETE CASCADE, so skipping this leaves an orphan row pointing
+      // at a design system that no longer exists on disk.
+      deleteWorkspaceResourceByResourceId(db, 'design_system', req.params.id);
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: String(err) });

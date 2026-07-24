@@ -13,6 +13,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import JSZip from 'jszip';
+import type Database from 'better-sqlite3';
 
 import {
   type ComponentsManifest,
@@ -23,6 +24,9 @@ import {
 import { parseFrontmatter } from './frontmatter.js';
 import type { FrontmatterObject, FrontmatterValue } from './frontmatter.js';
 import { extractSwiftColors } from './swift-colors.js';
+import { ensureWorkspaceResource, getWorkspaceResourceByResourceId } from '../db.js';
+
+type SqliteDb = Database.Database;
 
 export type DesignSystemSurface = 'web' | 'image' | 'video' | 'audio';
 export type DesignSystemSource = 'built-in' | 'installed' | 'user';
@@ -1545,6 +1549,53 @@ export async function isTeamSyncedUserDesignSystem(root: string, id: string): Pr
   if (!dirId) return false;
   const meta = await readUserMetadata(root, dirId);
   return meta.teamSynced === true;
+}
+
+/**
+ * One-time startup backfill (spec 9.2): design systems predate the generic
+ * `workspace_resources` envelope table entirely — `createWorkspaceOwnedDesignSystem`
+ * and `markTeamSynced` (server.ts) only started double-writing into it today,
+ * so every system claimed BEFORE that shipped has a `workspaceId` in its
+ * `metadata.json` but no corresponding row in the table. Left alone, that
+ * system stays permanently invisible to anything that reads the generic table
+ * (mirrors what `collapseWorkspaceProjectHomes` heals for project, applied to
+ * a filesystem-backed resource instead of a DB-only one).
+ *
+ * Idempotent by construction: a directory whose id already has a binding row
+ * is skipped, so re-running this on every daemon start costs one readdir plus
+ * a lookup per system and never writes a duplicate.
+ *
+ * `visibility` mirrors the claim `markTeamSynced` writes going forward —
+ * `teamSynced: true` backfills as `'team'`, everything else as `'personal'`.
+ * metadata.json itself is never touched; this only adds the second envelope
+ * copy `workspace_resources` needs.
+ */
+export async function backfillDesignSystemWorkspaceResources(
+  db: SqliteDb,
+  root: string,
+): Promise<number> {
+  let entries = [];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let backfilled = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const dirId = entry.name;
+    const metadata = await readUserMetadata(root, dirId);
+    const workspaceId = metadata.workspaceId;
+    if (!workspaceId) continue;
+    const id = `user:${dirId}`;
+    if (getWorkspaceResourceByResourceId(db, 'design_system', id)) continue;
+    ensureWorkspaceResource(db, 'design_system', workspaceId, id, {
+      visibility: metadata.teamSynced === true ? 'team' : 'personal',
+      resourceState: 'active',
+    });
+    backfilled += 1;
+  }
+  return backfilled;
 }
 
 export async function listUserDesignSystemFiles(
