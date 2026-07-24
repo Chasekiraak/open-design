@@ -10,6 +10,8 @@ export type HomeDemoJourney = 'new' | 'returning';
 export interface HomeDemoState {
   journey: HomeDemoJourney;
   role: HomeOnboardingRole;
+  /** A temporary design-system pick for the designer demo; never persisted. */
+  designSystemId?: string | null;
 }
 
 /** A mock with an explicit `null` profile must override actual local data. */

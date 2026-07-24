@@ -104,6 +104,15 @@ describe('DesignSystemPicker', () => {
     expect(screen.queryByTestId('project-ds-picker-preview-frame')).toBeNull();
   });
 
+  it('marks a contextual design-system recommendation in the list', async () => {
+    renderPicker({ recommendedId: 'clay' });
+
+    fireEvent.click(screen.getByTestId('project-ds-picker-trigger'));
+
+    expect(screen.getByTestId('project-ds-picker-option-clay-recommendation').textContent).toBe('Recommended');
+    expect(screen.queryByTestId('project-ds-picker-option-noir-recommendation')).toBeNull();
+  });
+
   it('updates the preview target on hover and opens the expanded kit preview', async () => {
     renderPicker();
 

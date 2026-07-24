@@ -61,6 +61,8 @@ interface Props {
   variant?: 'project' | 'footer' | 'home' | 'icon';
   /** Footer variant: visually-hidden label for the trigger button. */
   label?: string;
+  /** An optional, contextual recommendation shown alongside one list option. */
+  recommendedId?: string | null;
   /** Hide the recursive "Create" action when the picker is already on create. */
   showCreateAction?: boolean;
 }
@@ -73,6 +75,7 @@ export function DesignSystemPicker({
   onChange,
   variant = 'project',
   label,
+  recommendedId = null,
   showCreateAction = true,
 }: Props) {
   const { locale, t } = useI18n();
@@ -220,6 +223,7 @@ export function DesignSystemPicker({
 
   const renderOption = (d: DesignSystemSummary) => {
     const active = d.id === selectedId;
+    const recommended = d.id === recommendedId;
     return (
       <button
         key={d.id}
@@ -244,6 +248,14 @@ export function DesignSystemPicker({
       >
         <div className="project-ds-picker-option-head">
           <span className="project-ds-picker-option-title">{d.title}</span>
+          {recommended ? (
+            <span
+              className="project-ds-picker-option-recommendation"
+              data-testid={`project-ds-picker-option-${d.id}-recommendation`}
+            >
+              Recommended
+            </span>
+          ) : null}
           {active ? (
             <span
               className="project-ds-picker-option-check"

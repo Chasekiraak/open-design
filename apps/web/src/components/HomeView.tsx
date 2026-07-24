@@ -125,6 +125,7 @@ import {
 import { AnimatePresence } from 'motion/react';
 
 const HOME_DEMO_STATE_PANEL_ENABLED = process.env.NODE_ENV === 'development';
+const DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID = 'default';
 
 export interface ActivePlugin {
   record: InstalledPluginRecord;
@@ -872,6 +873,18 @@ export function HomeView({
     () => selectableHomeDesignSystems(designSystems, defaultDesignSystemId),
     [defaultDesignSystemId, designSystems],
   );
+  // The Demo panel is a local visual harness. Its designer state gets a
+  // sensible starter system without changing the user's saved composer choice.
+  const designerDemoRecommendedDesignSystemId = designSystemPickerSystems.some(
+    (system) => system.id === DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID,
+  )
+    ? DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID
+    : null;
+  const selectedHomeDesignSystemId = homeDemoState?.role === 'designer'
+    ? homeDemoState.designSystemId === undefined
+      ? designerDemoRecommendedDesignSystemId
+      : homeDemoState.designSystemId
+    : designSystemId;
   // Re-seed the default selection when the catalogue or the user's default
   // resolves after mount (async load), unless the user already picked one.
   useEffect(() => {
@@ -883,11 +896,11 @@ export function HomeView({
   // hint the rendered brief references — so it mirrors the persistent picker.
   const selectedDesignSystemTitle = useMemo(
     () =>
-      designSystemId
-        ? designSystemPickerSystems.find((system) => system.id === designSystemId)?.title
+      selectedHomeDesignSystemId
+        ? designSystemPickerSystems.find((system) => system.id === selectedHomeDesignSystemId)?.title
             ?? t('designSystemPicker.noneTitle')
         : t('designSystemPicker.noneTitle'),
-    [designSystemId, designSystemPickerSystems, t],
+    [selectedHomeDesignSystemId, designSystemPickerSystems, t],
   );
 
   function focusPromptAtEnd() {
@@ -1609,6 +1622,17 @@ export function HomeView({
   // sync so the rendered brief references the picked system even after the user
   // switches design systems mid-compose.
   function handleDesignSystemChange(id: string | null) {
+    if (homeDemoState?.role === 'designer') {
+      setHomeDemoStateValue({ ...homeDemoState, designSystemId: id });
+      if (active && active.inputFields.some((field) => field.name === 'designSystem')) {
+        const title = id
+          ? designSystemPickerSystems.find((system) => system.id === id)?.title
+              ?? t('designSystemPicker.noneTitle')
+          : t('designSystemPicker.noneTitle');
+        updateActiveInputs({ ...active.inputs, designSystem: title });
+      }
+      return;
+    }
     designSystemTouchedRef.current = true;
     setDesignSystemId(id);
     if (active && active.inputFields.some((field) => field.name === 'designSystem')) {
@@ -2050,7 +2074,7 @@ export function HomeView({
       // design system, so every product kind (not just prototype/deck) carries
       // the user's selection — the plugin's `designSystem` input is only the
       // apply-template hint and is kept in sync via handleDesignSystemChange.
-      const submittedDesignSystemId = designSystemId;
+      const submittedDesignSystemId = selectedHomeDesignSystemId;
       // Composer inputs are forwarded as-is; the deferred footer/media fields are
       // stripped from this set just below to form the run-facing inputs.
       const submittedApplyInputs = submittedActive ? submittedActive.inputs : defaultInputs;
@@ -2296,7 +2320,10 @@ export function HomeView({
         inlineEditableInputNames={active?.editableInputNames ?? []}
         footerInputNames={footerInputNamesForChip(active?.chipId ?? null)}
         designSystems={designSystemPickerSystems}
-        selectedDesignSystemId={designSystemId}
+        selectedDesignSystemId={selectedHomeDesignSystemId}
+        recommendedDesignSystemId={
+          homeDemoState?.role === 'designer' ? designerDemoRecommendedDesignSystemId : null
+        }
         onDesignSystemChange={handleDesignSystemChange}
         stagedFiles={stagedFiles}
         onAddFiles={stageFiles}

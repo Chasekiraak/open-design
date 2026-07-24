@@ -3424,6 +3424,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-ds-picker-option-recommendation {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.project-ds-picker-option-recommendation + .project-ds-picker-option-check {
+  margin-left: 0;
+}
 .project-ds-picker-option-cat {
   font-size: 12px;
   padding: 1px 6px;
@@ -3825,4 +3840,3 @@ body.od-quick-switcher-open .chat-composer-fixed-layer .composer-send:disabled {
    360px track plus the row-density overrides that came with it — was
    removed. Leaving the grid rule behind reserved an empty 360px column and
    the panel content stopped short of the panel edge. */
-
