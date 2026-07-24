@@ -513,8 +513,7 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
 
   await page.getByTestId('board-mode-toggle').click();
   await page.getByTestId('comment-panel-toggle').click();
-  const frame = artifactPreviewFrame(page);
-  await frame.locator('[data-od-id="hero-title"]').click();
+  await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
@@ -1104,14 +1103,22 @@ async function runGenerationDoesNotCreateExtraFileFlow(
   await expectScenarioProjectState(page, entry, projectId);
 }
 
+async function clickCommentTargetInPreview(page: Page, selector: string) {
+  const target = artifactPreviewFrame(page).locator(selector);
+  await expect(target).toBeVisible();
+  // Auto-fit zoom + comment-bridge injection can keep the iframe target
+  // moving for long enough that Playwright's stability check never settles
+  // (CI: "element is not stable" until test timeout). Force once visible.
+  await target.click({ force: true });
+}
+
 async function runCommentAttachmentFlow(
   page: Page,
   entry: UiScenario,
 ) {
   await page.getByTestId('board-mode-toggle').click();
   await page.getByTestId('comment-panel-toggle').click();
-  const frame = artifactPreviewFrame(page);
-  await frame.locator('[data-od-id="hero-title"]').click();
+  await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
