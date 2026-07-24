@@ -216,8 +216,9 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(401);
-    const payload = await resp.json();
-    expect(payload.error.code).toBe('WORKSPACE_CONTEXT_REQUIRED');
+    await expect(resp.json()).resolves.toMatchObject({
+      error: { code: 'WORKSPACE_CONTEXT_REQUIRED' },
+    });
   });
 
   it('allows run creation with a properly-authenticated team member', async () => {
@@ -228,8 +229,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
-    expect(typeof payload.runId).toBe('string');
+    await expect(resp.json()).resolves.toMatchObject({ runId: expect.any(String) });
   });
 
   it('still allows a headerless run creation against a never-claimed (legacy) project', async () => {
@@ -240,8 +240,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: UNBOUND_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
-    expect(typeof payload.runId).toBe('string');
+    await expect(resp.json()).resolves.toMatchObject({ runId: expect.any(String) });
   });
 
   it('still allows a headerless run creation with no projectId at all (scratch / non-project usage)', async () => {
@@ -252,8 +251,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
-    expect(typeof payload.runId).toBe('string');
+    await expect(resp.json()).resolves.toMatchObject({ runId: expect.any(String) });
   });
 });
 
@@ -297,8 +295,9 @@ describe('POST /api/runs — cross-checks stale client headers against the daemo
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(403);
-    const payload = await resp.json();
-    expect(payload.error.code).toBe('WORKSPACE_PROJECT_PERMISSION_DENIED');
+    await expect(resp.json()).resolves.toMatchObject({
+      error: { code: 'WORKSPACE_PROJECT_PERMISSION_DENIED' },
+    });
   });
 
   it('still allows the same headers when the daemon cache has no opinion yet (never polled this workspace)', async () => {
@@ -312,7 +311,6 @@ describe('POST /api/runs — cross-checks stale client headers against the daemo
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
-    expect(typeof payload.runId).toBe('string');
+    await expect(resp.json()).resolves.toMatchObject({ runId: expect.any(String) });
   });
 });
