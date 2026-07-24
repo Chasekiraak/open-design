@@ -675,7 +675,28 @@ describe('composeSystemPrompt — shared slim default', () => {
         '**Give each narrative act a memorable anchor.**',
       );
       expect(directive).toContain(
-        '**Prefer visual evidence over summary UI.**',
+        '**Choose the richest fitting visual medium.**',
+      );
+      expect(directive).toContain(
+        'a product view for product proof, a chart for quantitative relationships',
+      );
+      expect(directive).toContain(
+        'an image or illustration for emotion or context, and expressive typography for a reveal',
+      );
+      expect(directive).toContain(
+        'Do not default to prose, tables, or card grids',
+      );
+      expect(directive).toContain(
+        '**Use one primary visual medium per slide.**',
+      );
+      expect(directive).toContain(
+        '**Make visual assets presentation-grade.**',
+      );
+      expect(directive).toContain(
+        'feel composed into the slide rather than pasted onto it',
+      );
+      expect(directive).toContain(
+        'Use calmer workhorse slides between high-impact opening, reveal, proof, transition, and closing moments.',
       );
       expect(directive).toContain(
         'comprehension, emphasis, pacing, atmosphere, or brand recognition',
