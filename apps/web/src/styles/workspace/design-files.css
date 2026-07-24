@@ -1361,3 +1361,67 @@ button.df-card-thumb:focus:not(:disabled) {
 .df-row-popover button:hover { background: var(--bg-subtle); }
 .df-row-popover button.danger { color: var(--red); }
 .df-row-popover button.danger:hover { background: var(--red-bg); }
+
+/* ============================================================
+   Pending-sync file skeletons — DesignFilesPanel's `downloadPending`
+   (a member's local mirror hasn't caught up to the published head yet, see
+   `renderPendingFileRow` / `renderPendingCard`). None of these nodes render
+   a button, tabIndex, or onClick — there is nothing to click — so
+   `not-allowed` on hover is the only interaction feedback, not a guard
+   around a real handler. Compound class selectors here are written to beat
+   the base `.df-row` / `.df-row-icon` / `.df-card-thumb` rules on
+   specificity alone so the override holds regardless of stylesheet import
+   order (`.skeleton-shimmer` / `.skeleton-block` / the `shimmer` keyframe
+   itself live in viewer/composio.css and are reused as-is, not reinvented).
+   ============================================================ */
+.df-row.df-row-pending {
+  cursor: not-allowed;
+}
+.df-row.df-row-pending:hover {
+  background: transparent;
+}
+.df-row-icon-pending.skeleton-shimmer {
+  background: var(--bg-subtle);
+  background-image: linear-gradient(
+    90deg,
+    var(--bg-subtle) 0%,
+    var(--bg-muted) 50%,
+    var(--bg-subtle) 100%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.df-card.df-card-pending {
+  cursor: not-allowed;
+}
+.df-card.df-card-pending:hover {
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-sm);
+}
+.df-card-thumb-pending.skeleton-shimmer {
+  background: none;
+  background-color: var(--bg-subtle);
+  background-image: linear-gradient(
+    90deg,
+    var(--bg-subtle) 0%,
+    var(--bg-muted) 50%,
+    var(--bg-subtle) 100%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+  cursor: not-allowed;
+}
+/* Images have no natural size to borrow yet, so the placeholder picks a
+   portrait-friendlier fixed ratio instead of the page card's 16/9 — a
+   same-file override of `.df-card--image .df-card-thumb`'s `aspect-ratio:
+   auto`, which only works once a real `<img>` has loaded to size against. */
+.df-card--image .df-card-thumb-pending {
+  aspect-ratio: 4 / 3;
+  border-bottom: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .df-row-icon-pending.skeleton-shimmer,
+  .df-card-thumb-pending.skeleton-shimmer {
+    animation: none;
+  }
+}

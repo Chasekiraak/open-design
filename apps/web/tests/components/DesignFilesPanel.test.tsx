@@ -758,3 +758,134 @@ describe("DesignFilesPanel persisted (empty) folders", () => {
     expect(nestedDirs).toContain("icons");
   });
 });
+
+// A non-owner member's local mirror trailing the published head
+// (`downloadPending`, see useProjectCollab) is project-wide: the daemon's
+// `pull` materializes the whole tree in one external CLI call, so there is
+// no per-file "this one landed" signal to key a finer-grained flag off of.
+// While it holds, every currently-listed file (a plain local-disk read, so
+// it could be stale content or mid-overwrite by the in-flight pull) renders
+// as an inert skeleton instead of its real name/thumbnail, and no click
+// handler is wired up at all — there is nothing to open until the pull
+// confirms.
+describe("DesignFilesPanel pending sync (downloadPending)", () => {
+  afterEach(() => cleanup());
+
+  it("renders a non-html file as a skeleton row and blocks opening it", () => {
+    const { onOpenFile } = renderPanel(
+      [file({ name: "notes.txt", kind: "text", mime: "text/plain" })],
+      { downloadPending: true },
+    );
+
+    const row = screen.getByTestId("design-file-row-notes.txt");
+    expect(row.className).toContain("df-row-pending");
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.getAttribute("aria-busy")).toBe("true");
+    // The real name/size/time never render — only shimmering placeholders —
+    // so the file's actual name is not readable from the row.
+    expect(row.querySelector(".df-row-name")).toBeNull();
+    expect(row.querySelector(".df-row-name-btn")).toBeNull();
+    expect(row.querySelector(".skeleton-block")).toBeTruthy();
+    expect(row.querySelector(".df-row-icon-pending.skeleton-shimmer")).toBeTruthy();
+
+    fireEvent.click(row);
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("renders an HTML page as a skeleton card and blocks opening it (no thumbnail fetch)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { onOpenFile } = renderPanel(
+      [file({ name: "page.html", kind: "html", mime: "text/html" })],
+      { downloadPending: true },
+    );
+
+    const card = screen.getByTestId("design-file-row-page.html");
+    expect(card.className).toContain("df-card-pending");
+    expect(card.querySelector(".df-card-thumb-pending.skeleton-shimmer")).toBeTruthy();
+    // No real page-thumbnail machinery runs for a pending card.
+    expect(card.querySelector("iframe")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(card);
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("renders an image as a skeleton card and blocks opening it", () => {
+    const { onOpenFile } = renderPanel(
+      [file({ name: "photo.png", kind: "image", mime: "image/png" })],
+      { downloadPending: true },
+    );
+
+    const card = screen.getByTestId("design-file-row-photo.png");
+    expect(card.className).toContain("df-card-pending");
+    expect(card.className).toContain("df-card--image");
+    expect(card.querySelector("img")).toBeNull();
+    expect(card.querySelector(".df-card-thumb-pending.skeleton-shimmer")).toBeTruthy();
+
+    fireEvent.click(card);
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("still reports the correct per-category file counts in the tab bar while pending", () => {
+    renderPanel(
+      [
+        file({ name: "a.txt", kind: "text", mime: "text/plain" }),
+        file({ name: "b.txt", kind: "text", mime: "text/plain" }),
+      ],
+      { downloadPending: true },
+    );
+    expect(tabLabels().join(" ")).toContain("2");
+  });
+
+  it("renders real, clickable rows once downloadPending clears", () => {
+    const onOpenFile = vi.fn();
+    const { rerender } = render(
+      <DesignFilesPanel
+        projectId="test-project"
+        files={[file({ name: "notes.txt", kind: "text", mime: "text/plain" })]}
+        liveArtifacts={[]}
+        onRefreshFiles={vi.fn()}
+        onOpenFile={onOpenFile}
+        onOpenLiveArtifact={vi.fn()}
+        onRenameFile={vi.fn()}
+        onDeleteFile={vi.fn()}
+        onDeleteFiles={vi.fn()}
+        onUpload={vi.fn()}
+        onUploadFiles={vi.fn()}
+        onPaste={vi.fn()}
+        onNewSketch={vi.fn()}
+        downloadPending
+      />,
+    );
+    expect(screen.getByTestId("design-file-row-notes.txt").className).toContain(
+      "df-row-pending",
+    );
+
+    rerender(
+      <DesignFilesPanel
+        projectId="test-project"
+        files={[file({ name: "notes.txt", kind: "text", mime: "text/plain" })]}
+        liveArtifacts={[]}
+        onRefreshFiles={vi.fn()}
+        onOpenFile={onOpenFile}
+        onOpenLiveArtifact={vi.fn()}
+        onRenameFile={vi.fn()}
+        onDeleteFile={vi.fn()}
+        onDeleteFiles={vi.fn()}
+        onUpload={vi.fn()}
+        onUploadFiles={vi.fn()}
+        onPaste={vi.fn()}
+        onNewSketch={vi.fn()}
+        downloadPending={false}
+      />,
+    );
+    const row = screen.getByTestId("design-file-row-notes.txt");
+    expect(row.className).not.toContain("df-row-pending");
+    expect(row.querySelector(".df-row-name")?.textContent).toBe("notes.txt");
+    // The row container itself carries no click handler — only its cells
+    // do (name / icon / size / time) — so click the real open target.
+    fireEvent.click(row.querySelector(".df-row-name-btn")!);
+    expect(onOpenFile).toHaveBeenCalledWith("notes.txt");
+  });
+});
