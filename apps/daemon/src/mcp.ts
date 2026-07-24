@@ -150,7 +150,7 @@ const PROJECT_ARG = {
   description: 'Project id (UUID) or name substring. Optional; defaults to the active project (expires after ~5 minutes of no Open Design activity).',
 } as const;
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
   {
     name: 'list_projects',
     description: 'List every Open Design project on this daemon.',
@@ -414,6 +414,20 @@ const TOOL_DEFS = [
     annotations: { ...READ_ANNOTATIONS, title: 'List Open Design plugins' },
   },
   {
+    name: 'start_vela_login',
+    description:
+      'Start Open Design Cloud (Vela/AMR) browser sign-in through the local Open Design daemon. Returns the activation URL and user code when manual browser completion is needed.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { ...WRITE_ANNOTATIONS, title: 'Sign in to Open Design Cloud' },
+  },
+  {
+    name: 'get_vela_login_status',
+    description:
+      'Check whether Open Design Cloud (Vela/AMR) browser sign-in is complete. Does not expose Vela credentials.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { ...READ_ANNOTATIONS, title: 'Check Open Design Cloud sign-in' },
+  },
+  {
     name: 'start_run',
     description:
       'Commission Open Design to generate or refine a design. Open Design spawns its own agent to do the work and returns a runId immediately. Poll get_run(runId) until status is terminal, then get_artifact to pull the result. Project optional; defaults to the active project. Requires an existing project (create one first with create_project).',
@@ -558,6 +572,10 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
         'To make Open Design GENERATE or refine a design (rather than just',
         'read/edit files), commission a run - you do not run skills yourself:',
         ' - list_skills / list_plugins to see what you can ask OD to make.',
+        ' - for agent:"amr" (Open Design Cloud / Vela), call',
+        '    get_vela_login_status first. If signed out, call',
+        '    start_vela_login once, show its activation URL/code when',
+        '    present, and poll get_vela_login_status until loggedIn:true.',
         ' - list_agents when you need to pass start_run.agent — do not',
         '    guess "claude" / "codex" / "opencode"; only agents in the',
         '    returned list will actually spawn on this machine.',
@@ -752,6 +770,12 @@ function requireString(v: unknown, name: string): asserts v is string {
   }
 }
 
+function publicVelaLoginStatus(status: unknown): unknown {
+  if (!status || typeof status !== 'object' || Array.isArray(status)) return status;
+  const { configPath: _configPath, ...publicStatus } = status as JsonObject;
+  return publicStatus;
+}
+
 async function handleMcpToolCall(baseUrl: string, name: unknown, args: McpArgs) {
   try {
     switch (name) {
@@ -861,6 +885,22 @@ async function handleMcpToolCall(baseUrl: string, name: unknown, args: McpArgs) 
         return ok(await listPlugins(baseUrl));
       case 'list_agents':
         return ok(await listAgents(baseUrl, args.includeUnavailable === true));
+      case 'start_vela_login': {
+        const started = await postJson<JsonObject>(
+          `${baseUrl}/api/integrations/vela/login`,
+          {},
+        );
+        const status = publicVelaLoginStatus(
+          await getJson<JsonObject>(`${baseUrl}/api/integrations/vela/status`),
+        );
+        return ok({ started, status });
+      }
+      case 'get_vela_login_status':
+        return ok(
+          publicVelaLoginStatus(
+            await getJson<JsonObject>(`${baseUrl}/api/integrations/vela/status`),
+          ),
+        );
       case 'start_run':
         return await startRun(baseUrl, args);
       case 'get_run':
