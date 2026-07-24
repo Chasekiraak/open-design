@@ -201,6 +201,22 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
   const [previewTemplate, setPreviewTemplate] = useState<TemplateDemo | null>(null);
   const [activeType, setActiveType] = useState<TemplateType>('Slides');
   const [activeSubtype, setActiveSubtype] = useState('All');
+  // Remix (and the prompt-artifact copy path it shares) hands off to a
+  // fire-and-forget parent callback (`onRemixTemplate`/`onUsePrompt` return
+  // void) that kicks off a real POST /api/projects — nothing here observes
+  // when it settles. Without a guard, N rapid clicks before the resulting
+  // navigation actually leaves this view fired N separate creates,
+  // duplicating the project N times ("Community 的模板 remix 点击多次会复制
+  // 多次"). Track the in-flight template id and ignore repeat clicks on the
+  // SAME card until either the navigation away unmounts this view (the
+  // success path) or the timeout below fires (the failure/never-settles
+  // fallback, so a card can never get stuck disabled forever).
+  const [remixingId, setRemixingId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!remixingId) return;
+    const timer = window.setTimeout(() => setRemixingId(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [remixingId]);
   useEffect(() => {
     let cancelled = false;
     // `listPlugins` resolves to [] on a failed/aborted fetch, so a daemon that
@@ -234,6 +250,8 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
       void copyTemplatePrompt(template);
       return;
     }
+    if (remixingId) return;
+    setRemixingId(template.id);
     onRemixTemplate?.({ templateId: template.id, prompt: template.prompt });
   };
 
@@ -312,12 +330,13 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
               <div className="community-template-card__actions">
                 <button
                   type="button"
+                  disabled={remixingId === template.id}
                   onClick={(event) => {
                     event.stopPropagation();
                     handleTemplateAction(template);
                   }}
                 >
-                  {templateActionLabel(template)}
+                  {remixingId === template.id ? t('common.loading') : templateActionLabel(template)}
                 </button>
                 <button
                   type="button"
@@ -339,6 +358,7 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
           template={previewTemplate}
           onClose={() => setPreviewTemplate(null)}
           onUse={() => handleTemplateAction(previewTemplate)}
+          busy={remixingId === previewTemplate.id}
         />
       ) : null}
     </section>
@@ -349,10 +369,12 @@ function TemplatePreviewModal({
   template,
   onClose,
   onUse,
+  busy,
 }: {
   template: TemplateDemo;
   onClose: () => void;
   onUse: () => void;
+  busy?: boolean;
 }) {
   const t = useT();
   return (
@@ -385,7 +407,9 @@ function TemplatePreviewModal({
         />
         <footer className="community-template-preview__foot">
           <span>{template.meta}</span>
-          <button type="button" onClick={onUse}>{templateActionLabel(template)}</button>
+          <button type="button" disabled={busy} onClick={onUse}>
+            {busy ? t('common.loading') : templateActionLabel(template)}
+          </button>
         </footer>
       </section>
     </div>
