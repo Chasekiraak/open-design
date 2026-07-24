@@ -52,6 +52,10 @@ type DesignSystemListOptions = {
   defaultStatus?: string;
 };
 
+export type DesignSystemAssetSyncOutcome =
+  | { ok: true; synced: string[] }
+  | { ok: false; reason: 'not-found' | 'no-workspace-project' };
+
 export function createDesignSystemServerServices({
   getDb,
   roots,
@@ -91,6 +95,14 @@ export function createDesignSystemServerServices({
     listUserDesignSystemFiles: (root: string, id: string) => Promise<Array<{ kind?: string; path: string }> | null | undefined>;
     readUserDesignSystemFile: (root: string, id: string, filePath: string) => Promise<{ path: string; content: string } | null | undefined>;
     linkUserDesignSystemProject: (root: string, id: string, projectId: string) => Promise<unknown>;
+    // Physically copies real asset bytes (sourced from a workspace project's
+    // editing mirror) into the canonical assets/ dir and un-fingerprints them
+    // so the generator never overwrites them again (spec 04 §9.3).
+    syncUserDesignSystemAssetsFromFiles: (
+      root: string,
+      id: string,
+      files: Array<{ path: string; content: Buffer }>,
+    ) => Promise<{ synced: string[] }>;
     LEGACY_DESIGN_SYSTEM_ARTIFACTS: Array<{
       replacementPaths: string[];
       legacyPath: string;
@@ -399,6 +411,64 @@ export function createDesignSystemServerServices({
     }
   }
 
+  /**
+   * Copies the real `assets/` files out of a user design system's workspace
+   * project (the editing-time mirror an agent actually writes to) into the
+   * canonical design-system directory, so `team-resource-share`'s zip and
+   * `/api/design-systems/:id/archive` stop shipping a stale/placeholder
+   * `assets/logo.svg` (spec 04 §9.3, recvqb1t4FrckM). Locates the source
+   * project the same way `ensureUserDesignSystemWorkspaceProject` does
+   * (`projectBackedDesignSystemProjectId`), just copying in the opposite
+   * direction — from the project mirror back to canonical.
+   */
+  async function syncUserDesignSystemAssetsFromWorkspace(
+    dbHandle: Database.Database,
+    id: string,
+  ): Promise<DesignSystemAssetSyncOutcome> {
+    const systems = await listAllDesignSystems();
+    const summary = systems.find((s) => s.id === id && s.source === 'user');
+    if (!summary) return { ok: false, reason: 'not-found' };
+    const projectId = projectBackedDesignSystemProjectId(id, summary);
+    if (!projectId) return { ok: false, reason: 'no-workspace-project' };
+    const project = projects.getProject(dbHandle, projectId);
+    if (!project) return { ok: false, reason: 'no-workspace-project' };
+
+    const projectFiles = await projects.listFiles(
+      paths.PROJECTS_DIR,
+      project.id,
+      project.metadata ? { metadata: project.metadata } : {},
+    );
+    const assetPaths = projectFiles
+      .map((file) => (file && typeof file === 'object' ? (file as { path?: unknown }).path : undefined))
+      .filter(
+        (candidate): candidate is string =>
+          typeof candidate === 'string' && (candidate === 'assets' || candidate.startsWith('assets/')),
+      );
+
+    const files: Array<{ path: string; content: Buffer }> = [];
+    for (const assetPath of assetPaths) {
+      try {
+        const detail = await projects.readProjectFile(
+          paths.PROJECTS_DIR,
+          project.id,
+          assetPath,
+          project.metadata,
+        );
+        files.push({ path: assetPath, content: detail.buffer });
+      } catch {
+        // A file that vanished or was mid-rename during the scan shouldn't
+        // fail the whole sync — skip it and continue with the rest.
+      }
+    }
+
+    const result = await designSystems.syncUserDesignSystemAssetsFromFiles(
+      paths.USER_DESIGN_SYSTEMS_DIR,
+      id,
+      files,
+    );
+    return { ok: true, synced: result.synced };
+  }
+
   return {
     ensureUserDesignSystemWorkspaceProject,
     isProjectUsableDesignSystem,
@@ -410,6 +480,7 @@ export function createDesignSystemServerServices({
     readAvailableDesignSystemPackageInfo,
     readAvailableDesignSystemStaticFile,
     readDesignSystemWorkspaceTextFile,
+    syncUserDesignSystemAssetsFromWorkspace,
     validateProjectDesignSystemId,
     validateProjectSkillId,
   };

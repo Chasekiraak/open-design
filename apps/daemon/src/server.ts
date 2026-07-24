@@ -291,6 +291,7 @@ import {
   readUserDesignSystemFile,
   resolveDesignSystemAssets,
   stripPrefixAndValidateId,
+  syncUserDesignSystemAssetsFromFiles,
   updateUserDesignSystem,
   updateUserDesignSystemRevisionStatus,
 } from './design-systems/index.js';
@@ -2255,6 +2256,7 @@ export async function startServer({
       listUserDesignSystemFiles,
       readUserDesignSystemFile,
       linkUserDesignSystemProject,
+      syncUserDesignSystemAssetsFromFiles,
       LEGACY_DESIGN_SYSTEM_ARTIFACTS,
     },
     projects: {
@@ -2279,6 +2281,7 @@ export async function startServer({
     readAvailableDesignSystemPackageInfo,
     readAvailableDesignSystemStaticFile,
     readDesignSystemWorkspaceTextFile,
+    syncUserDesignSystemAssetsFromWorkspace,
     validateProjectDesignSystemId,
     validateProjectSkillId,
   } = designSystemServices;
@@ -4579,6 +4582,7 @@ export async function startServer({
       readUserDesignSystemFile,
       renderDesignSystemPreview,
       renderDesignSystemShowcase,
+      syncUserDesignSystemAssetsFromWorkspace,
       updateUserDesignSystem,
       updateUserDesignSystemRevisionStatus,
     },

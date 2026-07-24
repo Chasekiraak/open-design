@@ -54,6 +54,7 @@ function registerRoutes(app: express.Express, staticHtml: string | null) {
       renderDesignSystemPreview: () => '<!doctype html><title>preview</title>',
       renderDesignSystemShowcase: (id: string, body: string) =>
         `<!doctype html><title>${id} synthetic</title><main>${body}</main>`,
+      syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
       updateUserDesignSystem: async () => null,
       updateUserDesignSystemRevisionStatus: async () => null,
     },

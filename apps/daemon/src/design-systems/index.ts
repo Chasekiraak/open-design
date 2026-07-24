@@ -2250,6 +2250,97 @@ async function writeGeneratedDesignSystemFiles(
   );
 }
 
+// A real asset file synced in from a workspace project's editing-time
+// mirror — arbitrary bytes the agent already produced there (e.g. a
+// regenerated logo.svg), not generator output.
+export type DesignSystemAssetSourceFile = {
+  /** POSIX-relative path under the design-system root, e.g. "assets/logo.svg". */
+  path: string;
+  content: Buffer;
+};
+
+export type DesignSystemAssetSyncResult = {
+  /** POSIX-relative paths that were actually written to the canonical dir. */
+  synced: string[];
+};
+
+/**
+ * Copies real asset bytes into a user design system's canonical `assets/`
+ * directory — the fix for the logo/asset desync (spec 04 §9.3,
+ * recvqb1t4FrckM): canonical is the only directory `team-resource-share`
+ * packages and downloads read from, but agent-produced assets only ever
+ * landed in the workspace-project editing mirror, so a regenerated logo
+ * never reached what got shared or downloaded.
+ *
+ * Every write here is caller-supplied bytes, never generator output, so it
+ * must survive the next `writeGeneratedDesignSystemFiles` call rather than
+ * being silently regenerated back to a placeholder. Two things make it
+ * stick, both applied here:
+ *  1. Any `.od-generated.json` fingerprint entry for an overwritten path is
+ *     dropped. `filterGeneratedWritesPreservingUserEdits` treats a path with
+ *     no recorded fingerprint exactly like a hand-edited file — preserved,
+ *     never refreshed.
+ *  2. `artifactMode` flips to `'agent-managed'` the first time any file
+ *     actually syncs, so `createUserDesignSystem`/`updateUserDesignSystem`
+ *     skip `writeGeneratedDesignSystemFiles` entirely on every future write
+ *     (the "fingerprint protection was spinning with nothing to protect"
+ *     root cause the investigation identified).
+ *
+ * Only paths under `assets/` are accepted; anything else is silently
+ * skipped — this function syncs real assets, not arbitrary canonical files.
+ */
+export async function syncUserDesignSystemAssetsFromFiles(
+  root: string,
+  id: string,
+  files: DesignSystemAssetSourceFile[],
+): Promise<DesignSystemAssetSyncResult> {
+  const dirId = stripPrefixAndValidateId(id, 'user:');
+  if (!dirId) return { synced: [] };
+  const dir = path.join(root, dirId);
+  try {
+    const stats = await stat(path.join(dir, 'DESIGN.md'));
+    if (!stats.isFile()) return { synced: [] };
+  } catch {
+    return { synced: [] };
+  }
+
+  const manifest = await readGeneratedManifest(dir);
+  let manifestChanged = false;
+  const synced: string[] = [];
+  for (const file of files) {
+    const sanitized = sanitizeRelativeFilePath(file.path);
+    if (!sanitized || !(sanitized === 'assets' || sanitized.startsWith('assets/'))) continue;
+    const targetPath = path.join(dir, ...sanitized.split('/'));
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, file.content);
+    const key = generatedManifestKey(dir, targetPath);
+    if (key in manifest) {
+      delete manifest[key];
+      manifestChanged = true;
+    }
+    synced.push(sanitized);
+  }
+  if (synced.length === 0) return { synced };
+
+  if (manifestChanged) {
+    await writeFile(
+      path.join(dir, GENERATED_MANIFEST_FILENAME),
+      serializeGeneratedManifest(manifest),
+      'utf8',
+    );
+  }
+
+  const existingMeta = await readUserMetadata(root, dirId);
+  if (existingMeta.artifactMode !== 'agent-managed') {
+    await writeUserMetadata(root, dirId, {
+      ...existingMeta,
+      artifactMode: 'agent-managed',
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  return { synced };
+}
+
 function generatedDesignSystemFileWrites(
   dir: string,
   input: {

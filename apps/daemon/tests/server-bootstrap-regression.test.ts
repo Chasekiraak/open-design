@@ -476,6 +476,7 @@ describe('bootstrap route regressions', () => {
           `<!doctype html><title>${id} preview</title><main>${body}</main>`,
         renderDesignSystemShowcase: (id: string, body: string) =>
           `<!doctype html><title>${id} showcase</title><main>${body}</main>`,
+        syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
         updateUserDesignSystem: async () => null,
         updateUserDesignSystemRevisionStatus: async () => null,
       },

@@ -77,6 +77,18 @@ export interface RegisterDesignSystemRoutesDeps extends RouteDeps<'db' | 'paths'
     readUserDesignSystemFile: (root: string, id: string, filePath: string) => Promise<DesignSystemFileDetail | null>;
     renderDesignSystemPreview: (id: string, body: string) => string;
     renderDesignSystemShowcase: (id: string, body: string) => string;
+    /**
+     * Physically copies the real `assets/` files out of a user design
+     * system's workspace project (where an agent's Write/Edit tool calls
+     * actually land) into the canonical directory — the fix for spec 04
+     * §9.3 (recvqb1t4FrckM): canonical is the only directory
+     * `team-resource-share` and the download archive read from, and until
+     * this existed nothing ever copied a regenerated logo back into it.
+     */
+    syncUserDesignSystemAssetsFromWorkspace: (
+      db: DbHandle,
+      id: string,
+    ) => Promise<{ ok: true; synced: string[] } | { ok: false; reason: 'not-found' | 'no-workspace-project' }>;
     updateUserDesignSystem: (root: string, id: string, input: UserDesignSystemInput) => Promise<DesignSystemSummary | null>;
     updateUserDesignSystemRevisionStatus: (root: string, id: string, revisionId: string, status: 'accepted' | 'rejected') => Promise<DesignSystemRevision | null>;
   };
@@ -119,6 +131,7 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
     readUserDesignSystemFile,
     renderDesignSystemPreview,
     renderDesignSystemShowcase,
+    syncUserDesignSystemAssetsFromWorkspace,
     updateUserDesignSystem,
     updateUserDesignSystemRevisionStatus,
   } = ctx.designSystems;
@@ -395,6 +408,39 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
       res.json({ ...updated as object, designSystem: updated });
     } catch (err) {
       res.status(400).json({ error: String(err) });
+    }
+  });
+
+  // Asset sync (spec 04 §9.3, recvqb1t4FrckM): a signal-only endpoint — the
+  // browser never uploads file bytes here. The daemon locates the design
+  // system's workspace project itself (same lookup
+  // `ensureUserDesignSystemWorkspaceProject` uses) and copies real files
+  // under that project's `assets/` directory into the canonical design
+  // system directory, entirely on the daemon side of the data-directory
+  // boundary. Gated the same way as PATCH/DELETE: a locked workspace or a
+  // caller who cannot manage the (possibly team-synced) design system may
+  // not trigger a write to canonical.
+  app.post('/api/design-systems/:id/sync-assets', async (req, res) => {
+    try {
+      if (isRequestWorkspaceLocked(req)) {
+        return res.status(403).json({ error: 'WORKSPACE_LOCKED' });
+      }
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req))) {
+        return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
+      }
+      const outcome = await syncUserDesignSystemAssetsFromWorkspace(db, req.params.id);
+      if (!outcome.ok) {
+        if (outcome.reason === 'not-found') {
+          return res.status(404).json({ error: 'editable design system not found' });
+        }
+        // No workspace project to sync from yet — a benign no-op, not an
+        // error; the trigger sites call this speculatively on every asset
+        // write and run-end.
+        return res.json({ synced: [] });
+      }
+      res.json({ synced: outcome.synced });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
     }
   });
 

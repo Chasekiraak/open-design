@@ -751,6 +751,35 @@ export async function updateDesignSystemDraft(
   }
 }
 
+// Signal-only trigger for the daemon-side asset sync (spec 04 §9.3,
+// recvqb1t4FrckM): fires when the design-system chat's agent writes real
+// files under `assets/` in the workspace project, so the canonical
+// design-system directory — the only thing team-share/download/showcase
+// ever read from — stops shipping a stale placeholder logo. No file bytes
+// cross the browser: the daemon locates the workspace project itself and
+// copies file contents straight through on its own side of the data-
+// directory boundary. See `workspaceProjectHeaders` — this is a mutating
+// write against a resource `canMutateUserDesignSystem` gates the same way
+// PATCH/DELETE are gated, so the workspace identity headers must ride along.
+export async function syncDesignSystemAssetsFromWorkspace(
+  id: string,
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<{ synced: string[] } | null> {
+  try {
+    const resp = await fetch(`/api/design-systems/${encodeURIComponent(id)}/sync-assets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
+    });
+    if (!resp.ok) return null;
+    return (await resp.json()) as { synced: string[] };
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteDesignSystemDraft(id: string): Promise<boolean> {
   try {
     const resp = await fetch(`/api/design-systems/${encodeURIComponent(id)}`, {

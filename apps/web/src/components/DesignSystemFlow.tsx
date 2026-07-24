@@ -25,6 +25,7 @@ import {
   importProjectFigma,
   openFolderDialog,
   startDesignSystemTokenContractRebuildJob,
+  syncDesignSystemAssetsFromWorkspace as syncDesignSystemAssetsFromWorkspaceRequest,
   updateDesignSystemRevisionStatus,
   updateDesignSystemDraft,
   uploadProjectFile,
@@ -2132,6 +2133,19 @@ export function DesignSystemDetailView({
     return true;
   }, [body, editable, onSystemsRefresh, system]);
 
+  // Asset counterpart of syncDesignSystemBodyFromWorkspace (spec 04 §9.3,
+  // recvqb1t4FrckM): the text sync above PATCHes DESIGN.md content through
+  // the browser, but a binary asset (e.g. a regenerated logo.svg) can't
+  // travel the same "read then stuff into a JSON body" path. This instead
+  // signals the daemon to copy the workspace project's real `assets/` files
+  // into canonical itself — no bytes cross the browser — mirroring the
+  // architecture rule that only the daemon may touch the data directory.
+  const syncDesignSystemAssetsFromWorkspace = useCallback(async () => {
+    if (!system || !editable) return false;
+    const result = await syncDesignSystemAssetsFromWorkspaceRequest(system.id, workspaceContext);
+    return Boolean(result && result.synced.length > 0);
+  }, [editable, system, workspaceContext]);
+
   const refreshDesignSystemWorkspace = useCallback(async (projectId: string) => {
     const nextFiles = await refreshWorkspaceProjectFiles(projectId);
     await syncDesignSystemBodyFromWorkspace(projectId);
@@ -2370,6 +2384,9 @@ export function DesignSystemDetailView({
                 if (isDesignSystemSourcePath(filePath)) {
                   void syncDesignSystemBodyFromWorkspace(projectId);
                 }
+                if (isDesignSystemAssetPath(filePath)) {
+                  void syncDesignSystemAssetsFromWorkspace();
+                }
               });
             }
           },
@@ -2391,6 +2408,12 @@ export function DesignSystemDetailView({
             void (async () => {
               await refreshWorkspaceProjectFiles(projectId);
               const synced = await syncDesignSystemBodyFromWorkspace(projectId);
+              // Unconditional per-run fallback (mirrors the body sync above):
+              // catches asset writes the tool_result hook missed (a write
+              // tool this daemon build doesn't attribute a path for, or an
+              // out-of-band change) so canonical never permanently drifts
+              // from the workspace project's real assets.
+              void syncDesignSystemAssetsFromWorkspace();
               const audit = await fetchProjectDesignSystemPackageAudit(projectId);
               const auditSummary = audit ? summarizeDesignSystemPackageAudit(audit) : null;
               if (auditSummary) {
@@ -2473,6 +2496,7 @@ export function DesignSystemDetailView({
       projectChatMessages,
       refreshWorkspaceProjectFiles,
       requestWorkspaceFileOpen,
+      syncDesignSystemAssetsFromWorkspace,
       syncDesignSystemBodyFromWorkspace,
       system,
       t,
@@ -3339,6 +3363,15 @@ function filePathFromToolInput(input: unknown): string | null {
 function isDesignSystemSourcePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase();
   return normalized === 'design.md' || normalized.endsWith('/design.md');
+}
+
+// Asset counterpart of isDesignSystemSourcePath (spec 04 §9.3,
+// recvqb1t4FrckM): a write under the workspace project's assets/ directory
+// (e.g. a regenerated logo.svg) — the trigger for syncDesignSystemAssets-
+// FromWorkspace, same as a DESIGN.md write triggers the text sync above.
+function isDesignSystemAssetPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+  return normalized === 'assets' || normalized.startsWith('assets/');
 }
 
 function timestampFromIso(value: string | undefined): number | undefined {

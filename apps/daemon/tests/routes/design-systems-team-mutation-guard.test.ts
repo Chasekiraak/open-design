@@ -90,6 +90,7 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
       readUserDesignSystemFile: async () => null,
       renderDesignSystemPreview: () => '<!doctype html>',
       renderDesignSystemShowcase: () => '<!doctype html>',
+      syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
       updateUserDesignSystem,
       updateUserDesignSystemRevisionStatus: async () => null,
     },
