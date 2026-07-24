@@ -1902,6 +1902,60 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       updatedAt: now,
     });
   }
+  /**
+   * Claim a project this daemon has never bound to ANY workspace into the
+   * CURRENT mutating request's workspace, right before
+   * `enforceWorkspaceProjectMutation` evaluates it.
+   *
+   * `enforceWorkspaceResourceMutation`'s authenticated branch denies any
+   * mutation the moment the two-key lookup comes back empty
+   * (`workspaceResourceMutationAllowed`'s `if (!row) return false;`) — right
+   * for a project genuinely bound to a DIFFERENT workspace than the one the
+   * caller claims, but wrong for a project this daemon has never bound
+   * anywhere at all. That exact state is reachable one call up this same
+   * route: `bindDuplicateIntoRequestWorkspace` above skips binding the COPY
+   * whenever the duplicating request carried no workspace headers
+   * (`ctx === null` — a legitimate legacy/pre-context caller, per its own doc
+   * comment), leaving the copy permanently unbound. The FIRST later mutation
+   * that DOES carry real headers — e.g. duplicating that same copy again once
+   * the client's `workspaceContext` has resolved — then 403s as "workspace
+   * project mutation is not allowed" even though nothing has ever claimed the
+   * project (recvqbhor3pai2, "复制的项目再次复制").
+   *
+   * Keyed on "does ANY `workspace_projects` row exist for this project id at
+   * all" (`getWorkspaceProjectByProjectId`), not on the current
+   * `ctx.workspaceId` — a project already bound elsewhere (including a
+   * remote team project a prior list read already reconciled, which always
+   * attributes the REAL hub owner, never the reader) is left exactly where it
+   * is; this only ever claims a true orphan, matching `ensureWorkspaceProject`'s
+   * own idempotency contract.
+   *
+   * Attributes `createdByWorkspaceMemberId: ctx.workspaceMemberId`, same as
+   * `bindDuplicateIntoRequestWorkspace` — deliberately NOT the `null` an
+   * ordinary lazy-read projection uses (`ensureWorkspaceProjection`). A
+   * passive list read must not silently hand out ownership just because it
+   * happened to run first; an explicit mutation request naming this exact
+   * project is the "yes, this is mine" signal a read never had.
+   */
+  function reconcileUnboundProjectBeforeMutation(req: any, projectId: string) {
+    const ctx = workspaceProjectContextFromRequest(req);
+    if (ctx === null || ctx === 'missing') return;
+    if (getWorkspaceProjectByProjectId(db, projectId)) return;
+    const now = Date.now();
+    ensureWorkspaceProject(db, {
+      projectId,
+      workspaceId: ctx.workspaceId,
+      visibility: 'personal',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: ctx.workspaceMemberId,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      syncState: 'local_only',
+      resourceHubResourceId: null,
+      cloudTombstonedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
   function workspaceProjectRowVisibleForLocations(
     row: any,
     locations: Array<{ id: string; path: string; builtIn?: boolean }>,
@@ -2887,6 +2941,14 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       if (!sourceProject || !projectVisibleForLocations(sourceProject, locations)) {
         return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
       }
+      // recvqbhor3pai2: a project this daemon has never bound anywhere (e.g.
+      // a copy left unbound by an earlier headerless duplicate — see
+      // `bindDuplicateIntoRequestWorkspace`'s doc comment) must not be
+      // permanently un-duplicatable the moment a real, authenticated request
+      // finally comes in for it. Claim it into the caller's own workspace
+      // first, exactly like this same route already does for the COPY it is
+      // about to create.
+      reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
       if (!enforceWorkspaceProjectMutation(
         req,
         res,
@@ -2992,6 +3054,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       if (!sourceProject || !projectVisibleForLocations(sourceProject, locations)) {
         return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
       }
+      // recvqbhor3pai2 — same reasoning as the sibling /duplicate route just
+      // above: a never-bound source project must not be permanently
+      // un-copyable once a real, authenticated request finally names it.
+      reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
       if (!enforceWorkspaceProjectMutation(
         req,
         res,
