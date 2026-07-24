@@ -141,15 +141,47 @@ describe('HomeHero intent rail', () => {
     }
   });
 
-  it('shows the one-time design-system guide on the persistent entry for a new user', () => {
-    renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+  it('shows the one-time design-system guide and delays its icon cue for a new user', () => {
+    vi.useFakeTimers();
+    try {
+      renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
 
-    expect(screen.getByTestId('home-hero-design-system-trigger')).toHaveTextContent('Add design system');
-    expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
-      'Add a design system here to keep your design work consistent.',
-    );
-    expect(screen.getByTestId('home-hero-design-system-trigger-icon')).toHaveClass('is-first-run-guide');
-    expect(window.localStorage.getItem('open-design:home-design-system-guide:v1')).toBe('1');
+      expect(screen.getByTestId('home-hero-design-system-trigger')).toHaveTextContent('Add design system');
+      expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
+        'Add a design system here to keep your design work consistent.',
+      );
+      const icon = screen.getByTestId('home-hero-design-system-trigger-icon');
+      expect(icon).not.toHaveClass('is-first-run-guide');
+
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
+      expect(icon).toHaveClass('is-first-run-guide');
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(icon).not.toHaveClass('is-first-run-guide');
+      expect(window.localStorage.getItem('open-design:home-design-system-guide:v1')).toBe('1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels the delayed design-system cue after a control is used', () => {
+    vi.useFakeTimers();
+    try {
+      renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+      fireEvent.pointerDown(screen.getByTestId('home-hero-capability-design-system'));
+
+      expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1_200);
+      });
+      expect(screen.getByTestId('home-hero-design-system-trigger-icon')).not.toHaveClass('is-first-run-guide');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends the one-time design-system guide after opening the entry, typing, or choosing a product', () => {

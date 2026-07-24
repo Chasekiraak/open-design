@@ -1743,17 +1743,25 @@ button.home-hero__capability-word:focus-visible {
 }
 .home-hero__ds-row-trigger-icon.is-first-run-guide {
   transform-origin: center;
-  animation: home-hero-ds-entry-attention 460ms var(--ease-out) both;
+  animation: home-hero-ds-entry-attention 500ms var(--ease-out) both;
 }
 @keyframes home-hero-ds-entry-attention {
-  0%,
-  100% {
-    transform: scale(1);
+  0% {
+    transform: translateY(0) scale(1);
     color: currentColor;
   }
-  48% {
-    transform: scale(1.17);
-    color: var(--accent);
+  28% {
+    transform: translateY(-1px) scale(1.12);
+    color: var(--brand);
+  }
+  52% {
+    transform: translateY(0) scale(0.98);
+    color: var(--brand);
+  }
+  88%,
+  100% {
+    transform: translateY(0) scale(1);
+    color: currentColor;
   }
 }
 .home-hero__ds-row-trigger-label {

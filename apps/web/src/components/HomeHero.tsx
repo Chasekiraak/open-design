@@ -471,6 +471,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     () => !hasSeenHomeTemplateRecommendation(),
   );
   const [showFirstRunDesignSystemGuide, setShowFirstRunDesignSystemGuide] = useState(false);
+  const [showFirstRunDesignSystemAttention, setShowFirstRunDesignSystemAttention] = useState(false);
   const homeHeroRef = useRef<HTMLElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
@@ -570,6 +571,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
   const dismissFirstRunDesignSystemGuide = useCallback(() => {
     markHomeDesignSystemGuideSeen();
+    setShowFirstRunDesignSystemAttention(false);
     setShowFirstRunDesignSystemGuide(false);
   }, []);
 
@@ -588,6 +590,23 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     setShowFirstRunDesignSystemGuide(true);
     markHomeDesignSystemGuideSeen();
   }, [firstRunGuide, selectedDesignSystemId]);
+
+  useEffect(() => {
+    setShowFirstRunDesignSystemAttention(false);
+    if (!showFirstRunDesignSystemGuide) return undefined;
+
+    const startTimer = window.setTimeout(() => {
+      setShowFirstRunDesignSystemAttention(true);
+    }, 700);
+    const finishTimer = window.setTimeout(() => {
+      setShowFirstRunDesignSystemAttention(false);
+    }, 1_200);
+
+    return () => {
+      window.clearTimeout(startTimer);
+      window.clearTimeout(finishTimer);
+    };
+  }, [showFirstRunDesignSystemGuide]);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
     dismissTemplateRecommendation();
@@ -1462,6 +1481,15 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ref={homeHeroRef}
       className="home-hero"
       data-testid="home-hero"
+      onPointerDownCapture={(event) => {
+        const target = event.target;
+        if (
+          target instanceof Element
+          && target.closest('button, input, textarea, select, [role="button"], [contenteditable="true"]')
+        ) {
+          dismissFirstRunDesignSystemGuide();
+        }
+      }}
     >
       <span className="home-hero__logo-wrap">
         <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
@@ -2323,7 +2351,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 selectedId={selectedDesignSystemId}
                 showSelectedLabel={false}
                 homeEmptyLabel={showFirstRunDesignSystemGuide ? t('homeHero.designSystemGuide.add') : undefined}
-                homeIconAttention={showFirstRunDesignSystemGuide}
+                homeIconAttention={showFirstRunDesignSystemAttention}
                 onHomeOpen={dismissFirstRunDesignSystemGuide}
                 onChange={(id) => {
                   dismissFirstRunDesignSystemGuide();
