@@ -22,6 +22,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ApiErrorResponse, ChatRunCreateResponse } from '@open-design/contracts';
 
 import {
   closeDatabase,
@@ -216,7 +217,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(401);
-    const payload = await resp.json();
+    const payload = await resp.json() as ApiErrorResponse;
     expect(payload.error.code).toBe('WORKSPACE_CONTEXT_REQUIRED');
   });
 
@@ -228,7 +229,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
+    const payload = await resp.json() as ChatRunCreateResponse;
     expect(typeof payload.runId).toBe('string');
   });
 
@@ -240,7 +241,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ projectId: UNBOUND_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
+    const payload = await resp.json() as ChatRunCreateResponse;
     expect(typeof payload.runId).toBe('string');
   });
 
@@ -252,7 +253,7 @@ describe('POST /api/runs — workspace mutation gate', () => {
       body: JSON.stringify({ agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
+    const payload = await resp.json() as ChatRunCreateResponse;
     expect(typeof payload.runId).toBe('string');
   });
 });
@@ -297,7 +298,7 @@ describe('POST /api/runs — cross-checks stale client headers against the daemo
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(403);
-    const payload = await resp.json();
+    const payload = await resp.json() as ApiErrorResponse;
     expect(payload.error.code).toBe('WORKSPACE_PROJECT_PERMISSION_DENIED');
   });
 
@@ -312,7 +313,7 @@ describe('POST /api/runs — cross-checks stale client headers against the daemo
       body: JSON.stringify({ projectId: TEAM_PROJECT, agentId: 'claude', message: 'hi' }),
     });
     expect(resp.status).toBe(202);
-    const payload = await resp.json();
+    const payload = await resp.json() as ChatRunCreateResponse;
     expect(typeof payload.runId).toBe('string');
   });
 });
