@@ -1,8 +1,32 @@
 import type { Express, Request } from 'express';
 import type { PreviewComment } from '@open-design/contracts';
 import type { RouteDeps } from '../../server-context.js';
+import type { BoundWorkspaceResourceMutationGate } from '../../collab/workspace-resource-mutation.js';
 
 export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'projectStore' | 'conversations'> {
+  /**
+   * Gate POST (create/edit)/PATCH status/DELETE on the caller's WORKSPACE
+   * identity, before the author-identity logic below ever runs (spec 04 §10
+   * fix #4/#6 — recvqbklNGDqYY: a comment had zero `enforceWorkspace*`
+   * coverage, the one fully-unguarded write path among the four resource
+   * types). A comment has no workspace binding of its own, so this borrows
+   * the PARENT PROJECT's binding via `getWorkspaceProject`/
+   * `getWorkspaceProjectByProjectId` (both already available on
+   * `ctx.projectStore`) — the same instance `routes/project/index.ts` built
+   * for its own project routes (cross-check against the daemon's own
+   * last-known membership included), threaded down through
+   * `registerProjectConversationRoutes` rather than re-derived here.
+   *
+   * Optional, and a no-op when omitted, so fixtures that only exercise
+   * comment CRUD semantics (most of this file's existing tests, which use
+   * plain non-workspace-bound projects) keep compiling and behaving exactly
+   * as before — an unbound project's comments were never gated either way,
+   * since `enforceWorkspaceResourceMutation` itself passes a `row === null`
+   * lookup straight through regardless of ctx.
+   */
+  enforceWorkspaceProjectMutation?: BoundWorkspaceResourceMutationGate;
+  /** Paired with `enforceWorkspaceProjectMutation` above — see that field. */
+  sendApiError?: (res: any, status: number, code: string, message: string) => unknown;
   /**
    * Resolve the CURRENT caller's workspaceMemberId from the request identity
    * (workspace context). Server-authoritative — used both to stamp the author on
@@ -55,7 +79,7 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
 
 export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectCommentRoutesDeps): void {
   const { db } = ctx;
-  const { updateProject } = ctx.projectStore;
+  const { updateProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const {
     getConversation,
     listPreviewComments,
@@ -66,6 +90,29 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     deletePreviewComment,
     reorderPreviewComment,
   } = ctx.conversations;
+
+  /**
+   * Workspace-identity gate for a comment mutation, borrowing the PARENT
+   * PROJECT's binding (see `enforceWorkspaceProjectMutation` on
+   * `RegisterProjectCommentRoutesDeps` above). Writes the 401/403 response
+   * itself and returns false when denied — callers return immediately on
+   * `false` without running their own author-identity logic. A no-op (always
+   * allows) when the gate wasn't wired up, matching how an unbound project's
+   * comments behaved before this fix existed either way.
+   */
+  function enforceCommentWorkspaceMutation(req: Request, res: any, projectId: string): boolean {
+    if (!ctx.enforceWorkspaceProjectMutation || !ctx.sendApiError) return true;
+    return ctx.enforceWorkspaceProjectMutation(
+      req,
+      res,
+      ctx.sendApiError,
+      getWorkspaceProject,
+      getWorkspaceProjectByProjectId,
+      db,
+      projectId,
+      'writeFiles',
+    );
+  }
 
   /** The caller's workspaceMemberId, or undefined off-team / personal mode. */
   async function resolveCaller(req: Request): Promise<string | undefined> {
@@ -124,6 +171,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     if (!conv || conv.projectId !== req.params.id) {
       return res.status(404).json({ error: 'conversation not found' });
     }
+    if (!enforceCommentWorkspaceMutation(req, res, req.params.id)) return;
     try {
       // Server-authoritative author: stamp the current member id so the stored
       // (and pushed) comment carries who wrote it, rather than trusting the body.
@@ -184,6 +232,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
       if (!conv || conv.projectId !== req.params.id) {
         return res.status(404).json({ error: 'conversation not found' });
       }
+      if (!enforceCommentWorkspaceMutation(req, res, req.params.id)) return;
       try {
         const existing = getPreviewComment(
           db,
@@ -288,6 +337,7 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
       if (!conv || conv.projectId !== req.params.id) {
         return res.status(404).json({ error: 'conversation not found' });
       }
+      if (!enforceCommentWorkspaceMutation(req, res, req.params.id)) return;
       // Load before deleting so we can gate on the author and build the tombstone.
       const existing = getPreviewComment(
         db,

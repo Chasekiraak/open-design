@@ -242,12 +242,22 @@ export function rowToInstalledPlugin(row: DbRow): InstalledPluginRecord {
  * this never makes a pre-existing install vanish out from under an upgrading
  * user — only a plugin installed AFTER this shipped, into a specific
  * workspace, can be hidden from a different one.
+ *
+ * `scope === undefined` (as opposed to `null` or `''`) is a SEPARATE signal
+ * from "no identity": it means the caller — `listInstalledPlugins` called
+ * with no second argument at all — never asked for scoping in the first
+ * place (id resolution, the bundled-scenario scan), so nothing is filtered
+ * regardless of ownership. `null`/`''` means a caller DID ask to be scoped but
+ * has no workspace identity to offer (a signed-out client, a `curl` with no
+ * headers) — spec 04 §10: that must hide a CLAIMED plugin, not show it, or
+ * "no scope" silently becomes "trust everything".
  */
 function pluginVisibleFromWorkspace(db: SqliteDb, pluginId: string, scope: string | null | undefined): boolean {
-  const scopeId = scope?.trim();
-  if (!scopeId) return true;
   const binding = getWorkspaceResourceByResourceId(db, 'plugin', pluginId);
   const ownerId = typeof binding?.workspaceId === 'string' ? binding.workspaceId.trim() : '';
+  if (scope === undefined) return true;
+  const scopeId = scope?.trim();
+  if (!scopeId) return !ownerId;
   if (!ownerId) return true;
   return ownerId === scopeId;
 }
@@ -256,13 +266,17 @@ function pluginVisibleFromWorkspace(db: SqliteDb, pluginId: string, scope: strin
  * `workspaceId` is optional and defaults to the pre-workspace-isolation
  * behavior (every installed plugin, unfiltered) so every existing caller —
  * `od plugin list`, inventory stats, the bundled-scenario scan in server.ts —
- * keeps working unchanged. Only callers that pass a workspaceId (currently
- * `GET /api/plugins`) get the workspace-scoped view.
+ * keeps working unchanged, AS LONG AS THEY OMIT THE ARGUMENT ENTIRELY.
+ * `GET /api/plugins` always passes a second argument (`headerValue(...)`,
+ * which returns `string | null`, never `undefined`), so it always gets the
+ * workspace-scoped view even when the caller has no header — see
+ * `pluginVisibleFromWorkspace`'s doc comment for why `undefined` and `null`
+ * must NOT collapse to the same "unfiltered" behavior here.
  */
 export function listInstalledPlugins(db: SqliteDb, workspaceId?: string | null): InstalledPluginRecord[] {
   const rows = db.prepare(`SELECT * FROM installed_plugins ORDER BY title ASC`).all() as DbRow[];
   const records = rows.map(rowToInstalledPlugin);
-  if (!workspaceId) return records;
+  if (workspaceId === undefined) return records;
   return records.filter((record) => pluginVisibleFromWorkspace(db, record.id, workspaceId));
 }
 

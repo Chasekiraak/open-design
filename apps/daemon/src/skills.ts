@@ -164,16 +164,25 @@ export interface ListSkillsOptions {
  * shipped looks like this) stays visible everywhere. Only a skill imported
  * AFTER this shipped, into a specific workspace, can be hidden from a
  * different one.
+ *
+ * `scope === undefined` is a separate signal from `null`/`''`: undefined
+ * means the caller (system-prompt composition, id resolution, install/import
+ * lookups) never asked to be scoped at all, so nothing is filtered by
+ * ownership. `null`/`''` means a caller DID ask to be scoped but has no
+ * workspace identity to offer (signed-out client, headerless `curl`) — spec
+ * 04 §10: that must hide a CLAIMED skill, not show it, or "no scope" quietly
+ * becomes "trust everything".
  */
 function skillVisibleFromWorkspace(
   db: SqliteDb,
   skillId: string,
   scope: string | null | undefined,
 ): boolean {
-  const scopeId = scope?.trim();
-  if (!scopeId) return true;
   const binding = getWorkspaceResourceByResourceId(db, "skill", skillId);
   const ownerId = typeof binding?.workspaceId === "string" ? binding.workspaceId.trim() : "";
+  if (scope === undefined) return true;
+  const scopeId = scope?.trim();
+  if (!scopeId) return !ownerId;
   if (!ownerId) return true;
   return ownerId === scopeId;
 }
@@ -353,7 +362,13 @@ export async function listSkills(
       }
     }
   }
-  if (!options.db || !options.workspaceId) return out;
+  // `options.workspaceId === undefined` (key omitted entirely) is the
+  // "never asked to be scoped" case every non-`GET /api/skills` caller uses.
+  // A caller that DID pass the key — even as `null`, which `GET /api/skills`
+  // does whenever the request carries no `x-od-workspace-id` header — must
+  // still go through `skillVisibleFromWorkspace` below so a claimed skill is
+  // hidden from a headerless reader instead of silently passing through here.
+  if (!options.db || options.workspaceId === undefined) return out;
   const scopeDb = options.db;
   const scopeId = options.workspaceId;
   // A derived `<parent>:<child>` example card has no `workspace_resources`

@@ -117,6 +117,24 @@ describe('GET /api/skills — workspace visibility scope', () => {
     expect(await fetchSkillIds('ws-scope-owner')).toContain(skillId);
     expect(await fetchSkillIds('ws-scope-other')).not.toContain(skillId);
   });
+
+  // spec 04 §10: the symmetric case plugin/design-system already pin — a
+  // CLAIMED skill must not leak to a caller with no workspace identity at
+  // all (signed-out client, headerless `curl`), not just to a caller scoped
+  // to a DIFFERENT workspace. Before this fix, `GET /api/skills` with no
+  // header fell through to the unfiltered "no scope = everything" branch the
+  // same way plugin/design-system did — "no scope" must not mean "trust
+  // everything" (recvqbeDjAsejl / recvqbklNGDqYY).
+  it('hides a claimed skill from a caller with no workspace header at all', async () => {
+    const skillId = `wsscope-headerless-${Date.now()}`;
+    await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'ws-scope-headerless', 'member-owner');
+
+    expect(await fetchSkillIds()).not.toContain(skillId);
+    // Still visible from its own workspace, and to any workspace for an
+    // unclaimed sibling — this fix narrows one branch, not the whole filter.
+    expect(await fetchSkillIds('ws-scope-headerless')).toContain(skillId);
+  });
 });
 
 describe('DELETE /api/skills/:id — workspace ownership gate', () => {
@@ -190,6 +208,22 @@ describe('DELETE /api/skills/:id — workspace ownership gate', () => {
     bindSkillToWorkspace(skillId, 'skill-gate-5', 'member-owner');
     const db = openDatabase(process.cwd(), { dataDir: process.env.OD_DATA_DIR! });
     updateWorkspaceResource(db, 'skill', 'skill-gate-5', skillId, { visibility: 'team' });
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, { method: 'DELETE' });
+
+    expect(resp.status).toBe(401);
+    expect(existsSync(folder)).toBe(true);
+  });
+
+  // spec 04 §10 fix #3: `enforceWorkspaceResourceMutation`'s null-ctx branch
+  // used to only refuse a `visibility: 'team'` row, letting a headerless
+  // caller delete any BOUND-BUT-`personal` skill (`bindSkillToWorkspace`
+  // above defaults to `visibility: 'personal'`) — a claimed resource is a
+  // claimed resource regardless of who else it's shared with.
+  it('rejects a headerless caller against a personal-visibility (but bound) skill too', async () => {
+    const skillId = `wsgate-personal-headerless-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'skill-gate-6', 'member-owner');
 
     const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, { method: 'DELETE' });
 

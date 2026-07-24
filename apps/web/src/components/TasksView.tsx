@@ -29,6 +29,8 @@ import {
   type AutomationTemplateKind,
 } from './NewAutomationModal';
 import { describeRoutineSchedule } from './routineScheduleLabels';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { listProjects } from '../state/projects';
 
 type ProjectSummary = { id: string; name: string };
 type TemplateFilter =
@@ -380,6 +382,20 @@ function errorMessage(err: unknown): string {
 export function TasksView({ skills = [], designTemplates = [], connectors = [] }: Props) {
   const t = useT();
   const analytics = useAnalytics();
+  // Attaches the same workspace identity headers project reads already carry,
+  // so the daemon's `GET /api/workspaces/:id/projects` returns the caller's
+  // team projects instead of falling back to the no-scope `GET /api/projects`
+  // catalog (spec 04 §10), which now only lists never-claimed projects.
+  // `useWorkspaceContext` is a coalesced read shared across the nav shell, so
+  // calling it again here does not fan out an extra fetch.
+  //
+  // `workspaceView: 'all'` below matters: this picker needs every project the
+  // caller can attach an automation to (own drafts AND team-shared), not just
+  // the `'drafts'` fallback `listProjects` otherwise defaults to when the view
+  // is omitted (that default is right for the Home "Drafts" tab, wrong here —
+  // see `workspaceProjectListViewForRoute` in App.tsx for the same per-surface
+  // view choice made project-browsing routes).
+  const { context: tasksWorkspaceContext } = useWorkspaceContext();
   // P2 page_view page_name=automations. Ref-keyed so re-renders don't
   // double-fire while the user is on the page.
   const pageViewFiredRef = useState<{ fired: boolean }>(() => ({ fired: false }))[0];
@@ -451,24 +467,16 @@ export function TasksView({ skills = [], designTemplates = [], connectors = [] }
           proposalRefreshFailed = true;
           return null;
         });
-      const [rRes, pRes, tJson, proposalJson] = await Promise.all([
+      const [rRes, projectList, tJson, proposalJson] = await Promise.all([
         fetch('/api/routines'),
-        fetch('/api/projects'),
+        listProjects({ workspaceContext: tasksWorkspaceContext, workspaceView: 'all' }),
         templateRequest,
         proposalRequest,
       ]);
       if (!rRes.ok) throw new Error(`routines: ${rRes.status}`);
       const rJson = await rRes.json();
       setRoutines(rJson.routines ?? []);
-      if (pRes.ok) {
-        const pJson = await pRes.json();
-        setProjects(
-          (pJson.projects ?? []).map((p: ProjectSummary) => ({
-            id: p.id,
-            name: p.name,
-          })),
-        );
-      }
+      setProjects(projectList.map((p) => ({ id: p.id, name: p.name })));
       if (tJson) {
         setAutomationCatalog(Array.isArray(tJson.templates) ? tJson.templates : []);
       }
@@ -482,7 +490,11 @@ export function TasksView({ skills = [], designTemplates = [], connectors = [] }
       setLoading(false);
     }
     return { proposalRefreshFailed };
-  }, []);
+    // Re-run (and re-effect below, via the `refresh` identity change) on
+    // workspace switch, not just mount — same as PluginsView/RoutinesSection —
+    // so the project picker reflects the newly active workspace's projects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasksWorkspaceContext?.workspaceId]);
 
   useEffect(() => {
     void refresh();

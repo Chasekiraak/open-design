@@ -561,6 +561,7 @@ import {
   listMessages,
   listPreviewComments,
   listProjects,
+  listUnboundProjects,
   listTeamWorkspaceProjectShares,
   listWorkspaceProjects,
   listRoutines,
@@ -2659,6 +2660,23 @@ export async function startServer({
    * writes it before anything else reads), and otherwise the workspace context
    * — the same authority every other workspace surface uses — answers.
    *
+   * BUT the pin must not win unconditionally (spec 04 §10 fix #5): `velaLogout`
+   * (`routes/vela.ts`, `forgetVelaLogin`) never clears this pin file — only "B
+   * confirmed this member was actually removed" does
+   * (`resolvePinnedWorkspace`/`.clear()` in `vela-workspace-context.ts`). A pin
+   * with no live session behind it is unverifiable stale data from whoever was
+   * last signed in, not a scope this reader has any standing to claim — it
+   * must not outrank the daemon's own "no scope" answer. Session liveness is
+   * read via `collab.workspaceContext.lastKnown()` — the SAME zero-network,
+   * synchronous, source-agnostic cache `enforceWorkspaceProjectMutation`'s own
+   * membership cross-check already relies on (`collab/workspace-context.ts`) —
+   * rather than `readVelaControlApiContext`, because that helper only
+   * recognizes a REAL vela login: the tools-dev/demo dev-stub provider
+   * (`OD_WORKSPACE_CONTEXT_SOURCE` unset, `createDevWorkspaceContextProvider`)
+   * has no vela config to read at all, so gating on it would make every design
+   * system in every local dev/demo run look unclaimed — silently disabling
+   * this filter everywhere except a real production vela session.
+   *
    * The context read is a vela round trip, so it is memoized briefly. The value
    * only changes on a switch, and a switch writes the pin, which takes priority
    * and bypasses this cache entirely.
@@ -2666,6 +2684,11 @@ export async function startServer({
   let cachedWorkspaceScope: { id: string | null; at: number } | null = null;
   const WORKSPACE_SCOPE_TTL_MS = 10_000;
   async function resolveDesignSystemWorkspaceScope(): Promise<string | null> {
+    // No live session confirmed yet (never signed in, signed out, or this
+    // daemon process hasn't resolved `.current()` even once) — nothing here is
+    // verifiable, so skip the pin entirely rather than trust stale leftover
+    // state from a previous identity.
+    if (!collab.workspaceContext.lastKnown?.()) return null;
     const pinned = getActiveWorkspaceId()?.trim();
     if (pinned) return pinned;
     if (cachedWorkspaceScope && Date.now() - cachedWorkspaceScope.at < WORKSPACE_SCOPE_TTL_MS) {
@@ -4188,6 +4211,7 @@ export async function startServer({
     normalizeProjectDisplayStatus,
     composeProjectDisplayStatus,
     listProjects,
+    listUnboundProjects,
   };
   const projectEventDeps = { subscribeFileEvents, activeProjectEventSinks };
   const importDeps = { importClaudeDesignZip, projectDir, detectEntryFile };

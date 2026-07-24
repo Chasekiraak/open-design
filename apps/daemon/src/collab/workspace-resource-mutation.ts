@@ -233,6 +233,27 @@ function workspaceResourceMutationAllowed(
  * by a caller with no such cache wired up — the gate then behaves exactly as
  * before, trusting the header alone.
  */
+/**
+ * The shape `createEnforceWorkspaceProjectMutation` (routes/project/index.ts)
+ * returns: `enforceWorkspaceResourceMutation` with `resourceType` (and, for
+ * project, the last-known-membership cross-check) already bound. Exported so a
+ * resource type with no workspace binding of its own — a project comment — can
+ * borrow another resource type's ALREADY-BUILT gate instance instead of
+ * re-deriving one, and so the two ends of that hand-off (the builder in
+ * routes/project/index.ts, the consumer in routes/project/comments.ts) share
+ * one type instead of drifting.
+ */
+export type BoundWorkspaceResourceMutationGate = (
+  req: any,
+  res: Response,
+  sendApiError: (res: Response, status: number, code: string, message: string) => unknown,
+  getWorkspaceResource: (db: unknown, workspaceId: string, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  getWorkspaceResourceByResourceId: (db: unknown, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  db: unknown,
+  resourceId: string,
+  capability: WorkspaceResourceMutationCapability,
+) => boolean;
+
 export function enforceWorkspaceResourceMutation(
   resourceType: string,
   req: any,
@@ -251,11 +272,16 @@ export function enforceWorkspaceResourceMutation(
     // client that just logged out (the frontend only attaches these headers
     // while `workspaceContext` is non-null). Either way there is no identity
     // to check against a team. That's fine for a resource this daemon has
-    // never bound to a workspace, or one bound as `personal` — but a resource
-    // bound `team` requires proof of membership the request doesn't carry;
-    // treat it the same as `'missing'` rather than granting the mutation.
+    // never bound to a workspace at all (`row` is null/undefined) — but ANY
+    // bound resource, personal OR team, requires proof of membership the
+    // request doesn't carry. A `personal` binding is not "safe to trust a
+    // headerless caller with" — it just means the resource isn't SHARED, not
+    // that it isn't OWNED; a signed-out / different-workspace caller has no
+    // more standing over someone else's personal draft than over a team
+    // resource (recvqbeDjAsejl / recvqbklNGDqYY, spec 04 §10). Treat both the
+    // same as `'missing'` rather than granting the mutation.
     const row = getWorkspaceResourceByResourceId(db, resourceId);
-    if (row && row.visibility === 'team') {
+    if (row) {
       sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
       return false;
     }

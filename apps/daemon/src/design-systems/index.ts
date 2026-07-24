@@ -390,20 +390,31 @@ export async function listDesignSystems(
  * Whether a design system claimed by `owner` should be listed while `scope` is
  * the active workspace.
  *
- * Both halves of the "unknown" case resolve to VISIBLE, and for different
- * reasons. No `scope` means the caller asked for the unscoped catalog (id
- * resolution, install/import lookups), which must never hide anything. No
- * `owner` means the system predates workspace stamping, and an upgrading user
- * must not watch their library empty out. Only a positive disagreement — this
- * system belongs to a DIFFERENT workspace — hides it.
+ * `scope === undefined` (the `workspaceId` option key OMITTED, not merely
+ * empty) means the caller asked for the truly unscoped catalog — id
+ * resolution, install/import lookups, and (critically) `createUserDesignSystem`/
+ * `updateUserDesignSystem`/`linkUserDesignSystemProject` re-reading the system
+ * they just wrote by id — which must never hide anything, or writing a system
+ * claimed by a workspace would make `listDesignSystems(...).find(...)` fail to
+ * find what was just written (a real regression this fix must not introduce).
+ *
+ * `scope` present but empty (`null`/`''`) is a DIFFERENT case: a caller that
+ * DID ask to be scoped — `GET /api/design-systems` with no verified vela
+ * session — but has no workspace identity to offer. Spec 04 §10: that must
+ * hide a CLAIMED system, not show it, or "no scope" quietly becomes "trust
+ * everything". No `owner` still means VISIBLE either way — the system
+ * predates workspace stamping, and an upgrading user must not watch their
+ * library empty out. Only a positive disagreement (claimed elsewhere, scoped
+ * caller with a different or no identity) hides it.
  */
 function designSystemVisibleFromWorkspace(
   owner: string | undefined,
   scope: string | null | undefined,
 ): boolean {
+  if (scope === undefined) return true;
   const scopeId = scope?.trim();
-  if (!scopeId) return true;
   const ownerId = owner?.trim();
+  if (!scopeId) return !ownerId;
   if (!ownerId) return true;
   return ownerId === scopeId;
 }

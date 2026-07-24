@@ -98,6 +98,34 @@ describe('enforceWorkspaceResourceMutation', () => {
     expect(calls).toEqual([{ status: 401, code: 'WORKSPACE_CONTEXT_REQUIRED', message: 'workspace context is required' }]);
   });
 
+  // spec 04 §10 fix #3 (recvqbeDjAsejl / recvqbklNGDqYY): before this fix, the
+  // null-ctx branch only refused a `visibility: 'team'` row and let ANY
+  // `personal` row through unconditionally — so a signed-out caller (or a
+  // plain `curl` with no workspace headers) could still mutate someone else's
+  // personal-but-CLAIMED resource. A claimed resource is a claimed resource
+  // regardless of whether it's also shared with a team; only a genuinely
+  // UNBOUND resource (no row at all — the case above already covers this)
+  // should pass a headerless caller through.
+  it('rejects a headerless caller against a personal-visibility (but bound) resource', () => {
+    const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({
+      'plugin-a': { workspaceId: 'ws-1', visibility: 'personal', resourceState: 'active', createdByWorkspaceMemberId: 'member-owner' },
+    });
+    const { calls, sendApiError } = spySendApiError();
+    const allowed = enforceWorkspaceResourceMutation(
+      'plugin',
+      fakeReq(),
+      fakeRes(),
+      sendApiError,
+      getWorkspaceResource,
+      getWorkspaceResourceByResourceId,
+      {},
+      'plugin-a',
+      'delete',
+    );
+    expect(allowed).toBe(false);
+    expect(calls).toEqual([{ status: 401, code: 'WORKSPACE_CONTEXT_REQUIRED', message: 'workspace context is required' }]);
+  });
+
   it('rejects a caller carrying only a partial workspace header pair', () => {
     const { getWorkspaceResource, getWorkspaceResourceByResourceId } = makeLookups({});
     const { calls, sendApiError } = spySendApiError();

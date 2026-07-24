@@ -126,13 +126,22 @@ export function createDesignSystemServerServices({
    * `listAllDesignSystems` below) — only `GET /api/skills` passes it. Callers
    * that resolve a skill BY ID (system-prompt composition, install/import
    * lookups, `/api/skills/:id/example`) must keep omitting it.
+   *
+   * Checking `options.workspaceId === undefined` (not just falsy) matters:
+   * `GET /api/skills` always passes the key, with `null` whenever the request
+   * carries no `x-od-workspace-id` header (headerValue never returns
+   * `undefined`) — that request DID ask to be scoped, just with no identity,
+   * and must still reach `listSkills`'s workspace filter so a claimed skill is
+   * hidden from it (spec 04 §10), not silently fall through to the unscoped
+   * branch the way a plain `options.workspaceId ? … : …` truthiness check
+   * would.
    */
   async function listAllSkills(options: { workspaceId?: string | null } = {}) {
     const db = getDb?.();
-    return skills.listSkills(
-      roots.SKILL_ROOTS,
-      db && options.workspaceId ? { db, workspaceId: options.workspaceId } : undefined,
-    );
+    if (!db || options.workspaceId === undefined) {
+      return skills.listSkills(roots.SKILL_ROOTS);
+    }
+    return skills.listSkills(roots.SKILL_ROOTS, { db, workspaceId: options.workspaceId });
   }
 
   async function listAllDesignTemplates() {
@@ -151,6 +160,14 @@ export function createDesignSystemServerServices({
    * that resolve a system BY ID — project validation, install/import lookups —
    * must keep omitting it, or a project would stop finding its own design
    * system whenever the user is working from another workspace.
+   *
+   * Forwarding the key whenever it is DEFINED (not just truthy) matters:
+   * `GET /api/design-systems` always passes `workspaceId`, with `null`
+   * whenever there is no verified vela session — that request DID ask to be
+   * scoped, just with no identity, and must still reach
+   * `designSystemVisibleFromWorkspace`'s filter so a claimed system is hidden
+   * from it (spec 04 §10) instead of silently landing in the unscoped branch a
+   * plain `options.workspaceId ? … : …` truthiness check would take.
    */
   async function listAllDesignSystems(options: { workspaceId?: string | null } = {}) {
     const builtIn = (await designSystems.listDesignSystems(paths.DESIGN_SYSTEMS_DIR)).map((s) => ({
@@ -166,7 +183,7 @@ export function createDesignSystemServerServices({
         source: 'user',
         isEditable: true,
         defaultStatus: 'draft',
-        ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+        ...(options.workspaceId !== undefined ? { workspaceId: options.workspaceId } : {}),
       });
     } catch {
       // User directory may not exist yet or be unreadable.

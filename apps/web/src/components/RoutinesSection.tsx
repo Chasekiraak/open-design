@@ -16,6 +16,8 @@ import { localizeRunFailureReason } from '../i18n/runErrors';
 import type { Dict } from '../i18n/types';
 import { useAnalytics } from '../analytics/provider';
 import { trackAutomationsClick } from '../analytics/events';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { listProjects } from '../state/projects';
 
 // Shared translator signature: every sub-component in this file is module-scoped,
 // so `t` from `useT()` is threaded down as a prop rather than re-hooked.
@@ -463,6 +465,20 @@ function RunHistory({
 export function RoutinesSection({ onClose }: RoutinesSectionProps) {
   const t = useT();
   const analytics = useAnalytics();
+  // Attaches the same workspace identity headers project reads already carry,
+  // so the daemon's `GET /api/workspaces/:id/projects` returns the caller's
+  // team projects instead of falling back to the no-scope `GET /api/projects`
+  // catalog (spec 04 §10), which now only lists never-claimed projects.
+  // `useWorkspaceContext` is a coalesced read shared across the nav shell, so
+  // calling it again here does not fan out an extra fetch.
+  //
+  // `workspaceView: 'all'` below matters: this picker needs every project the
+  // caller can attach an automation to (own drafts AND team-shared), not just
+  // the `'drafts'` fallback `listProjects` otherwise defaults to when the view
+  // is omitted (that default is right for the Home "Drafts" tab, wrong here —
+  // see `workspaceProjectListViewForRoute` in App.tsx for the same per-surface
+  // view choice made project-browsing routes).
+  const { context: routinesWorkspaceContext } = useWorkspaceContext();
   const fireAutomation = (element: 'new_automation' | 'create' | 'save' | 'cancel' | 'run_now' | 'edit' | 'pause' | 'resume' | 'delete' | 'history') => {
     trackAutomationsClick(analytics.track, { page_name: 'automations', area: 'automations', element });
   };
@@ -488,22 +504,14 @@ export function RoutinesSection({ onClose }: RoutinesSectionProps) {
 
   const refresh = async () => {
     try {
-      const [rRes, pRes] = await Promise.all([
+      const [rRes, projectList] = await Promise.all([
         fetch('/api/routines'),
-        fetch('/api/projects'),
+        listProjects({ workspaceContext: routinesWorkspaceContext, workspaceView: 'all' }),
       ]);
       if (!rRes.ok) throw new Error(`routines: ${rRes.status}`);
       const rJson = await rRes.json();
       setRoutines(rJson.routines ?? []);
-      if (pRes.ok) {
-        const pJson = await pRes.json();
-        setProjects(
-          (pJson.projects ?? []).map((p: ProjectSummary) => ({
-            id: p.id,
-            name: p.name,
-          })),
-        );
-      }
+      setProjects(projectList.map((p) => ({ id: p.id, name: p.name })));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -514,7 +522,11 @@ export function RoutinesSection({ onClose }: RoutinesSectionProps) {
 
   useEffect(() => {
     void refresh();
-  }, []);
+    // Re-run on workspace switch (not just mount), same as PluginsView, so the
+    // project picker reflects the newly active workspace's projects instead of
+    // staying stuck on whatever was visible before the context resolved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routinesWorkspaceContext?.workspaceId]);
 
   const projectsById = useMemo(() => {
     const map = new Map<string, string>();

@@ -1421,7 +1421,6 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     ensureWorkspaceProject,
     getWorkspaceProject,
     getWorkspaceProjectByProjectId,
-    listWorkspaceProjectBindings,
     listWorkspaceProjects,
     updateWorkspaceProject,
     rebindWorkspaceProject,
@@ -1431,7 +1430,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   const { writeProjectFile, readProjectFile, ensureProject, listFiles, listTabs, setTabs, resolveProjectDir } = ctx.projectFiles;
   const { insertConversation } = ctx.conversations;
   const { getTemplate, listTemplates, deleteTemplate, insertTemplate, findTemplateByNameAndProject, updateTemplate } = ctx.templates;
-  const { listLatestProjectRunStatuses, listProjectsAwaitingInput, normalizeProjectDisplayStatus, composeProjectDisplayStatus, listProjects } = ctx.status;
+  const { listLatestProjectRunStatuses, listProjectsAwaitingInput, normalizeProjectDisplayStatus, composeProjectDisplayStatus, listProjects, listUnboundProjects } = ctx.status;
   const { subscribeFileEvents, activeProjectEventSinks } = ctx.events;
   const { randomId } = ctx.ids;
   const { validateProjectDesignSystemId, validateProjectSkillId } = ctx.validation;
@@ -2166,19 +2165,25 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           }
         }
       }
-      // The one workspace each project belongs to, so an unscoped reader can
-      // still tell whose draft it is holding. Read in bulk: this is the home
-      // page's list endpoint, and a per-project lookup would be N+1. A project
-      // missing here is awaiting adoption — never a claim that it belongs
-      // nowhere. See collab/workspace-project-home.ts.
-      const workspaceBindings = listWorkspaceProjectBindings(db);
+      // This is the NO-SCOPE catalog: no `x-od-workspace-*` headers are read
+      // here at all, so every unbound (never-claimed) project must be visible
+      // (pre-workspace-isolation compatibility) while every project some
+      // workspace HAS claimed must not leak to a caller with no identity to
+      // check it against — a signed-out client, a removed member, or a plain
+      // `curl` (spec 04 §10: "no scope" must not mean "trust everything").
+      // `listUnboundProjects` is the join that enforces this; a workspace-
+      // scoped caller uses `GET /api/workspaces/:id/projects` instead, which
+      // has its own ctx-gated membership check. Every row here is, by
+      // construction, unbound — so `workspaceId` is always `null`; no binding
+      // lookup needed (a `listWorkspaceProjectBindings` scan here would only
+      // ever resolve to misses).
       /** @type {import('@open-design/contracts').ProjectsResponse} */
       const body = {
-        projects: listProjects(db)
+        projects: listUnboundProjects(db)
           .filter((project: any) => projectVisibleForLocations(project, locations))
           .map((project: any) => ({
             ...project,
-            workspaceId: workspaceBindings.get(project.id) ?? null,
+            workspaceId: null,
             status: brandAwareProjectStatus(
               project,
               composeProjectDisplayStatus(
@@ -3348,7 +3353,16 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     }
   });
 
-  registerProjectConversationRoutes(app, ctx);
+  // Comments have no workspace binding of their own — thread down the SAME
+  // `enforceWorkspaceProjectMutation` instance (built above with the
+  // last-known-membership cross-check already wired) so a comment's mutation
+  // gate matches its parent project's exactly, instead of comments quietly
+  // shipping a second, weaker copy (spec 04 §10 fix #4/#6).
+  registerProjectConversationRoutes(app, {
+    ...ctx,
+    enforceWorkspaceProjectMutation,
+    sendApiError,
+  });
 
   // ---- Tabs -----------------------------------------------------------------
 
