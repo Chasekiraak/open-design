@@ -651,6 +651,48 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(legacy).not.toContain('**End with a purposeful closing slide.**');
   });
 
+  it('adds presentation presence without reducing visual value to comprehension alone', () => {
+    const directives = [
+      renderDeckPromptDirective('outcome_only', 'filesystem'),
+      renderDeckPromptDirective('current_outcome', 'filesystem'),
+    ];
+    const legacy = renderDeckPromptDirective('current', 'filesystem');
+    const composedDeck = composeSystemPrompt({
+      metadata: { kind: 'deck' } as any,
+      deckPromptVariant: 'outcome_only',
+    });
+    const composedNonDeck = composeSystemPrompt({
+      metadata: { kind: 'other' } as any,
+    });
+
+    for (const directive of directives) {
+      expect(directive.match(/## Presentation presence/g)).toHaveLength(1);
+      expect(directive).toContain(
+        '**Design for live delivery, not a document or dashboard.**',
+      );
+      expect(directive).toContain('**Commit to a visual thesis.**');
+      expect(directive).toContain(
+        '**Give each narrative act a memorable anchor.**',
+      );
+      expect(directive).toContain(
+        '**Prefer visual evidence over summary UI.**',
+      );
+      expect(directive).toContain(
+        'comprehension, emphasis, pacing, atmosphere, or brand recognition',
+      );
+      expect(directive).toContain(
+        '**Require a shareable visual payoff.**',
+      );
+      expect(directive).not.toContain(
+        'If removing it does not reduce comprehension, remove it.',
+      );
+    }
+
+    expect(legacy).not.toContain('## Presentation presence');
+    expect(composedDeck).toContain('## Presentation presence');
+    expect(composedNonDeck).not.toContain('## Presentation presence');
+  });
+
   it('renders the two experimental deck directive variants from shared blocks', () => {
     const currentWithOutcome = renderDeckPromptDirective(
       'current_outcome',

@@ -593,7 +593,15 @@ Apply these as result criteria for the deck and for every slide. They constrain 
 8. **Create one visual center of gravity.** Each slide needs a dominant element — a statement, number, chart, product view, or diagram. Supporting elements must reinforce it rather than compete with it.
 9. **Vary composition only for narrative reasons.** Keep a coherent deck-wide system. Change surface, density, or layout when the story changes mode — opening, evidence, transition, reveal, or close — never by slide index or for arbitrary variety.
 10. **Preserve epistemic honesty.** Distinguish sourced facts, user-provided facts, assumptions, and recommendations. Never invent metrics, traction, quotes, customers, or research to make a slide look complete; use an explicit placeholder or qualitative framing when evidence is missing.
-11. **Make every visual element earn its place.** Every line, border, container, icon, and decoration must clarify hierarchy, grouping, comparison, scale, or meaning. If removing it does not reduce comprehension, remove it. Never stack multiple boundaries to express the same separation; prefer whitespace, alignment, type, and surface before adding boxes or rules.
+
+## Presentation presence
+
+- **Design for live delivery, not a document or dashboard.** A slide must work while the audience listens: use the full canvas for a presentation composition, not a narrow web-content column or a sequence of UI panels.
+- **Commit to a visual thesis.** Derive a coherent type character, palette, image treatment, grid, and signature move from the brand, subject, and audience. Consistency must not collapse into identical pages.
+- **Give each narrative act a memorable anchor.** Use an appropriate reveal or proof — such as a decisive statement, product view, key number, chart, contrast, case, or image — so the story has visual peaks rather than only workhorse pages.
+- **Prefer visual evidence over summary UI.** Show products as product views, quantities as charts, mechanisms as diagrams, change as comparison, and customer value as a case. Use card grids only for genuinely parallel items, never as the default layout.
+- **Make every visual element earn its place.** Every line, border, container, icon, image, and decorative device must contribute to comprehension, emphasis, pacing, atmosphere, or brand recognition. Remove arbitrary chrome and repeated boundaries; purposeful visual expression is valid even when it does not encode data.
+- **Require a shareable visual payoff.** Before handoff, identify slides whose screenshot communicates a clear point with finished visual expression. If the deck has no such moment, redesign it before delivery.
 
 Only when relevant:
 
