@@ -69,10 +69,11 @@ const allowedConsumers = new Map<string, string>([
     "apps/daemon/tests/project-classifiers.test.ts",
     "file-kind classifier input; the LICENSE literal is never resolved or opened",
   ],
-  [
-    "apps/daemon/tests/runtimes/trae-cli.test.ts",
-    "reads docs/agent-adapters.md from the repository, but this test file is not selected by any ci.yml daemon-test lane",
-  ],
+  // NOTE: apps/daemon/tests/runtimes/trae-cli.test.ts is a conditional
+  // exception added in checkCertainExemptConsumption(), not here: it genuinely
+  // reads docs/agent-adapters.md, and its exemption holds only while the
+  // ci.yml daemon lane runs nothing but project-watchers.test.ts. See
+  // DAEMON_LANE_SINGLE_FILE_NEEDLE below.
   [
     "apps/web/tests/components/ChatPane.imported-folder-artifacts.test.tsx",
     "imported-project artifact fixture paths rendered from in-memory test data",
@@ -102,6 +103,18 @@ const allowedConsumers = new Map<string, string>([
     "behavior fixtures for this very check: source snippets passed to the collector as data, never resolved or opened",
   ],
 ]);
+
+// apps/daemon/tests/runtimes/trae-cli.test.ts genuinely consumes repository
+// docs (docs/agent-adapters.md coverage assertion). It is tolerable only
+// because the ci.yml daemon lane currently executes a single test file that is
+// not it. That wiring fact is this needle; if the daemon lane ever widens, the
+// exception silently disappears and the guard reports the read, forcing the
+// reclassification (docs → daemon scope rule, or relocating the consistency
+// test to e2e/tests/) instead of letting the entry rot.
+const DAEMON_LANE_SINGLE_FILE_NEEDLE =
+  "run: pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/project-watchers.test.ts";
+
+const CONDITIONAL_CONSUMER = "apps/daemon/tests/runtimes/trae-cli.test.ts";
 
 type ConsumptionViolation = {
   filePath: string;
@@ -205,9 +218,14 @@ async function collectCheckedFiles(directory: string): Promise<string[]> {
 export async function checkCertainExemptConsumption(): Promise<boolean> {
   const violations: ConsumptionViolation[] = [];
 
+  const ciWorkflow = await readFile(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  const conditionallyAllowed = ciWorkflow.includes(DAEMON_LANE_SINGLE_FILE_NEEDLE)
+    ? new Set([CONDITIONAL_CONSUMER])
+    : new Set<string>();
+
   for (const root of checkedRoots) {
     for (const repositoryPath of await collectCheckedFiles(path.join(repoRoot, root))) {
-      if (allowedConsumers.has(repositoryPath)) continue;
+      if (allowedConsumers.has(repositoryPath) || conditionallyAllowed.has(repositoryPath)) continue;
       const source = await readFile(path.join(repoRoot, repositoryPath), "utf8");
       violations.push(...collectCertainExemptConsumptionFromSource(repositoryPath, source));
     }
