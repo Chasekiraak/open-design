@@ -48,11 +48,9 @@ import {
   BROWSER_PAGE_ARCHIVE_INDEX_FILE,
   BROWSER_PAGE_ARCHIVE_SCHEMA,
   BROWSER_SERIALIZE_HTML_SCRIPT,
-  BROWSER_VIEWPORT_PRESETS,
   type BrowserPageArchiveCapture,
   type BrowserPageArchiveManifest,
   type BrowserElementSnapshot,
-  type BrowserViewportId,
   browserApplyStyleScript,
   browserApplyTextScript,
   browserCommentFilePath,
@@ -936,7 +934,6 @@ export function DesignBrowserPanel({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [browserUseOpen, setBrowserUseOpen] = useState(false);
-  const [viewport, setViewport] = useState<BrowserViewportId>('desktop');
   const [isLoading, setIsLoading] = useState(false);
   const [webviewNode, setWebviewNode] = useState<WebviewElement | null>(null);
   const [drawOverlayOpen, setDrawOverlayOpen] = useState(false);
@@ -2385,14 +2382,6 @@ export function DesignBrowserPanel({
       commenting
     />
   ) : null;
-  const viewportPreset =
-    BROWSER_VIEWPORT_PRESETS.find((preset) => preset.id === viewport) ?? BROWSER_VIEWPORT_PRESETS[0]!;
-  const viewportStyle = viewportPreset.width
-    ? ({
-        '--db-viewport-width': `${viewportPreset.width}px`,
-        '--db-viewport-height': `${viewportPreset.height}px`,
-      } as CSSProperties)
-    : undefined;
   const statusBaseText = typeof statusMessage === 'string' ? statusMessage : statusMessage?.message ?? '';
   const statusText = archiveSaving && statusBaseText
     ? `${statusBaseText} · ${formatBrowserSnapshotElapsed(archiveElapsedSeconds)}`
@@ -2431,12 +2420,6 @@ export function DesignBrowserPanel({
           >
             <Icon name={isLoading ? 'close' : 'reload'} size={isLoading ? 16 : 15} />
           </IconTooltipButton>
-          <BrowserViewportControls
-            viewport={viewport}
-            onViewport={setViewport}
-            disabled={isBlank}
-            t={t}
-          />
         </div>
         <form className="db-address-form" onSubmit={handleAddressSubmit}>
           <BrowserSiteIcon
@@ -2642,7 +2625,7 @@ export function DesignBrowserPanel({
         </div>
       ) : null}
       {browserPreviewImageModal}
-      <div className={`db-content db-content-viewport-${isBlank ? 'desktop' : viewport}`}>
+      <div className="db-content">
         <PreviewDrawOverlay
           active={drawOverlayOpen}
           captureTarget={activeCommentTarget ? browserTargetFromSnapshot(activeCommentTarget) : null}
@@ -2655,10 +2638,7 @@ export function DesignBrowserPanel({
           sendDisabled={sendDisabled}
           sendDisabledReason={t('chat.annotationSendDisabledReason')}
         >
-          <div
-            className={`db-viewport-frame db-viewport-${isBlank ? 'desktop' : viewport}`}
-            style={isBlank ? undefined : viewportStyle}
-          >
+          <div className="db-viewport-frame">
             {isBlank ? (
               <DesignBrowserStart
                 onNavigate={navigateTo}
@@ -2736,93 +2716,6 @@ function IconTooltipButton({
         {children}
       </button>
     </span>
-  );
-}
-
-function browserViewportIcon(viewport: BrowserViewportId): string {
-  if (viewport === 'tablet') return 'tablet-line';
-  if (viewport === 'mobile') return 'smartphone-line';
-  return 'computer-line';
-}
-
-function viewportLabel(viewport: BrowserViewportId, t: ReturnType<typeof useT>): string {
-  if (viewport === 'tablet') return t('designBrowser.viewport.tablet');
-  if (viewport === 'mobile') return t('designBrowser.viewport.mobile');
-  return t('designBrowser.viewport.desktop');
-}
-
-function viewportTitle(viewport: BrowserViewportId, t: ReturnType<typeof useT>): string {
-  if (viewport === 'tablet') return t('designBrowser.viewport.tabletTitle');
-  if (viewport === 'mobile') return t('designBrowser.viewport.mobileTitle');
-  return t('designBrowser.viewport.desktopTitle');
-}
-
-function BrowserViewportControls({
-  disabled,
-  onViewport,
-  viewport,
-  t,
-}: {
-  disabled?: boolean;
-  onViewport: (viewport: BrowserViewportId) => void;
-  viewport: BrowserViewportId;
-  t: ReturnType<typeof useT>;
-}) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div className="db-viewport-switcher" ref={menuRef}>
-      <IconTooltipButton
-        label={viewportTitle(viewport, t)}
-        disabled={disabled}
-        className={open ? 'is-active' : ''}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <RemixIcon name={browserViewportIcon(viewport)} size={14} className="db-viewport-icon" />
-        <span className="db-viewport-label">{viewportLabel(viewport, t)}</span>
-        <RemixIcon name="arrow-down-s-line" size={14} />
-      </IconTooltipButton>
-      {open ? (
-        <div className="db-viewport-menu" role="listbox" aria-label={t('designBrowser.viewportAria')}>
-          {BROWSER_VIEWPORT_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              role="option"
-              aria-selected={preset.id === viewport}
-              className={preset.id === viewport ? 'active' : ''}
-              onClick={() => {
-                onViewport(preset.id);
-                setOpen(false);
-              }}
-            >
-              <span className="db-viewport-menu-label">
-                <RemixIcon name={browserViewportIcon(preset.id)} size={14} />
-                <span>{viewportLabel(preset.id, t)}</span>
-              </span>
-              {preset.id === viewport ? <Icon name="check" size={14} /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 

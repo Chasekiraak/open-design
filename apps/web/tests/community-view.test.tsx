@@ -150,7 +150,7 @@ describe('CommunityView catalogue source', () => {
   it('builds the grid from GET /api/plugins', async () => {
     await renderCommunity();
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/plugins');
+    expect(fetchMock).toHaveBeenCalledWith('/api/plugins', undefined);
 
     // Slides leads, and it carries exactly the two deck plugins the daemon
     // served — not a bundled demo array.

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../../src/App';
+import type { Route } from '../../src/router';
 import type { AppConfig, Project } from '../../src/types';
 import {
   fetchComposioConfigFromDaemon,
@@ -29,12 +30,14 @@ import { useIframeKeepAlivePool } from '../../src/components/IframeKeepAlivePool
 
 const evictProjectMock = vi.fn();
 const evictMatchingMock = vi.fn();
-const useRouteMock = vi.fn(() => ({
+const PROJECT_ROUTE: Route = {
   kind: 'project' as const,
   projectId: 'project-1',
   conversationId: null,
   fileName: null,
-}));
+};
+const SETTINGS_ROUTE: Route = { kind: 'home', view: 'settings' };
+const useRouteMock = vi.fn<() => Route>(() => PROJECT_ROUTE);
 
 vi.mock('../../src/router', () => ({
   navigate: vi.fn(),
@@ -248,6 +251,7 @@ const project: Project = {
 
 describe('App preview keep-alive invalidation', () => {
   beforeEach(() => {
+    useRouteMock.mockReturnValue(PROJECT_ROUTE);
     mockedUseIframeKeepAlivePool.mockReturnValue({
       attach: vi.fn(),
       release: vi.fn(),
@@ -307,9 +311,11 @@ describe('App preview keep-alive invalidation', () => {
   // mutation so the pool drops any project that depends on the affected
   // id — active or parked — regardless of which summary fields moved.
   it('evicts pool entries for projects that use a changed skill, even on body-only edits', async () => {
-    render(<App />);
+    const view = render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    useRouteMock.mockReturnValue(SETTINGS_ROUTE);
+    view.rerender(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Trigger skill body change' }));
 
     await waitFor(() => {
@@ -328,9 +334,11 @@ describe('App preview keep-alive invalidation', () => {
   });
 
   it('does not evict pool entries for projects that use a different skill', async () => {
-    render(<App />);
+    const view = render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    useRouteMock.mockReturnValue(SETTINGS_ROUTE);
+    view.rerender(<App />);
     fireEvent.click(
       await screen.findByRole('button', { name: 'Trigger unrelated skill change' }),
     );
@@ -349,9 +357,11 @@ describe('App preview keep-alive invalidation', () => {
   });
 
   it('evicts pool entries for projects that use a changed design system', async () => {
-    render(<App />);
+    const view = render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    useRouteMock.mockReturnValue(SETTINGS_ROUTE);
+    view.rerender(<App />);
     fireEvent.click(
       await screen.findByRole('button', { name: 'Trigger design system change' }),
     );

@@ -46,8 +46,8 @@ describe('workspace settings shell gating (D4.3)', () => {
     expect(canShowWorkspaceSettings(teamContext({ role: 'member' }))).toBe(true);
   });
 
-  it('hides the region off-team (personal / null / no context)', () => {
-    expect(canShowWorkspaceSettings(teamContext({ role: 'owner', workspaceType: 'personal' }))).toBe(false);
+  it('shows the region for a personal workspace but hides it without context', () => {
+    expect(canShowWorkspaceSettings(teamContext({ role: 'owner', workspaceType: 'personal' }))).toBe(true);
     expect(canShowWorkspaceSettings(null)).toBe(false);
     expect(canShowWorkspaceSettings(undefined)).toBe(false);
   });
