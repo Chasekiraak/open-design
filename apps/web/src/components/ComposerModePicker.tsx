@@ -204,19 +204,24 @@ export function ComposerModePicker({
   const activeMode = selected ? MODES.find((m) => m.id === selected) ?? null : null;
   const triggerIcon = activeMode ? activeMode.icon : ICON_DEFAULT;
   const activeName = activeMode ? t(activeMode.nameKey) : null;
+  const modeTooltip = activeName
+    ? t('chat.modePicker.current', { name: activeName })
+    : t('chat.modePicker.choose');
 
   return (
     <div className={`composer-mode${activeMode ? ' is-selected' : ''}`} ref={rootRef}>
       <button
         ref={triggerRef}
         type="button"
-        className={`composer-mode__trigger${open ? ' is-open' : ''}${selected ? ' is-selected' : ''}`}
+        className={`composer-mode__trigger od-tooltip${open ? ' is-open' : ''}${selected ? ' is-selected' : ''}`}
         data-testid="composer-mode-trigger"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={activeName ? t('chat.modePicker.current', { name: activeName }) : t('chat.modePicker.choose')}
-        title={activeName ?? t('chat.modePicker.mode')}
+        aria-label={modeTooltip}
+        title={modeTooltip}
+        data-tooltip={modeTooltip}
+        data-tooltip-placement="top"
       >
         <span className="composer-mode__icon" aria-hidden>{triggerIcon}</span>
         {activeName && !labelHidden ? (

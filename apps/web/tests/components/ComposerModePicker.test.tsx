@@ -86,7 +86,10 @@ describe('ComposerModePicker', () => {
     // (design was and remains the mode), so no redundant change fires.
     fireEvent.click(screen.getByTestId('composer-mode-clear'));
     expect(onModeChange).not.toHaveBeenCalled();
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    const trigger = screen.getByTestId('composer-mode-trigger');
+    expect(trigger.getAttribute('aria-label')).toBe('Choose a mode');
+    expect(trigger.getAttribute('data-tooltip')).toBe('Choose a mode');
+    expect(trigger.className).toContain('od-tooltip');
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
 
     // …and picking 设计 again re-pins it, still without a redundant change.

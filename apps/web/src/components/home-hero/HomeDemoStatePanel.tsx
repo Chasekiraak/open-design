@@ -10,6 +10,14 @@ export interface HomeDemoState {
   role: HomeOnboardingRole;
 }
 
+/** A mock with an explicit `null` profile must override actual local data. */
+export function resolveHomeDemoRole(
+  value: HomeDemoState | null,
+  actualRole: HomeOnboardingRole,
+): HomeOnboardingRole {
+  return value === null ? actualRole : value.role;
+}
+
 interface Props {
   actualRole: HomeOnboardingRole;
   value: HomeDemoState | null;
@@ -23,7 +31,7 @@ const ROLE_OPTIONS: ReadonlyArray<{ label: string; value: HomeOnboardingRole }> 
 ];
 
 export function HomeDemoStatePanel({ actualRole, value, onChange }: Props) {
-  const selectedRole = value?.role ?? actualRole;
+  const selectedRole = resolveHomeDemoRole(value, actualRole);
 
   function chooseJourney(journey: HomeDemoJourney) {
     onChange({ journey, role: selectedRole });

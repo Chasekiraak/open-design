@@ -3,9 +3,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { HomeDemoStatePanel } from '../../../src/components/home-hero/HomeDemoStatePanel';
+import {
+  HomeDemoStatePanel,
+  resolveHomeDemoRole,
+} from '../../../src/components/home-hero/HomeDemoStatePanel';
 
 describe('HomeDemoStatePanel', () => {
+  it('lets an explicit no-profile mock override an actual designer profile', () => {
+    expect(resolveHomeDemoRole({ journey: 'new', role: null }, 'designer')).toBeNull();
+    expect(resolveHomeDemoRole(null, 'designer')).toBe('designer');
+  });
+
   it('switches between new and returning demos while preserving the selected profile', () => {
     const onChange = vi.fn();
     const { rerender } = render(<HomeDemoStatePanel actualRole={null} value={null} onChange={onChange} />);

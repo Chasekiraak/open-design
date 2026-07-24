@@ -119,6 +119,7 @@ import {
 } from './home-hero/main-flow';
 import {
   HomeDemoStatePanel,
+  resolveHomeDemoRole,
   type HomeDemoState,
 } from './home-hero/HomeDemoStatePanel';
 import { AnimatePresence } from 'motion/react';
@@ -428,7 +429,7 @@ export function HomeView({
     return role === 'marketing' || role === 'agency' || role === 'growth' ? 'marketing' : null;
   });
   const [homeDemoState, setHomeDemoStateValue] = useState<HomeDemoState | null>(null);
-  const onboardingRole = homeDemoState?.role ?? storedOnboardingRole;
+  const onboardingRole = resolveHomeDemoRole(homeDemoState, storedOnboardingRole);
   // A designer's self-reported onboarding role is the sole passive visual
   // selection. Everyone else starts on Ask's lightweight execution route, but
   // sees the neutral mode trigger until they choose a mode or a visual intent
@@ -924,7 +925,7 @@ export function HomeView({
   function handleHomeDemoStateChange(next: HomeDemoState | null) {
     setHomeDemoStateValue(next);
     sessionModeManuallySelectedRef.current = false;
-    const role = next?.role ?? storedOnboardingRole;
+    const role = resolveHomeDemoRole(next, storedOnboardingRole);
     setSessionMode(role === 'designer' ? 'design' : 'chat');
     setHasVisibleModeSelection(role === 'designer');
     setModeSuggestion(null);
