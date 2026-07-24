@@ -7,7 +7,7 @@ import type {
   WorkspaceContextResponse,
   WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
-import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
+import { coalescedGet, forceCoalescedGet } from '../lib/coalesced-get';
 import { useWorkspaceInvalidation } from './workspace-events';
 
 // One shared read of the workspace context (`GET /api/workspace/context`) for the
@@ -95,28 +95,38 @@ export function useWorkspaceContext(): WorkspaceContextState {
    * Open Design Cloud" callout on screen for the whole (vela-backed,
    * up-to-seconds) re-read, because `loading` had already settled to false on
    * the earlier signed-out read and only `context !== null` gates the callout
-   * (#140). It also drops the coalescing entry, whose whole premise — that
+   * (#140). It also forces the coalescing entry, whose whole premise — that
    * sub-second staleness is invisible — stops holding at exactly this moment:
    * the cached answer describes the identity the user just replaced.
+   *
+   * This hook is mounted by a dozen-plus components at once (App, EntryShell,
+   * SettingsDialog, HomeView, ...), and a sign-in fires ONE broadcast event
+   * every mounted instance reacts to in the same synchronous pass. Forcing via
+   * `forceCoalescedGet` (rather than `evictCoalescedGet` + `coalescedGet`
+   * directly) collapses that whole burst to a single real fetch instead of one
+   * per mounted instance — see its doc for why the naive evict-then-fetch
+   * pattern is unsafe here.
    */
   const loadContext = useCallback(async (options: { markLoading?: boolean } = {}) => {
-    if (options.markLoading) {
-      evictCoalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY);
-      if (mountedRef.current) {
-        setState((prev) =>
-          prev.context === null && !prev.loading ? { ...prev, loading: true } : prev,
-        );
-      }
+    if (options.markLoading && mountedRef.current) {
+      setState((prev) =>
+        prev.context === null && !prev.loading ? { ...prev, loading: true } : prev,
+      );
     }
     try {
-      // Coalesced: every mounted consumer of this hook (and every focus/pageshow
-      // refresh across them) fires the same read on a home-view burst — collapse
-      // them to one request. The nav shell tolerates sub-second staleness.
-      const body = await coalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, async () => {
+      const fetchContext = async () => {
         const res = await fetch('/api/workspace/context', { cache: 'no-store' });
         if (!res.ok) throw new Error(`workspace-context ${res.status}`);
         return (await res.json()) as WorkspaceContextResponse;
-      });
+      };
+      // Coalesced: every mounted consumer of this hook (and every focus/pageshow
+      // refresh across them) fires the same read on a home-view burst — collapse
+      // them to one request. The nav shell tolerates sub-second staleness.
+      // An explicit identity-change refresh forces a fresh read instead of
+      // sharing a settled answer that predates the change.
+      const body = options.markLoading
+        ? await forceCoalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, fetchContext)
+        : await coalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, fetchContext);
       // A successful read is the only thing that redefines "signed in": persist it
       // (including an explicit null for a genuinely signed-out response) so the
       // next remount seeds from the truth, not a stale value.
@@ -348,15 +358,22 @@ export function useTeamProjects(): TeamProjectsState {
 
   // Fetch the full list. Shared by the initial load, manual reload(), and the
   // poll. Never flips `loading` (only the initial/reload effect does) so a
-  // background refresh has no spinner.
-  const loadFull = useCallback(async () => {
+  // background refresh has no spinner. `force` bypasses a settled/in-flight
+  // cache entry for a genuine identity/workspace change (see
+  // `onTeamProjectsChanged` below) via `forceCoalescedGet`, which also
+  // collapses the case where every mounted `useTeamProjects()` instance reacts
+  // to that same change in one synchronous burst into a single fetch.
+  const loadFull = useCallback(async (force = false) => {
     try {
-      const projects = await coalescedGet('workspace-team-projects', async () => {
+      const fetchProjects = async () => {
         const res = await fetch('/api/workspace/projects/team');
         if (!res.ok) throw new Error(`team-projects ${res.status}`);
         const body = (await res.json()) as WorkspaceTeamProjectsResponse;
         return body.projects ?? [];
-      });
+      };
+      const projects = force
+        ? await forceCoalescedGet('workspace-team-projects', fetchProjects)
+        : await coalescedGet('workspace-team-projects', fetchProjects);
       cachedTeamProjects = projects;
       if (mountedRef.current) {
         setProjects(projects);
@@ -415,11 +432,10 @@ export function useTeamProjects(): TeamProjectsState {
     };
     const onTeamProjectsChanged = () => {
       // A workspace switch fires this same event (see `switchWorkspace` in
-      // EntryNavRail.tsx). Without evicting, an in-flight coalesced read
+      // EntryNavRail.tsx). Without forcing, an in-flight coalesced read
       // started just before the switch can resolve inside the new call's
       // coalescing window and hand back the PREVIOUS workspace's team list.
-      evictCoalescedGet('workspace-team-projects');
-      void loadFull();
+      void loadFull(true);
     };
     const onStorage = (event: StorageEvent) => {
       if (event.key === TEAM_PROJECTS_CHANGED_STORAGE_KEY) void loadFull();

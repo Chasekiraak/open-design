@@ -22,6 +22,11 @@ import {
 import { AMR_LOGIN_STATUS_EVENT, AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
 import type { VelaLoginStatus } from '../../src/providers/daemon';
+import {
+  TEAM_PROJECTS_CHANGED_EVENT,
+  WORKSPACE_BILLING_REFRESH_EVENT,
+  WORKSPACE_CONTEXT_REFRESH_EVENT,
+} from '../../src/collab/useWorkspaceContext';
 
 interface StubbedResponse {
   status?: number;
@@ -573,19 +578,20 @@ describe('AmrLoginPill', () => {
   // Open Design agent card's "Authorize" action both render (SettingsDialog
   // renders it from a full-page `/settings` route, so the entry rail — and
   // its `useWorkspaceContext` hook — is unmounted the whole time the user is
-  // on that page). The pill itself never calls
+  // on that page). Besides notifyAmrLoginStatusChanged(), it also fires
   // notifyWorkspaceContextRefresh()/notifyWorkspaceBillingRefresh()/
-  // notifyTeamProjectsChanged() the way CloudSignInTip's finishSignedIn() and
-  // EntryShell's pollAmrLoginCompletion() do — instead, App.tsx listens for
-  // this AMR_LOGIN_STATUS_EVENT globally and resets every open tab down to a
-  // fresh Home tab on any identity change (see `deriveTabIdentityScope` /
-  // WorkspaceTabsBar). That fresh EntryShell mount seeds `useWorkspaceContext`
-  // from a null module-level cache, which starts it in `loading: true` —
-  // landing on the exact same rail loading-skeleton state CloudSignInTip
-  // drives directly. This test locks in the one signal that whole chain
-  // depends on: verified via a real end-to-end settings-page walkthrough
-  // (Playwright, screenshotted) rather than asserted here from code reading
-  // alone.
+  // notifyTeamProjectsChanged() directly on poll-confirmed sign-in — the same
+  // three CloudSignInTip's finishSignedIn() and EntryShell's
+  // pollAmrLoginCompletion() fire (see the dedicated test below). It no
+  // longer relies solely on App.tsx's global AMR_LOGIN_STATUS_EVENT listener
+  // eventually resetting every open tab down to a fresh Home tab (see
+  // `deriveTabIdentityScope` / WorkspaceTabsBar) to get a stale rail to
+  // refetch — that reset still happens (for tab identity-scope safety) and
+  // its remount's fetch now safely joins/shares the explicit one instead of
+  // firing a second, via `forceCoalescedGet`. This test locks in the
+  // AMR_LOGIN_STATUS_EVENT signal specifically; verified end-to-end (real
+  // Playwright walkthrough with network capture) in
+  // e2e/ui/amr-login-pill-workspace-refresh.test.ts.
   it('dispatches AMR_LOGIN_STATUS_EVENT once polling confirms signed-in, so identity-scope listeners outside this pill (e.g. the entry rail after a Settings sign-in) learn about it too', async () => {
     let loginPosted = false;
     const fetchMock = vi.fn(async (input, init) => {
@@ -621,6 +627,64 @@ describe('AmrLoginPill', () => {
       expect(events.length).toBeGreaterThanOrEqual(2);
     } finally {
       window.removeEventListener(AMR_LOGIN_STATUS_EVENT, onEvent);
+    }
+  });
+
+  // This fix: the pill used to only call
+  // notifyAmrLoginStatusChanged() on poll-confirmed sign-in, leaving the
+  // workspace-context/billing/team-projects refresh to whatever the global
+  // AMR_LOGIN_STATUS_EVENT listener in App.tsx happened to trigger later
+  // (a forced tab-reset remount, not a deliberate signal). It must now fire
+  // all three explicitly, immediately, the same way CloudSignInTip's
+  // finishSignedIn() and EntryShell's pollAmrLoginCompletion() already do.
+  it('fires notifyWorkspaceContextRefresh/notifyWorkspaceBillingRefresh/notifyTeamProjectsChanged once polling confirms signed-in', async () => {
+    let loginPosted = false;
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({
+          body: loginPosted
+            ? { loggedIn: true, profile: 'prod', configPath: '/x', user: { id: 'u', email: 'leaf@example.com' } }
+            : { loggedIn: false, profile: 'prod', user: null, configPath: '/x' },
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        loginPosted = true;
+        return jsonResponse({ status: 202, body: { pid: 4242 } });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    let contextRefreshCount = 0;
+    let billingRefreshCount = 0;
+    let teamProjectsChangedCount = 0;
+    const onContextRefresh = () => {
+      contextRefreshCount += 1;
+    };
+    const onBillingRefresh = () => {
+      billingRefreshCount += 1;
+    };
+    const onTeamProjectsChanged = () => {
+      teamProjectsChangedCount += 1;
+    };
+    window.addEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, onContextRefresh);
+    window.addEventListener(WORKSPACE_BILLING_REFRESH_EVENT, onBillingRefresh);
+    window.addEventListener(TEAM_PROJECTS_CHANGED_EVENT, onTeamProjectsChanged);
+    try {
+      renderPill();
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+      });
+      expect(contextRefreshCount).toBe(1);
+      expect(billingRefreshCount).toBe(1);
+      expect(teamProjectsChangedCount).toBe(1);
+    } finally {
+      window.removeEventListener(WORKSPACE_CONTEXT_REFRESH_EVENT, onContextRefresh);
+      window.removeEventListener(WORKSPACE_BILLING_REFRESH_EVENT, onBillingRefresh);
+      window.removeEventListener(TEAM_PROJECTS_CHANGED_EVENT, onTeamProjectsChanged);
     }
   });
 

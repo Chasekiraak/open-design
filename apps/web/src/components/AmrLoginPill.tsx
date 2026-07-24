@@ -28,6 +28,11 @@ import {
   amrLoginStatusEventReason,
   notifyAmrLoginStatusChanged,
 } from './amrLoginPolling';
+import {
+  notifyTeamProjectsChanged,
+  notifyWorkspaceBillingRefresh,
+  notifyWorkspaceContextRefresh,
+} from '../collab/useWorkspaceContext';
 import { Icon } from './Icon';
 import { amrConsoleUrlForProfile, amrProfileBadgeLabel } from '../runtime/amr-guidance';
 
@@ -360,6 +365,24 @@ export function AmrLoginPill({
         // Wake the app-level status sync so configure_type flips to 'amr'
         // on the very next capture, not on an unrelated later refresh.
         notifyAmrLoginStatusChanged();
+        // This pill is a THIRD place AMR sign-in success is detected
+        // (CloudSignInTip's finishSignedIn() and EntryShell's
+        // pollAmrLoginCompletion() are the other two) and must fire the same
+        // workspace-surface nudges they do. Before this, the pill relied on
+        // App.tsx's global AMR_LOGIN_STATUS_EVENT listener eventually
+        // resetting every open tab back to a fresh Home mount (see
+        // deriveTabIdentityScope), whose remount happens to start
+        // useWorkspaceContext from a null module cache — a side effect that
+        // may not run for a while (or ever, if the user never returns to
+        // Home), not a deliberate refresh. Firing these immediately means
+        // every mounted workspace surface updates as soon as sign-in
+        // actually resolves, regardless of what the tab does afterward.
+        // `forceCoalescedGet` (behind these three notifiers) already
+        // collapses a later remount's from-scratch fetch into this one when
+        // it lands inside the coalescing window.
+        notifyWorkspaceContextRefresh();
+        notifyWorkspaceBillingRefresh();
+        notifyTeamProjectsChanged();
         stopPolling();
         loginStartedAtRef.current = null;
         loginPendingRef.current = false;
@@ -485,8 +508,21 @@ export function AmrLoginPill({
         setErrorMessage(result.error || t('settings.amrLoginErrorCompact'));
         return;
       }
+      // Dispatch only — do not ALSO call `startPolling(startedAt)` directly
+      // here. This pill is itself subscribed to AMR_LOGIN_STATUS_EVENT (see
+      // the effect above), so the dispatch below already reaches this same
+      // instance's 'login-started' branch synchronously and starts polling.
+      // Calling `startPolling` a second time here used to race two
+      // concurrent `tick()` loops against the same login: `startPolling`'s
+      // own `stopPolling()` cancels the OTHER call's `setInterval`, but not
+      // its already-in-flight immediate `tick()`, so both loops independently
+      // observed the poll landing on signed-in and each fired every
+      // sign-in-success notifier (notifyAmrLoginStatusChanged +
+      // the three workspace refreshes below) once — a real duplicate network
+      // request per notifier, not just a redundant event. Every other
+      // mounted pill instance already relies solely on this same broadcast
+      // to start its own polling; the initiating instance must too.
       notifyAmrLoginStatusChanged('login-started');
-      startPolling(startedAt);
     },
     [
       amrEntrySourceDetail,
@@ -494,7 +530,6 @@ export function AmrLoginPill({
       installationId,
       metricsConsent,
       onSignInStarted,
-      startPolling,
       t,
     ],
   );
