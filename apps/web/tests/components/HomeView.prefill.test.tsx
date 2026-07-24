@@ -1121,8 +1121,13 @@ describe('HomeView prompt handoff', () => {
 
     await clearActiveTypeChip();
     await pickHomeTemplate('prototype');
-    // Card body opens preview; the Use button is what seeds the composer input.
-    fireEvent.click(await screen.findByTestId('home-hero-plugin-preset-use-example-web-prototype'));
+    // The card itself is the single click-to-use affordance — clicking it
+    // directly seeds the composer input.
+    fireEvent.click(
+      (await screen.findAllByTestId('home-hero-plugin-preset')).find(
+        (item) => item.getAttribute('data-plugin-id') === 'example-web-prototype',
+      )!,
+    );
 
     screen.getByTestId('home-hero-input');
     await waitFor(() => {
@@ -1227,10 +1232,9 @@ describe('HomeView prompt handoff', () => {
     if (!liveArtifactTemplatePreset) {
       throw new Error('expected live artifact image template preset to render');
     }
-    // Seeding the composer is the Use button's job now (card body previews).
-    fireEvent.click(
-      screen.getByTestId(`home-hero-plugin-preset-use-${LIVE_ARTIFACT_IMAGE_TEMPLATE_PLUGIN.id}`),
-    );
+    // The card itself is the single click-to-use affordance — clicking it
+    // directly seeds the composer.
+    fireEvent.click(liveArtifactTemplatePreset);
 
     screen.getByTestId('home-hero-input');
     // The composer seed prefers the curated description over the query head
@@ -1477,7 +1481,7 @@ describe('HomeView prompt handoff', () => {
     });
     expect(screen.getByTestId('home-hero-plugin-presets')).toBeTruthy();
     expect(screen.getByTestId('home-hero-plugin-presets').textContent).toContain('Simple Deck');
-    fireEvent.click(screen.getAllByTestId(/^home-hero-plugin-preset-use-/)[0]!);
+    fireEvent.click(screen.getAllByTestId('home-hero-plugin-preset')[0]!);
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-simple-deck/apply')
     ))).toBe(false);
@@ -1492,7 +1496,7 @@ describe('HomeView prompt handoff', () => {
     await waitFor(() => {
       expect(screen.getByTestId('home-hero-plugin-presets')).toBeTruthy();
     });
-    fireEvent.click(screen.getAllByTestId(/^home-hero-plugin-preset-use-/)[0]!);
+    fireEvent.click(screen.getAllByTestId('home-hero-plugin-preset')[0]!);
     expect(fetchMock.mock.calls.some(([url]) => (
       typeof url === 'string' && url.includes('/api/plugins/example-web-prototype/apply')
     ))).toBe(false);
