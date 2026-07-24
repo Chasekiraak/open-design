@@ -723,9 +723,9 @@ jobs:
               marker="<!-- merge-queue-needs-validation -->"
               {
                 printf '%s\n' "$marker"
-                printf 'Ejected from the merge queue: this PR still carries the `needs-validation` label.\n\n'
+                printf "Ejected from the merge queue: this PR still carries the \`needs-validation\` label.\n\n"
                 printf 'The merge queue gate ([run %s](%s/%s/actions/runs/%s)) blocked the queued group because of the label. That failure runs on the queue'"'"'s transient ref, so it never appears in this PR'"'"'s own checks — they stay green, and this notice is the only visible trace on the PR.\n\n' "$RUN_ID" "$GITHUB_SERVER_URL" "$REPO" "$RUN_ID"
-                printf 'To land this PR: complete the QA pass the label is tracking, remove the `needs-validation` label, then add the PR back to the merge queue.\n'
+                printf "To land this PR: complete the QA pass the label is tracking, remove the \`needs-validation\` label, then add the PR back to the merge queue.\n"
               } > "$handoff_dir/body.md"
               jq -n \
                 --arg kind "comment" \
