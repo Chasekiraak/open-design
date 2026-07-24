@@ -1100,6 +1100,13 @@ export interface Dict {
   'whatsNew.cta': string;
   'whatsNew.dismissAria': string;
 
+  // Update reminder card on /community: cover artwork, release highlights, and
+  // a cancel/update action pair. Highlight copy comes from the release payload;
+  // these keys cover the card chrome only.
+  'updateReminder.title': string;
+  'updateReminder.notesLabel': string;
+  'updateReminder.confirm': string;
+
   // Newsletter email field on the onboarding About-you step.
   'newsletter.label': string;
   'newsletter.placeholder': string;

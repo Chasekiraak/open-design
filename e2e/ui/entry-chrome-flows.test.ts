@@ -143,7 +143,7 @@ test('[P0] @critical entry chrome exposes the primary home creation surface and 
   await expect(page.getByTestId('workspace-home-rail-toggle')).toBeVisible();
   await page.getByTestId('workspace-home-rail-toggle').click();
   await expect(page.locator('.entry-nav-rail')).toBeVisible();
-  await expect(page.getByTestId('entry-nav-logo')).toBeVisible();
+  await expect(page.getByTestId('entry-nav-search')).toBeVisible();
   await expect(page.locator('.entry-brand')).toHaveCount(0);
   await expect(page.getByTestId('home-hero-input')).toBeVisible();
   await expect(page.getByTestId('home-hero-plus-trigger')).toBeVisible();
@@ -328,7 +328,11 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await gotoEntryHome(page);
   await ensureRailOpen(page);
 
-  await expect(page.getByTestId('entry-nav-logo')).toBeVisible();
+  // The rail is header-free: no logo, no in-rail collapse control — the
+  // column starts at the search box, and folding lives in the pinned Home
+  // tab's toggle on the workspace tabs bar.
+  await expect(page.getByTestId('entry-nav-logo')).toHaveCount(0);
+  await expect(page.getByTestId('entry-nav-collapse')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-search')).toBeVisible();
   await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('entry-nav-community')).toBeVisible();
@@ -341,10 +345,10 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await expect(page.getByTestId('entry-nav-projects')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-tasks')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-integrations')).toHaveCount(0);
-  // Settings is the rail's own control (footer chip when signed out), never a
-  // duplicate of the nav group's destinations.
-  await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-nav-plugins')).toHaveCount(0);
-  await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-settings-button')).toBeVisible();
+  // Signed-out settings is the nav group's own item right under 扩展 — #5517
+  // dropped the footer settings chip, so the footer carries no settings entry.
+  await expect(page.locator('.entry-nav-rail__group').getByTestId('entry-settings-button')).toBeVisible();
+  await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-settings-button')).toHaveCount(0);
 
   await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
   // Nothing is applied on a fresh Home: no template pill reset, no plugin
@@ -2285,10 +2289,10 @@ test('[P1] collapsed new-user templates gallery stays out of the keyboard tab or
 });
 
 test('[P1] rail can be collapsed again on coarse-pointer / non-hover devices', async ({ page }) => {
-  // Emulate a touch device where `(hover: none)` matches: the collapse button
-  // can't be revealed by hover and the topbar toggle is display:none once the
-  // rail docks, so the rail must stay foldable through the always-visible
-  // collapse control. emulateMedia() doesn't cover `hover`, so use CDP.
+  // Emulate a touch device where `(hover: none)` matches. The rail has no
+  // in-rail collapse control, so folding must work through the pinned Home
+  // tab's toggle — which must stay tappable without any hover affordance.
+  // emulateMedia() doesn't cover `hover`, so use CDP.
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setEmulatedMedia', {
     features: [
@@ -2300,14 +2304,9 @@ test('[P1] rail can be collapsed again on coarse-pointer / non-hover devices', a
   await gotoEntryHome(page);
   await ensureRailOpen(page);
 
-  // Without a hover, the collapse control must still be visible and tappable,
-  // and tapping it must actually fold the rail back. It is stacked on top of
-  // the logo, so dispatch the tap on the control itself rather than relying on
-  // pointer hit-testing (which resolves to the logo underneath).
-  const collapse = page.getByTestId('entry-nav-collapse');
-  await collapse.focus();
-  await expect(collapse).toBeVisible();
-  await collapse.evaluate((element: HTMLElement) => element.click());
+  const toggle = page.getByTestId('workspace-home-rail-toggle');
+  await expect(toggle).toBeVisible();
+  await toggle.click();
   await expect(page.locator('.entry')).not.toHaveClass(/entry--rail-open/);
 });
 

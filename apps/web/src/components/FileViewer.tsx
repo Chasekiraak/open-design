@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { Button, Input, Select } from '@open-design/components';
+import { CenteredLoader } from './Loading';
 import { APP_CHROME_FILE_ACTIONS_ID, APP_CHROME_FILE_ACTIONS_SELECTOR } from './AppChromeHeader';
 import {
   buildSocialSharePayload,
@@ -7225,6 +7226,14 @@ function HtmlViewer({
   // revisit skips the loading skeleton entirely — the fetch still runs, but
   // the pane doesn't flash a skeleton for content the user has already seen.
   const sourceLoadedKeysRef = useRef<Set<string>>(new Set());
+  // URL-load previews that have painted at least once (keep-alive key). The
+  // loading skeleton above only waits for `source` (the file TEXT fetch); in
+  // URL-load mode the iframe then issues its OWN network navigation, which can
+  // sit queued behind heavy same-origin traffic (e.g. drafts-grid cover
+  // iframes still streaming in) — leaving a bare white pane with no feedback.
+  // Until that first load event lands, keep a loader over the transport stack.
+  const urlPreviewLoadedKeysRef = useRef<Set<string>>(new Set());
+  const [urlPreviewFirstLoadPending, setUrlPreviewFirstLoadPending] = useState(false);
   const [boardMode, setBoardMode] = useState(false);
   const [commentPanelOpen, setCommentPanelOpen] = useState(false);
   const [commentCreateMode, setCommentCreateMode] = useState(false);
@@ -8688,6 +8697,16 @@ function HtmlViewer({
     ? POWERED_PREVIEW_SANDBOX
     : 'allow-scripts allow-downloads';
   const urlFrameAllow = usePoweredPreview ? POWERED_PREVIEW_ALLOW : undefined;
+  // Arm the first-load overlay only for URL-load previews this pane has never
+  // painted (per keep-alive key, so tab revisits and pooled re-attaches skip
+  // it). about:blank parks (powered probe, srcDoc-active) never arm.
+  useEffect(() => {
+    if (!useUrlLoadPreview || urlFrameSrc === 'about:blank') {
+      setUrlPreviewFirstLoadPending(false);
+      return;
+    }
+    setUrlPreviewFirstLoadPending(!urlPreviewLoadedKeysRef.current.has(urlPreviewKeepAliveKey));
+  }, [useUrlLoadPreview, urlFrameSrc, urlPreviewKeepAliveKey]);
   const activateSrcDocTransport = useCallback((target: HTMLIFrameElement | null = srcDocPreviewIframeRef.current) => {
     if (!canActivateSrcDocTransport({
       srcDoc,
@@ -13578,6 +13597,12 @@ function HtmlViewer({
                           onLoad={() => {
                             const frame = urlPreviewIframeRef.current;
                             if (useUrlLoadPreview) iframeRef.current = frame;
+                            // First real paint of this artifact URL — drop the
+                            // first-load overlay. about:blank parks don't count.
+                            if ((frame?.getAttribute('src') ?? 'about:blank') !== 'about:blank') {
+                              urlPreviewLoadedKeysRef.current.add(urlPreviewKeepAliveKey);
+                              setUrlPreviewFirstLoadPending(false);
+                            }
                             setUrlSelectionBridgeReady(false);
                             dcViewportRestoreAtRef.current = Date.now();
                             frame?.contentWindow?.postMessage({
@@ -13606,6 +13631,12 @@ function HtmlViewer({
                           onLoad={() => {
                             const frame = urlPreviewIframeRef.current;
                             if (useUrlLoadPreview) iframeRef.current = frame;
+                            // First real paint of this artifact URL — drop the
+                            // first-load overlay. about:blank parks don't count.
+                            if ((frame?.getAttribute('src') ?? 'about:blank') !== 'about:blank') {
+                              urlPreviewLoadedKeysRef.current.add(urlPreviewKeepAliveKey);
+                              setUrlPreviewFirstLoadPending(false);
+                            }
                             setUrlSelectionBridgeReady(false);
                             dcViewportRestoreAtRef.current = Date.now();
                             frame?.contentWindow?.postMessage({
@@ -13681,6 +13712,21 @@ function HtmlViewer({
                           if (!useUrlLoadPreview) scheduleDesktopPreviewContentMeasure(frame);
                         }}
                       />
+                      {useUrlLoadPreview && urlPreviewFirstLoadPending ? (
+                        // First-ever URL-load of this artifact: the iframe's own
+                        // navigation may still be queued behind heavy same-origin
+                        // traffic (drafts/all-projects cover iframes) — without
+                        // this cover the pane reads as a dead white screen.
+                        <div
+                          className="artifact-preview-first-load"
+                          role="status"
+                          aria-busy="true"
+                          aria-label={t('fileViewer.loading')}
+                          data-testid="artifact-preview-first-load"
+                        >
+                          <CenteredLoader label={t('fileViewer.loading')} />
+                        </div>
+                      ) : null}
                     </div>
                   </PreviewDrawOverlay>
                   {previewAssetWarning ? (

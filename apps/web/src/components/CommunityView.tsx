@@ -1,4 +1,4 @@
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { InstalledPluginRecord } from '@open-design/contracts';
 import { useI18n, useT } from '../i18n';
@@ -79,13 +79,18 @@ const TEMPLATE_TYPE_LABEL_KEY: Record<TemplateType, keyof Dict> = {
   'Audio': 'community.typeAudio',
 };
 
-function countTemplatesByType(templates: TemplateDemo[]): Record<TemplateType, number> {
-  const counts = Object.fromEntries(
-    TEMPLATE_TYPE_ORDER.map((type) => [type, 0]),
-  ) as Record<TemplateType, number>;
-  for (const template of templates) counts[template.type] += 1;
-  return counts;
-}
+/** Each tab carries the same icon the home composer's creation-type radial
+ *  uses for that artifact kind (see home-hero/chips.ts), so the two surfaces
+ *  read as one taxonomy. */
+const TEMPLATE_TYPE_ICON: Record<TemplateType, IconName> = {
+  'Slides': 'present',
+  'Prototype': 'artboard',
+  'Live Artifact': 'bar-chart-box',
+  'Image': 'image',
+  'Video': 'video-ai',
+  'HyperFrames': 'orbit',
+  'Audio': 'mic',
+};
 
 // Card accents tint the thumbnail plate and the fallback preview page. The
 // palette is the designer's; picking from it by a stable hash of the plugin id
@@ -230,7 +235,6 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
     () => buildCommunityTemplates(plugins, locale, t),
     [plugins, locale, t],
   );
-  const templateTypeCounts = useMemo(() => countTemplatesByType(templates), [templates]);
   const typeOptions = TEMPLATE_TYPE_ORDER.filter((type) =>
     templates.some((template) => template.type === type),
   );
@@ -244,7 +248,6 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
     const subtypeMatches = activeSubtype === 'All' || template.subtype === activeSubtype;
     return typeMatches && subtypeMatches;
   });
-  const typeCount = (type: TemplateType) => templateTypeCounts[type];
   const handleTemplateAction = (template: TemplateDemo) => {
     if (isPromptArtifact(template)) {
       void copyTemplatePrompt(template);
@@ -257,8 +260,7 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
 
   return (
     <section className="community-template-view" aria-labelledby="community-template-title">
-      {/* Sticky header: title + search + both filter rows stay pinned while the
-          grid scrolls, mirroring the plugins-home Scenario-row treatment. */}
+      {/* Header (title + search + filter rows) scrolls away with the grid. */}
       <div className="community-template-view__header">
       <header className="community-template-view__hero">
         <div>
@@ -283,31 +285,33 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
                   setActiveSubtype('All');
                 }}
               >
+                <Icon name={TEMPLATE_TYPE_ICON[type]} size={16} aria-hidden />
                 <span>{t(TEMPLATE_TYPE_LABEL_KEY[type])}</span>
-                <small>{typeCount(type)}</small>
               </button>
             ))}
           </div>
         </div>
-        <div className="community-template-view__subtabs">
-          <button
-            type="button"
-            className={activeSubtype === 'All' ? 'is-active' : ''}
-            onClick={() => setActiveSubtype('All')}
-          >
-            {t('common.all')}
-          </button>
-          {subtypeOptions.map((subtype) => (
+        {subtypeOptions.length > 0 ? (
+          <div className="community-template-view__subtabs">
             <button
-              key={subtype}
               type="button"
-              className={activeSubtype === subtype ? 'is-active' : ''}
-              onClick={() => setActiveSubtype(subtype)}
+              className={activeSubtype === 'All' ? 'is-active' : ''}
+              onClick={() => setActiveSubtype('All')}
             >
-              {subtype}
+              {t('common.all')}
             </button>
-          ))}
-        </div>
+            {subtypeOptions.map((subtype) => (
+              <button
+                key={subtype}
+                type="button"
+                className={activeSubtype === subtype ? 'is-active' : ''}
+                onClick={() => setActiveSubtype(subtype)}
+              >
+                {subtype}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       </div>
 

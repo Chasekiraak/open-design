@@ -484,13 +484,10 @@ test('[P1] home left rail expands and collapses from the shell controls', async 
   // the stable second destination in both the signed-out and team rails.
   await expect(page.getByTestId('entry-nav-design-systems')).toBeVisible();
 
-  // The collapse control is stacked on top of the logo and only becomes
-  // opaque/clickable while the brand block is hovered, so hover it first —
-  // otherwise the logo underneath keeps intercepting the click.
-  const collapse = page.getByTestId('entry-nav-collapse');
-  await page.locator('.entry-nav-rail__brand').hover();
-  await expect(collapse).toBeVisible();
-  await collapse.click();
+  // The rail has no in-rail collapse control (the header is chrome-free);
+  // the pinned Home tab's toggle folds it back.
+  await expect(expand).toHaveAttribute('aria-expanded', 'true');
+  await expand.click();
   await expect(shell).not.toHaveClass(/entry--rail-open/);
   await expect(rail).toHaveAttribute('aria-hidden', 'true');
   await expect(expand).toHaveAttribute('aria-expanded', 'false');

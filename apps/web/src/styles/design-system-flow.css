@@ -25,11 +25,14 @@
   top: 0;
   z-index: 20;
   height: 64px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
-  padding: 0 28px;
+  /* Back / Continue align with the form column's safe area, not the window
+     edges: same centering math as `.ds-setup-shell:not(--embedded)
+     .ds-setup-form` (min(1280px, 100vw - 56px), centered). */
+  padding: 0 max(28px, calc((100vw - 1280px) / 2));
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   -webkit-backdrop-filter: var(--material-thin-backdrop);
@@ -98,13 +101,6 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-}
-.ds-setup-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  color: var(--accent);
 }
 .ds-setup-form {
   width: min(720px, calc(100vw - 40px));

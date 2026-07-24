@@ -65,7 +65,6 @@ function renderRail(props: {
         onViewChange={() => {}}
         onNewProject={() => {}}
         open
-        onClose={() => {}}
         context={props.context}
         billing={props.billing}
       />

@@ -1182,12 +1182,9 @@
   justify-content: space-between;
   gap: 18px;
   padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-soft));
+  border: 1px solid color-mix(in srgb, var(--brand, #87ea5c) 22%, var(--border-soft));
   border-radius: 14px;
-  background:
-    linear-gradient(135deg,
-      color-mix(in srgb, var(--accent) 8%, var(--bg-panel)),
-      color-mix(in srgb, var(--bg-panel) 96%, var(--accent)));
+  background: var(--brand-soft, #ebffde);
 }
 .settings-cloud-signin-callout strong {
   display: block;
@@ -1201,21 +1198,42 @@
   font-size: 13px;
   line-height: 1.45;
 }
+/* Solid pill mirroring the community selected-tab treatment: black fill,
+   green ink (icon + label share currentColor). */
 .settings-cloud-signin-callout__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   min-height: 34px;
   padding: 0 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border: 1px solid transparent;
   border-radius: var(--radius-large, 8px);
-  background: var(--bg-panel);
-  color: var(--text);
+  background: var(--text-strong);
+  color: var(--brand, #87ea5c);
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 .settings-cloud-signin-callout__button:hover {
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel));
+  background: color-mix(in srgb, var(--text-strong) 88%, var(--brand, #87ea5c));
+}
+/* The pill wrapper (AmrLoginPill's .amr-account-control root) carries the
+   callout button's border + fill; the inner action <button> would otherwise
+   add the global button primitive's own border/fill as a second box around
+   the label. Flatten it so only the outer shell paints. */
+.settings-cloud-signin-callout__button .amr-account-control__action,
+.settings-cloud-signin-callout__button .amr-account-control__action:hover:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
 }
 .settings-language-grid {
   display: grid;
@@ -1525,7 +1543,8 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  /* Same 14px family as .agent-card / the cloud sign-in callout. */
+  border-radius: 14px;
   /* Match the installed-agent cards above (--bg-panel) instead of the grayer
      --bg-subtle, so the "installable" group reads as the same surface. */
   background: var(--bg-panel);
@@ -1590,7 +1609,10 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   /* Borderless: the panel fill + grid gaps delineate cards (transparent 1px
      keeps geometry stable across states). */
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  /* Corner radius matches the cloud sign-in callout above the list
+     (.settings-cloud-signin-callout, 14px) so the whole 本机 CLI column
+     reads as one card family. */
+  border-radius: 14px;
   cursor: pointer;
   text-align: left;
   position: relative;
@@ -2177,9 +2199,9 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   min-height: 32px;
   padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--green, #00aa54);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -2215,7 +2237,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   min-height: 32px;
   padding: 0 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-tint) 62%, var(--bg-panel));
   color: var(--text);
   font-size: 12px;
@@ -2345,6 +2367,11 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
+}
+/* Diagnostic rows inside an installed card are card content, not a full-bleed
+   strip: inset them to the same 24px gutter the model-config fields use. */
+.agent-card-installed .agent-card-diagnostic {
+  margin: 6px 24px 0;
 }
 .agent-card-config {
   display: grid;
@@ -2714,6 +2741,9 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   /* Wide enough for the two-level company + models layout even when the
      trigger that anchors it is narrow. */
   min-width: 380px;
+  /* Constant breathing room above/below the scrolling list — padding inside
+     the scroller scrolls away with the content and reads as flush rows. */
+  padding-block: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2736,7 +2766,9 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   font-size: 14px;
 }
 .model-select-searchable__search-row {
-  padding: 0;
+  /* Breathing room around the search input so the row's border-bottom reads
+     as a real divider instead of hugging the input's own border. */
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
 }
 .model-select-searchable__input {
@@ -2749,7 +2781,8 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  /* Vertical breathing room lives on the popover, outside the scroller. */
+  padding: 0 6px;
 }
 /* Two-level browse layout: companies on the left, hovered company's models on
    the right. */
@@ -2766,8 +2799,8 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
   border-right: 1px solid var(--border);
 }
 .model-select-searchable__company {
@@ -2775,7 +2808,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px;
   border-radius: var(--radius);
   display: flex;
   align-items: center;
@@ -2799,6 +2832,19 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   font-size: 12px;
   font-weight: 500;
 }
+.model-select-searchable__company-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.model-select-searchable__company-logo {
+  flex: 0 0 auto;
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
 /* The selected model's company gets the brand dot so you can find it at a
    glance across the company list. */
 .model-select-searchable__company.has-selected .model-select-searchable__company-name::before {
@@ -2817,15 +2863,15 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  gap: 8px;
+  padding: 8px;
 }
 .model-select-searchable__option {
   appearance: none;
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 8px 30px 8px 10px;
+  padding: 10px;
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
@@ -2852,25 +2898,12 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   background: var(--accent-tint);
   color: var(--accent-strong);
 }
-.model-select-searchable__option[data-selected='true']::after {
-  content: '✓';
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 12px;
-  font-weight: 700;
-  color: currentColor;
-}
 .settings-byok-select-popover .model-select-searchable__option.is-active {
   background: color-mix(in srgb, var(--selected) 10%, var(--bg-panel));
   color: var(--text);
 }
 .settings-byok-select-popover .model-select-searchable__option.is-active:hover {
   background: color-mix(in srgb, var(--selected) 14%, var(--bg-panel));
-}
-.settings-byok-select-popover .model-select-searchable__option[data-selected='true']::after {
-  color: var(--selected);
 }
 .model-select-searchable__value,
 .model-select-searchable__option-content {
@@ -3108,7 +3141,8 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
 .agent-cli-env {
   padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  /* Same 14px family as .agent-card / the cloud sign-in callout. */
+  border-radius: 14px;
   /* Same surface as the "可安装" collapse (.agent-install-collapse, --bg-panel)
      so the two folded sections read as one family. */
   background: var(--bg-panel);

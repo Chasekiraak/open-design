@@ -150,6 +150,24 @@
   height: 16px;
 }
 
+/* Rotating hue palette for the create-new rows (assigned by row index in
+   TabLauncherMenu.tsx); tokens are theme-aware so they hold up in dark mode. */
+.iconBlue {
+  color: var(--blue);
+}
+
+.iconGreen {
+  color: var(--green);
+}
+
+.iconAmber {
+  color: var(--amber);
+}
+
+.iconRed {
+  color: var(--red);
+}
+
 .rowBody {
   flex: 1 1 auto;
   min-width: 0;

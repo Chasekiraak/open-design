@@ -40,11 +40,12 @@ export type PlusMenuPlacementPreference = 'auto' | 'down' | 'up';
 type PlusMenuFlyoutPlacement = 'right' | 'left' | 'contained';
 type PlusMenuFlyoutVerticalPlacement = 'down' | 'up';
 type PlusMenuVerticalPlacement = 'down' | 'up';
-export type PlusMenuSubmenu = 'connectors' | 'plugins' | 'skills' | 'mcp' | 'toolbox';
+export type PlusMenuSubmenu = 'connectors' | 'plugins' | 'skills' | 'mcp' | 'toolbox' | 'workingDir';
 
 // Analytics mapping for the submenu flyouts: which resource list each
 // submenu carries. `toolbox` is intentionally absent — the project composer
-// tracks it separately as `design_toolbox_open`.
+// tracks it separately as `design_toolbox_open`. `workingDir` is absent too:
+// its flyout carries actions, not an attachable resource list.
 export const PLUS_SUBMENU_RESOURCE_KIND = {
   connectors: 'connector',
   plugins: 'plugin',
@@ -52,6 +53,11 @@ export const PLUS_SUBMENU_RESOURCE_KIND = {
   mcp: 'mcp',
 } as const;
 type PlusMenuPopupStyle = CSSProperties & Record<'--plus-menu-flyout-max-height', string>;
+
+/** Last path segment for the working-dir recent rows (mirrors WorkingDirPicker). */
+function dirBasename(dir: string): string {
+  return dir.split(/[/\\]/).filter(Boolean).pop() ?? dir;
+}
 
 function getFlyoutBoundary(anchor: HTMLElement): Pick<DOMRect, 'left' | 'right'> {
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
@@ -193,6 +199,18 @@ export interface ComposerPlusMenuProps {
   /** Opens a native folder picker and stages the folder as local code context. */
   onLinkLocalCode?: () => void;
 
+  /**
+   * Working-directory submenu (project composer only): mirrors the Home
+   * composer's WorkingDirPicker — pick a folder, re-pick a recent one, or
+   * clear the current binding. The whole row renders only when
+   * `onPickWorkingDir` is provided; Home keeps its own footer picker.
+   */
+  workingDir?: string | null;
+  recentWorkingDirs?: string[];
+  onPickWorkingDir?: () => void;
+  onSelectRecentWorkingDir?: (dir: string) => void;
+  onClearWorkingDir?: () => void;
+
   /** Opens the "Select from library" picker; omit to hide the row. */
   onSelectFromLibrary?: () => void;
 
@@ -255,6 +273,13 @@ export interface ComposerPlusMenuProps {
    * preference yields when the content cannot fit on that side.
    */
   placementPreference?: PlusMenuPlacementPreference;
+
+  /**
+   * External open request (e.g. the next-step card's quick-access pills).
+   * Bumping `nonce` opens the menu exactly as if the "+" trigger was clicked;
+   * `submenu` additionally pre-opens that flyout. `null` never opens.
+   */
+  openRequest?: { nonce: number; submenu?: PlusMenuSubmenu } | null;
 }
 
 function pluginMatches(
@@ -293,6 +318,11 @@ export function ComposerPlusMenu({
   attachLoading,
   onReferenceProject,
   onLinkLocalCode,
+  workingDir,
+  recentWorkingDirs,
+  onPickWorkingDir,
+  onSelectRecentWorkingDir,
+  onClearWorkingDir,
   onSelectFromLibrary,
   onImportFigma,
   renderToolbox,
@@ -302,6 +332,7 @@ export function ComposerPlusMenu({
   onSubmenuOpen,
   onSearchUsed,
   placementPreference = 'auto',
+  openRequest,
 }: ComposerPlusMenuProps) {
   const t = useT();
   const { locale } = useI18n();
@@ -409,6 +440,23 @@ export function ComposerPlusMenu({
     if (submenu !== next) onSubmenuOpen?.(next);
     setSubmenu(next);
   }
+
+  // External open request (quick-access pills): replay the trigger-click open,
+  // then pre-open the requested flyout. Keyed on nonce so a repeat click
+  // re-opens after a close. No row anchor exists yet, so the flyout geometry
+  // falls back to the default down placement.
+  const lastOpenRequestNonceRef = useRef(0);
+  useEffect(() => {
+    if (!openRequest || openRequest.nonce === lastOpenRequestNonceRef.current) return;
+    lastOpenRequestNonceRef.current = openRequest.nonce;
+    cancelSubmenuClose();
+    onOpen?.();
+    setOpen(true);
+    if (openRequest.submenu) openSubmenu(openRequest.submenu, null);
+    // openSubmenu / cancelSubmenuClose are hoisted per-render function
+    // declarations; the nonce ref is the real change detector here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
 
   function handleQueryChange(value: string) {
     if (
@@ -590,6 +638,63 @@ export function ComposerPlusMenu({
               <Icon name="folder" size={15} className="plus-menu__item-icon" />
               <span>{t('chat.plus.linkLocalCode')}</span>
             </button>
+          ) : null}
+          {onPickWorkingDir ? (
+            <PlusSubmenuRow
+              label={t('homeWorkingDir.triggerShort')}
+              icon="folder"
+              open={submenu === 'workingDir'}
+              testId="composer-plus-working-dir"
+              onOpen={(row) => openSubmenu('workingDir', row)}
+              onClose={scheduleCloseSubmenu}
+            >
+              <div className="plus-menu__list">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="plus-menu__item"
+                  data-testid="composer-plus-working-dir-pick"
+                  onClick={() => {
+                    close();
+                    onPickWorkingDir();
+                  }}
+                >
+                  <Icon name="folder" size={15} className="plus-menu__item-icon" />
+                  <span>{workingDir ? t('homeWorkingDir.replace') : t('homeWorkingDir.pick')}</span>
+                </button>
+                {(recentWorkingDirs ?? []).map((dir) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    role="menuitem"
+                    className="plus-menu__item"
+                    title={dir}
+                    onClick={() => {
+                      close();
+                      onSelectRecentWorkingDir?.(dir);
+                    }}
+                  >
+                    <Icon name="history" size={15} className="plus-menu__item-icon" />
+                    <span>{dirBasename(dir)}</span>
+                  </button>
+                ))}
+                {workingDir && onClearWorkingDir ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="plus-menu__item"
+                    data-testid="composer-plus-working-dir-clear"
+                    onClick={() => {
+                      close();
+                      onClearWorkingDir();
+                    }}
+                  >
+                    <Icon name="close" size={15} className="plus-menu__item-icon" />
+                    <span>{t('homeWorkingDir.clear')}</span>
+                  </button>
+                ) : null}
+              </div>
+            </PlusSubmenuRow>
           ) : null}
           {LIBRARY_UI_VISIBLE && onSelectFromLibrary ? (
             <button

@@ -1346,11 +1346,10 @@ describe('FileWorkspace launcher tab creation', () => {
 
     fireEvent.click(screen.getByTestId('workspace-add-tab'));
 
-    expect(screen.queryByRole('button', { name: /New Terminal/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /New Browser/i })).toBeTruthy();
-    expect(
-      screen.getByText('Sketch rough layouts and notes for the agent to use as design context'),
-    ).toBeTruthy();
+    const launcherMenu = within(screen.getByTestId('tab-launcher-menu'));
+    expect(launcherMenu.queryByRole('button', { name: /New Terminal/i })).toBeNull();
+    expect(launcherMenu.getByRole('button', { name: /New Browser/i })).toBeTruthy();
+    expect(launcherMenu.getByRole('button', { name: /New sketch/i })).toBeTruthy();
     expect(screen.getByText('Create new')).toBeTruthy();
   });
 

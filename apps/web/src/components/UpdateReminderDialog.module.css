@@ -1,0 +1,129 @@
+.panel {
+  width: 420px;
+  padding: var(--spacing-18, 18px);
+  gap: 0;
+}
+
+/* Frosted sheet over the page — a translucent glass shape that carries the
+   blur (per the Liquid Glass material tokens), not a raw blur of the view. */
+.backdrop.backdrop {
+  background: var(--glass-regular);
+  backdrop-filter: blur(var(--glass-regular-blur, 28px));
+  -webkit-backdrop-filter: blur(var(--glass-regular-blur, 28px));
+}
+
+/* The cover sits inset as its own card, at the image's natural aspect ratio. */
+.cover {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-md, 8px);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-10, 10px);
+  padding: var(--spacing-18, 18px) 0 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-20, 20px);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.notesLabel {
+  margin: 0;
+  font-size: var(--font-size-13, 13px);
+  color: var(--text-muted);
+}
+
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-10, 10px);
+}
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-10, 10px);
+  font-size: var(--font-size-13, 13px);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.noteDot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-circular, 50%);
+  background: var(--text-strong);
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-8, 8px);
+  padding: var(--spacing-20, 20px) 0 0;
+}
+
+/* Doubled selectors out-rank the shared Button variant classes regardless of
+   stylesheet injection order. */
+.cancel.cancel {
+  border-radius: var(--radius-pill, 999px);
+}
+
+/* Dark solid fill comes from the shared primary variant; the brand green
+   lands on the label and icon via currentColor. */
+.confirm.confirm {
+  color: var(--brand);
+}
+
+.confirmIcon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Collapsed rail strip: same dark-pill + brand-green language as the dialog
+   CTA, sized to sit above the nav rail's account row. */
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-8, 8px);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--spacing-12, 12px);
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--text-strong);
+  color: var(--brand);
+  font-family: inherit;
+  font-size: var(--font-size-13, 13px);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--duration-ultra-fast, 50ms) var(--curve-easy-ease, ease);
+}
+
+.strip:hover {
+  background: var(--accent);
+}
+
+.strip:focus-visible {
+  outline: var(--stroke-thin, 1px) solid var(--blue);
+  outline-offset: 2px;
+}
+
+.stripIcon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}

@@ -11,6 +11,15 @@ import styles from './TabLauncherMenu.module.css';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
 
+// Create-new rows cycle through a small hue palette (one color per row) so
+// the icon column reads as a colorful menu instead of a uniform gray strip.
+const ACTION_ICON_COLORS = [
+  styles.iconBlue,
+  styles.iconGreen,
+  styles.iconAmber,
+  styles.iconRed,
+];
+
 // Page/area/project_id are filled by the host (FileWorkspace); the menu only
 // supplies the event-specific fields.
 export type TabLauncherTrackInput = Omit<
@@ -256,21 +265,21 @@ export function TabLauncherMenu({
           <section className={styles.section}>
             <div className={styles.sectionHeader}>{t('workspace.createNew')}</div>
             <ul className={styles.list}>
-              {actions.map((action) => (
+              {actions.map((action, index) => (
                 <li key={action.id}>
                   <button
                     type="button"
                     className={styles.row}
                     onClick={() => runLauncherAction(action)}
                   >
-                    <span className={styles.rowIcon} aria-hidden>
+                    <span
+                      className={`${styles.rowIcon} ${ACTION_ICON_COLORS[index % ACTION_ICON_COLORS.length]}`}
+                      aria-hidden
+                    >
                       <Icon name={action.iconName} size={15} />
                     </span>
                     <span className={styles.rowBody}>
                       <span className={styles.rowName}>{t(action.labelKey)}</span>
-                      {action.descriptionKey ? (
-                        <span className={styles.rowMeta}>{t(action.descriptionKey)}</span>
-                      ) : null}
                     </span>
                   </button>
                 </li>
@@ -336,9 +345,6 @@ export function TabLauncherMenu({
                       </span>
                       <span className={styles.rowBody}>
                         <span className={styles.rowName}>{item.label}</span>
-                        <span className={styles.rowMeta}>
-                          {workspaceContextKindLabel(item.kind)} · {workspaceContextMeta(item)}
-                        </span>
                       </span>
                       <span className={styles.rowOpen}>{t('workspace.tabOpen')}</span>
                     </button>
@@ -396,36 +402,6 @@ function workspaceContextIconName(kind: WorkspaceContextItem['kind']): IconName 
   if (kind === 'side-chat') return 'comment';
   if (kind === 'live-artifact') return 'file-code';
   return 'file';
-}
-
-function workspaceContextKindLabel(kind: WorkspaceContextItem['kind']): string {
-  switch (kind) {
-    case 'browser':
-      return 'Browser';
-    case 'design-files':
-      return 'Design files';
-    case 'design-system':
-      return 'Design system';
-    case 'folder':
-      return 'Folder';
-    case 'project':
-      return 'Project';
-    case 'local-code':
-      return 'Local code';
-    case 'terminal':
-      return 'Terminal';
-    case 'side-chat':
-      return 'Side chat';
-    case 'live-artifact':
-      return 'Live artifact';
-    case 'file':
-    default:
-      return 'File';
-  }
-}
-
-function workspaceContextMeta(item: WorkspaceContextItem): string {
-  return item.url || item.path || item.absolutePath || item.title || item.tabId || item.id;
 }
 
 function workspaceContextSearchText(item: WorkspaceContextItem): string {

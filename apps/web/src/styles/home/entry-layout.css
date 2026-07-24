@@ -242,58 +242,6 @@
   .entry-shell--no-header .entry { transition-delay: 0ms; }
 }
 
-/* Brand slot — the logo, with a collapse button that fades in on hover so the
-   docked rail can be dismissed Manus-style without a separate chrome control. */
-.entry-nav-rail__brand {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-}
-.entry-nav-rail .entry-nav-rail__collapse {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  color: var(--text);
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 140ms cubic-bezier(0.23, 1, 0.32, 1),
-    background 140ms cubic-bezier(0.23, 1, 0.32, 1),
-    color 140ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-.entry--rail-open .entry-nav-rail__brand:hover .entry-nav-rail__collapse,
-.entry--rail-open .entry-nav-rail__collapse:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-/* The global button press feedback (primitives.css `button:active` →
-   `transform: translateY(1px)`) REPLACES this button's centering translate,
-   teleporting it a quadrant away mid-press so the mouseup lands outside it
-   and the click never fires. Re-state the full transform for :active. */
-.entry-nav-rail .entry-nav-rail__collapse:active:not(:disabled) {
-  transform: translate(-50%, -50%) translateY(1px);
-}
-/* Coarse-pointer / non-hover devices can't reveal the collapse button on
-   hover, and the topbar toggle is display:none once the rail docks — so the
-   rail would strand open. Keep the collapse control permanently visible and
-   tappable there so touch users can always fold the rail back. */
-@media (hover: none) {
-  .entry--rail-open .entry-nav-rail__collapse {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
 /* Narrow window: below the comfortable split width the docked rail
    auto-collapses instead of squeezing into a broken sliver — the grid track
    zeroes out and the floating panel is clipped and inert. The open state is
@@ -307,25 +255,9 @@
     pointer-events: none;
   }
 }
-/* When the rail is collapsed the brand element still sits at the top-left
-   under the cursor; force the absolutely-positioned collapse button inert so
-   it can't swallow clicks meant for the topbar toggle stacked beneath it. */
-.entry:not(.entry--rail-open) .entry-nav-rail__collapse {
-  opacity: 0;
-  pointer-events: none;
-}
-.entry-nav-rail__collapse:hover {
-  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
-  color: var(--text-strong, #111);
-}
-.entry-nav-rail__collapse:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 /* Topbar panel toggle — the single affordance left visible when the rail
    is collapsed. Sits at the left edge of the sticky topbar and is hidden
-   once the rail is docked (the rail's own collapse button takes over). */
+   once the rail is docked (the tabs bar's pinned Home toggle takes over). */
 .entry-rail-toggle {
   display: inline-flex;
   align-items: center;
@@ -345,8 +277,7 @@
 }
 /* The flex layout would otherwise shrink the icon's width to a sliver; pin
    the SVG so the panel glyph renders at its intended square size. */
-.entry-rail-toggle svg,
-.entry-nav-rail__collapse svg {
+.entry-rail-toggle svg {
   flex-shrink: 0;
 }
 .entry-rail-toggle:hover {
@@ -446,7 +377,10 @@
   position: absolute;
   left: var(--spacing-8, 8px);
   right: var(--spacing-8, 8px);
-  bottom: 42px;
+  /* Anchored to the footer (position: relative), whose bottom edge sits the
+     panel's 5px bottom padding + 1px ring above the panel's visible edge —
+     3 + 5 + 1 = 9px, matching the sides' 8 + 1px ring inset. */
+  bottom: 3px;
   display: grid;
   gap: 4px;
   width: auto;
@@ -552,12 +486,13 @@
 }
 
 /* ---------- Right-side hover tooltip (rail items only) ----------
-   The rail is icon-only, so each button advertises its label via a
-   `data-tooltip` attribute. The label slides in from the right on
-   hover/focus-visible (matching the Lovart-style affordance the user
-   requested) and sits above siblings via z-index. We deliberately
-   block tooltips while the help popover is open so the floating
-   menu does not collide with the tooltip bubble. */
+   Only the rail's icon-only controls (updater, avatar, icon-only
+   sign-out) advertise a `data-tooltip`; labeled nav items render
+   their text inline and must not emit the attribute, or the bubble
+   would duplicate visible text. The label slides in from the right
+   on hover/focus-visible and sits above siblings via z-index. We
+   deliberately block tooltips while the help popover is open so the
+   floating menu does not collide with the tooltip bubble. */
 .entry-nav-rail [data-tooltip] {
   position: relative;
 }
@@ -979,14 +914,6 @@
 .entry-nav-rail__logo.is-active {
   background: transparent;
   border-color: transparent;
-}
-.entry-nav-rail__logo-img {
-  position: absolute;
-  inset: auto;
-  width: 30px;
-  height: 30px;
-  display: block;
-  pointer-events: none;
 }
 .entry-nav-rail__btn {
   appearance: none;
@@ -2094,6 +2021,12 @@
 .inline-switcher--compact .inline-switcher__agent-grid {
   grid-template-columns: minmax(0, 1fr);
   gap: 1px;
+  /* Cap the visible model list at six rows (6 × 36px row + 5 × 2px gap);
+     longer catalogs scroll inside so the settings footer stays on screen.
+     Same cap as the project popover's .avatar-model-list. */
+  max-height: 226px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .inline-switcher--compact .inline-switcher__agent {
   border: none;
@@ -2275,6 +2208,9 @@
      dropdown OPENED but rendered underneath the dialog, reading as "click
      does nothing". */
   z-index: 10500;
+  /* Constant breathing room above/below the scrolling list — padding inside
+     the scroller scrolls away with the content and reads as flush rows. */
+  padding-block: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2282,7 +2218,9 @@
   overflow: hidden;
 }
 .model-select-searchable__search-row {
-  padding: 0;
+  /* Breathing room around the search input so the row's border-bottom reads
+     as a real divider instead of hugging the input's own border. */
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border);
 }
 .model-select-searchable__input {
@@ -2295,14 +2233,16 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  gap: 4px;
+  /* Vertical breathing room lives on the popover, outside the scroller. */
+  padding: 0 8px;
 }
 .model-select-searchable__option {
   appearance: none;
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 8px 30px 8px 10px;
+  padding: 10px;
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
@@ -2325,16 +2265,6 @@
   background: var(--accent-tint);
   color: var(--accent-strong);
 }
-.model-select-searchable__option[data-selected='true']::after {
-  content: '✓';
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 12px;
-  font-weight: 700;
-  color: currentColor;
-}
 .model-select-searchable__value,
 .model-select-searchable__option-content {
   display: flex;
@@ -2353,6 +2283,20 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* Vendor brand mark leading the option row. 1px top nudge centers the 16px
+   mark against the 13px/1.35 first label line despite the row's
+   flex-start alignment (multi-line label + meta rows). */
+.model-select-searchable__option-logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 1px;
+}
+.model-select-searchable__option-logo img {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
 }
 .model-select-searchable__value-label,
 .model-select-searchable__option-label {
@@ -5578,42 +5522,6 @@
 .entry-nav-rail__account-trigger svg { color: var(--text-soft); }
 /* The membership wordmark reads as a solid black mark, not a muted glyph. */
 .entry-nav-rail__account-trigger .plan-badge { color: var(--text-strong); }
-
-.entry-nav-rail__local-logo {
-  appearance: none;
-  width: 36px;
-  height: 36px;
-  margin: 0 0 12px 2px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-large, 8px);
-  background: transparent;
-  cursor: pointer;
-  transition:
-    background 140ms var(--ease-out),
-    transform 140ms var(--ease-out);
-}
-
-.entry-nav-rail__local-logo:hover {
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-
-.entry-nav-rail__local-logo:active {
-  transform: scale(0.96);
-}
-
-.entry-nav-rail__local-logo:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.entry-nav-rail__local-logo img {
-  width: 27px;
-  height: 27px;
-  display: block;
-}
 
 /* ── Credits chip (✨ N) — separate region from the account dropdown ── */
 .entry-nav-rail__credits-chip {

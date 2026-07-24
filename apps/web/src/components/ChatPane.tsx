@@ -1065,6 +1065,11 @@ export function ChatPane({
   const handleToolboxAction = useCallback((id: DesignToolboxActionId) => {
     composerRef.current?.applyDesignToolboxAction(id);
   }, []);
+  // Next-step quick pills: open the composer "+" menu directly on the 扩展
+  // (plugins) or 设计百宝箱 (toolbox) flyout. Stable for the same memo reason.
+  const handleNextStepOpenComposerPanel = useCallback((which: 'plugins' | 'toolbox') => {
+    composerRef.current?.openPlusMenu(which);
+  }, []);
   const handleNextStepPromptAction = useCallback((
     prompt: string,
     options?: { sessionMode?: ChatSessionMode },
@@ -2476,6 +2481,7 @@ export function ChatPane({
                 nextStepSkills={skills}
                 toolboxSkillNames={featuredToolboxSkillNames}
                 nextStepVariant={nextStepVariant}
+                onNextStepOpenComposerPanel={handleNextStepOpenComposerPanel}
                 onForkFromMessage={onForkFromMessage}
                 onAssistantFeedback={onAssistantFeedback}
                 forkingMessageId={forkingMessageId}
@@ -3164,6 +3170,7 @@ function ChatRows({
   nextStepSkills,
   toolboxSkillNames,
   nextStepVariant,
+  onNextStepOpenComposerPanel,
   onForkFromMessage,
   onAssistantFeedback,
   forkingMessageId,
@@ -3224,6 +3231,7 @@ function ChatRows({
   nextStepSkills?: SkillSummary[];
   toolboxSkillNames?: Partial<Record<DesignToolboxActionId, string | null>>;
   nextStepVariant?: NextStepActionsVariant;
+  onNextStepOpenComposerPanel?: (which: 'plugins' | 'toolbox') => void;
   onForkFromMessage?: (message: ChatMessage) => void;
   onAssistantFeedback?: (message: ChatMessage, change: ChatMessageFeedbackChange) => void;
   forkingMessageId?: string | null;
@@ -3437,6 +3445,7 @@ function ChatRows({
         nextStepSkills={nextStepSkills}
         toolboxSkillNames={toolboxSkillNames}
         nextStepVariant={nextStepVariant}
+        onNextStepOpenComposerPanel={onNextStepOpenComposerPanel}
       />
     );
   };

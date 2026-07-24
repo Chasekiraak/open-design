@@ -100,7 +100,6 @@ interface Props {
 
 const STORAGE_KEY = 'open-design:workspace-tabs:v1';
 const OPEN_WORKSPACE_TAB_EVENT = 'open-design:workspace-tabs:open';
-const MAX_SEARCH_RESULTS = 80;
 const TAB_DRAG_HAPTIC_MS = 8;
 const TAB_DROP_HAPTIC_MS = 12;
 
@@ -451,10 +450,6 @@ function syncStateToRoute(state: WorkspaceTabsState, route: Route): WorkspaceTab
   return normalizeTabsState({ tabs: nextTabs, activeTabId: replacement.id });
 }
 
-function normalizeSearch(value: string): string {
-  return value.trim().toLocaleLowerCase();
-}
-
 /**
  * Whatever `identityScopeKey` this bar last persisted alongside the tabs
  * blob, read directly from storage. Used exactly once, at mount (see
@@ -495,7 +490,6 @@ export function WorkspaceTabsBar({
   // value.
   const [scopeKeyAtMount] = useState(() => readPersistedScopeKey());
   const lastSeenScopeKeyRef = useRef<string | undefined>(scopeKeyAtMount);
-  const [tabsMenuOpen, setTabsMenuOpen] = useState(false);
   // #5517 corner fan: the "+" button opens a corner-anchored radial menu of
   // template wedges instead of immediately spawning a home tab.
   const [radialMenu, setRadialMenu] = useState<{ x: number; y: number } | null>(null);
@@ -517,12 +511,8 @@ export function WorkspaceTabsBar({
       window.removeEventListener('keydown', onKey);
     };
   }, [radialMenu]);
-  const [query, setQuery] = useState('');
   const [tabsOverflowing, setTabsOverflowing] = useState(false);
   const stripRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const previousOnboardingCompletedRef = useRef(onboardingCompleted);
   const resetEntryToHomeAfterOnboardingRef = useRef(false);
   const dragSuppressClickRef = useRef(false);
@@ -666,20 +656,6 @@ export function WorkspaceTabsBar({
     () => new Map(displayTabs.map((tab) => [tab.id, tab])),
     [displayTabs],
   );
-  const filteredTabs = useMemo(() => {
-    const needle = normalizeSearch(query);
-    const source = needle
-      ? displayTabs.filter((tab) => {
-          const haystack = `${tab.title} ${tab.meta}`.toLocaleLowerCase();
-          return haystack.includes(needle);
-        })
-      : displayTabs;
-    return source
-      .slice()
-      .sort((a, b) => b.tab.lastActiveAt - a.tab.lastActiveAt)
-      .slice(0, MAX_SEARCH_RESULTS);
-  }, [displayTabs, query]);
-
   useEffect(() => {
     setState((current) => syncStateToRoute(current, route));
   }, [route]);
@@ -771,16 +747,6 @@ export function WorkspaceTabsBar({
     navigate(routeForTab(homeTab));
   }, [identityScopeKey, onboardingActive]);
 
-  // Close the Search-tabs popover whenever onboarding becomes active. The
-  // trigger button is hidden during onboarding, so a popover left open across
-  // a route flip to /onboarding (e.g. browser back/forward, which bypasses
-  // activateTab/createNewTab) would otherwise float over the first-run flow
-  // with no visible control to dismiss it. The portal is also gated on
-  // !onboardingActive below so it never renders for the frame before this runs.
-  useEffect(() => {
-    if (onboardingActive) setTabsMenuOpen(false);
-  }, [onboardingActive]);
-
   // Scroll the active tab into view when it changes. The strip itself
   // is native-scrollable horizontally (see CSS), so we just nudge the
   // browser's scroll position whenever the active id flips — keeps the
@@ -799,7 +765,6 @@ export function WorkspaceTabsBar({
           activeTabId: nextTab.id,
         });
       });
-      setTabsMenuOpen(false);
     }
 
     window.addEventListener(OPEN_WORKSPACE_TAB_EVENT, onOpenWorkspaceTab);
@@ -857,43 +822,6 @@ export function WorkspaceTabsBar({
       // Best-effort browser chrome state. Navigation itself remains URL-driven.
     }
   }, [state, identityScopeKey]);
-
-  useEffect(() => {
-    if (!tabsMenuOpen) return;
-    const frame = window.requestAnimationFrame(() => {
-      searchInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [tabsMenuOpen]);
-
-  useEffect(() => {
-    if (!tabsMenuOpen) return;
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node;
-      const insideTrigger = menuRef.current?.contains(target) ?? false;
-      // The popover is rendered through a portal into document.body to
-      // escape the `contain: layout` containment block on
-      // `.workspace-tabs-strip` (which would otherwise resolve our
-      // fixed positioning against the strip instead of the viewport).
-      // The portaled node is outside menuRef's subtree, so we also have
-      // to count clicks inside it as "inside the menu".
-      const insidePopover = popoverRef.current?.contains(target) ?? false;
-      if (!insideTrigger && !insidePopover) {
-        setTabsMenuOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setTabsMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', onPointerDown, true);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown, true);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [tabsMenuOpen]);
 
   useEffect(() => {
     function onWorkspaceTabShortcut(event: KeyboardEvent) {
@@ -965,7 +893,6 @@ export function WorkspaceTabsBar({
       ),
       activeTabId: tab.id,
     }));
-    setTabsMenuOpen(false);
     navigate(routeForTab(tab));
   }
 
@@ -1108,7 +1035,6 @@ export function WorkspaceTabsBar({
       });
       navigate({ kind: 'home', view: 'home' });
     }
-    setTabsMenuOpen(false);
   }
 
   function closeTab(tabId: string) {
@@ -1138,7 +1064,6 @@ export function WorkspaceTabsBar({
   }
 
   function reorderTab(sourceId: string, targetId: string, edge: TabDropEdge) {
-    setTabsMenuOpen(false);
     setState((current) => {
       const normalized = normalizeTabsState(current);
       const tabs = reorderTabsById(normalized.tabs, sourceId, targetId, edge);
@@ -1352,7 +1277,11 @@ export function WorkspaceTabsBar({
                     onClick={() => openTab(tab)}
                   >
                     <span className="workspace-tab__icon" aria-hidden>
-                      <Icon name={display.icon} size={14} />
+                      {/* The pinned entry tab remembers its last section
+                          (settings / community / …), but clicking it always
+                          lands on home (openTab), so it must read as the Home
+                          button — not the remembered section's icon. */}
+                      <Icon name={isPinned ? 'home' : display.icon} size={14} />
                     </span>
                     <span className="workspace-tab__label">{display.title}</span>
                   </button>
@@ -1379,102 +1308,9 @@ export function WorkspaceTabsBar({
             radial template menu below is now unreachable — its state and
             markup stay, as the reference keeps them.
 
-            The tab-search button is NOT dropped. The reference annotates its
-            own removal as "Tab search removed for the demo.", i.e. a demo
-            expedient, where it annotates the "+" as "removed per request" —
-            a real decision. Following the first would have left the whole
-            search popover unreachable (acceptance #46 was filed against it). */}
-      </div>
-      <div className="workspace-tabs-actions" ref={menuRef}>
-        {onboardingActive ? null : (
-          <button
-            type="button"
-            className={`workspace-tabs-icon-btn od-tooltip${tabsMenuOpen ? ' is-active' : ''}`}
-            onClick={() => setTabsMenuOpen((open) => !open)}
-            title={t('workspace.searchTabs')}
-            data-tooltip={t('workspace.searchTabs')}
-            data-tooltip-placement="bottom"
-            aria-label={t('workspace.searchTabs')}
-            aria-haspopup="dialog"
-            aria-expanded={tabsMenuOpen}
-            data-testid="workspace-tabs-search"
-          >
-            <Icon name="search" size={14} />
-          </button>
-        )}
-        {tabsMenuOpen && !onboardingActive && typeof document !== 'undefined'
-          ? createPortal(
-              <div
-                className="workspace-tabs-popover"
-                role="dialog"
-                aria-label={t('workspace.searchTabs')}
-                ref={popoverRef}
-              >
-                <div className="workspace-tabs-search">
-                  <Icon name="search" size={14} />
-                  <input
-                    ref={searchInputRef}
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={t('workspace.searchFilesPlaceholder')}
-                    aria-label={t('workspace.searchTabs')}
-                  />
-                </div>
-                <div className="workspace-tabs-popover__section">
-                  <span>{t('workspace.openTabs')}</span>
-                  <span>{state.tabs.length}</span>
-                </div>
-                <div className="workspace-tabs-list" role="listbox" aria-label={t('workspace.openTabs')}>
-                  {filteredTabs.length > 0 ? (
-                    filteredTabs.map((display) => {
-                      const active = display.id === state.activeTabId;
-                      return (
-                        <div
-                          key={display.id}
-                          className={`workspace-tabs-list__item${active ? ' is-active' : ''}`}
-                          role="option"
-                          aria-selected={active}
-                        >
-                          <button
-                            type="button"
-                            className="workspace-tabs-list__main od-tooltip"
-                            onClick={() => openTab(display.tab)}
-                            title={display.title}
-                            data-tooltip={display.title}
-                            data-tooltip-placement="right"
-                          >
-                            <span className="workspace-tabs-list__icon" aria-hidden>
-                              <Icon name={display.icon} size={15} />
-                            </span>
-                            <span className="workspace-tabs-list__text">
-                              <span className="workspace-tabs-list__title">{display.title}</span>
-                              <span className="workspace-tabs-list__meta">{display.meta}</span>
-                            </span>
-                          </button>
-                          {display.tab.kind === 'entry' ? null : (
-                            <button
-                              type="button"
-                              className="workspace-tabs-list__close od-tooltip"
-                              onClick={() => closeTab(display.id)}
-                              title={t('common.close')}
-                              data-tooltip={t('common.close')}
-                              data-tooltip-placement="left"
-                              aria-label={t('common.close')}
-                            >
-                              <Icon name="close" size={14} />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="workspace-tabs-empty">{t('workspace.noTabsFound')}</div>
-                  )}
-                </div>
-              </div>,
-              document.body,
-            )
-          : null}
+            The tab-search button (and its popover) was removed per request
+            (2026-07-24); a tab scrolled out of view is reached by scrolling
+            the strip or cycling with Ctrl+Tab / ⌘1-9. */}
       </div>
       {radialMenu ? createPortal(
         <div className="workspace-radial-layer" onMouseDown={() => setRadialMenu(null)}>

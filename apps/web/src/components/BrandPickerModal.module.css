@@ -119,6 +119,8 @@
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  padding: 16px 4px 4px 2px;
+  /* Side padding ≥ the picker cards' 9px hover bleed (BrandReferencePicker's
+     side-nav split) so the bleed isn't clipped by overflow-x: hidden. */
+  padding: 16px 9px 4px 9px;
   border-top: 1px solid var(--border);
 }

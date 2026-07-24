@@ -810,6 +810,20 @@
   align-items: center;
   gap: 6px;
 }
+/* Full-page presentation: the chrome strip holds only the autosave pill
+   (the close/fullscreen buttons are hidden above), so it reads as a page
+   toast rather than corner chrome — center it under the top nav instead
+   of leaving it stranded in the panel's top-right corner. 32px keeps a
+   clear band of air below the workspace tabs bar hairline; at 12px the
+   pill visually collided with it (dogfood 2026-07-24). As a transient
+   blurred toast it may briefly float over section content — that is
+   normal toast behavior and reads better than hugging the nav line. */
+.settings-page-shell .settings-chrome {
+  top: 32px;
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
 .settings-chrome > * {
   pointer-events: auto;
 }
@@ -1508,6 +1522,35 @@
   width: 100%;
   max-width: 992px;
   margin-inline: auto;
+}
+/* Pinned mode switch (本机 CLI / API 提供商): sticky at its own resting spot,
+   so the pill simply stops moving while the agent list scrolls beneath. The
+   sticky containing block is the scroll container's CONTENT box, so the pill
+   can never slide up into `.settings-content`'s padding band — the ::before
+   strip extends the opaque cover upward over that band instead (over empty
+   padding at rest, invisible). The bottom skirt (padding-bottom cancelled by
+   the negative bottom margin) masks the flex gap under the pill mid-scroll. */
+.settings-execution-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin-bottom: -18px;
+  padding-bottom: 18px;
+  background: var(--bg-elevated);
+}
+.settings-execution-sticky::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  /* Tallest variant wins: covers page-shell's 32px band and the modal's 16px
+     one; the scroll container clips whatever pokes past its top edge. */
+  height: 40px;
+  background: inherit;
+}
+.settings-page-shell .settings-execution-sticky {
+  background: var(--bg);
 }
 .modal-settings.settings-sidebar-collapsed .settings-content {
   padding-left: calc(var(--modal-padding) + 16px);

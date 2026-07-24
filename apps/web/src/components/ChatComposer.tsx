@@ -58,7 +58,7 @@ import type {
 } from '@open-design/contracts';
 import { buildVisualAnnotationAttachment, commentTargetDisplayName } from '../comments';
 import { Icon, type IconName } from "./Icon";
-import { ComposerPlusMenu, PLUS_SUBMENU_RESOURCE_KIND } from './ComposerPlusMenu';
+import { ComposerPlusMenu, PLUS_SUBMENU_RESOURCE_KIND, type PlusMenuSubmenu } from './ComposerPlusMenu';
 import { LibraryPicker } from './LibraryPicker';
 import { FigmaImportModal } from './FigmaImportModal';
 import { FigmaHelpModal } from './FigmaHelpModal';
@@ -374,6 +374,12 @@ export interface ChatComposerHandle {
   applyDesignToolboxSkill: (skillId: string) => void;
   /** Legacy: open the standalone toolbox popover. Currently unused by callers. */
   openDesignToolbox: () => void;
+  /**
+   * Open the composer "+" menu from outside (e.g. the next-step card's
+   * quick-access pills), optionally landing on a specific flyout
+   * ('plugins' for 扩展, 'toolbox' for 设计百宝箱, ...).
+   */
+  openPlusMenu: (submenu?: PlusMenuSubmenu) => void;
 }
 
 export interface ChatSendMeta {
@@ -518,6 +524,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     // its own cascading skill menu, so nothing opens this anymore; kept compiling
     // behind `openDesignToolbox` until the panel subsystem is removed wholesale.
     const [designToolboxOpen, setDesignToolboxOpen] = useState(false);
+    // External "+"-menu open request (next-step quick pills) — nonce-keyed so
+    // every pill click re-opens even after the menu was dismissed.
+    const [plusMenuOpenRequest, setPlusMenuOpenRequest] = useState<
+      { nonce: number; submenu?: PlusMenuSubmenu } | null
+    >(null);
     const [stagedMcpServers, setStagedMcpServers] = useState<McpServerConfig[]>([]);
     const [stagedConnectors, setStagedConnectors] = useState<ConnectorDetail[]>([]);
     const linkedDirs = projectMetadata?.linkedDirs ?? [];
@@ -1116,6 +1127,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         openDesignToolbox: () => {
           setComposerEngaged(true);
           setDesignToolboxOpen(true);
+        },
+        openPlusMenu: (submenu?: PlusMenuSubmenu) => {
+          setComposerEngaged(true);
+          setPlusMenuOpenRequest((prev) => ({
+            nonce: (prev?.nonce ?? 0) + 1,
+            ...(submenu ? { submenu } : {}),
+          }));
         },
       }),
       [connectors, mcpServers, pluginsForComposer, skills]
@@ -2899,13 +2917,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
             <ComposerPlusMenu
               triggerTestId="chat-plus-trigger"
               placementPreference="up"
+              openRequest={plusMenuOpenRequest}
               onOpen={() => {
                 trackComposerBar({ element: 'plus_menu_open' });
                 setComposerEngaged(true);
               }}
               onSubmenuOpen={(submenu) => {
-                // The toolbox flyout tracks its own open (design_toolbox_open).
-                if (submenu === 'toolbox') return;
+                // The toolbox flyout tracks its own open (design_toolbox_open);
+                // the working-dir flyout carries actions, not a resource list.
+                if (submenu === 'toolbox' || submenu === 'workingDir') return;
                 trackComposerBar({
                   element: 'plus_submenu_open',
                   resource_kind: PLUS_SUBMENU_RESOURCE_KIND[submenu],
@@ -2985,6 +3005,20 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
               onLinkLocalCode={() => {
                 trackComposerBar({ element: 'plus_pick', resource_kind: 'workspace', resource_id: 'local-code' });
                 void handleLinkLocalCodeContext();
+              }}
+              workingDir={workingDir}
+              recentWorkingDirs={recentDirs}
+              onPickWorkingDir={() => {
+                trackComposerBar({ element: 'plus_pick', resource_kind: 'workspace', resource_id: 'working-dir' });
+                void handlePickWorkingDir();
+              }}
+              onSelectRecentWorkingDir={(dir) => {
+                trackComposerBar({ element: 'plus_pick', resource_kind: 'workspace', resource_id: 'working-dir-recent' });
+                void setWorkingDirFolder(dir);
+              }}
+              onClearWorkingDir={() => {
+                trackComposerBar({ element: 'plus_pick', resource_kind: 'workspace', resource_id: 'working-dir-clear' });
+                void clearWorkingDir();
               }}
               attachLoading={uploading}
               onSelectFromLibrary={() => {

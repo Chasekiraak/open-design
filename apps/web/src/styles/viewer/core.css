@@ -1307,6 +1307,18 @@
   visibility: hidden;
   pointer-events: none;
 }
+/* First-ever URL-load of an artifact: the iframe's own navigation can queue
+   behind heavy same-origin traffic (e.g. drafts-grid cover iframes), which
+   otherwise reads as a dead white pane. Sits above both transport iframes
+   until the active frame's first load event lands. */
+.artifact-preview-first-load {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  background: var(--bg-panel);
+}
 .preview-asset-warning {
   position: absolute;
   left: 12px;

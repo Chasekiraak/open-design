@@ -317,10 +317,12 @@ describe('EntryShell settings menu', () => {
     }) as typeof fetch;
     const props = renderHome();
 
-    fireEvent.click(await screen.findByTestId('entry-nav-settings'));
+    // The signed-out rail's own settings item (below 扩展) is the single
+    // settings entry — the #5517 footer carries none.
+    fireEvent.click(await screen.findByTestId('entry-settings-button'));
 
     expect(props.onOpenSettings).toHaveBeenCalledWith();
-    expect(screen.queryByTestId('entry-settings-button')).toBeNull();
+    expect(screen.getAllByTestId('entry-settings-button')).toHaveLength(1);
   });
 });
 

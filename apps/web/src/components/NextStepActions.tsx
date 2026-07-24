@@ -227,6 +227,9 @@ interface Props {
   onShareToOpenDesign?: () => void;
   shareToOpenDesignBusy?: boolean;
   variant?: NextStepActionsVariant;
+  // Quick-access pills above the card: open the composer "+" menu directly on
+  // the 扩展 (plugins) or 设计百宝箱 (toolbox) flyout.
+  onOpenComposerPanel?: (which: 'plugins' | 'toolbox') => void;
 }
 
 const FLYOUT_GAP = 8;
@@ -337,6 +340,7 @@ export function NextStepActions({
   onShareToOpenDesign,
   shareToOpenDesignBusy = false,
   variant = 'default',
+  onOpenComposerPanel,
 }: Props) {
   const { t, locale } = useI18n();
   const analytics = useAnalytics();
@@ -808,6 +812,30 @@ export function NextStepActions({
               <Icon name="chevron-right" size={13} className={styles.toolboxRowArrow} />
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {/* The 扩展 / 设计百宝箱 quick pills sit BELOW the suggestion rows so
+          they hug the composer input right underneath this card. */}
+      {onOpenComposerPanel ? (
+        <div className={styles.quickPills} data-testid="next-step-quick-pills">
+          <button
+            type="button"
+            className={styles.quickPill}
+            data-testid="next-step-quick-pill-plugins"
+            onClick={() => onOpenComposerPanel('plugins')}
+          >
+            <Icon name="sparkles" size={13} />
+            <span>{t('entry.navPlugins')}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.quickPill}
+            data-testid="next-step-quick-pill-toolbox"
+            onClick={() => onOpenComposerPanel('toolbox')}
+          >
+            <Icon name="lightbulb" size={13} />
+            <span>{t('chat.designToolbox.tooltip')}</span>
+          </button>
         </div>
       ) : null}
 
