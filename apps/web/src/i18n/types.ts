@@ -1692,6 +1692,7 @@ export interface Dict {
   'pluginsView.sharing': string;
   'pluginsView.unsharing': string;
   'pluginsView.shareToTeam': string;
+  'pluginsView.syncToTeam': string;
   'pluginsView.unshareFromTeam': string;
   'pluginsView.moreActions': string;
   'pluginsView.skillUrlUnsupported': string;
@@ -1703,6 +1704,9 @@ export interface Dict {
   'pluginsView.shareSuccess': string;
   'pluginsView.shareUnavailable': string;
   'pluginsView.shareFailed': string;
+  'pluginsView.syncSuccess': string;
+  'pluginsView.syncUnavailable': string;
+  'pluginsView.syncFailed': string;
   'pluginsView.unshareSuccess': string;
   'pluginsView.unshareUnavailable': string;
   'pluginsView.unshareFailed': string;
@@ -2145,6 +2149,8 @@ export interface Dict {
   'dsManager.officialPresets': string;
   'dsManager.shareToTeam': string;
   'dsManager.shareToTeamFailed': string;
+  'dsManager.syncToTeam': string;
+  'dsManager.syncToTeamFailed': string;
   'dsManager.unshareFromTeam': string;
   'dsManager.unshareFromTeamFailed': string;
   'dsManager.teamSyncedReadOnly': string;

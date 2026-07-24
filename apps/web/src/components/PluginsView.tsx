@@ -864,7 +864,14 @@ interface MarketCard {
   action: MarketCardAction;
   // what the card body opens when clicked; null when nothing local backs it
   detail: MarketCardDetail | null;
-  // present only for a personal resource that is not yet shared to the team
+  // Present for a personal resource that is either not yet shared, or already
+  // shared AND managed by the current caller (`canUnshare` true — the
+  // original sharer or a workspace owner/admin). The button/menu label
+  // switches between "share" and "sync" (see `card.isShared`) but both cases
+  // call the same POST .../share route: it has no "already shared" guard, so
+  // a repeat call just pushes the current local directory over the hub's
+  // stale copy. Absent entirely for a teammate's pulled copy the caller may
+  // not manage, so a plain member can never overwrite someone else's share.
   share: { kind: MarketMode; id: string } | null;
   // present for a resource currently in the team index
   unshare: { kind: MarketMode; id: string } | null;
@@ -1196,6 +1203,12 @@ export function ExtensionsMarketplace({
 
   async function shareResource(kind: MarketMode, id: string, title: string) {
     if (sharingId || unsharingId) return;
+    // Same POST route promotes a not-yet-shared resource AND pushes an update
+    // for one that is already shared (`share()` has no "already shared"
+    // guard — see team-resource-share.ts). Only the toast copy distinguishes
+    // the two so an owner who just edited and re-shared sees "synced", not a
+    // confusing "shared" repeated on every subsequent push.
+    const wasAlreadyShared = (kind === 'plugins' ? sharedPluginIds : sharedSkillIds).has(id);
     setSharingId(id);
     setMenuId(null);
     const basePath = kind === 'plugins' ? 'plugins' : 'skills';
@@ -1206,12 +1219,21 @@ export function ExtensionsMarketplace({
       const body = (await res.json().catch(() => ({}))) as { shared?: boolean };
       if (res.ok && body.shared) {
         await refreshSharedResources();
-        setToast({ message: t('pluginsView.shareSuccess', { title }), tone: 'success' });
+        setToast({
+          message: t(wasAlreadyShared ? 'pluginsView.syncSuccess' : 'pluginsView.shareSuccess', { title }),
+          tone: 'success',
+        });
       } else {
-        setToast({ message: t('pluginsView.shareUnavailable', { title }), tone: 'error' });
+        setToast({
+          message: t(wasAlreadyShared ? 'pluginsView.syncUnavailable' : 'pluginsView.shareUnavailable', { title }),
+          tone: 'error',
+        });
       }
     } catch {
-      setToast({ message: t('pluginsView.shareFailed', { title }), tone: 'error' });
+      setToast({
+        message: t(wasAlreadyShared ? 'pluginsView.syncFailed' : 'pluginsView.shareFailed', { title }),
+        tone: 'error',
+      });
     } finally {
       setSharingId(null);
     }
@@ -1304,7 +1326,13 @@ export function ExtensionsMarketplace({
         accent: marketAccent(record.id),
         action: { kind: 'try', record },
         detail: { kind: 'plugin', record },
-        share: personal && !shared ? { kind: 'plugins', id: record.id } : null,
+        // Keep the share affordance live after the first share (relabeled to
+        // "sync" by `card.isShared`) so an owner can push a local edit to the
+        // team without unsharing and resharing. Restricted to `canUnshare`
+        // once shared — the same "who may manage this" gate `unshare` already
+        // uses — so a plain member who merely has the plugin installed can't
+        // overwrite the real owner's shared copy.
+        share: personal && (!shared || canUnshare) ? { kind: 'plugins', id: record.id } : null,
         unshare: shared && canUnshare ? { kind: 'plugins', id: record.id } : null,
         uninstall:
           record.sourceKind === 'bundled' ? null : { kind: 'plugins', id: record.id },
@@ -1327,7 +1355,10 @@ export function ExtensionsMarketplace({
         // the skill at all (issue #131).
         action: { kind: 'use-skill', skill },
         detail: { kind: 'skill', skill },
-        share: personal && !shared ? { kind: 'skills', id: skill.id } : null,
+        // See the plugin card builder above: keep sharing live post-share
+        // (relabeled "sync") for whoever may manage it, so a skill owner can
+        // push local edits without unshare-then-reshare.
+        share: personal && (!shared || canUnshare) ? { kind: 'skills', id: skill.id } : null,
         unshare: shared && canUnshare ? { kind: 'skills', id: skill.id } : null,
         uninstall: skill.source === 'user' ? { kind: 'skills', id: skill.id } : null,
         stats: null,
@@ -1724,7 +1755,11 @@ export function ExtensionsMarketplace({
                           void shareResource(share.kind, share.id, card.title);
                         }}
                       >
-                        {busy ? t('pluginsView.sharing') : t('pluginsView.shareToTeam')}
+                        {busy
+                          ? t('pluginsView.sharing')
+                          : card.isShared
+                            ? t('pluginsView.syncToTeam')
+                            : t('pluginsView.shareToTeam')}
                       </button>
                     ) : card.unshare ? (
                       <button
@@ -1777,7 +1812,7 @@ export function ExtensionsMarketplace({
                                 }}
                               >
                                 <Icon name="users" size={14} />
-                                {t('pluginsView.shareToTeam')}
+                                {card.isShared ? t('pluginsView.syncToTeam') : t('pluginsView.shareToTeam')}
                               </button>
                             ) : null}
                             {menuActions.includes('unshare') ? (
