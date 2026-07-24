@@ -74,7 +74,7 @@ const allowedConsumers = new Map<string, string>([
   // exception added in checkCertainExemptConsumption(), not here: it genuinely
   // reads docs/agent-adapters.md, and its exemption holds only while the
   // ci.yml daemon lane runs nothing but project-watchers.test.ts. See
-  // DAEMON_LANE_SINGLE_FILE_NEEDLE below.
+  // DAEMON_LANE_ALLOWED_TEST_COMMAND below.
   [
     "apps/web/tests/components/ChatPane.imported-folder-artifacts.test.tsx",
     "imported-project artifact fixture paths rendered from in-memory test data",
@@ -107,15 +107,31 @@ const allowedConsumers = new Map<string, string>([
 
 // apps/daemon/tests/runtimes/trae-cli.test.ts genuinely consumes repository
 // docs (docs/agent-adapters.md coverage assertion). It is tolerable only
-// because the ci.yml daemon lane currently executes a single test file that is
-// not it. That wiring fact is this needle; if the daemon lane ever widens, the
-// exception silently disappears and the guard reports the read, forcing the
+// because ci.yml currently executes exactly one daemon test command, targeting
+// a single test file that is not it. If the daemon test inventory ever widens,
+// the exception disappears and the guard reports the read, forcing
 // reclassification (docs → daemon scope rule, or relocating the consistency
 // test to e2e/tests/) instead of letting the entry rot.
-const DAEMON_LANE_SINGLE_FILE_NEEDLE =
-  "run: pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/project-watchers.test.ts";
+const DAEMON_LANE_ALLOWED_TEST_COMMAND =
+  "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/project-watchers.test.ts";
 
 const CONDITIONAL_CONSUMER = "apps/daemon/tests/runtimes/trae-cli.test.ts";
+
+export function daemonTestInvocationsFromWorkflow(workflow: string): string[] {
+  return workflow
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("#"))
+    .map((line) => line.replace(/^run:\s*/, ""))
+    .filter((line) =>
+      /\bpnpm\s+--filter\s+@open-design\/daemon\s+(?:test\b|(?:exec\s+)?vitest\b)/.test(line),
+    );
+}
+
+export function workflowRunsOnlyAllowedDaemonTest(workflow: string): boolean {
+  const invocations = daemonTestInvocationsFromWorkflow(workflow);
+  return invocations.length === 1 && invocations[0] === DAEMON_LANE_ALLOWED_TEST_COMMAND;
+}
 
 type ConsumptionViolation = {
   filePath: string;
@@ -269,7 +285,7 @@ export async function checkCertainExemptConsumption(): Promise<boolean> {
   const violations: ConsumptionViolation[] = [];
 
   const ciWorkflow = await readFile(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
-  const conditionallyAllowed = ciWorkflow.includes(DAEMON_LANE_SINGLE_FILE_NEEDLE)
+  const conditionallyAllowed = workflowRunsOnlyAllowedDaemonTest(ciWorkflow)
     ? new Set([CONDITIONAL_CONSUMER])
     : new Set<string>();
 

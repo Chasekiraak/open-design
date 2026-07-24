@@ -77,7 +77,7 @@ Requirements:
    tolerates `apps/daemon/tests/runtimes/trae-cli.test.ts` reading
    `docs/agent-adapters.md` only while `ci.yml`'s daemon lane still runs
    nothing but `project-watchers.test.ts` — the exception is conditional on
-   that exact needle (`DAEMON_LANE_SINGLE_FILE_NEEDLE` in
+   that exclusive invocation check (`workflowRunsOnlyAllowedDaemonTest` in
    `scripts/check-certain-exempt-consumption.ts`); widening the lane revives
    the violation and forces reclassification.
 

@@ -610,6 +610,33 @@ test("the consumption guard folds repository paths while allowing sandbox fixtur
   assert.deepEqual(prose, []);
 });
 
+test("the consumption guard requires the narrow daemon test command to be exclusive", async () => {
+  const { daemonTestInvocationsFromWorkflow, workflowRunsOnlyAllowedDaemonTest } = await import(
+    "../../../scripts/check-certain-exempt-consumption.ts"
+  );
+  const narrowCommand =
+    "pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/project-watchers.test.ts";
+  const narrowOnly = `
+jobs:
+  daemon_tests:
+    steps:
+      - name: Daemon workspace tests
+        run: ${narrowCommand}
+`;
+  assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowOnly), [narrowCommand]);
+  assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowOnly), true);
+
+  const narrowPlusBroader = `${narrowOnly}
+      - name: Full daemon suite
+        run: pnpm --filter @open-design/daemon test
+`;
+  assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowPlusBroader), [
+    narrowCommand,
+    "pnpm --filter @open-design/daemon test",
+  ]);
+  assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowPlusBroader), false);
+});
+
 test("the rule table classifies every file: no path escapes both fallbacks", async () => {
   const { scopeRules, matchesRuleMatch } = await import("../../../scripts/scopes.ts");
   const samples = [
