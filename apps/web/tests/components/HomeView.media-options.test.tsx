@@ -122,15 +122,13 @@ describe('HomeView media composer options', () => {
     stubFetch();
     renderHome();
 
-    // The design-system picker is a persistent companion to the + context
-    // control, so it remains reachable in every output state. Image/Video add
-    // no inline footer pills either; ratio / duration / model / resolution are
-    // asked for during the run (mirroring prototype/deck).
-    const plusTrigger = screen.getByTestId('home-hero-plus-trigger');
+    // The design-system picker is a persistent entry below the composer. A
+    // selected system may appear next to +, but the entry itself never moves.
+    // Image/Video add no inline footer pills either; ratio / duration / model /
+    // resolution are asked for during the run (mirroring prototype/deck).
     const designSystemTrigger = screen.getByTestId('home-hero-design-system-trigger');
-    expect(designSystemTrigger.closest('.home-hero__input-foot')).toBeTruthy();
-    expect(plusTrigger.compareDocumentPosition(designSystemTrigger) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(designSystemTrigger.closest('.home-hero__workdir-row')).toBeTruthy();
+    expect(screen.queryByTestId('home-hero-selected-design-system')).toBeNull();
 
     await clickHomeRailChip('image');
     await waitFor(() => expect(screen.getByTestId('home-hero-template-trigger').textContent).not.toContain('None'));
@@ -168,6 +166,32 @@ describe('HomeView media composer options', () => {
     // the prompt body.
     expect(screen.queryByTestId('home-hero-prompt-slot-text')).toBeNull();
     expect(screen.queryByTestId('home-hero-prompt-slot-voice')).toBeNull();
+  });
+
+  it('shows a selected design system beside + while keeping its picker below the composer', async () => {
+    stubFetch();
+    renderHome({
+      designSystems: [
+        designSystem('neutral-modern', 'Neutral Modern', 'built-in', 'published'),
+      ],
+    });
+
+    await chooseOption('designSystem', 'neutral-modern', 'Neutral Modern');
+
+    const plusTrigger = screen.getByTestId('home-hero-plus-trigger');
+    const selectedChip = await screen.findByTestId('home-hero-selected-design-system');
+    const designSystemTrigger = screen.getByTestId('home-hero-design-system-trigger');
+    expect(selectedChip.textContent).toContain('Neutral Modern');
+    expect(selectedChip.querySelector('svg')).toBeTruthy();
+    expect(selectedChip.closest('.home-hero__input-foot')).toBeTruthy();
+    expect(plusTrigger.compareDocumentPosition(selectedChip) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(designSystemTrigger.closest('.home-hero__workdir-row')).toBeTruthy();
+    expect(designSystemTrigger.textContent).toContain('Design system');
+
+    fireEvent.click(within(selectedChip).getByRole('button', { name: 'Clear Neutral Modern' }));
+    await waitFor(() => expect(screen.queryByTestId('home-hero-selected-design-system')).toBeNull());
+    expect(screen.getByTestId('home-hero-design-system-trigger')).toBeTruthy();
   });
 
   it('includes only published user-created design systems in the Home style picker', async () => {

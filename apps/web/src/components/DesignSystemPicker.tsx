@@ -65,6 +65,11 @@ interface Props {
   recommendedId?: string | null;
   /** Hide the recursive "Create" action when the picker is already on create. */
   showCreateAction?: boolean;
+  /**
+   * Keep the Home trigger as a stable "Design system" entry when its selected
+   * value is rendered separately in the composer beside the add button.
+   */
+  showSelectedLabel?: boolean;
 }
 
 export function DesignSystemPicker({
@@ -77,6 +82,7 @@ export function DesignSystemPicker({
   label,
   recommendedId = null,
   showCreateAction = true,
+  showSelectedLabel = true,
 }: Props) {
   const { locale, t } = useI18n();
   const triggerDisabled = Boolean(loading || disabled);
@@ -483,6 +489,9 @@ export function DesignSystemPicker({
   }
 
   if (variant === 'home') {
+    const homeTriggerLabel = showSelectedLabel && selected
+      ? selected.title
+      : t('newproj.designSystem');
     return (
       <div
         ref={wrapRef}
@@ -504,7 +513,7 @@ export function DesignSystemPicker({
           <span className="home-hero__ds-row-trigger-label">
             {loading
               ? t('designSystemPicker.loading')
-              : selected?.title ?? t('newproj.designSystem')}
+              : homeTriggerLabel}
           </span>
           <Icon name="chevron-down" size={11} className="home-hero__ds-row-trigger-chevron" />
         </button>
