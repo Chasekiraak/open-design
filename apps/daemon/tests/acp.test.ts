@@ -803,6 +803,58 @@ test('kind:other cannot claim Bash-like names that unlock partial redaction', ()
   assert.equal(isAcpPartialRedactToolName((toolUse.payload as { name?: string }).name ?? ''), false);
 });
 
+test('missing kind cannot claim Bash-like names that unlock partial redaction', () => {
+  // No-kind is the bypass left after kind:other was fail-closed: an adapter
+  // that omits kind but sends name/title "Bash" must not enter Langfuse's
+  // partial-redact allowlist. Only a recognized execute-family kind may.
+  for (const impersonator of ['Bash', 'bash', 'shell', 'Execute', 'terminal']) {
+    assert.equal(
+      acpToolName({ name: impersonator }),
+      'Other',
+      `no-kind name=${impersonator}`,
+    );
+  }
+  assert.equal(acpToolName({ title: 'Bash' }), 'Other');
+  assert.equal(acpToolName({ title: 'run shell command' }), 'Other');
+  // Non-Bash identifiers without kind remain available.
+  assert.equal(acpToolName({ name: 'my_special_tool' }), 'my_special_tool');
+  // Execute-family kinds still unlock Bash.
+  assert.equal(acpToolName({ kind: 'execute', name: 'Bash' }), 'Bash');
+  assert.equal(acpToolName({ kind: 'shell', title: 'run something' }), 'Bash');
+
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'no-kind bash-named tool',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'no-kind-bash-1',
+    // Intentionally omit kind — name alone must not unlock partial redaction.
+    name: 'Bash',
+    status: 'completed',
+    rawInput: { secret: 'API_KEY=super-secret', command: 'cat /Users/alice/.env' },
+    rawOutput: 'should not matter',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Other');
+  assert.equal(isAcpPartialRedactToolName((toolUse.payload as { name?: string }).name ?? ''), false);
+});
+
 test('sticky thinkOnly: pending Thinking then status-only completed emits no tool events', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];

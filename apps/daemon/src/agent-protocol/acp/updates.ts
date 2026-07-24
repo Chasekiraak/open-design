@@ -479,9 +479,10 @@ export function isAcpPartialRedactToolName(toolName: string): boolean {
  * collapses to the opaque family label `Other`. Langfuse additionally
  * canonicalizes non-allowlisted names at the telemetry boundary.
  *
- * Callers that resolve names under trusted `kind:other` must also reject
- * Bash-like partial-redact labels via `isAcpPartialRedactToolName` so custom
- * tools cannot impersonate the sole non-fail-closed family.
+ * Callers that resolve names without a recognized execute-family kind
+ * (missing kind, kind:other, unknown kinds) must also reject Bash-like
+ * partial-redact labels via `isAcpPartialRedactToolName` so custom tools
+ * cannot impersonate the sole non-fail-closed family.
  */
 export function sanitizeAcpCustomToolName(raw: string): string {
   const trimmed = raw.trim();
@@ -529,11 +530,13 @@ export function acpTelemetryToolCallId(raw: string): string {
  * exception: it is recognized for stickiness but is not a family, so an
  * explicit identifier-like name still wins there for UI/transcript — except
  * Bash-like partial-redact labels, which collapse to `Other` so custom MCP
- * tools cannot bypass Langfuse fail-closed payload redaction. Untrusted
- * free-text names (paths, tokens, titles) are collapsed to `Other` before the
- * event is emitted so Langfuse span labels cannot carry user-specific strings.
- * Payloads for unknown tools still fail closed in Langfuse
- * (`shouldFullyRedactToolPayload`). Write-label override to Write/Edit
+ * tools cannot bypass Langfuse fail-closed payload redaction. The same rule
+ * applies when `kind` is missing: a bare `name: "Bash"` (or Bash-like title)
+ * must not unlock partial redaction without a recognized execute-family kind.
+ * Untrusted free-text names (paths, tokens, titles) are collapsed to `Other`
+ * before the event is emitted so Langfuse span labels cannot carry
+ * user-specific strings. Payloads for unknown tools still fail closed in
+ * Langfuse (`shouldFullyRedactToolPayload`). Write-label override to Write/Edit
  * applies only when there is no recognized non-write kind, so
  * `countNewArtifacts` keeps working for title-only write frames.
  */
@@ -551,15 +554,18 @@ export function acpToolName(update: JsonObject): string {
     // Content-tool redaction keys off stable Claude-shaped families; keeping
     // adapter-local names would skip the known-content path (unknown names
     // still fail closed in Langfuse, but canonical families stay precise).
+    // Execute-family kinds are the only path that may emit Bash (partial-redact).
     name = kindName;
   } else if (typeof update.name === 'string' && update.name.trim()) {
-    // kind:other / custom: keep only identifier-like adapter names. Paths,
-    // tokens, and free text collapse to Other before the event is emitted.
+    // kind:other / missing kind / unknown kind: keep only identifier-like
+    // adapter names. Paths, tokens, and free text collapse to Other before
+    // the event is emitted.
     name = sanitizeAcpCustomToolName(update.name);
-    // Fail closed: kind:other must not claim Bash/shell/execute/terminal.
-    // Those names unlock Langfuse partial-redact (lexical masking only);
-    // custom MCP tools can put arbitrary private content in rawInput.
-    if (kindToken === 'other' && isAcpPartialRedactToolName(name)) {
+    // Fail closed: without a recognized execute-family kind, never claim
+    // Bash/shell/execute/terminal. Those names unlock Langfuse partial-redact
+    // (lexical masking only); unclassified custom tools (no kind, kind:other)
+    // can put arbitrary private content in rawInput.
+    if (isAcpPartialRedactToolName(name)) {
       name = 'Other';
     }
   } else if (recognizedKind && kindName) {
@@ -570,8 +576,9 @@ export function acpToolName(update: JsonObject): string {
     const fromTitle = acpToolNameFromTitle(update.title);
     // Title heuristics can still surface path-like first tokens; sanitize.
     name = fromTitle ? sanitizeAcpCustomToolName(fromTitle) : null;
-    // Same fail-closed rule when kind:other reaches title (no name field).
-    if (name && kindToken === 'other' && isAcpPartialRedactToolName(name)) {
+    // Same fail-closed rule for title-derived Bash labels without execute kind
+    // (missing kind, kind:other, or any non-canonical-family path).
+    if (name && isAcpPartialRedactToolName(name)) {
       name = 'Other';
     }
   } else if (kindName) {
