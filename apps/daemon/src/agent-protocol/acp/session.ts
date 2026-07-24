@@ -858,6 +858,12 @@ export function attachAcpSession({
       return;
     }
     if (promptRequestId !== null && obj.id === promptRequestId) {
+      // Flush still-open tools before AMR no-output classification. A successful
+      // session/prompt may omit a terminal tool_call_update; clean-closing those
+      // pending non-think tools flips emittedConcreteToolEvent so we take
+      // finishCleanPrompt instead of acp_no_visible_output (which would re-flush
+      // them as isError via fail()). Think-only open tools do not flip the flag.
+      flushOpenAcpTools();
       const usage = formatUsage(result.usage);
       if (!emittedVisibleTextChunk && !emittedConcreteToolEvent && modelUnavailableErrorCode) {
         const outputTokens = usage?.output_tokens;

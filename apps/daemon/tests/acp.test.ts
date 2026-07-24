@@ -2078,6 +2078,65 @@ test('attachAcpSession does not fail a tool-only AMR turn that emits no assistan
   assert.deepEqual(errorEvents, [], 'a turn that produced tool calls must not be reported as model-unavailable');
 });
 
+test('successful session/prompt with open concrete tool flushes clean (not no-output fail)', () => {
+  // Regression: session/prompt can succeed after an in-progress tool frame without a
+  // terminal tool_call_update. Clean-flush the open tool before AMR no-output
+  // classification so the run succeeds with isError=false instead of failing and
+  // re-flushing the tool as an error.
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  const session = attachAcpSession({
+    child: child as never,
+    prompt: 'read a file',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'open-read-1',
+    kind: 'read',
+    title: 'Read src/app.ts',
+    status: 'in_progress',
+    locations: [{ path: 'src/app.ts' }],
+  });
+  // Prompt completes successfully with usage but no terminal tool_call_update.
+  writeAcpResult(child, 3, {
+    stopReason: 'end_turn',
+    usage: { inputTokens: 10, outputTokens: 50, totalTokens: 60 },
+  });
+
+  assert.equal(session.hasFatalError(), false);
+  assert.equal(session.completedSuccessfully(), true);
+
+  const errorEvents = events.filter((entry) => entry.event === 'error');
+  assert.deepEqual(errorEvents, [], 'open concrete tool must not trigger acp_no_visible_output');
+
+  const toolUse = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'open-read-1',
+  );
+  assert.ok(toolUse, 'open concrete tool must be clean-flushed as tool_use');
+  assert.equal((toolUse.payload as { name?: string }).name, 'Read');
+
+  const toolResult = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === 'open-read-1',
+  );
+  assert.ok(toolResult, 'open concrete tool must be clean-flushed as tool_result');
+  assert.equal((toolResult.payload as { isError?: boolean }).isError, false);
+});
+
 test('attachAcpSession still fails an AMR turn that produces no text and no tool calls', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
