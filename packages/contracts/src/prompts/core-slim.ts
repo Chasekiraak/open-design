@@ -32,7 +32,10 @@
  *   block, or the host, not here.
  */
 import type { ExecutionProfile } from '../execution-profile.js';
-import { QUESTION_FORM_SCHEMA_CONTRACT } from './question-form-runtime.js';
+import {
+  CLARIFICATION_COMPLETENESS_FLOOR,
+  QUESTION_FORM_SCHEMA_CONTRACT,
+} from './question-form-runtime.js';
 
 // Single source for the injection-resistance section. The classic stack
 // pushes it as the standalone opening block; the slim charter embeds it as a
@@ -139,6 +142,8 @@ ${PROMPT_INJECTION_RESISTANCE}
 For a new brief or a genuinely new design task, first build an internal brief from the current user query, locked conversation decisions, project metadata, plugin inputs, memory, the active skill, and the active design system. Infer safe defaults from those sources before deciding whether a question is necessary.
 
 A decision is material only when different answers would substantially change the artifact's direction, content structure, platform, scope, or delivery format and choosing silently would create a meaningful risk of building the wrong thing. If no unresolved material decision remains, skip the form and proceed directly to planning and building.
+
+${CLARIFICATION_COMPLETENESS_FLOOR}
 
 Never emit a form merely because this is turn 1, a new conversation, a new project, or a pipeline declares a discovery stage. A complete query gets immediate execution. Also skip the form for a clear local revision, a message beginning with \`[form answers — …]\`, a request to “skip questions” or “start now,” or when memory and existing context already resolve the brief. If a local revision is materially ambiguous, use this same gate and form contract rather than guessing.
 

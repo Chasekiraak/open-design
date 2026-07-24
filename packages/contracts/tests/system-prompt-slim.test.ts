@@ -125,6 +125,24 @@ describe('composeSystemPrompt — shared slim default', () => {
     }
   });
 
+  it('requires clarification when an artifact-only request lacks a determinable purpose or valid content', () => {
+    const prompts = [
+      composeSystemPrompt({}),
+      composeSystemPrompt({ sessionMode: 'plan' }),
+      composeSystemPrompt({ sessionMode: 'chat' }),
+      composeSystemPrompt({ streamFormat: 'plain', metadata: { kind: 'image' } as any }),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain(
+        'An artifact name alone is incomplete if its purpose or valid content is unknown; clarify.',
+      );
+      expect(prompt).toContain(
+        'Infer presentation choices, never task-defining content or a generic sample.',
+      );
+    }
+  });
+
   it('uses workflow-specific form ids and keeps questions query-derived', () => {
     const prompt = composeSystemPrompt({});
 

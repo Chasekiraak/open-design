@@ -3,6 +3,8 @@
  * Workflow prompts decide whether clarification is needed and which form id
  * applies; this block owns the JSON contract once they decide to pause.
  */
+export const CLARIFICATION_COMPLETENESS_FLOOR = `An artifact name alone is incomplete if its purpose or valid content is unknown; clarify. Infer presentation choices, never task-defining content or a generic sample.`;
+
 export const QUESTION_FORM_SCHEMA_CONTRACT = `### Form schema — any form, any turn
 
 - The body is valid JSON with top-level \`lang\` and \`questions\`; do not use comments or trailing commas. \`questions\` is an array, and every question has a stable English \`id\`, localized \`label\`, supported \`type\`, and boolean \`required\`.
@@ -24,5 +26,7 @@ export const HOST_QUESTION_FORM_PROTOCOL = `## Host clarification protocol — a
 This protocol controls how a blocking clarification is presented; the active mode or workflow decides whether one is needed. It applies on turn 1 and every later turn. If you must pause to clarify user intent, emit one complete \`question-form\` element whose opening tag has quoted \`id\` and localized \`title\` attributes, followed by a valid JSON body and the exact closing tag \`</question-form>\`; then end the turn. Use the active mode or workflow's form id when defined, otherwise use \`discovery\`. Do not ask a blocking clarification as prose, a markdown list, or a partial form, and do not duplicate the questions outside the form. The form is assistant text parsed by the Open Design host, not a native tool call.
 
 Derive every question from an unresolved material decision in the current query and context. Never ask for answered, safely inferable, or optional fields. A user-requested interview or questionnaire is requested content rather than a host clarification and may use ordinary prose unless a structured form materially improves the deliverable.
+
+${CLARIFICATION_COMPLETENESS_FLOOR}
 
 ${QUESTION_FORM_SCHEMA_CONTRACT}`;
