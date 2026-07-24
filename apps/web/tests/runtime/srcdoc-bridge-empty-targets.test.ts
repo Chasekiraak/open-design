@@ -505,6 +505,18 @@ describe('selection bridge — empty annotation surface (#890)', () => {
     expect(win.document.getElementById('home')?.hasAttribute('hidden')).toBe(true);
     expect(win.document.getElementById('profile')?.hasAttribute('hidden')).toBe(false);
     expect(win.document.getElementById('profile')?.className).toBe('active');
+
+    const home = win.document.getElementById('home')!;
+    const profile = win.document.getElementById('profile')!;
+    home.dispatchEvent(new win.Event('pointerdown', { bubbles: true }));
+    home.removeAttribute('hidden');
+    home.setAttribute('data-edit-revision', 'fresh');
+    profile.setAttribute('hidden', '');
+
+    await new Promise<void>((resolve) => win.setTimeout(resolve, 120));
+    expect(home.hasAttribute('hidden')).toBe(false);
+    expect(home.getAttribute('data-edit-revision')).toBe('fresh');
+    expect(profile.hasAttribute('hidden')).toBe(true);
   });
 
   it('posts od:comment-target for the annotated card when the device-frame iframe is clicked', async () => {

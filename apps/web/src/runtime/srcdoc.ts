@@ -2235,11 +2235,30 @@ function meaningfulDomFallbackTarget(el) {
     }
     if (active()) setTimeout(postTargets, 0);
   }
+  var runtimeStateRestoreSequence = 0;
+  function cancelScheduledRuntimeStateRestore(){
+    runtimeStateRestoreSequence += 1;
+  }
+  // Retried restores help state survive an asynchronous artifact boot, but
+  // after the user interacts the live document is authoritative. Invalidate
+  // the pending handoff before its rAF/timeout callbacks can replay stale state.
+  document.addEventListener('pointerdown', cancelScheduledRuntimeStateRestore, true);
+  document.addEventListener('click', cancelScheduledRuntimeStateRestore, true);
+  document.addEventListener('keydown', cancelScheduledRuntimeStateRestore, true);
+  document.addEventListener('input', cancelScheduledRuntimeStateRestore, true);
+  document.addEventListener('change', cancelScheduledRuntimeStateRestore, true);
+  document.addEventListener('scroll', cancelScheduledRuntimeStateRestore, true);
   function scheduleRuntimeStateRestore(state){
-    restoreRuntimeState(state);
-    window.requestAnimationFrame(function(){
+    runtimeStateRestoreSequence += 1;
+    var sequence = runtimeStateRestoreSequence;
+    function restoreIfCurrent(){
+      if (sequence !== runtimeStateRestoreSequence) return;
       restoreRuntimeState(state);
-      window.setTimeout(function(){ restoreRuntimeState(state); }, 80);
+    }
+    restoreIfCurrent();
+    window.requestAnimationFrame(function(){
+      restoreIfCurrent();
+      window.setTimeout(restoreIfCurrent, 80);
     });
   }
   window.addEventListener('message', function(ev){
