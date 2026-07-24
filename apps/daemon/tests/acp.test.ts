@@ -2005,6 +2005,63 @@ test('child-exit fail path flushes open ACP tools as errored pairs', () => {
   assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
 });
 
+test('abort flushes open ACP tools as errored pairs', () => {
+  // User cancel calls abort() without going through fail(). Deferred tools
+  // must still emit tool_use/tool_result so canceled runs keep a complete
+  // transcript for Langfuse/PostHog (same as timeout / child-exit fails).
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  const session = attachAcpSession({
+    child: child as never,
+    prompt: 'run a long bash',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'open-bash-cancel-1',
+    kind: 'execute',
+    title: 'bash',
+    status: 'in_progress',
+    rawInput: { command: 'sleep 999' },
+  });
+  // No terminal tool_call_update — user cancels mid-tool.
+  session.abort();
+
+  const toolUse = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'open-bash-cancel-1',
+  );
+  assert.ok(toolUse, 'open tool must be flushed as tool_use on abort');
+  assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
+
+  const toolResult = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === 'open-bash-cancel-1',
+  );
+  assert.ok(toolResult, 'open tool must be flushed as tool_result on abort');
+  assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
+
+  // Idempotent: second abort must not re-emit the pair.
+  const agentCountBefore = events.filter((e) => e.event === 'agent').length;
+  session.abort();
+  assert.equal(
+    events.filter((e) => e.event === 'agent').length,
+    agentCountBefore,
+    'abort flush must be idempotent',
+  );
+});
+
 test('attachAcpSession treats stageTimeoutMs <= 0 as a watchdog disable, not an immediate-failure schedule', async () => {
   vi.useFakeTimers();
   try {

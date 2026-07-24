@@ -299,6 +299,74 @@ describe('scanRunEventsForUsageAnalytics', () => {
     });
   });
 
+  it('merges a later output-only usage frame with earlier input and cache fields', () => {
+    // A trailing frame with only output_tokens must not freeze the reverse
+    // scan: earlier input/cache counters still need to merge into run_finished.
+    const result = scanRunEventsForUsageAnalytics(
+      [
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              input_tokens: 8_000,
+              cache_read_input_tokens: 2_000,
+              cache_creation_input_tokens: 500,
+            },
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: { output_tokens: 120 },
+          },
+        },
+      ],
+      'amr-model',
+      0,
+    );
+
+    expect(result).toMatchObject({
+      input_tokens: 8_000,
+      output_tokens: 120,
+      cache_read_input_tokens: 2_000,
+      cache_creation_input_tokens: 500,
+      cache_token_source: 'anthropic',
+      token_count_source: 'provider_usage',
+    });
+  });
+
+  it('merges a later input-only usage frame with earlier output tokens', () => {
+    const result = scanRunEventsForUsageAnalytics(
+      [
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: { output_tokens: 90, total_tokens: 4_090 },
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: { input_tokens: 4_000 },
+          },
+        },
+      ],
+      '',
+      0,
+    );
+
+    expect(result).toMatchObject({
+      input_tokens: 4_000,
+      output_tokens: 90,
+      total_tokens: 4_090,
+      token_count_source: 'provider_usage',
+    });
+  });
+
   it('normalizes additive Responses-API / ACP usage where cache_read exceeds input_tokens', () => {
     // Real AMR/vela follow-up shape: the stream reports input_tokens as the
     // UNCACHED remainder with cached_input_tokens reported separately ON TOP, so

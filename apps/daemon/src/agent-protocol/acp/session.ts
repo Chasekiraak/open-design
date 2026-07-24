@@ -955,6 +955,11 @@ export function attachAcpSession({
      */
     abort() {
       if (aborted || finished) return;
+      // Flush deferred tool pairs as errored before terminal cancel. Tools are
+      // held until a terminal tool_call_update; without this flush, user cancel
+      // (runs.ts → acpSession.abort) drops in-progress tools from the transcript
+      // and from Langfuse/PostHog — unlike timeout and child-exit fail paths.
+      flushOpenAcpTools(true);
       aborted = true;
       finished = true;
       clearStageTimer();

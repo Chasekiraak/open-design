@@ -468,9 +468,10 @@ export function scanRunEventsForUsageAnalytics(
   let agentReportedModel: string | null = null;
   const needAgentModel = !hasExplicitRequestedModelForAnalytics(reqBodyModel);
   // Provider-usage is true for any real token field (including thought/cache-only
-  // ACP frames). Primary usage is input/output/total — enough to stop seeking
-  // older frames. Keeping these separate prevents a later partial `usage`
-  // frame from hiding an earlier complete record.
+  // ACP frames). Primary usage is complete only once both input and output are
+  // known — a trailing output-only or input-only frame must keep the reverse
+  // scan open so earlier frames can fill the missing primary fields (and cache).
+  // total alone is not enough to stop; providers often emit it without the pair.
   let haveProviderUsage = false;
   let havePrimaryUsage = false;
 
@@ -496,8 +497,8 @@ export function scanRunEventsForUsageAnalytics(
       if (usage) {
         const fields = extractUsageCacheFields(usage);
         // Reverse-scan merge: most-recent frame wins per field; fill gaps from
-        // older frames so a trailing thought/cache-only update still keeps
-        // earlier input/output/total.
+        // older frames so a trailing partial update still keeps earlier
+        // input/output/total/cache counters.
         if (inputTokens === undefined && fields.inputTokens !== undefined) {
           inputTokens = fields.inputTokens;
         }
@@ -535,10 +536,11 @@ export function scanRunEventsForUsageAnalytics(
         ) {
           haveProviderUsage = true;
         }
+        // Require both input and output before treating primary usage as
+        // complete. A single-field trailing frame (output-only / input-only /
+        // total-only) must not freeze the reverse scan.
         havePrimaryUsage =
-          inputTokens !== undefined ||
-          outputTokens !== undefined ||
-          providerTotalTokens !== undefined;
+          inputTokens !== undefined && outputTokens !== undefined;
       }
     }
 
@@ -559,8 +561,9 @@ export function scanRunEventsForUsageAnalytics(
       }
     }
 
-    // Stop once we have primary (input/output/total) usage. Thought/cache-only
-    // frames mark provider_usage but do not complete the reverse scan.
+    // Stop only once both input and output are known. Partial primary frames
+    // (and thought/cache-only frames) keep the reverse scan open so earlier
+    // counters still merge.
     if (havePrimaryUsage && (!needAgentModel || agentReportedModel)) break;
   }
 
