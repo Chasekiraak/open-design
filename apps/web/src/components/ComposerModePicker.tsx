@@ -288,6 +288,14 @@ export function ComposerModePicker({
                   <span className="composer-mode-menu__head">
                     <span className="composer-mode-menu__icon" aria-hidden>{m.icon}</span>
                     <span className="composer-mode-menu__name">{t(m.nameKey)}</span>
+                    {m.costKey ? (
+                      <span
+                        className="composer-mode-menu__meta"
+                        data-testid={`composer-mode-menu-${m.id}-cost`}
+                      >
+                        {t('chat.mode.cardCost')} · {t(m.costKey)}
+                      </span>
+                    ) : null}
                     {selected === m.id ? (
                       <span className="composer-mode-menu__check" aria-hidden>
                         <Icon name="check" size={16} />
@@ -295,14 +303,6 @@ export function ComposerModePicker({
                     ) : null}
                   </span>
                   <span className="composer-mode-menu__desc">{t(m.descKey)}</span>
-                  {m.costKey ? (
-                    <span
-                      className="composer-mode-menu__meta"
-                      data-testid={`composer-mode-menu-${m.id}-cost`}
-                    >
-                      {t('chat.mode.cardCost')} · {t(m.costKey)}
-                    </span>
-                  ) : null}
                 </button>
               ))}
             </div>,
