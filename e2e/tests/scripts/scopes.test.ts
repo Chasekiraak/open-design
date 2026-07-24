@@ -536,7 +536,7 @@ test("merge-queue threshold trusts the certain-exempt core without escalation", 
   });
 });
 
-test("the consumption guard distinguishes repo readers from sandbox fixture writers", async () => {
+test("the consumption guard folds repository paths while allowing sandbox fixture writers", async () => {
   const { collectCertainExemptConsumptionFromSource } = await import(
     "../../../scripts/check-certain-exempt-consumption.ts"
   );
@@ -564,10 +564,36 @@ test("the consumption guard distinguishes repo readers from sandbox fixture writ
     "docs/agent-adapters.md",
   ]);
 
-  // Known project writers resolve the same-looking path inside a sandbox.
+  const splitJoin = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/src/example.ts",
+    `await readFile(path.join(repoRoot, "docs", "agent-adapters.md"));`,
+  );
+  assert.deepEqual(splitJoin.map((violation) => violation.literal), [
+    `path.join(repoRoot, "docs", "agent-adapters.md")`,
+  ]);
+
+  const splitResolve = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/src/example.ts",
+    `await readFile(path.resolve("docs", "agent-adapters.md"));`,
+  );
+  assert.deepEqual(splitResolve.map((violation) => violation.literal), [
+    `path.resolve("docs", "agent-adapters.md")`,
+  ]);
+
+  const interpolatedPrefix = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/src/example.ts",
+    "await readFile(`docs/${adapter}.md`);",
+  );
+  assert.deepEqual(interpolatedPrefix.map((violation) => violation.literal), [
+    "`docs/${adapter}.md`",
+  ]);
+
+  // Known project writers resolve the same-looking paths inside a sandbox.
   for (const source of [
     `await writeProjectFile("docs/empty.md", "");`,
     `await fixture.writeProjectFile("docs/empty.md", "");`,
+    `await writeProjectFile(path.join("docs", "empty.md"), "");`,
+    "await writeProjectFile(`docs/${name}.md`, \"\");",
   ]) {
     const fixtureWrite = collectCertainExemptConsumptionFromSource(
       "apps/daemon/tests/example.test.ts",

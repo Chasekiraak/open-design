@@ -19,8 +19,9 @@ import { CERTAIN_EXEMPT_EXACT, CERTAIN_EXEMPT_PREFIXES } from "./scopes.ts";
 //   it is an argument to a known sandbox-fixture writer. Test files can also
 //   contain repo-root helpers, so exempting them wholesale would hide real
 //   consumption.
-// Template literals with substitutions are not statically resolvable and are
-// out of scope.
+// - path.join/path.resolve expressions made from static segments (optionally
+//   anchored at repoRoot), and template literals whose static prefix already
+//   enters an exempt directory: flagged as the same repository dependency.
 //
 // Deliberately outside the checked surface:
 // - root `scripts/` — floor-owned code. Preflight and workspace unit tests are
@@ -141,7 +142,7 @@ function literalConsumesCertainExemptSurface(fromRepositoryPath: string, literal
   return landsInCertainExemptSurface(literal);
 }
 
-function isSandboxFixtureWriterArgument(node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral): boolean {
+function isSandboxFixtureWriterArgument(node: ts.Expression): boolean {
   const call = node.parent;
   if (!ts.isCallExpression(call) || !call.arguments.includes(node)) return false;
 
@@ -152,6 +153,51 @@ function isSandboxFixtureWriterArgument(node: ts.StringLiteral | ts.NoSubstituti
       ? callee.name.text
       : undefined;
   return name !== undefined && sandboxFixtureWriterNames.has(name);
+}
+
+type StaticPath = {
+  path: string;
+  display: string;
+  prefixOnly: boolean;
+};
+
+function staticPathFromExpression(node: ts.Expression, sourceFile: ts.SourceFile): StaticPath | undefined {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return { path: node.text, display: node.text, prefixOnly: false };
+  }
+
+  if (ts.isTemplateExpression(node)) {
+    const prefix = node.head.text;
+    if (!CERTAIN_EXEMPT_PREFIXES.some((exemptPrefix) => prefix.startsWith(exemptPrefix))) {
+      return undefined;
+    }
+    return { path: prefix, display: node.getText(sourceFile), prefixOnly: true };
+  }
+
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return undefined;
+  const callee = node.expression;
+  if (
+    !ts.isIdentifier(callee.expression) ||
+    callee.expression.text !== "path" ||
+    (callee.name.text !== "join" && callee.name.text !== "resolve")
+  ) {
+    return undefined;
+  }
+
+  const segments: string[] = [];
+  for (const [index, argument] of node.arguments.entries()) {
+    if (index === 0 && ts.isIdentifier(argument) && argument.text === "repoRoot") continue;
+    const segment = staticPathFromExpression(argument, sourceFile);
+    if (segment === undefined || segment.prefixOnly) return undefined;
+    segments.push(segment.path);
+  }
+  if (segments.length === 0) return undefined;
+
+  return {
+    path: path.posix.join(...segments),
+    display: node.getText(sourceFile),
+    prefixOnly: false,
+  };
 }
 
 export function collectCertainExemptConsumptionFromSource(
@@ -168,16 +214,20 @@ export function collectCertainExemptConsumptionFromSource(
   const violations: ConsumptionViolation[] = [];
 
   const visit = (node: ts.Node): void => {
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      if (
-        !isSandboxFixtureWriterArgument(node) &&
-        literalConsumesCertainExemptSurface(repositoryPath, node.text)
-      ) {
-        violations.push({
-          filePath: repositoryPath,
-          lineNumber: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
-          literal: node.text,
-        });
+    if (ts.isExpression(node)) {
+      const candidate = staticPathFromExpression(node, sourceFile);
+      if (candidate !== undefined && !isSandboxFixtureWriterArgument(node)) {
+        const consumes = candidate.prefixOnly
+          ? CERTAIN_EXEMPT_PREFIXES.some((prefix) => candidate.path.startsWith(prefix))
+          : literalConsumesCertainExemptSurface(repositoryPath, candidate.path);
+        if (consumes) {
+          violations.push({
+            filePath: repositoryPath,
+            lineNumber: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+            literal: candidate.display,
+          });
+          return;
+        }
       }
     }
     ts.forEachChild(node, visit);
