@@ -206,6 +206,7 @@ export function RecentProjectsStrip({
   const resolvedLimit = limit ?? responsiveLimit;
   const hasRecentProjects = projects.length > 0;
   const fullPageGrid = heading !== undefined || description !== undefined || space !== 'recent';
+  const showOwnerFilter = space !== 'drafts';
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
   const [kindFilter, setKindFilter] = useState<ProjectKindFilter>('all');
@@ -311,6 +312,7 @@ export function RecentProjectsStrip({
       .map((project) => ({ project, creator: resolveCreator(project.id) }))
       .filter(({ project, creator }) => {
         const ownerMatches =
+          !showOwnerFilter ||
           ownerFilter === 'all' ||
           (ownerFilter === 'mine' && creator.ownedBySelf) ||
           (ownerFilter === 'others' && !creator.ownedBySelf);
@@ -318,7 +320,15 @@ export function RecentProjectsStrip({
         return ownerMatches && kindMatches;
       })
       .slice(0, resolvedLimit),
-    [kindFilter, ownerFilter, resolvedLimit, sortedProjects, projectOwnerMemberIds, selfMemberId],
+    [
+      kindFilter,
+      ownerFilter,
+      projectOwnerMemberIds,
+      resolvedLimit,
+      selfMemberId,
+      showOwnerFilter,
+      sortedProjects,
+    ],
   );
   const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const renameTitleId = useId();
@@ -693,34 +703,36 @@ export function RecentProjectsStrip({
                 {t('recentProjects.multiSelect')}
               </button>
             ) : null}
-            <div className="recent-projects__filter-wrap">
-              <button
-                type="button"
-                className="recent-projects__filter"
-                aria-expanded={openHeaderMenu === 'owner'}
-                onClick={() => setOpenHeaderMenu((current) => current === 'owner' ? null : 'owner')}
-              >
-                {t(OWNER_FILTER_OPTIONS.find((option) => option.id === ownerFilter)?.labelKey ?? 'recentProjects.ownerAll')}
-                <Icon name="chevron-down" size={13} />
-              </button>
-              {openHeaderMenu === 'owner' ? (
-                <div className="recent-projects__filter-menu" role="menu">
-                  {OWNER_FILTER_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={ownerFilter === option.id ? 'is-active' : undefined}
-                      onClick={() => {
-                        setOwnerFilter(option.id);
-                        setOpenHeaderMenu(null);
-                      }}
-                    >
-                      {t(option.labelKey)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            {showOwnerFilter ? (
+              <div className="recent-projects__filter-wrap">
+                <button
+                  type="button"
+                  className="recent-projects__filter"
+                  aria-expanded={openHeaderMenu === 'owner'}
+                  onClick={() => setOpenHeaderMenu((current) => current === 'owner' ? null : 'owner')}
+                >
+                  {t(OWNER_FILTER_OPTIONS.find((option) => option.id === ownerFilter)?.labelKey ?? 'recentProjects.ownerAll')}
+                  <Icon name="chevron-down" size={13} />
+                </button>
+                {openHeaderMenu === 'owner' ? (
+                  <div className="recent-projects__filter-menu" role="menu">
+                    {OWNER_FILTER_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={ownerFilter === option.id ? 'is-active' : undefined}
+                        onClick={() => {
+                          setOwnerFilter(option.id);
+                          setOpenHeaderMenu(null);
+                        }}
+                      >
+                        {t(option.labelKey)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="recent-projects__filter-wrap">
               <button
                 type="button"
