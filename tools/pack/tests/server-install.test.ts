@@ -593,12 +593,17 @@ describe("server payload installer", () => {
     const entrypoint = join(root, "install-core.mjs");
     await writeFile(entrypoint, "", "utf8");
 
-    expect(
-      isInstallServerCliEntrypoint(
-        pathToFileURL(await realpath(entrypoint)).href,
-        entrypoint,
-      ),
-    ).toBe(true);
+    const moduleUrl = pathToFileURL(await realpath(entrypoint)).href;
+    expect(isInstallServerCliEntrypoint(moduleUrl, entrypoint)).toBe(true);
+
+    // Windows argv paths often differ in drive-letter / segment casing from the
+    // file URL form of import.meta.url; identity must still hold.
+    if (process.platform === "win32") {
+      const flippedCase = entrypoint.replace(/[a-zA-Z]/g, (ch) =>
+        ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase(),
+      );
+      expect(isInstallServerCliEntrypoint(moduleUrl, flippedCase)).toBe(true);
+    }
   });
 
   it("publishes an immutable release and atomically points current at it", async () => {

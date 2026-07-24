@@ -211,11 +211,31 @@ async function withOwnedServerInstallLock<T>(
   }
 }
 
+/**
+ * Canonical path identity for install-time comparisons.
+ *
+ * Windows: realpath can return extended-length (`\\?\`) forms and NTFS is
+ * case-insensitive, so identity must fold separators + case after resolving.
+ * POSIX: realpath alone is enough (e.g. `/var` → `/private/var` on macOS).
+ */
+function canonicalizePathIdentity(path: string): string {
+  let canonicalPath = realpathSync.native(path);
+  if (process.platform === "win32") {
+    // GetFinalPathNameByHandle may return an extended-length path.
+    if (canonicalPath.startsWith("\\\\?\\UNC\\")) {
+      // \\?\UNC\server\share\… → \\server\share\…
+      canonicalPath = `\\\\${canonicalPath.slice("\\\\?\\UNC\\".length)}`;
+    } else if (canonicalPath.startsWith("\\\\?\\")) {
+      // \\?\C:\… → C:\…
+      canonicalPath = canonicalPath.slice("\\\\?\\".length);
+    }
+    return canonicalPath.replaceAll("\\", "/").toLowerCase();
+  }
+  return canonicalPath;
+}
+
 function normalizedInstallLockKey(path: string): string {
-  const canonicalPath = realpathSync.native(path);
-  return process.platform === "win32"
-    ? canonicalPath.replaceAll("\\", "/").toLowerCase()
-    : canonicalPath;
+  return canonicalizePathIdentity(path);
 }
 
 async function withServerInstallLocks<T>(
@@ -1075,11 +1095,23 @@ export function isInstallServerCliEntrypoint(
   if (argvPath == null) return false;
   try {
     return (
-      realpathSync(fileURLToPath(moduleUrl)) ===
-      realpathSync(resolve(argvPath))
+      canonicalizePathIdentity(fileURLToPath(moduleUrl)) ===
+      canonicalizePathIdentity(resolve(argvPath))
     );
   } catch {
-    return fileURLToPath(moduleUrl) === resolve(argvPath);
+    // Paths may not exist yet (or are not resolvable). Fall back to a
+    // platform-aware string compare so Windows drive-letter / separator
+    // aliases still match import.meta.url against process.argv[1].
+    try {
+      const left = resolve(fileURLToPath(moduleUrl));
+      const right = resolve(argvPath);
+      return process.platform === "win32"
+        ? left.replaceAll("\\", "/").toLowerCase() ===
+            right.replaceAll("\\", "/").toLowerCase()
+        : left === right;
+    } catch {
+      return false;
+    }
   }
 }
 
