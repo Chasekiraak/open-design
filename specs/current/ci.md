@@ -64,10 +64,28 @@ Requirements:
 4. **Goldens updated, divergence pinned.** The golden that changes is the
    proof of the behavior change; the goldens that do not change are the proof
    of its containment.
+5. **Exceptions bind to checkable preconditions.** Every guard allowlist entry
+   is a claim, and claims split by what justifies them. A *local, definitional*
+   fact ("this string is passed as data to a pure function, never opened") may
+   stay prose — it can only be falsified by editing the allowlisted file
+   itself, which puts the entry in front of a reviewer. A *remote, mutable*
+   fact ("that lane doesn't run this file", "that workflow is outside the
+   gate") must not be trusted as prose: the guard verifies the fact and drops
+   the exception the moment it stops holding, so the failure mode is a loud
+   guard report at the change that broke the premise — not a rationale that
+   rotted silently years earlier. Worked example: the consumption guard
+   tolerates `apps/daemon/tests/runtimes/trae-cli.test.ts` reading
+   `docs/agent-adapters.md` only while `ci.yml`'s daemon lane still runs
+   nothing but `project-watchers.test.ts` — the exception is conditional on
+   that exact needle (`DAEMON_LANE_SINGLE_FILE_NEEDLE` in
+   `scripts/check-certain-exempt-consumption.ts`); widening the lane revives
+   the violation and forces reclassification.
 
 Demotion is not yet codified (open question), with one hard rule already in
 force: if a guard check is deleted or renamed, the rule-table invariant test
-fails CI — a certain rule can never silently outlive its guard.
+fails CI — a certain rule can never silently outlive its guard. Rule five is
+the same principle one level down: an exception can never silently outlive
+its premise.
 
 ## Promotion #1 (2026-07): the certain-exempt core
 
