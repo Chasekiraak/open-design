@@ -564,6 +564,7 @@ import {
   listUnboundProjects,
   listTeamWorkspaceProjectShares,
   listWorkspaceProjects,
+  listWorkspaceResources,
   listRoutines,
   listRoutineRuns,
   listTabs,
@@ -708,6 +709,10 @@ import {
   reconcileWorkspaceProjectsWithRemote,
   type LocalTeamProjectBinding,
 } from './collab/workspace-projects-reconciler.js';
+import {
+  reconcileWorkspaceResourcesWithRemote,
+  type LocalTeamResourceBinding,
+} from './collab/workspace-resources-reconciler.js';
 import { createVelaCliCollabClientFromEnv } from './collab/vela-cli-collab-client.js';
 import {
   createVelaCliTeamProjectCatalogClientFromEnv,
@@ -3557,6 +3562,19 @@ export async function startServer({
         case 'billing-changed':
           emitWorkspaceEvent({ type: 'billing-changed', at: Date.now() });
           break;
+        case 'team-resources-changed': {
+          // A design-system/plugin/skill resource was shared (moved the
+          // 'published' ref) or retracted (removed) on the resource hub.
+          // `resourceKind` routes to just that kind's reconciler instead of
+          // re-checking all of them on every event — see
+          // `reconcileTeamResourcesFromRemote` below (declared later in this
+          // function; referencing it here is safe because this callback only
+          // ever RUNS once an actual SSE event arrives, well after the rest
+          // of `startServer`'s synchronous setup — including that
+          // declaration — has completed).
+          void reconcileTeamResourcesFromRemote(event.resourceKind).catch(() => undefined);
+          break;
+        }
       }
     },
     onReconnect: () => {
@@ -3564,6 +3582,11 @@ export async function startServer({
       // pollers watch, plus a comment pull for open projects.
       void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
       void collabCloud?.pollOnce().catch(() => undefined);
+      // Same catch-up principle for the design-system/skill resource
+      // reconciler: a missed 'team-resources-changed' push during the
+      // disconnect window is closed by one full re-check across every kind
+      // this daemon drives it for (no resourceKind => reconcile all).
+      void reconcileTeamResourcesFromRemote().catch(() => undefined);
     },
     onError: (error) => {
       console.warn('[od] hub events channel error (will reconnect):', String(error));
@@ -3967,6 +3990,87 @@ export async function startServer({
     share: skillsTeamShare,
     listTeam: cachedTeamResourceList(skillsTeamShare, syncSharedTeamSkill),
   });
+
+  // Collab realtime for design-system/skill "team resource" sharing: react
+  // to a `team-resources-changed` signal (hub push, wired above, OR the
+  // dedicated poll fallback below) by reconciling this workspace's
+  // `workspace_resources` rows against each kind's live shared listing. See
+  // `collab/workspace-resources-reconciler.ts` for the full design —
+  // in particular why retraction marks `resourceState: 'deleted'` and leaves
+  // `visibility: 'team'` alone, instead of demoting to `visibility:
+  // 'personal'` the way `workspace-projects-reconciler.ts` does for
+  // `workspace_projects` (that would misattribute a teammate's pulled copy
+  // as caller-authored — the exact bug `SkillSummary.teamSynced` exists to
+  // prevent).
+  //
+  // 'plugin' is a deliberate, documented gap, not an oversight: plugin's
+  // personal/team split runs entirely through `installed_plugins.source`'s
+  // `team:plugin:` prefix and has never been bound into `workspace_resources`
+  // at all (unlike design_system/skill, whose `syncSharedTeamDesignSystem` /
+  // `syncSharedTeamSkill` already double-write into that table today).
+  // Driving this reconciler for 'plugin' before that binding exists would
+  // just read zero local rows and silently do nothing on every call — a
+  // reconciler that looks wired but never has anything to reconcile is worse
+  // than the honest gap. Follow-up: teach plugin install/share to also write
+  // a `workspace_resources('plugin', ...)` row (mirroring the other two
+  // kinds), then add it to `RECONCILED_TEAM_RESOURCE_KINDS` below.
+  const RECONCILED_TEAM_RESOURCE_KINDS = ['design_system', 'skill'] as const;
+  type ReconciledTeamResourceKind = (typeof RECONCILED_TEAM_RESOURCE_KINDS)[number];
+  const teamResourceShareByKind: Record<ReconciledTeamResourceKind, TeamResourceShareService> = {
+    design_system: designSystemsTeamShare,
+    skill: skillsTeamShare,
+  };
+  const reconcileTeamResourceKind = (resourceType: ReconciledTeamResourceKind) =>
+    reconcileWorkspaceResourcesWithRemote({
+      getWorkspaceIdentity: async () => {
+        const context = await collab.workspaceContext.current({});
+        if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
+        return { workspaceId: context.workspaceId };
+      },
+      listRemoteTeamResources: async () =>
+        (await teamResourceShareByKind[resourceType].sharedResources()).map((resource) => ({
+          resourceId: resource.id,
+        })),
+      listLocalActiveTeamRows: (workspaceId): LocalTeamResourceBinding[] =>
+        listWorkspaceResources(db, resourceType, workspaceId)
+          .filter((row: any) => row.visibility === 'team' && row.resourceState !== 'deleted')
+          .map((row: any) => ({
+            resourceId: row.resourceId,
+            workspaceId: row.workspaceId,
+            visibility: row.visibility,
+            resourceState: row.resourceState ?? null,
+          })),
+      applyRetire: (workspaceId, resourceId) => {
+        updateWorkspaceResource(db, resourceType, workspaceId, resourceId, { resourceState: 'deleted' });
+      },
+      onError: (error) => console.warn(`[od] workspace-resources (${resourceType}) reconciliation error:`, error),
+    });
+  // `resourceKind` scopes the pass to just the kind the event was about;
+  // omitted (hub reconnect catch-up, the poll fallback) reconciles every
+  // kind this daemon drives it for.
+  const reconcileTeamResourcesFromRemote = async (resourceKind?: string): Promise<void> => {
+    const kinds = resourceKind
+      ? RECONCILED_TEAM_RESOURCE_KINDS.filter((kind) => kind === resourceKind)
+      : RECONCILED_TEAM_RESOURCE_KINDS;
+    await Promise.all(kinds.map((kind) => reconcileTeamResourceKind(kind)));
+  };
+  // Dedicated ~15s poll fallback — the "poll-as-floor" half of the same
+  // architecture principle `workspaceInvalidationPoller` follows for
+  // project/member/context signals (push accelerates delivery; the poll
+  // never stops running). Kept as its own timer rather than folded into that
+  // poller's deps: `workspaceInvalidationPoller` decides whether to emit by
+  // diffing a cheap SIGNATURE against the previous one (see its
+  // `emitIfChanged`), and there is no equivalent cheap "did the team-shared
+  // resource set change" digest to diff against (vela's own
+  // `/api/v1/collab/sync-digest` carries no resources token) — so this
+  // always just re-reads and re-diffs unconditionally on its own cadence
+  // instead of piggybacking on that poller's change-detection.
+  const teamResourcesPollTimer = setInterval(() => {
+    void reconcileTeamResourcesFromRemote().catch((error) =>
+      console.warn('[od] workspace-resources poll error:', error),
+    );
+  }, 15_000);
+  teamResourcesPollTimer.unref?.();
 
   registerMemoryRoutes(app, {
     http: { createSseResponse, requireLocalDaemonRequest },

@@ -18,6 +18,8 @@
 //     frame at least every 15s, so 45s of silence means the TCP stream is
 //     zombied and we abort + reconnect.
 
+export type HubResourceStatus = 'shared' | 'retracted';
+
 export interface HubWorkspaceEvent {
   type:
     | 'team-projects-changed'
@@ -26,10 +28,21 @@ export interface HubWorkspaceEvent {
     | 'workspace-context-changed'
     | 'billing-changed'
     | 'project-metadata-changed'
-    | 'project-content-changed';
+    | 'project-content-changed'
+    | 'team-resources-changed';
   workspaceId?: string;
   projectId?: string;
   resourceId?: string;
+  /** Set on 'team-resources-changed': `resource_hub.resources.kind` at emit
+   *  time — 'design_system' | 'plugin' | 'skill' | 'project' | any future
+   *  kind. Opaque here by design (mirrors vela's own `WorkspaceEvent.
+   *  resourceKind`); this daemon's `onEvent` handler owns the kind→reconciler
+   *  routing. */
+  resourceKind?: string;
+  /** Set on 'team-resources-changed' alongside resourceKind: whether the hub
+   *  write was a publish (moved the 'published' ref) or a retraction (the
+   *  resource's soft-delete). */
+  resourceStatus?: HubResourceStatus;
   seq?: number;
   version?: number;
   at?: string;
@@ -43,7 +56,10 @@ const HUB_EVENT_TYPES = new Set<HubWorkspaceEvent['type']>([
   'billing-changed',
   'project-metadata-changed',
   'project-content-changed',
+  'team-resources-changed',
 ]);
+
+const HUB_RESOURCE_STATUSES = new Set<HubResourceStatus>(['shared', 'retracted']);
 
 export function parseHubWorkspaceEvent(data: string): HubWorkspaceEvent | null {
   try {
@@ -55,6 +71,13 @@ export function parseHubWorkspaceEvent(data: string): HubWorkspaceEvent | null {
     if (typeof parsed.workspaceId === 'string') event.workspaceId = parsed.workspaceId;
     if (typeof parsed.projectId === 'string') event.projectId = parsed.projectId;
     if (typeof parsed.resourceId === 'string') event.resourceId = parsed.resourceId;
+    if (typeof parsed.resourceKind === 'string') event.resourceKind = parsed.resourceKind;
+    if (
+      typeof parsed.resourceStatus === 'string' &&
+      HUB_RESOURCE_STATUSES.has(parsed.resourceStatus as HubResourceStatus)
+    ) {
+      event.resourceStatus = parsed.resourceStatus as HubResourceStatus;
+    }
     if (typeof parsed.seq === 'number') event.seq = parsed.seq;
     if (typeof parsed.version === 'number') event.version = parsed.version;
     if (typeof parsed.at === 'string') event.at = parsed.at;

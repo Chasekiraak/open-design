@@ -48,6 +48,43 @@ describe('parseHubWorkspaceEvent', () => {
     expect(parseHubWorkspaceEvent('{"type":"mystery"}')).toBeNull();
     expect(parseHubWorkspaceEvent('not json')).toBeNull();
   });
+
+  // workspace-team continuous-sync priority 3: the resource-hub's
+  // 'team-resources-changed' push (vela API PR: emits on a 'published' ref
+  // move or a resource soft-delete) needs resourceKind + resourceStatus to
+  // route to the right per-kind reconciler and to tell "just shared" from
+  // "just retracted" apart.
+  it('parses team-resources-changed with resourceKind and resourceStatus', () => {
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"team-resources-changed","workspaceId":"w1","resourceId":"my-skill","resourceKind":"skill","resourceStatus":"shared","version":2}',
+      ),
+    ).toEqual({
+      type: 'team-resources-changed',
+      workspaceId: 'w1',
+      resourceId: 'my-skill',
+      resourceKind: 'skill',
+      resourceStatus: 'shared',
+      version: 2,
+    });
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"team-resources-changed","workspaceId":"w1","resourceId":"my-skill","resourceKind":"skill","resourceStatus":"retracted"}',
+      ),
+    ).toMatchObject({ resourceStatus: 'retracted' });
+  });
+
+  it('drops an unrecognized resourceStatus rather than passing it through', () => {
+    const event = parseHubWorkspaceEvent(
+      '{"type":"team-resources-changed","workspaceId":"w1","resourceId":"r1","resourceStatus":"mystery"}',
+    );
+    expect(event).toEqual({
+      type: 'team-resources-changed',
+      workspaceId: 'w1',
+      resourceId: 'r1',
+    });
+    expect(event).not.toHaveProperty('resourceStatus');
+  });
 });
 
 describe('startHubEventsSubscriber', () => {
