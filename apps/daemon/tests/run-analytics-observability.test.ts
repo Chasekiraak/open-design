@@ -299,6 +299,49 @@ describe('scanRunEventsForUsageAnalytics', () => {
     });
   });
 
+  it('merges earlier cache counters when a later frame already has input and output', () => {
+    // Inverse of the trailing cache-only case: providers may emit cache on an
+    // earlier frame and a complete input/output pair later. Reverse-scan must
+    // keep walking after primary is filled so cache_read/cache_creation still merge.
+    const result = scanRunEventsForUsageAnalytics(
+      [
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              cache_read_input_tokens: 250,
+              cache_creation_input_tokens: 100,
+            },
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              input_tokens: 1000,
+              output_tokens: 50,
+              total_tokens: 1050,
+            },
+          },
+        },
+      ],
+      '',
+      0,
+    );
+
+    expect(result).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 50,
+      total_tokens: 1050,
+      cache_read_input_tokens: 250,
+      cache_creation_input_tokens: 100,
+      cache_token_source: 'anthropic',
+      token_count_source: 'provider_usage',
+    });
+  });
+
   it('merges a later output-only usage frame with earlier input and cache fields', () => {
     // A trailing frame with only output_tokens must not freeze the reverse
     // scan: earlier input/cache counters still need to merge into run_finished.

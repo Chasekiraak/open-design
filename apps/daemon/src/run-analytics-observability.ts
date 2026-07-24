@@ -472,8 +472,13 @@ export function scanRunEventsForUsageAnalytics(
   // known — a trailing output-only or input-only frame must keep the reverse
   // scan open so earlier frames can fill the missing primary fields (and cache).
   // total alone is not enough to stop; providers often emit it without the pair.
+  // Cache counters are independent of the primary pair: a newer complete
+  // input/output frame that omits cache must not freeze the scan before an
+  // earlier cache_read/cache_creation frame is merged (the inverse of a
+  // trailing cache-only frame).
   let haveProviderUsage = false;
   let havePrimaryUsage = false;
+  let haveCacheFields = false;
 
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
@@ -488,7 +493,14 @@ export function scanRunEventsForUsageAnalytics(
         }
       | null
       | undefined;
-    if (ev?.event === 'agent' && data?.type === 'usage' && !havePrimaryUsage) {
+    // Keep merging usage while primary or cache counters are still incomplete.
+    // Stopping on primary alone drops earlier cache-only frames when a newer
+    // frame already supplied input+output without cache.
+    if (
+      ev?.event === 'agent' &&
+      data?.type === 'usage' &&
+      !(havePrimaryUsage && haveCacheFields)
+    ) {
       const usage = data.usage && typeof data.usage === 'object'
         ? data.usage
         : data.modelUsage && typeof data.modelUsage === 'object'
@@ -541,6 +553,12 @@ export function scanRunEventsForUsageAnalytics(
         // total-only) must not freeze the reverse scan.
         havePrimaryUsage =
           inputTokens !== undefined && outputTokens !== undefined;
+        // Cache fields resolve only once both counters are present. If a
+        // stream never emits them, the loop exhausts usage events instead of
+        // treating "no cache seen yet" as complete.
+        haveCacheFields =
+          cacheReadInputTokens !== undefined &&
+          cacheCreationInputTokens !== undefined;
       }
     }
 
@@ -561,10 +579,17 @@ export function scanRunEventsForUsageAnalytics(
       }
     }
 
-    // Stop only once both input and output are known. Partial primary frames
-    // (and thought/cache-only frames) keep the reverse scan open so earlier
-    // counters still merge.
-    if (havePrimaryUsage && (!needAgentModel || agentReportedModel)) break;
+    // Stop only once primary input/output and both cache counters are known.
+    // Partial primary frames, cache-only frames, and the inverse (complete
+    // primary without cache) keep the reverse scan open so earlier counters
+    // still merge. Streams with no cache frames simply finish the loop.
+    if (
+      havePrimaryUsage &&
+      haveCacheFields &&
+      (!needAgentModel || agentReportedModel)
+    ) {
+      break;
+    }
   }
 
   // Forward scan for the turn's FIRST model-call usage (the reverse loop above
