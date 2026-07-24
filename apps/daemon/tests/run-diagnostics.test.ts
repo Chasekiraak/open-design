@@ -312,6 +312,36 @@ describe('run diagnostics', () => {
     expect(JSON.stringify(result)).not.toContain('call-must-not-reach-analytics');
   });
 
+  it('surfaces AMR OpenCode timeout context when structured details omit runtime', () => {
+    const result = summarizeRunDiagnosticsForAnalytics({
+      events: [
+        {
+          event: 'error',
+          data: {
+            error: {
+              details: {
+                kind: 'opencode_prompt_error',
+                phase: 'timeout',
+                lastEventType: 'tool_call_update',
+                lastToolStatus: 'completed',
+                lastToolKind: 'read',
+              },
+            },
+          },
+        },
+      ],
+      exitCode: 1,
+      signal: null,
+    });
+
+    expect(result).toMatchObject({
+      amr_opencode_error_phase: 'timeout',
+      amr_opencode_last_event_type: 'tool_call_update',
+      amr_opencode_last_tool_status: 'completed',
+      amr_opencode_last_tool_kind: 'read',
+    });
+  });
+
   it('buckets unknown AMR OpenCode context instead of forwarding raw values', () => {
     const result = summarizeRunDiagnosticsForAnalytics({
       events: [

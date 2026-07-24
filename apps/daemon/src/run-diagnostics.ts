@@ -147,7 +147,10 @@ function amrOpenCodeLastToolKind(value: unknown): TrackingAmrOpenCodeLastToolKin
 function amrOpenCodeDiagnosticsFromError(data: unknown): Partial<RunDiagnosticsAnalytics> | null {
   const error = recordValue(recordValue(data)?.error);
   const details = recordValue(error?.details);
-  if (details?.kind !== 'opencode_prompt_error' || details.runtime !== 'opencode') {
+  if (
+    details?.kind !== 'opencode_prompt_error' ||
+    (details.runtime !== undefined && details.runtime !== 'opencode')
+  ) {
     return null;
   }
   const errorPhase = amrOpenCodeErrorPhase(details.phase);
