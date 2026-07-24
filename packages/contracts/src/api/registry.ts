@@ -203,6 +203,18 @@ export interface SkillSummary {
   // prompt" fast-create on a derived card still composes the parent's
   // SKILL.md body.
   aggregatesExamples: boolean;
+  /**
+   * True for a skill materialized locally from a TEAMMATE's team share (the
+   * puller's copy — never set on the sharer's own skill; mirrors
+   * `DesignSystemSummary.teamSynced` / the puller-side marker
+   * `syncSharedTeamSkill`'s `markTeamSynced` stamps into `workspace_resources`
+   * as `visibility: 'team'`). Without this, a pulled skill was indistinguishable
+   * from one the caller authored themselves — `source` reads `'user'` either
+   * way — so unsharing it team-side made it silently reappear in "Personal"
+   * instead of just dropping out of the Team scope like design-system/plugin
+   * already do.
+   */
+  teamSynced?: boolean;
 }
 
 // Body shape for POST /api/skills/import. The daemon turns this into a

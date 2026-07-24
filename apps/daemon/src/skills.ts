@@ -104,6 +104,19 @@ export interface SkillInfo {
   critiquePolicy: SkillCritiquePolicy;
   body: string;
   dir: string;
+  /**
+   * True for a skill materialized locally from a TEAMMATE's team share — the
+   * puller's copy, never the sharer's own (mirrors design-systems'
+   * `metadata.json` `teamSynced` flag; see `isTeamSyncedUserDesignSystem` in
+   * design-systems/index.ts). Sourced from the generic `workspace_resources`
+   * binding's `visibility` column (`'team'` — written by `syncSharedTeamSkill`'s
+   * `markTeamSynced` in server.ts), so it only appears when the caller asked to
+   * be workspace-scoped (`db` + `workspaceId` both passed to `listSkills`).
+   * Without this, a skill pulled from the team was indistinguishable from one
+   * the caller authored, and unsharing it team-side let it silently reappear
+   * in "Personal" instead of just leaving the Team scope.
+   */
+  teamSynced?: boolean;
 }
 
 interface DerivedExample {
@@ -178,7 +191,20 @@ function skillVisibleFromWorkspace(
   skillId: string,
   scope: string | null | undefined,
 ): boolean {
-  const binding = getWorkspaceResourceByResourceId(db, "skill", skillId);
+  return skillVisibleFromBinding(getWorkspaceResourceByResourceId(db, "skill", skillId), scope);
+}
+
+/**
+ * Pure counterpart of {@link skillVisibleFromWorkspace} that takes an
+ * already-fetched binding row instead of looking it up again — lets
+ * `listSkills`'s final scoping pass reuse the one binding read for both the
+ * visibility check and the `teamSynced` annotation below, instead of hitting
+ * `workspace_resources` twice per entry.
+ */
+function skillVisibleFromBinding(
+  binding: ReturnType<typeof getWorkspaceResourceByResourceId>,
+  scope: string | null | undefined,
+): boolean {
   const ownerId = typeof binding?.workspaceId === "string" ? binding.workspaceId.trim() : "";
   if (scope === undefined) return true;
   const scopeId = scope?.trim();
@@ -375,11 +401,22 @@ export async function listSkills(
   // row of its own — only the parent skill is ever bound (see
   // `importUserSkill`'s caller) — so resolve derived ids back to their
   // parent before checking visibility.
-  return out.filter((entry) => {
-    const derived = splitDerivedSkillId(entry.id);
-    const bindingId = derived ? derived.parentId : entry.id;
-    return skillVisibleFromWorkspace(scopeDb, bindingId, scopeId);
-  });
+  return out
+    .map((entry) => {
+      const derived = splitDerivedSkillId(entry.id);
+      const bindingId = derived ? derived.parentId : entry.id;
+      return { entry, binding: getWorkspaceResourceByResourceId(scopeDb, "skill", bindingId) };
+    })
+    .filter(({ binding }) => skillVisibleFromBinding(binding, scopeId))
+    // A binding whose visibility is `'team'` is the puller's copy of a
+    // teammate's share (see `syncSharedTeamSkill`'s `markTeamSynced` in
+    // server.ts) — never the sharer's own skill, which is never bound this
+    // way. Surface it so the UI can keep a team-synced skill out of
+    // "Personal" once it stops being actively shared (see `SkillSummary.
+    // teamSynced`'s doc comment for the full rationale).
+    .map(({ entry, binding }) =>
+      binding?.visibility === "team" ? { ...entry, teamSynced: true } : entry,
+    );
 }
 
 // Discover example artifacts that live alongside SKILL.md under

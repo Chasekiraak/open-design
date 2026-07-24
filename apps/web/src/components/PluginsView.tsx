@@ -138,6 +138,18 @@ function isPersonalPluginRecord(plugin: InstalledPluginRecord): boolean {
   return !plugin.source.startsWith('team:plugin:');
 }
 
+// Mirrors `isPersonalPluginRecord` for skills: a skill materialized from a
+// TEAMMATE's team share carries `teamSynced: true` (the puller-side marker
+// `syncSharedTeamSkill`'s `markTeamSynced` stamps into `workspace_resources`,
+// surfaced onto `SkillSummary` by `listSkills`'s workspace-scoped pass — never
+// set on the sharer's own skill). Without this exclusion, unsharing a skill
+// team-side made the puller's now-stale copy silently reappear in "Personal"
+// — `source` reads `'user'` either way, so it was indistinguishable from a
+// skill the caller authored themselves.
+function isPersonalSkillRecord(skill: SkillSummary): boolean {
+  return skill.source === 'user' && !skill.teamSynced;
+}
+
 const PLUGINS_TABS: ReadonlyArray<{
   id: PluginsTab;
 }> = [
@@ -1176,7 +1188,7 @@ export function ExtensionsMarketplace({
     () => buildAvailablePlugins(marketplaces, allInstalledPlugins),
     [marketplaces, allInstalledPlugins],
   );
-  const userSkills = useMemo(() => skills.filter((skill) => skill.source === 'user'), [skills]);
+  const userSkills = useMemo(() => skills.filter(isPersonalSkillRecord), [skills]);
   const officialSkills = useMemo(
     () => skills.filter((skill) => skill.source !== 'user'),
     [skills],
