@@ -423,14 +423,25 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     expected: FULL_PLAN,
   },
   {
-    // While the certain rule set is empty, every queued file sits below the
-    // merge-queue trust threshold and escalates: the queue stays full. The
-    // first certain-rule promotion is the deliberate behavior change that
-    // makes this case diverge.
-    name: "merge_group docs-only group still runs everything at the certain threshold",
+    // Root markdown stays medium-tier (the global md regex is not promotable:
+    // its safety depends on other rules covering runtime-markdown directories),
+    // so one README.md in the group escalates and keeps the queue full even
+    // though docs/ itself is certain-tier.
+    name: "merge_group group with root markdown still runs everything at the certain threshold",
     context: { eventName: "merge_group" },
     files: ["README.md", "docs/architecture.md"],
     expected: FULL_PLAN,
+  },
+  {
+    // The first certain-tier promotion: a group confined to the certain-exempt
+    // core (docs/, landing-page, editor configs, LICENSE/CODEOWNERS) drops to
+    // the unconditional floor lanes instead of running everything. Guarded by
+    // the "certain-exempt surface consumption" guard check; methodology in
+    // specs/current/ci.md.
+    name: "merge_group certain-exempt core group drops to the floor lanes",
+    context: { eventName: "merge_group" },
+    files: ["docs/architecture.md", "docs/nested/guide.mdx", "apps/landing-page/src/pages/index.astro", "LICENSE", ".github/CODEOWNERS"],
+    expected: expectedPlan({ ciMode: "full" }),
   },
   {
     name: "merge_group mixed group runs everything at the certain threshold",
@@ -482,16 +493,82 @@ test("rule ids are unique", async () => {
   assert.deepEqual(ids, [...new Set(ids)]);
 });
 
-test("certain rules must name their enforcing guard", async () => {
+test("certain rules must name a guard that resolves to a real guard check", async () => {
   const { scopeRules } = await import("../../../scripts/scopes.ts");
+  // guard.ts must run through tsx (its check modules use .js-suffixed TS-ESM
+  // specifiers), so go through the root guard script exactly like CI does.
+  const guardCheckNames = new Set(
+    execFileSync("pnpm", ["--silent", "guard", "--list-checks"], { cwd: repoRoot, encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean),
+  );
   for (const rule of scopeRules) {
     if (rule.confidence === "certain") {
       assert.ok(
-        rule.guard != null && rule.guard.length > 0,
-        `rule ${rule.id} is "certain" but names no guard; promotion requires the check that keeps its boundary invariant true`,
+        rule.guard != null && guardCheckNames.has(rule.guard),
+        `rule ${rule.id} is "certain" but its guard ${JSON.stringify(rule.guard)} does not resolve to a scripts/guard.ts check; promotion requires the live check that keeps its boundary invariant true`,
       );
     }
   }
+});
+
+test("certain-exempt markdown matches only the certain rule (no medium co-match neutralizes the promotion)", async () => {
+  const { scopeRules, matchesRuleMatch } = await import("../../../scripts/scopes.ts");
+  for (const file of ["docs/architecture.md", "docs/nested/guide.mdx", "apps/landing-page/README.md"]) {
+    const matched = scopeRules.filter((rule) => matchesRuleMatch(file, rule.match)).map((rule) => rule.id);
+    assert.deepEqual(matched, ["certain-exempt-surface"], file);
+  }
+});
+
+test("merge-queue threshold trusts the certain-exempt core without escalation", async () => {
+  const { evaluateScopeOutputs, SCOPE_EFFECTS } = await import("../../../scripts/scopes.ts");
+  const atQueue = evaluateScopeOutputs(["docs/architecture.md"], "certain", {
+    deriveWorkspaceValidationFromTestScopes: true,
+  });
+  assert.deepEqual(
+    Object.values(atQueue.outputs),
+    SCOPE_EFFECTS.map(() => false),
+  );
+  assert.deepEqual(atQueue.decisions[0], {
+    file: "docs/architecture.md",
+    matchedRules: ["certain-exempt-surface"],
+    escalated: false,
+  });
+});
+
+test("the consumption guard flags repo-resolving literals and tolerates test fixtures", async () => {
+  const { collectCertainExemptConsumptionFromSource, isFixtureTolerantPath } = await import(
+    "../../../scripts/check-certain-exempt-consumption.ts"
+  );
+
+  // Dot-relative resolution into docs/ is consumption anywhere, tests included.
+  const relative = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/tests/example.test.ts",
+    `const spec = readFileSync("../../../docs/spec.md", "utf8");`,
+  );
+  assert.deepEqual(relative.map((violation) => violation.literal), ["../../../docs/spec.md"]);
+
+  // Bare repo-relative literals are consumption in non-test source...
+  const bareInSource = collectCertainExemptConsumptionFromSource(
+    "tools/example/src/config.ts",
+    `const changelog = "docs/CHANGELOG";`,
+  );
+  assert.deepEqual(bareInSource.map((violation) => violation.literal), ["docs/CHANGELOG"]);
+
+  // ...but fixture data in tests (sandboxed project paths, never repo docs/).
+  assert.ok(isFixtureTolerantPath("apps/daemon/tests/example.test.ts"));
+  const bareInTest = collectCertainExemptConsumptionFromSource(
+    "apps/daemon/tests/example.test.ts",
+    `await writeProjectFile("docs/empty.md", "");`,
+  );
+  assert.deepEqual(bareInTest, []);
+
+  // Prose that merely mentions a docs path does not start with the prefix.
+  const prose = collectCertainExemptConsumptionFromSource(
+    "apps/web/src/copy.ts",
+    `const footer = "Spec: docs/skills-protocol.md covers the adapter surface.";`,
+  );
+  assert.deepEqual(prose, []);
 });
 
 test("the rule table classifies every file: no path escapes both fallbacks", async () => {
