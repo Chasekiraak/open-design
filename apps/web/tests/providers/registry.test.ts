@@ -25,8 +25,10 @@ import {
   fetchSkillExample,
   isDeployProviderId,
   openFolderDialog,
+  patchPreviewCommentSortKey,
   updateDeployConfig,
   uploadProjectFiles,
+  upsertPreviewComment,
   writeProjectTextFileDetailed,
 } from '../../src/providers/registry';
 
@@ -210,6 +212,121 @@ describe('writeProjectTextFileDetailed', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await writeProjectTextFileDetailed('project-1', 'preview.html', '<html></html>');
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+// A minimal PreviewCommentTarget — only the fields the contract requires,
+// the values themselves are irrelevant to the header-attachment behavior
+// under test here.
+const PREVIEW_COMMENT_TARGET = {
+  filePath: 'index.html',
+  elementId: 'el-1',
+  selector: '#el-1',
+  label: 'Hero',
+  text: '',
+  position: { x: 0, y: 0, width: 10, height: 10 },
+  htmlHint: '<div>hero</div>',
+};
+
+function previewCommentResponse(overrides: Record<string, unknown> = {}): Response {
+  return new Response(
+    JSON.stringify({
+      comment: {
+        id: 'cmt_1',
+        projectId: 'project-1',
+        conversationId: 'conv-1',
+        ...PREVIEW_COMMENT_TARGET,
+        note: 'hi',
+        status: 'open',
+        createdAt: 0,
+        updatedAt: 0,
+        ...overrides,
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+describe('upsertPreviewComment', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  // recvq5BVsolIxi follow-up: this call used to omit `x-od-workspace-*`
+  // entirely, so a team-bound project's daemon-side
+  // `enforceCommentWorkspaceMutation` gate 401'd with
+  // `WORKSPACE_CONTEXT_REQUIRED` on every real click — silently, since the
+  // caller collapsed any non-ok response to `null`. Reproduced against the
+  // real dogfood daemon via curl before this fix landed.
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await upsertPreviewComment(
+      'project-1',
+      'conv-1',
+      { target: PREVIEW_COMMENT_TARGET, note: 'hi' },
+      personalWorkspaceContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await upsertPreviewComment('project-1', 'conv-1', { target: PREVIEW_COMMENT_TARGET, note: 'hi' });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+describe('patchPreviewCommentSortKey', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse({ sortKey: 42 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchPreviewCommentSortKey('project-1', 'conv-1', 'cmt_1', 42, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments/cmt_1/reorder',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse({ sortKey: 42 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchPreviewCommentSortKey('project-1', 'conv-1', 'cmt_1', 42);
 
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });

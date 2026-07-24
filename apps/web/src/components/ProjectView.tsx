@@ -3604,20 +3604,36 @@ export function ProjectView({
         ? previewComments.find((comment) => comment.id === commentId)
         : undefined;
       const attachments = mergePreviewCommentAttachments(existing?.attachments, uploadedAttachments);
-      const saved = await upsertPreviewComment(project.id, activeConversationId, {
-        ...(commentId ? { id: commentId } : {}),
-        target,
-        note,
-        ...(attachments.length > 0 ? { attachments } : {}),
-      });
-      if (!saved) return null;
+      const saved = await upsertPreviewComment(
+        project.id,
+        activeConversationId,
+        {
+          ...(commentId ? { id: commentId } : {}),
+          target,
+          note,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        },
+        workspaceContext,
+      );
+      if (!saved) {
+        // Do not fail silently (recvq5BVsolIxi follow-up): a missing/expired
+        // workspace context 401s here with zero prior UI feedback, and the
+        // popover otherwise just closes as if the comment had saved.
+        setProjectActionsToast({
+          message: t('project.previewCommentSaveFailed'),
+          details: null,
+          tone: 'error',
+          ttlMs: 5000,
+        });
+        return null;
+      }
       setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
       setAttachedComments((current) =>
         attachAfterSave ? mergeAttachedComments(current, saved) : current.map((comment) => comment.id === saved.id ? saved : comment),
       );
       return saved;
     },
-    [project.id, activeConversationId, previewComments],
+    [project.id, activeConversationId, previewComments, workspaceContext, t],
   );
 
   const removePreviewComment = useCallback(
@@ -3638,7 +3654,10 @@ export function ProjectView({
    * old order, then reconciles with whatever the daemon actually persisted.
    * A failed PATCH leaves the optimistic order in place rather than
    * snapping back — the daemon call is a best-effort persistence layer for a
-   * personal display preference, not content that must round-trip.
+   * personal display preference, not content that must round-trip. Even so,
+   * a failed persist gets a toast (recvq5BVsolIxi follow-up): the local
+   * order still looks right until the next reload silently drops it, and the
+   * user should have a chance to notice and retry before that happens.
    */
   const reorderPreviewComment = useCallback(
     async (commentId: string, sortKey: number) => {
@@ -3646,10 +3665,25 @@ export function ProjectView({
       setPreviewComments((current) =>
         current.map((comment) => (comment.id === commentId ? { ...comment, sortKey } : comment)),
       );
-      const saved = await patchPreviewCommentSortKey(project.id, activeConversationId, commentId, sortKey);
-      if (saved) setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
+      const saved = await patchPreviewCommentSortKey(
+        project.id,
+        activeConversationId,
+        commentId,
+        sortKey,
+        workspaceContext,
+      );
+      if (saved) {
+        setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
+      } else {
+        setProjectActionsToast({
+          message: t('project.previewCommentReorderFailed'),
+          details: null,
+          tone: 'error',
+          ttlMs: 5000,
+        });
+      }
     },
-    [project.id, activeConversationId],
+    [project.id, activeConversationId, workspaceContext, t],
   );
 
   const attachPreviewComment = useCallback((comment: PreviewComment) => {

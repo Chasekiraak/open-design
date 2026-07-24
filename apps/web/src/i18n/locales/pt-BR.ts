@@ -2074,6 +2074,8 @@ export const ptBR: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Prévia do sistema de design aberta.',
+  'project.previewCommentSaveFailed': 'Não foi possível salvar o comentário. Tente novamente.',
+  'project.previewCommentReorderFailed': 'Não foi possível salvar a ordem dos comentários; ela pode ser redefinida ao recarregar.',
   'project.metaFreeform': 'livre',
   'project.typePrototype': 'Protótipo',
   'project.typeDeck': 'Slides',

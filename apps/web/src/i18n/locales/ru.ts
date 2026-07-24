@@ -2074,6 +2074,8 @@ export const ru: Dict = {
   'project.brandReadyAiOptimize': 'AI-оптимизация',
   'project.brandReadyEditManually': 'Редактировать вручную',
   'project.brandReadyPreviewOpened': 'Предпросмотр дизайн-системы открыт.',
+  'project.previewCommentSaveFailed': 'Не удалось сохранить комментарий. Попробуйте ещё раз.',
+  'project.previewCommentReorderFailed': 'Не удалось сохранить порядок комментариев — при обновлении страницы он может сброситься.',
   'project.metaFreeform': 'произвольная форма',
   'project.typePrototype': 'Прототип',
   'project.typeDeck': 'Слайды',

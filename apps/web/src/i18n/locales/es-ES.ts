@@ -2074,6 +2074,8 @@ export const esES: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Vista previa del sistema de diseño abierta.',
+  'project.previewCommentSaveFailed': 'No se pudo guardar el comentario. Inténtalo de nuevo.',
+  'project.previewCommentReorderFailed': 'No se pudo guardar el orden de los comentarios y puede restablecerse al recargar.',
   'project.metaFreeform': 'estilo libre',
   'project.typePrototype': 'Prototipo',
   'project.typeDeck': 'Diapositivas',

@@ -2074,6 +2074,8 @@ export const fr: Dict = {
   'project.brandReadyAiOptimize': 'Optimiser avec l’IA',
   'project.brandReadyEditManually': 'Modifier manuellement',
   'project.brandReadyPreviewOpened': 'Aperçu du système de design ouvert.',
+  'project.previewCommentSaveFailed': "Le commentaire n'a pas pu être enregistré. Veuillez réessayer.",
+  'project.previewCommentReorderFailed': "L'ordre des commentaires n'a pas pu être enregistré et pourrait être réinitialisé au prochain chargement.",
   'project.metaFreeform': 'libre',
   'project.typePrototype': 'Prototype',
   'project.typeDeck': 'Diapositives',

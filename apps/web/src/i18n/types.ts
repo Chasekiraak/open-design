@@ -2802,6 +2802,8 @@ export interface Dict {
   'project.brandReadyAiOptimize': string;
   'project.brandReadyEditManually': string;
   'project.brandReadyPreviewOpened': string;
+  'project.previewCommentSaveFailed': string;
+  'project.previewCommentReorderFailed': string;
   'project.metaFreeform': string;
   'project.typePrototype': string;
   'project.typeDeck': string;

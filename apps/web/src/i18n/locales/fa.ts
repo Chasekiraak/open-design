@@ -2074,6 +2074,8 @@ export const fa: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'پیش‌نمایش سیستم طراحی باز شد.',
+  'project.previewCommentSaveFailed': 'نظر ذخیره نشد. دوباره تلاش کنید.',
+  'project.previewCommentReorderFailed': 'ترتیب نظرات ذخیره نشد و ممکن است با بارگذاری دوباره بازنشانی شود.',
   'project.metaFreeform': 'آزاد',
   'project.typePrototype': 'نمونه اولیه',
   'project.typeDeck': 'اسلایدها',

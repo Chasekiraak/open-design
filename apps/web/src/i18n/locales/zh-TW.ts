@@ -2177,6 +2177,8 @@ export const zhTW: Dict = {
   "project.brandReadyAiOptimize": "AI 最佳化",
   "project.brandReadyEditManually": "手動編輯",
   "project.brandReadyPreviewOpened": "已跳轉到設計體系預覽。",
+  "project.previewCommentSaveFailed": "留言儲存失敗，請再試一次。",
+  "project.previewCommentReorderFailed": "留言順序儲存失敗，重新載入頁面後可能恢復原狀。",
   "project.metaFreeform": "自由設計",
   "project.customInstructions": "專案指示",
   "project.customInstructionsPlaceholder": "此專案的指示（每則訊息都會注入）…",

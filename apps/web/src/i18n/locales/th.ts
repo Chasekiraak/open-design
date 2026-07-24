@@ -2074,6 +2074,8 @@ export const th: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'เปิดตัวอย่างระบบออกแบบแล้ว',
+  'project.previewCommentSaveFailed': 'ไม่สามารถบันทึกความคิดเห็นได้ กรุณาลองใหม่อีกครั้ง',
+  'project.previewCommentReorderFailed': 'ไม่สามารถบันทึกลำดับความคิดเห็นได้ และอาจรีเซ็ตเมื่อโหลดหน้าใหม่',
   'project.metaFreeform': 'ฟรีฟอร์ม',
   'project.typePrototype': 'ต้นแบบ',
   'project.typeDeck': 'สไลด์',

@@ -2074,6 +2074,8 @@ export const ar: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'تم فتح معاينة نظام التصميم.',
+  'project.previewCommentSaveFailed': 'تعذّر حفظ التعليق. حاول مرة أخرى.',
+  'project.previewCommentReorderFailed': 'تعذّر حفظ ترتيب التعليقات وقد يُعاد ضبطه عند إعادة التحميل.',
   'project.metaFreeform': 'شكل حر',
   'project.typePrototype': 'نموذج أولي',
   'project.typeDeck': 'شرائح',

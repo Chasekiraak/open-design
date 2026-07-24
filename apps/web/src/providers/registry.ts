@@ -2076,17 +2076,29 @@ export async function fetchPreviewComments(
   }
 }
 
+// `workspaceContext`, when present, proves the caller's workspace membership
+// to the daemon's `enforceCommentWorkspaceMutation` gate (spec 04 §10 fix
+// #4/#6 — recvqbklNGDqYY) the same way `workspaceProjectHeaders`' call sites
+// elsewhere in this file do. A workspace-bound project mutated with no
+// headers fails closed with 401 `WORKSPACE_CONTEXT_REQUIRED` — silently, from
+// the caller's point of view, unless it inspects the response — so this
+// param is NOT optional-in-spirit for a team project even though it stays an
+// optional trailing arg for personal-project callers that have no context.
 export async function upsertPreviewComment(
   projectId: string,
   conversationId: string,
   input: PreviewCommentUpsertRequest,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<PreviewComment | null> {
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+        },
         body: JSON.stringify(input),
       },
     );
@@ -2125,19 +2137,31 @@ export async function patchPreviewCommentStatus(
  * Persist a drag-reorder of the sidebar's display order (recvq5BVsolIxi
  * Phase 2). Writes only the dragged comment's `sortKey` — never a whole-list
  * renumber, and never touches `pinSeq` (the canvas pin number).
+ *
+ * `workspaceContext`, when present, attaches the same workspace identity
+ * headers the sibling comment-mutation calls in this file carry (see
+ * `upsertPreviewComment` above) — kept consistent with those call sites even
+ * though today's `/reorder` route does not itself gate on them, so this
+ * write stays correct if/when that route gains the same
+ * `enforceCommentWorkspaceMutation` coverage the other comment mutations
+ * have.
  */
 export async function patchPreviewCommentSortKey(
   projectId: string,
   conversationId: string,
   commentId: string,
   sortKey: number,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<PreviewComment | null> {
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}/reorder`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+        },
         body: JSON.stringify({ sortKey }),
       },
     );

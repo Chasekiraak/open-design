@@ -2074,6 +2074,8 @@ export const en: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Design system preview opened.',
+  'project.previewCommentSaveFailed': 'Comment could not be saved. Please try again.',
+  'project.previewCommentReorderFailed': 'Comment order could not be saved and may reset on reload.',
   'project.metaFreeform': 'freeform',
   'project.typePrototype': 'Prototype',
   'project.typeDeck': 'Slides',

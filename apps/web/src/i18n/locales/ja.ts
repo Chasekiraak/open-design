@@ -2074,6 +2074,8 @@ export const ja: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'デザインシステムのプレビューを開きました。',
+  'project.previewCommentSaveFailed': 'コメントを保存できませんでした。もう一度お試しください。',
+  'project.previewCommentReorderFailed': 'コメントの並び順を保存できませんでした。再読み込みすると元に戻る場合があります。',
   'project.metaFreeform': 'フリーフォーム',
   'project.typePrototype': 'プロトタイプ',
   'project.typeDeck': 'スライド',

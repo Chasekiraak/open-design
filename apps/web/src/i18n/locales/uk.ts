@@ -2074,6 +2074,8 @@ export const uk: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Попередній перегляд дизайн-системи відкрито.',
+  'project.previewCommentSaveFailed': 'Не вдалося зберегти коментар. Спробуйте ще раз.',
+  'project.previewCommentReorderFailed': 'Не вдалося зберегти порядок коментарів — він може скинутися після оновлення сторінки.',
   'project.metaFreeform': 'вільна форма',
   'project.typePrototype': 'Прототип',
   'project.typeDeck': 'Слайди',

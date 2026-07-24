@@ -2074,6 +2074,8 @@ export const hu: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Designrendszer előnézete megnyitva.',
+  'project.previewCommentSaveFailed': 'A megjegyzést nem sikerült elmenteni. Próbáld újra.',
+  'project.previewCommentReorderFailed': 'A megjegyzések sorrendjét nem sikerült elmenteni, és újratöltéskor visszaállhat.',
   'project.metaFreeform': 'szabad formátum',
   'project.typePrototype': 'Prototípus',
   'project.typeDeck': 'Diák',

@@ -2074,6 +2074,8 @@ export const ko: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': '디자인 시스템 미리보기를 열었습니다.',
+  'project.previewCommentSaveFailed': '댓글을 저장하지 못했습니다. 다시 시도해 주세요.',
+  'project.previewCommentReorderFailed': '댓글 순서를 저장하지 못했습니다. 새로고침하면 초기화될 수 있습니다.',
   'project.metaFreeform': '자유 양식',
   'project.typePrototype': '프로토타입',
   'project.typeDeck': '슬라이드',

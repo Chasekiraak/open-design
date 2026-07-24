@@ -2074,6 +2074,8 @@ export const id: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Pratinjau sistem desain dibuka.',
+  'project.previewCommentSaveFailed': 'Komentar tidak dapat disimpan. Coba lagi.',
+  'project.previewCommentReorderFailed': 'Urutan komentar tidak dapat disimpan dan mungkin akan direset saat memuat ulang.',
   'project.metaFreeform': 'Bebas',
   'project.typePrototype': 'Prototipe',
   'project.typeDeck': 'Slide',

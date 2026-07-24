@@ -2074,6 +2074,8 @@ export const de: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Designsystem-Vorschau geöffnet.',
+  'project.previewCommentSaveFailed': 'Kommentar konnte nicht gespeichert werden. Bitte versuche es erneut.',
+  'project.previewCommentReorderFailed': 'Die Kommentarreihenfolge konnte nicht gespeichert werden und wird beim Neuladen möglicherweise zurückgesetzt.',
   'project.metaFreeform': 'frei',
   'project.typePrototype': 'Prototyp',
   'project.typeDeck': 'Folien',

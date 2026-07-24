@@ -2074,6 +2074,8 @@ export const tr: Dict = {
   'project.brandReadyAiOptimize': 'AI Optimize',
   'project.brandReadyEditManually': 'Edit manually',
   'project.brandReadyPreviewOpened': 'Tasarım sistemi önizlemesi açıldı.',
+  'project.previewCommentSaveFailed': 'Yorum kaydedilemedi. Lütfen tekrar deneyin.',
+  'project.previewCommentReorderFailed': 'Yorum sıralaması kaydedilemedi ve yeniden yüklendiğinde sıfırlanabilir.',
   'project.metaFreeform': 'serbest stil',
   'project.typePrototype': 'Prototip',
   'project.typeDeck': 'Slaytlar',

@@ -2169,6 +2169,8 @@ export const zhCN: Dict = {
   "project.brandReadyAiOptimize": "AI 优化",
   "project.brandReadyEditManually": "手动编辑",
   "project.brandReadyPreviewOpened": "已跳转到设计体系预览。",
+  "project.previewCommentSaveFailed": "评论保存失败，请重试。",
+  "project.previewCommentReorderFailed": "评论顺序保存失败，刷新页面后可能恢复原状。",
   "project.metaFreeform": "自由设计",
   "project.customInstructions": "项目指令",
   "project.customInstructionsPlaceholder": "此项目的指令（每条消息都会注入）…",
