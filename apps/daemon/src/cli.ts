@@ -1494,7 +1494,10 @@ async function runMcp(args) {
     return;
   }
 
-  const daemonUrl = await cliDaemonUrl(flags);
+  const { ensureMcpDaemonUrl } = await import('./mcp-bootstrap.js');
+  const daemonUrl = await ensureMcpDaemonUrl({
+    flagUrl: flags['daemon-url'],
+  });
 
   const { runMcpStdio } = await import('./mcp.js');
   await runMcpStdio({ daemonUrl });
@@ -1516,7 +1519,11 @@ Options:
                        discovers the live daemon URL at startup, so
                        MCP client configs stay valid across daemon
                        restarts even when the port is ephemeral. A
-                       running MCP server caches the URL; restart the
+                       packaged install also starts the signed Open
+                       Design app in --headless mode when its daemon
+                       is stopped; no Electron window is opened.
+                       Once running, the MCP server caches the URL;
+                       restart the
                        MCP client after a daemon restart to pick up a
                        new port.
 

@@ -41,6 +41,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const PACKAGED_CHILD_ENV_ALLOWLIST = [
+  "CODEX_HOME",
   "HOME",
   "HTTP_PROXY",
   "HTTPS_PROXY",
@@ -412,6 +413,8 @@ export type PackagedDaemonSpawnEnvOptions = {
   amrProfile?: string | null;
   daemonCliEntry: string | null;
   desktopHandoffEnv?: NodeJS.ProcessEnv;
+  mcpBootstrapArgs?: readonly string[];
+  mcpBootstrapCommand?: string | null;
   nodeCommand?: string | null;
   /**
    * PR #974 round-5 (lefarcen P2): only pin the daemon's import-folder
@@ -462,6 +465,13 @@ export function buildPackagedDaemonSpawnEnv(
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
+    ...(options.mcpBootstrapCommand == null
+      || options.mcpBootstrapCommand.length === 0
+      ? {}
+      : { OD_MCP_BOOTSTRAP_COMMAND: options.mcpBootstrapCommand }),
+    ...(options.mcpBootstrapArgs == null
+      ? {}
+      : { OD_MCP_BOOTSTRAP_ARGS: JSON.stringify(options.mcpBootstrapArgs) }),
     ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
     ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
       ? {}
@@ -607,6 +617,8 @@ export async function startPackagedSidecars(
     daemonSidecarEntry: string | null;
     electronNodeCommand: string | null;
     nodeCommand: string | null;
+    mcpBootstrapCommand: string | null;
+    mcpBootstrapArgs: readonly string[];
     telemetryRelayUrl: string | null;
     posthogKey: string | null;
     posthogHost: string | null;
@@ -680,6 +692,8 @@ export async function startPackagedSidecars(
         daemonCliEntry: options.daemonCliEntry,
         desktopHandoffEnv: process.env,
         legacyDataDir: process.env.OD_LEGACY_DATA_DIR ?? null,
+        mcpBootstrapArgs: options.mcpBootstrapArgs,
+        mcpBootstrapCommand: options.mcpBootstrapCommand,
         nodeCommand: options.nodeCommand,
         requireDesktopAuth: options.requireDesktopAuth,
         telemetryRelayUrl: options.telemetryRelayUrl,

@@ -97,6 +97,17 @@ describe('resolveDaemonStatusTimeoutMs', () => {
 });
 
 describe('packaged child Vite+ environment forwarding', () => {
+  it('forwards CODEX_HOME so isolated and managed Codex installs never fall back to another user config', () => {
+    const env = resolvePackagedChildBaseEnv({
+      CODEX_HOME: '/tmp/isolated-codex-home',
+      HOME: '/Users/tester',
+      RANDOM_INTERNAL_FLAG: 'drop-me',
+    });
+
+    expect(env.CODEX_HOME).toBe('/tmp/isolated-codex-home');
+    expect(env.RANDOM_INTERNAL_FLAG).toBeUndefined();
+  });
+
   it('keeps VP_HOME in the packaged child base env without forwarding unrelated variables', () => {
     const env = resolvePackagedChildBaseEnv({
       HOME: '/Users/tester',
@@ -424,6 +435,35 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect('OD_REQUIRE_DESKTOP_AUTH' in env).toBe(false);
     expect(env.OD_DATA_DIR).toBe('/tmp/od-pkg/data');
     expect(env.OD_APP_VERSION).toBeUndefined();
+  });
+
+  it('forwards the signed packaged launcher used to bootstrap MCP headlessly', () => {
+    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+      appVersion: '1.2.3',
+      daemonCliEntry: '/Applications/Open Design.app/Contents/Resources/app/prebundled/daemon/daemon-cli.mjs',
+      legacyDataDir: null,
+      mcpBootstrapArgs: [
+        '-g',
+        '-j',
+        '/Applications/Open Design.app',
+        '--args',
+        '--headless',
+      ],
+      mcpBootstrapCommand:
+        '/usr/bin/open',
+      requireDesktopAuth: false,
+    });
+
+    expect(env.OD_MCP_BOOTSTRAP_COMMAND).toBe(
+      '/usr/bin/open',
+    );
+    expect(JSON.parse(env.OD_MCP_BOOTSTRAP_ARGS ?? 'null')).toEqual([
+      '-g',
+      '-j',
+      '/Applications/Open Design.app',
+      '--args',
+      '--headless',
+    ]);
   });
 
   it('forwards OD_LEGACY_DATA_DIR only when set, irrespective of requireDesktopAuth', () => {

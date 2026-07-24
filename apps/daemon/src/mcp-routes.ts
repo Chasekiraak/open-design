@@ -49,6 +49,17 @@ export function registerMcpRoutes(app: Express, ctx: RegisterMcpRoutesDeps) {
     if (isSidecarMode) {
       sidecarEnv[SIDECAR_ENV.IPC_PATH] = sidecarIpcPath;
     }
+    const mcpBootstrapCommand = process.env.OD_MCP_BOOTSTRAP_COMMAND;
+    if (
+      mcpBootstrapCommand != null
+      && mcpBootstrapCommand.length > 0
+    ) {
+      sidecarEnv.OD_MCP_BOOTSTRAP_COMMAND = mcpBootstrapCommand;
+    }
+    const mcpBootstrapArgs = process.env.OD_MCP_BOOTSTRAP_ARGS;
+    if (mcpBootstrapArgs != null && mcpBootstrapArgs.length > 0) {
+      sidecarEnv.OD_MCP_BOOTSTRAP_ARGS = mcpBootstrapArgs;
+    }
     // tools-dev / packaged launchers export OD_WEB_PORT so the daemon
     // knows where the browser-facing Open Design studio is running.
     // CLI-only / headless launches set neither and webBaseUrl falls

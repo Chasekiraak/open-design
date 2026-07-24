@@ -74,6 +74,13 @@ function makeInstallInfoApp({ cliPath, port, env = {}, dataDir }: InstallInfoOpt
     if (isSidecarMode) {
       sidecarEnv[SIDECAR_ENV.IPC_PATH] = sidecarIpcPath;
     }
+    for (const key of [
+      'OD_MCP_BOOTSTRAP_COMMAND',
+      'OD_MCP_BOOTSTRAP_ARGS',
+    ] as const) {
+      const value = env[key];
+      if (value != null && value.length > 0) sidecarEnv[key] = value;
+    }
     const payload = buildMcpInstallPayload({
       cliPath,
       cliExists: fs.existsSync(cliPath),
@@ -257,6 +264,36 @@ describe('GET /api/mcp/install-info', () => {
       expect(body.env).toEqual({
         OD_DATA_DIR: dataDir,
         [SIDECAR_ENV.IPC_PATH]: '/tmp/open-design/ipc/default/daemon.sock',
+      });
+    } finally {
+      await new Promise<void>((done) => server?.close(() => done()));
+    }
+  });
+
+  it('pins the packaged headless bootstrap in the installed MCP config', async () => {
+    const bootstrapArgs =
+      '["-g","-j","/Applications/Open Design.app","--args","--headless"]';
+    const { port, server } = await startHarness(
+      cliPath,
+      {
+        [SIDECAR_ENV.IPC_PATH]:
+          '/tmp/open-design/ipc/default/daemon.sock',
+        OD_MCP_BOOTSTRAP_COMMAND: '/usr/bin/open',
+        OD_MCP_BOOTSTRAP_ARGS: bootstrapArgs,
+      },
+      dataDir,
+    );
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${port}/api/mcp/install-info`,
+      );
+      const body = await readInstallInfo(res);
+      expect(body.env).toEqual({
+        OD_DATA_DIR: dataDir,
+        [SIDECAR_ENV.IPC_PATH]:
+          '/tmp/open-design/ipc/default/daemon.sock',
+        OD_MCP_BOOTSTRAP_COMMAND: '/usr/bin/open',
+        OD_MCP_BOOTSTRAP_ARGS: bootstrapArgs,
       });
     } finally {
       await new Promise<void>((done) => server?.close(() => done()));
