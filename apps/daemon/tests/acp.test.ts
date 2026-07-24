@@ -633,6 +633,82 @@ test('kind:read + title containing update stays Read, not Write', () => {
   assert.equal(countNewArtifacts(runEvents), 0);
 });
 
+test('kind:read + explicit noncanonical name read_file normalizes to Read', () => {
+  // Content-tool redaction only matches canonical families (Read/Write/Edit/…).
+  // ACP adapters commonly send kind:"read" with name:"read_file"; the transcript
+  // must still emit Read so rawOutput is redacted in Langfuse, not serialized.
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read secrets',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'read-file-1',
+    kind: 'read',
+    name: 'read_file',
+    status: 'completed',
+    locations: [{ path: 'secrets.env' }],
+    rawOutput: 'API_KEY=super-secret\nPASSWORD=also-secret\n',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  const toolResult = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_result',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Read');
+  assert.ok(toolResult);
+  assert.match(
+    String((toolResult.payload as { content?: string }).content ?? ''),
+    /API_KEY=super-secret/,
+  );
+});
+
+test('kind:other keeps explicit custom tool name', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'custom tool',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'custom-1',
+    kind: 'other',
+    name: 'my_special_tool',
+    status: 'completed',
+    rawOutput: 'ok',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'my_special_tool');
+});
+
 test('sticky thinkOnly: pending Thinking then status-only completed emits no tool events', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];

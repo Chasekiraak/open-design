@@ -449,22 +449,33 @@ function acpToolNameFromTitle(title: string): string | null {
 
 /**
  * Resolves a stable Claude-shaped tool name from an ACP tool-call update.
- * Trusted ACP `kind` wins over title heuristics when the kind is recognized
- * (so `kind: read` + title "update …" stays Read). Explicit `name` still wins
- * when present. Write-label override to Write/Edit applies only when there is
- * no recognized non-write kind, so `countNewArtifacts` keeps working for
- * title-only write frames.
+ * Trusted ACP `kind` wins over both explicit `name` and title heuristics when
+ * the kind is a known tool family (so `kind: read` + `name: read_file` or
+ * title "update …" stays Read). That keeps content-tool redaction and analytics
+ * families aligned with Langfuse's canonical name set. Kind `other` is the
+ * exception: it is recognized for stickiness but is not a family, so an
+ * explicit name still wins there. Write-label override to Write/Edit applies
+ * only when there is no recognized non-write kind, so `countNewArtifacts`
+ * keeps working for title-only write frames.
  */
 export function acpToolName(update: JsonObject): string {
   const kindRaw = typeof update.kind === 'string' ? update.kind.trim() : '';
+  const kindToken = kindRaw.toLowerCase();
   const recognizedKind = kindRaw ? isAcpRecognizedKind(kindRaw) : false;
   const kindName = kindRaw ? acpToolNameFromKind(kindRaw) : null;
+  // "other" is a valid ACP kind for custom tools, not a canonical family.
+  const kindIsCanonicalFamily = recognizedKind && kindToken !== 'other';
 
   let name: string | null = null;
-  if (typeof update.name === 'string' && update.name.trim()) {
+  if (kindIsCanonicalFamily && kindName) {
+    // Canonical kind wins over explicit noncanonical names (read_file, etc.).
+    // Content-tool redaction keys off stable Claude-shaped families; keeping
+    // adapter-local names would skip redaction and leak file contents.
+    name = kindName;
+  } else if (typeof update.name === 'string' && update.name.trim()) {
     name = update.name.trim();
   } else if (recognizedKind && kindName) {
-    // Kind is authoritative over title heuristics.
+    // kind:other (or any remaining recognized kind without a preferred name).
     name = kindName;
   } else if (typeof update.title === 'string' && update.title.trim()) {
     name = acpToolNameFromTitle(update.title);
