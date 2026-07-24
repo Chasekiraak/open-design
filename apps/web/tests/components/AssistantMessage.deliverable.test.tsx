@@ -183,4 +183,32 @@ describe('AssistantMessage — task deliverable card', () => {
     expect(card.textContent).toContain('1 files changed');
     expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
   });
+
+  // The card's status label is an unconditional "Done", so it must never
+  // render for a run that reached a terminal state without succeeding — a
+  // failed or canceled run that wrote files would otherwise present a
+  // partial artifact as delivered while the same message reports the error.
+  // Those turns keep the plain file ledger instead.
+  it.each(['failed', 'canceled'] as const)(
+    'keeps the deliverable card off a %s run that produced files',
+    (runStatus) => {
+      render(
+        <AssistantMessage
+          message={baseMessage({
+            runStatus,
+            producedFiles: [
+              file('report.md', 'text', 1700000004),
+              file('agent-native-app.html', 'html', 1700000005),
+            ],
+          })}
+          streaming={false}
+          projectId="proj-1"
+          isLast
+          onRequestOpenFile={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByTestId('task-deliverable-card')).toBeNull();
+    },
+  );
 });

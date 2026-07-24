@@ -777,22 +777,19 @@ function AssistantMessageImpl({
       (!message.runStatus && !!message.endedAt) ||
       isBrandBrowserAssistMessage
     );
-  const runTerminal =
-    !streaming &&
-    (
-      (message.runStatus ? isTerminalRunStatus(message.runStatus) : false) ||
-      (!message.runStatus && !!message.endedAt) ||
-      isBrandBrowserAssistMessage
-    );
-  // Deliverable card: shows on the latest completed turn that either produced
-  // a headline artifact (artifact mode) or changed files (changes mode). The
-  // card headlines the completion; the detailed ledger stays below.
+  // Deliverable card: shows on the latest successfully completed turn that
+  // either produced a headline artifact (artifact mode) or changed files
+  // (changes mode). The card headlines the completion; the detailed ledger
+  // stays below. Success-only on purpose: the card carries an unconditional
+  // "Done" label, so a failed or canceled run that wrote files must fall back
+  // to the plain file ledger instead of presenting a partial artifact as
+  // delivered.
   const changedFileCount =
     turnArtifactOps.length > 0 ? turnArtifactOps.length : displayedProduced.length;
   const showDeliverableCard = Boolean(
     !streaming &&
       isLast &&
-      runTerminal &&
+      runSucceeded &&
       projectId &&
       (deliverable || changedFileCount > 0),
   );
