@@ -161,6 +161,12 @@ describe("server runtime dependencies", () => {
           ),
           "foreign-native",
         );
+        // Linux fixtures only create build/Release; ensure the target
+        // prebuild dir exists so we can plant a .pdb for prune coverage.
+        await mkdir(
+          join(nodePtyRoot, "prebuilds", `${target.platform}-${target.arch}`),
+          { recursive: true },
+        );
         await writeFile(
           join(
             nodePtyRoot,
