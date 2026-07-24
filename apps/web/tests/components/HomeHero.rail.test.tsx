@@ -10,7 +10,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { InstalledPluginRecord } from '@open-design/contracts';
+import type { DesignSystemSummary, InstalledPluginRecord } from '@open-design/contracts';
 
 vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
   PlaceholderCarousel: () => null,
@@ -103,6 +103,15 @@ function renderHero(overrides: Partial<React.ComponentProps<typeof HomeHero>> = 
   return { onPickChip, onPickPlugin, onPickExamplePlugin, onOpenPluginDetails, onClearActiveChip };
 }
 
+const NEUTRAL_MODERN: DesignSystemSummary = {
+  id: 'neutral-modern',
+  title: 'Neutral Modern',
+  category: 'Starter',
+  summary: 'A neutral fallback system.',
+  source: 'built-in',
+  status: 'published',
+};
+
 // First-time Home renders the catalog inline. Returning users use the exact
 // same cards after expanding the composer footer trigger.
 function openTemplateGrid() {
@@ -136,6 +145,66 @@ describe('HomeHero intent rail', () => {
       });
 
       expect(screen.getByTestId('home-hero-capability-visual-references')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cues a prefilled Design mode before its selected design system, then stops after interaction', () => {
+    vi.useFakeTimers();
+    try {
+      renderHero({
+        sessionMode: 'design',
+        selectedSessionMode: 'design',
+        designSystems: [NEUTRAL_MODERN],
+        selectedDesignSystemId: NEUTRAL_MODERN.id,
+        onDesignSystemChange: vi.fn(),
+        prefilledDesignModeAttentionKey: 'new:designer:neutral-modern',
+      });
+
+      const modeIcon = screen.getByTestId('composer-mode-icon');
+      const designSystemIcon = screen.getByTestId('home-hero-selected-design-system-icon');
+      expect(modeIcon).toHaveClass('is-prefill-attention');
+      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
+
+      act(() => {
+        vi.advanceTimersByTime(180);
+      });
+      expect(modeIcon).not.toHaveClass('is-prefill-attention');
+      expect(designSystemIcon).toHaveClass('is-prefill-attention');
+
+      // Any composer control ends the one-shot hint and prevents a later
+      // timer phase from restarting it.
+      fireEvent.pointerDown(screen.getByTestId('home-hero-plus-trigger'));
+      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(modeIcon).not.toHaveClass('is-prefill-attention');
+      expect(designSystemIcon).not.toHaveClass('is-prefill-attention');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels the prefilled attention before a user starts typing', () => {
+    vi.useFakeTimers();
+    try {
+      renderHero({
+        sessionMode: 'design',
+        selectedSessionMode: 'design',
+        designSystems: [NEUTRAL_MODERN],
+        selectedDesignSystemId: NEUTRAL_MODERN.id,
+        onDesignSystemChange: vi.fn(),
+        prefilledDesignModeAttentionKey: 'new:designer:neutral-modern',
+      });
+
+      fireEvent.input(screen.getByTestId('home-hero-input'));
+      expect(screen.getByTestId('composer-mode-icon')).not.toHaveClass('is-prefill-attention');
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(screen.getByTestId('home-hero-selected-design-system-icon')).not.toHaveClass('is-prefill-attention');
     } finally {
       vi.useRealTimers();
     }

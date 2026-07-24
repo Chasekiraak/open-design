@@ -124,6 +124,8 @@ export interface ComposerModePickerProps {
    *  used when the composer row is space-constrained, e.g. while a run streams
    *  and the wide "思考中" button is showing. */
   labelHidden?: boolean;
+  /** A one-shot visual cue for a mode that was prefilled for the user. */
+  iconAttention?: boolean;
 }
 
 export function ComposerModePicker({
@@ -132,6 +134,7 @@ export function ComposerModePicker({
   selectedMode,
   onClearSelection,
   labelHidden = false,
+  iconAttention = false,
 }: ComposerModePickerProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -230,7 +233,13 @@ export function ComposerModePicker({
         data-tooltip={modeTooltip}
         data-tooltip-placement="top"
       >
-        <span className="composer-mode__icon" aria-hidden>{triggerIcon}</span>
+        <span
+          className={`composer-mode__icon${iconAttention ? ' is-prefill-attention' : ''}`}
+          data-testid="composer-mode-icon"
+          aria-hidden
+        >
+          {triggerIcon}
+        </span>
         {activeName && !labelHidden ? (
           <span className="composer-mode__label">{activeName}</span>
         ) : null}

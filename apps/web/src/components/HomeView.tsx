@@ -2279,6 +2279,13 @@ export function HomeView({
         onboardingRole={onboardingRole}
         recentChipId={homeRecentChipId}
         demoStateKey={homeDemoState ? `${homeDemoState.journey}:${homeDemoState.role ?? 'neutral'}` : null}
+        prefilledDesignModeAttentionKey={
+          homeDemoState?.role === 'designer'
+          && homeDemoState.designSystemId === undefined
+          && selectedHomeDesignSystemId
+            ? `${homeDemoState.journey}:designer:${selectedHomeDesignSystemId}`
+            : null
+        }
         onCreateIntent={useCreateModeForVisualIntent}
         modeSuggestion={modeSuggestion}
         onAcceptModeSuggestion={acceptHomeModeSuggestion}

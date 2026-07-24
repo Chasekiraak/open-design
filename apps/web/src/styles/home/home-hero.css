@@ -1243,6 +1243,24 @@ button.home-hero__capability-word:focus-visible {
   flex: 0 0 auto;
   color: var(--text-muted);
 }
+.home-hero__selected-design-system-icon.is-prefill-attention {
+  transform-origin: center;
+  animation: home-hero-ds-prefill-attention 220ms var(--ease-out) both;
+}
+@keyframes home-hero-ds-prefill-attention {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  48% {
+    transform: scale(1.16);
+    filter: brightness(1.16);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
 .home-hero__selected-design-system-label {
   min-width: 0;
   overflow: hidden;
@@ -4214,6 +4232,9 @@ button.home-hero__capability-word:focus-visible {
   color: color-mix(in srgb, #fafafa 72%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
+  .home-hero__selected-design-system-icon.is-prefill-attention {
+    animation: none;
+  }
   .home-hero__template-card .home-hero__scenario-art-svg {
     transition: none;
   }

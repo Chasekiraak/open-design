@@ -269,6 +269,12 @@ interface Props {
   onDismissModeSuggestion?: () => void;
   /** Development-only state-switcher token; a change restores Home's recommendation surface. */
   demoStateKey?: string | null;
+  /**
+   * One-shot attention token for a Demo state that automatically prefilled
+   * both Design mode and a design system. A new token replays the short,
+   * ordered hint; user interaction cancels the current token immediately.
+   */
+  prefilledDesignModeAttentionKey?: string | null;
   // Personalized first-run starting point (spec §7). Rendered directly under
   // the composer card — before the template section — so a brand-new user sees
   // their recommended entry without scrolling.
@@ -425,6 +431,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onAcceptModeSuggestion,
     onDismissModeSuggestion,
     demoStateKey = null,
+    prefilledDesignModeAttentionKey = null,
     recommendationSlot,
   },
   ref,
@@ -454,6 +461,15 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
   const [sendAttention, setSendAttention] = useState(false);
+  // A prefilled Design mode and design system are two separate decisions.
+  // Briefly cue them in order so the user can notice both without a looping or
+  // distracting affordance. Any composer interaction makes the hint moot.
+  const [prefilledAttentionStage, setPrefilledAttentionStage] = useState<
+    'mode' | 'design-system' | null
+  >(null);
+  const activePrefilledAttentionKeyRef = useRef<string | null>(null);
+  const dismissedPrefilledAttentionKeysRef = useRef(new Set<string>());
+  const playedPrefilledAttentionKeysRef = useRef(new Set<string>());
   // First-run guidance trail (see home-hero/firstRunGuide.ts): which rail
   // chip is pulsing, and whether the first example-prompt card is pulsing.
   const [guidePulseChipId, setGuidePulseChipId] = useState<string | null>(null);
@@ -548,6 +564,40 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     setShowTemplateRecommendation(true);
     setTemplateGridOpen(true);
   }, [demoStateKey]);
+
+  useEffect(() => {
+    activePrefilledAttentionKeyRef.current = prefilledDesignModeAttentionKey;
+    const key = prefilledDesignModeAttentionKey;
+    if (
+      key === null
+      || dismissedPrefilledAttentionKeysRef.current.has(key)
+      || playedPrefilledAttentionKeysRef.current.has(key)
+    ) {
+      setPrefilledAttentionStage(null);
+      return;
+    }
+
+    setPrefilledAttentionStage('mode');
+    const designSystemTimer = window.setTimeout(() => {
+      if (!dismissedPrefilledAttentionKeysRef.current.has(key)) {
+        setPrefilledAttentionStage('design-system');
+      }
+    }, 180);
+    const completeTimer = window.setTimeout(() => {
+      playedPrefilledAttentionKeysRef.current.add(key);
+      setPrefilledAttentionStage(null);
+    }, 460);
+    return () => {
+      window.clearTimeout(designSystemTimer);
+      window.clearTimeout(completeTimer);
+    };
+  }, [prefilledDesignModeAttentionKey]);
+
+  const dismissPrefilledAttention = useCallback(() => {
+    const key = activePrefilledAttentionKeyRef.current;
+    if (key !== null) dismissedPrefilledAttentionKeysRef.current.add(key);
+    setPrefilledAttentionStage(null);
+  }, []);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
     dismissTemplateRecommendation();
@@ -1406,7 +1456,16 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   let optionRenderIndex = 0;
 
   return (
-    <section ref={homeHeroRef} className="home-hero" data-testid="home-hero">
+    <section
+      ref={homeHeroRef}
+      className="home-hero"
+      data-testid="home-hero"
+      onPointerDownCapture={dismissPrefilledAttention}
+      onInputCapture={dismissPrefilledAttention}
+      onKeyDownCapture={(event) => {
+        if (event.key !== 'Tab') dismissPrefilledAttention();
+      }}
+    >
       <span className="home-hero__logo-wrap">
         <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
       </span>
@@ -1785,6 +1844,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 // inputs from the seeded text. Real user edits always differ
                 // from the current prompt.
                 if (plainText === prompt) return;
+                dismissPrefilledAttention();
                 dismissTemplateRecommendation();
                 onPromptChange(plainText);
                 if (selectedPromptExample && plainText !== selectedPromptExample.promptText) {
@@ -2115,7 +2175,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 <Icon
                   name="palette"
                   size={14}
-                  className="home-hero__selected-design-system-icon"
+                  className={`home-hero__selected-design-system-icon${prefilledAttentionStage === 'design-system' ? ' is-prefill-attention' : ''}`}
+                  data-testid="home-hero-selected-design-system-icon"
                   aria-hidden
                 />
                 <span className="home-hero__selected-design-system-label">
@@ -2217,6 +2278,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             <ComposerModePicker
               mode={sessionMode}
               selectedMode={selectedSessionMode}
+              iconAttention={prefilledAttentionStage === 'mode'}
               onClearSelection={onClearSessionModeSelection}
               onModeChange={(next) => {
                 if (next !== sessionMode) {

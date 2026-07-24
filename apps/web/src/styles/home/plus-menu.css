@@ -485,12 +485,35 @@
 .composer-mode__icon {
   display: inline-flex;
 }
+.composer-mode__icon.is-prefill-attention {
+  transform-origin: center;
+  animation: composer-mode-prefill-attention 220ms var(--ease-out) both;
+}
 .composer-mode__icon svg {
   display: block;
   /* 16px in both states — the unselected circular trigger previously ran the
      glyph at 18px, a touch larger than the selected pill's 16px. */
   width: 16px;
   height: 16px;
+}
+@keyframes composer-mode-prefill-attention {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  48% {
+    transform: scale(1.16);
+    filter: brightness(1.16);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-mode__icon.is-prefill-attention {
+    animation: none;
+  }
 }
 /* In the home composer footer, match the "+" button chrome exactly: a 36px
    circular outlined button (panel fill + border + soft shadow, muted glyph)
