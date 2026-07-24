@@ -609,6 +609,11 @@
   background: rgba(116, 92, 255, 0.12);
   border-color: rgba(116, 92, 255, 0.28);
 }
+.design-card-tag.tag-web-clone {
+  color: #0a7ea4;
+  background: rgba(10, 126, 164, 0.12);
+  border-color: rgba(10, 126, 164, 0.28);
+}
 .design-card-tag.tag-slide {
   color: #b15e00;
   background: rgba(255, 159, 64, 0.14);

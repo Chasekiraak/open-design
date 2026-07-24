@@ -1933,6 +1933,7 @@ export const ko: Dict = {
   'designs.deleteSelectedPartial': '프로젝트 {deleted}개를 삭제했으며, {failed}개는 실패했습니다.',
   'designs.tagPrototype': '프로토타입',
   'designs.tagLiveArtifact': '라이브 아티팩트',
+  'designs.tagWebClone': '웹사이트 클론',
   'designs.tagSlide': '슬라이드',
   'designs.tagMedia': '미디어',
   'designs.renameTitle': '프로젝트 이름 바꾸기',

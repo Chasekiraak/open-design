@@ -1933,6 +1933,7 @@ export const ptBR: Dict = {
   'designs.deleteSelectedPartial': '{deleted} projeto(s) excluído(s); {failed} falharam.',
   'designs.tagPrototype': 'Protótipo',
   'designs.tagLiveArtifact': 'Artefato ao vivo',
+  'designs.tagWebClone': 'Clone de site',
   'designs.tagSlide': 'Slide',
   'designs.tagMedia': 'Mídia',
   'designs.renameTitle': 'Renomear projeto',

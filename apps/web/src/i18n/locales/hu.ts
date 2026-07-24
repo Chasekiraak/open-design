@@ -1933,6 +1933,7 @@ export const hu: Dict = {
   'designs.deleteSelectedPartial': '{deleted} projekt törölve; {failed} sikertelen.',
   'designs.tagPrototype': 'Prototípus',
   'designs.tagLiveArtifact': 'Élő elem',
+  'designs.tagWebClone': 'Weboldal-klón',
   'designs.tagSlide': 'Dia',
   'designs.tagMedia': 'Média',
   'designs.renameTitle': 'Projekt átnevezése',

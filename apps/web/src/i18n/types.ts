@@ -2505,6 +2505,7 @@ export interface Dict {
   'designs.deleteSelectedPartial': string;
   'designs.tagPrototype': string;
   'designs.tagLiveArtifact': string;
+  'designs.tagWebClone': string;
   'designs.tagSlide': string;
   'designs.tagMedia': string;
   'designs.renameTitle': string;

@@ -1933,6 +1933,7 @@ export const th: Dict = {
   'designs.deleteSelectedPartial': 'ลบ {deleted} โปรเจกต์แล้ว ล้มเหลว {failed} รายการ',
   'designs.tagPrototype': 'ต้นแบบ',
   'designs.tagLiveArtifact': 'อาร์ติแฟกต์แบบสด',
+  'designs.tagWebClone': 'โคลนเว็บไซต์',
   'designs.tagSlide': 'สไลด์',
   'designs.tagMedia': 'สื่อ',
   'designs.renameTitle': 'เปลี่ยนชื่อโปรเจกต์',

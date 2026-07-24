@@ -1933,6 +1933,7 @@ export const fa: Dict = {
   'designs.deleteSelectedPartial': '{deleted} پروژه حذف شد؛ {failed} مورد ناموفق بود.',
   'designs.tagPrototype': 'پروتوتایپ',
   'designs.tagLiveArtifact': 'آرتیفکت زنده',
+  'designs.tagWebClone': 'همتاسازی وب‌سایت',
   'designs.tagSlide': 'اسلاید',
   'designs.tagMedia': 'رسانه',
   'designs.renameTitle': 'تغییر نام پروژه',

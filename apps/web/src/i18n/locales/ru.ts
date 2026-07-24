@@ -1933,6 +1933,7 @@ export const ru: Dict = {
   'designs.deleteSelectedPartial': 'Удалено проектов: {deleted}; не удалось: {failed}.',
   'designs.tagPrototype': 'Прототип',
   'designs.tagLiveArtifact': 'Живой артефакт',
+  'designs.tagWebClone': 'Клон сайта',
   'designs.tagSlide': 'Слайд',
   'designs.tagMedia': 'Медиа',
   'designs.renameTitle': 'Переименовать проект',

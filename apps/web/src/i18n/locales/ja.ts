@@ -1933,6 +1933,7 @@ export const ja: Dict = {
   'designs.deleteSelectedPartial': '{deleted} 件のプロジェクトを削除しました（{failed} 件は失敗）。',
   'designs.tagPrototype': 'プロトタイプ',
   'designs.tagLiveArtifact': 'ライブアーティファクト',
+  'designs.tagWebClone': 'ウェブサイト複製',
   'designs.tagSlide': 'スライド',
   'designs.tagMedia': 'メディア',
   'designs.renameTitle': 'プロジェクト名を変更',

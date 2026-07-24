@@ -125,6 +125,7 @@ const KIND_FILTER_OPTIONS: KindFilterOption[] = [
   { id: 'prototype', labelKey: 'designs.tagPrototype' },
   { id: 'slide', labelKey: 'designs.tagSlide' },
   { id: 'live-artifact', labelKey: 'designs.tagLiveArtifact' },
+  { id: 'web-clone', labelKey: 'designs.tagWebClone' },
   { id: 'media', labelKey: 'designs.tagMedia' },
   { id: 'design-system', label: DESIGN_SYSTEM_TAG_LABEL },
 ];
@@ -1628,7 +1629,13 @@ export function projectCover(
   return { kind: 'fallback', style, initial };
 }
 
-export type ProjectCategory = 'prototype' | 'live-artifact' | 'slide' | 'media' | 'brand';
+export type ProjectCategory =
+  | 'prototype'
+  | 'live-artifact'
+  | 'web-clone'
+  | 'slide'
+  | 'media'
+  | 'brand';
 
 /** Every chip a project card can wear, `ProjectCategory` plus the
  *  design-system tag the card substitutes for it. */
@@ -1651,6 +1658,12 @@ export function projectCategory(project: Project): ProjectCategory {
   if (meta?.intent === 'live-artifact' || project.skillId === 'live-artifact') {
     return 'live-artifact';
   }
+  // Website clone projects still store `kind: 'prototype'` (see
+  // home-hero/chips.ts's 'web-clone' chip) so preview behavior stays
+  // identical to a blank prototype; only `intent: 'web-clone'` marks the
+  // scenario. Without this branch every clone fell through to the default
+  // 'prototype' bucket and had no way to be filtered separately (recvpZbvupSr1o).
+  if (meta?.intent === 'web-clone') return 'web-clone';
   if (meta?.kind === 'deck') return 'slide';
   if (meta?.kind === 'brand') return 'brand';
   if (meta?.kind === 'image' || meta?.kind === 'video' || meta?.kind === 'audio') {
@@ -1664,13 +1677,15 @@ export function ProjectTag({ category }: { category: ProjectCategory }) {
   const label =
     category === 'live-artifact'
       ? t('designs.tagLiveArtifact')
-      : category === 'slide'
-        ? t('designs.tagSlide')
-        : category === 'brand'
-          ? 'Brand'
-        : category === 'media'
-          ? t('designs.tagMedia')
-          : t('designs.tagPrototype');
+      : category === 'web-clone'
+        ? t('designs.tagWebClone')
+        : category === 'slide'
+          ? t('designs.tagSlide')
+          : category === 'brand'
+            ? 'Brand'
+          : category === 'media'
+            ? t('designs.tagMedia')
+            : t('designs.tagPrototype');
   return <span className={`design-card-tag tag-${category}`}>{label}</span>;
 }
 

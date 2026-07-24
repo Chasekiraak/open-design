@@ -1933,6 +1933,7 @@ export const fr: Dict = {
   'designs.deleteSelectedPartial': '{deleted} projet(s) supprimé(s) ; {failed} échec(s).',
   'designs.tagPrototype': 'Prototype',
   'designs.tagLiveArtifact': 'Artefact dynamique',
+  'designs.tagWebClone': 'Clone de site web',
   'designs.tagSlide': 'Diapositive',
   'designs.tagMedia': 'Média',
   'designs.renameTitle': 'Renommer le projet',

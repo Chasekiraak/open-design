@@ -2023,6 +2023,7 @@ export const zhCN: Dict = {
   "designs.deleteSelectedPartial": "已删除 {deleted} 个项目；{failed} 个失败。",
   "designs.tagPrototype": "原型",
   "designs.tagLiveArtifact": "实时看板",
+  "designs.tagWebClone": "网站复刻",
   "designs.tagSlide": "幻灯片",
   "designs.tagMedia": "媒体",
   "designs.renameTitle": "重命名项目",

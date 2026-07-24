@@ -1933,6 +1933,7 @@ export const uk: Dict = {
   'designs.deleteSelectedPartial': 'Видалено проєктів: {deleted}; не вдалося: {failed}.',
   'designs.tagPrototype': 'Прототип',
   'designs.tagLiveArtifact': 'Живий артефакт',
+  'designs.tagWebClone': 'Клон сайту',
   'designs.tagSlide': 'Слайд',
   'designs.tagMedia': 'Медіа',
   'designs.renameTitle': 'Перейменувати проєкт',

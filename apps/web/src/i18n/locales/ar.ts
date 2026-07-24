@@ -1933,6 +1933,7 @@ export const ar: Dict = {
   'designs.deleteSelectedPartial': 'تم حذف {deleted} مشروع؛ فشل {failed}.',
   'designs.tagPrototype': 'نموذج أولي',
   'designs.tagLiveArtifact': 'عنصر مباشر',
+  'designs.tagWebClone': 'استنساخ موقع ويب',
   'designs.tagSlide': 'شريحة',
   'designs.tagMedia': 'وسائط',
   'designs.renameTitle': 'إعادة تسمية المشروع',

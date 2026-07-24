@@ -1329,13 +1329,17 @@ function ProjectBrandCover({
 	);
 }
 
-type ProjectCategory = "prototype" | "live-artifact" | "slide" | "media" | "brand";
+type ProjectCategory = "prototype" | "live-artifact" | "web-clone" | "slide" | "media" | "brand";
 
 function projectCategory(project: Project): ProjectCategory {
 	const meta = project.metadata;
 	if (meta?.intent === "live-artifact" || project.skillId === "live-artifact") {
 		return "live-artifact";
 	}
+	// Website clone projects still store `kind: 'prototype'` (see
+	// home-hero/chips.ts's 'web-clone' chip); only `intent: 'web-clone'`
+	// marks the scenario, so it must be checked before the prototype fallback.
+	if (meta?.intent === "web-clone") return "web-clone";
 	if (meta?.kind === "deck") return "slide";
 	if (meta?.kind === "brand") return "brand";
 	if (meta?.kind === "image" || meta?.kind === "video" || meta?.kind === "audio") {
@@ -1349,13 +1353,15 @@ function ProjectTag({ category }: { category: ProjectCategory }) {
 	const label =
 		category === "live-artifact"
 			? t("designs.tagLiveArtifact")
-			: category === "slide"
-				? t("designs.tagSlide")
-				: category === "brand"
-					? "Brand"
-				: category === "media"
-					? t("designs.tagMedia")
-					: t("designs.tagPrototype");
+			: category === "web-clone"
+				? t("designs.tagWebClone")
+				: category === "slide"
+					? t("designs.tagSlide")
+					: category === "brand"
+						? "Brand"
+					: category === "media"
+						? t("designs.tagMedia")
+						: t("designs.tagPrototype");
 	return (
 		<span className={`design-card-tag tag-${category}`}>{label}</span>
 	);

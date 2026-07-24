@@ -2031,6 +2031,7 @@ export const zhTW: Dict = {
   "designs.deleteSelectedPartial": "已刪除 {deleted} 個專案；{failed} 個失敗。",
   "designs.tagPrototype": "原型",
   "designs.tagLiveArtifact": "即時看板",
+  "designs.tagWebClone": "網站復刻",
   "designs.tagSlide": "投影片",
   "designs.tagMedia": "媒體",
   "designs.renameTitle": "重新命名專案",

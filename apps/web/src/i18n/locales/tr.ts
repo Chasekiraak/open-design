@@ -1933,6 +1933,7 @@ export const tr: Dict = {
   'designs.deleteSelectedPartial': '{deleted} proje silindi; {failed} başarısız oldu.',
   'designs.tagPrototype': 'Prototip',
   'designs.tagLiveArtifact': 'Canlı Yapıt',
+  'designs.tagWebClone': 'Web sitesi klonu',
   'designs.tagSlide': 'Slayt',
   'designs.tagMedia': 'Medya',
   'designs.renameTitle': 'Projeyi yeniden adlandır',
