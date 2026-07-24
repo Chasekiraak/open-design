@@ -104,6 +104,23 @@ describe('HomeView media composer options', () => {
     expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
   });
 
+  it('does not label Neutral Modern as a designer recommendation', async () => {
+    saveOnboardingProfile({ role: 'designer' });
+    stubFetch();
+    renderHome({
+      defaultDesignSystemId: 'default',
+      designSystems: [
+        designSystem('default', 'Neutral Modern', 'built-in', 'published'),
+      ],
+    });
+
+    await openOption('designSystem');
+
+    // Neutral Modern is a safe fallback, not a role-based personalized
+    // recommendation.
+    expect(screen.queryByTestId('project-ds-picker-option-default-recommendation')).toBeNull();
+  });
+
   it('renders the design-system popover outside the prompt editor (not clipped by it)', async () => {
     stubFetch();
     renderHome();

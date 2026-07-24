@@ -213,8 +213,6 @@ interface Props {
   // available for every product kind. `null` = "No design system".
   selectedDesignSystemId?: string | null;
   onDesignSystemChange?: (id: string | null) => void;
-  /** Contextual recommendation for a Home-only design-system picker option. */
-  recommendedDesignSystemId?: string | null;
   stagedFiles?: File[];
   onAddFiles?: (files: File[]) => void;
   onRemoveFile?: (index: number) => void;
@@ -381,7 +379,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     designSystems = EMPTY_DESIGN_SYSTEMS,
     selectedDesignSystemId = null,
     onDesignSystemChange,
-    recommendedDesignSystemId = null,
     stagedFiles = EMPTY_STAGED_FILES,
     onAddFiles = () => undefined,
     onImportFigma,
@@ -2286,7 +2283,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               variant="home"
               designSystems={designSystems}
               selectedId={selectedDesignSystemId}
-              recommendedId={recommendedDesignSystemId}
               showSelectedLabel={false}
               onChange={(id) => {
                 dismissTemplateRecommendation();

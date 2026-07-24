@@ -125,7 +125,7 @@ import {
 import { AnimatePresence } from 'motion/react';
 
 const HOME_DEMO_STATE_PANEL_ENABLED = process.env.NODE_ENV === 'development';
-const DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID = 'default';
+const DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID = 'default';
 
 export interface ActivePlugin {
   record: InstalledPluginRecord;
@@ -873,16 +873,17 @@ export function HomeView({
     () => selectableHomeDesignSystems(designSystems, defaultDesignSystemId),
     [defaultDesignSystemId, designSystems],
   );
-  // The Demo panel is a local visual harness. Its designer state gets a
-  // sensible starter system without changing the user's saved composer choice.
-  const designerDemoRecommendedDesignSystemId = designSystemPickerSystems.some(
-    (system) => system.id === DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID,
+  // The Demo panel gives designers a neutral fallback system without changing
+  // the user's saved composer choice. It is deliberately a default, not a
+  // personalized recommendation.
+  const designerDemoDefaultDesignSystemId = designSystemPickerSystems.some(
+    (system) => system.id === DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID,
   )
-    ? DESIGNER_DEMO_RECOMMENDED_DESIGN_SYSTEM_ID
+    ? DESIGNER_DEMO_DEFAULT_DESIGN_SYSTEM_ID
     : null;
   const selectedHomeDesignSystemId = homeDemoState?.role === 'designer'
     ? homeDemoState.designSystemId === undefined
-      ? designerDemoRecommendedDesignSystemId
+      ? designerDemoDefaultDesignSystemId
       : homeDemoState.designSystemId
     : designSystemId;
   // Re-seed the default selection when the catalogue or the user's default
@@ -2321,9 +2322,6 @@ export function HomeView({
         footerInputNames={footerInputNamesForChip(active?.chipId ?? null)}
         designSystems={designSystemPickerSystems}
         selectedDesignSystemId={selectedHomeDesignSystemId}
-        recommendedDesignSystemId={
-          homeDemoState?.role === 'designer' ? designerDemoRecommendedDesignSystemId : null
-        }
         onDesignSystemChange={handleDesignSystemChange}
         stagedFiles={stagedFiles}
         onAddFiles={stageFiles}
