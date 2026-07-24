@@ -270,16 +270,35 @@ const EMPTY_PROMPT_TEMPLATES: PromptTemplateSummary[] = [];
 
 // The Home composer lives inside EntryView, which App.tsx fully UNMOUNTS the
 // moment the user opens a project tab (the single `appMain` slot swaps
-// EntryView → ProjectView). Plain useState would therefore be discarded on
-// every tab switch, so a half-typed prompt and the chosen design system vanish
-// when the user steps away and comes back. Persist those two serializable,
-// user-visible fields to localStorage so they survive the unmount/remount,
-// mirroring ChatComposer's draft persistence. Object-valued selections (active
-// template, skill, staged files, working directory) are intentionally NOT
-// persisted here — they reference live catalogue records / File handles / a
-// desktop auth token that cannot round-trip through JSON safely.
+// EntryView → ProjectView), and Settings — a standalone page, not a dialog —
+// swaps `appMain` again the same way. Plain useState would therefore be
+// discarded on every tab switch, so a half-typed prompt and the chosen design
+// system vanish when the user steps away and comes back. Persist those two
+// serializable, user-visible fields to localStorage so they survive the
+// unmount/remount, mirroring ChatComposer's draft persistence. Object-valued
+// selections (active template, skill, staged files, working directory) are
+// intentionally NOT persisted here — they reference live catalogue records /
+// File handles / a desktop auth token that cannot round-trip through JSON
+// safely.
 const HOME_COMPOSER_PROMPT_KEY = 'open-design:home-composer:prompt';
 const HOME_COMPOSER_DESIGN_SYSTEM_KEY = 'open-design:home-composer:design-system';
+// The active type-chip + bound plugin (the "创作类型" + "示例提示词" pick) is a
+// third piece of composer state that used to fall through this same crack:
+// `active` (below) held only a live `InstalledPluginRecord` + resolved apply
+// result, neither of which survives JSON, so it was never persisted at all —
+// a Settings round trip silently cleared the chip/example-prompt selection
+// even though the prompt text and design system correctly came back. Persist
+// only the three serializable identity fields (chip id, plugin id, project
+// kind) and re-resolve the full `ActivePlugin` from the live plugin catalog
+// on remount (see `pendingChipRestore` below), the same way a cross-surface
+// "use this plugin" hand-off resolves `pendingPluginUseHandoff`.
+const HOME_COMPOSER_CHIP_KEY = 'open-design:home-composer:chip';
+
+interface HomeComposerChipDraft {
+  chipId: string | null;
+  pluginId: string;
+  projectKind: ProjectKind | null;
+}
 // `EntryShell` keeps `HomeView` permanently mounted and toggles it with CSS
 // visibility instead of unmounting it on every Home/Community/... view
 // switch (unlike the EntryView<->ProjectView swap described above, which
@@ -311,11 +330,32 @@ function writeHomeComposerDraft(key: string, value: string | null): void {
   }
 }
 
+function readHomeComposerChipDraft(): HomeComposerChipDraft | null {
+  const raw = readHomeComposerDraft(HOME_COMPOSER_CHIP_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<HomeComposerChipDraft> | null;
+    if (!parsed || typeof parsed.pluginId !== 'string' || !parsed.pluginId) return null;
+    return {
+      chipId: typeof parsed.chipId === 'string' ? parsed.chipId : null,
+      pluginId: parsed.pluginId,
+      projectKind: typeof parsed.projectKind === 'string' ? (parsed.projectKind as ProjectKind) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeHomeComposerChipDraft(draft: HomeComposerChipDraft | null): void {
+  writeHomeComposerDraft(HOME_COMPOSER_CHIP_KEY, draft ? JSON.stringify(draft) : null);
+}
+
 // Drop the persisted draft once a run is actually created, so the just-sent
 // prompt and pick don't resurrect the next time the Home tab mounts.
 function clearHomeComposerDraft(): void {
   writeHomeComposerDraft(HOME_COMPOSER_PROMPT_KEY, null);
   writeHomeComposerDraft(HOME_COMPOSER_DESIGN_SYSTEM_KEY, null);
+  writeHomeComposerChipDraft(null);
 }
 
 /**
@@ -410,6 +450,13 @@ export function HomeView({
   );
   const [pendingPluginUseHandoff, setPendingPluginUseHandoff] =
     useState<PendingPluginUseHandoff | null>(null);
+  // The persisted chip/plugin identity, read exactly once on mount (lazy
+  // initializer — mirrors `restoredDraftRef` below for the prompt/design
+  // system draft). Resolved into a full `active` binding by the restore
+  // effect further down once the plugin catalog has loaded, then cleared.
+  const [pendingChipRestore, setPendingChipRestore] = useState<HomeComposerChipDraft | null>(
+    () => readHomeComposerChipDraft(),
+  );
   const [fallbackProjectKind, setFallbackProjectKind] = useState<ProjectKind | null>(null);
   const [fallbackProjectMetadata, setFallbackProjectMetadata] =
     useState<ProjectMetadata | null>(null);
@@ -498,6 +545,17 @@ export function HomeView({
   useEffect(() => {
     writeHomeComposerDraft(HOME_COMPOSER_DESIGN_SYSTEM_KEY, designSystemId);
   }, [designSystemId]);
+  // Persist the active chip/plugin identity the same way — only the three
+  // serializable fields, not `active` itself (see the module note above).
+  // Clearing on `active === null` covers the explicit-clear (×) and the
+  // Ask-mode / skill-pick paths that reset `active` to null directly.
+  useEffect(() => {
+    writeHomeComposerChipDraft(
+      active
+        ? { chipId: active.chipId, pluginId: active.record.id, projectKind: active.projectKind }
+        : null,
+    );
+  }, [active]);
   // Live counterpart to the draft-key restore above (see the
   // `HOME_COMPOSER_SEED_EVENT` module note) — picks up a `seedHomeComposerPrompt`
   // call that fires while this HomeView instance is already mounted, which is
@@ -1272,6 +1330,46 @@ export function HomeView({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPluginUseHandoff, pluginsLoading, plugins]);
+
+  // Restore the chip/example-prompt selection persisted by the write effect
+  // above, the same way the hand-off effect just above resolves a live
+  // cross-surface "use this plugin" intent — wait for the plugin catalog,
+  // look the persisted id up, then re-bind through the same
+  // `requestActivePlugin` path a manual chip click uses. This is what makes
+  // recvqg21bqVuvE (selected creation type + example prompt lost after a
+  // Settings round trip) recoverable: Settings is a full `EntryView` unmount,
+  // so `active` itself cannot survive it, but its serializable identity can.
+  //
+  // `replaceWithoutConfirmation` skips the "replace your draft?" dialog —
+  // this is a silent background restore, not a user gesture. `suppressPromptUpdate`
+  // keeps it from overwriting the textarea, which the separate prompt draft
+  // (above) already restored correctly on its own.
+  //
+  // Guarded against a live intent winning the same mount: if a cross-surface
+  // hand-off is mid-flight (`pendingPluginUseHandoff`) or something already
+  // bound `active` before this effect got to run, drop the stale restore
+  // instead of stomping it.
+  useEffect(() => {
+    if (!pendingChipRestore || pluginsLoading) return;
+    const restore = pendingChipRestore;
+    setPendingChipRestore(null);
+    if (active || pendingPluginUseHandoff) return;
+    const record = plugins.find((plugin) => plugin.id === restore.pluginId);
+    if (!record) {
+      // The persisted plugin was uninstalled/removed since the last visit —
+      // drop the stale pointer rather than surfacing an error for a background
+      // restore the user never explicitly asked to retry.
+      writeHomeComposerChipDraft(null);
+      return;
+    }
+    requestActivePlugin(record, undefined, {
+      chipId: restore.chipId ?? undefined,
+      projectKind: restore.projectKind ?? undefined,
+      replaceWithoutConfirmation: true,
+      suppressPromptUpdate: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChipRestore, pluginsLoading, plugins, active, pendingPluginUseHandoff]);
 
   function addPluginContext(record: InstalledPluginRecord, nextPrompt: string | null) {
     setSelectedPluginContexts((prev) => {
