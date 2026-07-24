@@ -3140,13 +3140,13 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('forwards inspiration picker multi-select ids into the run prompt metadata', async () => {
+  it('grounds inspiration picker multi-select systems in the run prompt', async () => {
     // Chain spec for the inspiration picker's multi design-system pick:
     // web sends `inspirationDesignSystemIds` on the chat body (additional
-    // systems beyond the applied primary), and the daemon must surface them
-    // through the composed system prompt's `inspirationDesignSystemIds`
-    // metadata line so the model borrows accents without replacing the
-    // primary system's tokens.
+    // systems beyond the applied primary), and the daemon must resolve each
+    // id through the design-system reader and embed its DESIGN.md content —
+    // ids alone cannot ground a selection, so the assertion below pins an
+    // actual token from bento's DESIGN.md, not just the names.
     const captureDir = mkdtempSync(join(tmpdir(), 'od-insp-meta-prompt-'));
     tempDirs.push(captureDir);
     const capturePath = join(captureDir, 'prompt.txt');
@@ -3184,6 +3184,15 @@ process.stdin.on('end', () => {
           expect(existsSync(capturePath)).toBe(true);
           const prompt = readFileSync(capturePath, 'utf8');
           expect(prompt).toContain('**inspirationDesignSystemIds**: bento, organic');
+          // Grounding: the composed prompt embeds each resolvable system's
+          // DESIGN.md body (bounded), so the agent has real tokens to
+          // borrow — `#FAD4C0` is bento's primary color token. `organic`
+          // is not a registry system, so it degrades gracefully to the
+          // metadata line above without an (empty) grounding block.
+          expect(prompt).toContain('## Additional inspiration systems');
+          expect(prompt).toContain('(`bento`)');
+          expect(prompt).toContain('#FAD4C0');
+          expect(prompt).not.toContain('(`organic`)');
         },
       );
     } finally {

@@ -80,3 +80,50 @@ describe('inspiration step guidance — daemon/contracts mirror parity', () => {
     expect(INSPIRATION_STEP_GUIDANCE).toBe(daemonCopy);
   });
 });
+
+// Grounding contract for the picker's *additional* systems (PR #5899 review):
+// passing resolved `inspirationDesignSystems` must embed each system's actual
+// DESIGN.md content with explicit primary-first precedence — a user-authored
+// `user:...` pick is useless to the agent if only its id reaches the prompt.
+describe('additional inspiration systems — prompt grounding', () => {
+  const secondary = {
+    id: 'user:custom-brand',
+    title: 'Custom Brand',
+    body: '# Custom Brand\n\n- **Primary**: `#63FE13`\n- **Display**: `Albert Sans, sans-serif`\n\nSignature motif token: ZEPHYR-GRID-77.',
+  };
+
+  it('embeds a unique token from a secondary system so it reaches the agent', () => {
+    const prompt = composeSystemPrompt({
+      designSystemTitle: 'Editorial',
+      designSystemBody: '# Editorial\n\n- **Primary**: `#101010`',
+      inspirationDesignSystems: [secondary],
+    });
+    expect(prompt).toContain('## Additional inspiration systems');
+    expect(prompt).toContain('Custom Brand (`user:custom-brand`)');
+    expect(prompt).toContain('ZEPHYR-GRID-77');
+    expect(prompt).toContain('#63FE13');
+  });
+
+  it('keeps the primary system authoritative and ordered first', () => {
+    const prompt = composeSystemPrompt({
+      designSystemTitle: 'Editorial',
+      designSystemBody: '# Editorial\n\n- **Primary**: `#101010`',
+      inspirationDesignSystems: [secondary],
+    });
+    const primaryIdx = prompt.indexOf('## Active design system');
+    const inspirationIdx = prompt.indexOf('## Additional inspiration systems');
+    expect(primaryIdx).toBeGreaterThan(-1);
+    expect(inspirationIdx).toBeGreaterThan(primaryIdx);
+    expect(prompt).toContain(
+      "never replace or contradict the primary system's tokens",
+    );
+  });
+
+  it('renders nothing when no additional systems were resolved', () => {
+    const prompt = composeSystemPrompt({
+      designSystemTitle: 'Editorial',
+      designSystemBody: '# Editorial\n\n- **Primary**: `#101010`',
+    });
+    expect(prompt).not.toContain('## Additional inspiration systems');
+  });
+});

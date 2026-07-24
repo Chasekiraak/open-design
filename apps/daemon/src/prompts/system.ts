@@ -713,6 +713,13 @@ export interface ComposeInput {
   designSystemFixtureHtml?: string | undefined;
   designSystemPullIndex?: string | undefined;
   designSystemImportMode?: 'normalized' | 'hybrid' | 'verbatim' | undefined;
+  // Additional inspiration systems the user picked alongside the primary
+  // one (inspiration-picker multi-select). The daemon resolves each id
+  // through the same DESIGN.md reader chain as the primary and bounds the
+  // bodies before composing, so the agent receives actual palette /
+  // typography / component content to borrow from — ids alone (the old
+  // metadata line) cannot ground a user-authored system.
+  inspirationDesignSystems?: Array<{ id: string; title?: string | undefined; body: string }> | undefined;
   // Craft references the active skill opted into via `od.craft.requires`.
   // The daemon resolves the slug list to file contents and concatenates
   // them with section headers; we inject them between the DESIGN.md and
@@ -839,6 +846,7 @@ export function composeSystemPrompt({
   designSystemFixtureHtml,
   designSystemPullIndex,
   designSystemImportMode,
+  inspirationDesignSystems,
   craftBody,
   craftSections,
   memoryBody,
@@ -1203,6 +1211,20 @@ export function composeSystemPrompt({
   if (designSystemPullIndex && designSystemPullIndex.trim().length > 0) {
     parts.push(
       `\n\n## Pull-layer files available on demand${designSystemTitle ? ` — ${designSystemTitle}` : ''}\n\nThis design-system package declares richer files for inspection, source evidence, or human preview. Keep the push prompt light: use the index below to decide what to read later. When the runtime tool environment is available, read a listed path with \`\"$OD_NODE_BIN\" \"$OD_BIN\" tools design-systems read --path <path>\`; the daemon will reject paths outside this manifest allowlist.\n\n\`\`\`text\n${designSystemPullIndex.trim()}\n\`\`\``,
+    );
+  }
+
+  if (Array.isArray(inspirationDesignSystems) && inspirationDesignSystems.length > 0) {
+    const blocks = inspirationDesignSystems
+      .map((system) => {
+        const label = system.title && system.title.trim().length > 0
+          ? `${system.title.trim()} (\`${system.id}\`)`
+          : `\`${system.id}\``;
+        return `\n\n### Inspiration — ${label}\n\n${system.body.trim()}`;
+      })
+      .join('');
+    parts.push(
+      `\n\n## Additional inspiration systems\n\nThe user picked the systems below as *additional* inspiration alongside the primary selection. Precedence is explicit: the active design system above stays authoritative for tokens, palette values, and component rules. Borrow palette accents, typographic personality, or component patterns from these systems, but never replace or contradict the primary system's tokens with theirs. If no active design system section is present above, treat the first inspiration system as the leading reference.${blocks}`,
     );
   }
 

@@ -3627,6 +3627,20 @@ export async function startServer({
     projectFiles: projectFileDeps,
   });
 
+  // Prompt budget for the additional-inspiration grounding blocks: the picker
+  // caps selection, and each embedded DESIGN.md is cut so a handful of long
+  // imported systems cannot crowd out the primary system or the skill body.
+  const MAX_INSPIRATION_PROMPT_SYSTEMS = 3;
+  const MAX_INSPIRATION_PROMPT_BODY_CHARS = 6000;
+  const truncateInspirationPromptBody = (body: string): string => {
+    const trimmed = body.trim();
+    if (trimmed.length <= MAX_INSPIRATION_PROMPT_BODY_CHARS) return trimmed;
+    const cut = trimmed.slice(0, MAX_INSPIRATION_PROMPT_BODY_CHARS);
+    const lastBreak = cut.lastIndexOf('\n');
+    const bounded = lastBreak > MAX_INSPIRATION_PROMPT_BODY_CHARS / 2 ? cut.slice(0, lastBreak) : cut;
+    return `${bounded}\n\n… (truncated for prompt budget)`;
+  };
+
   const composeDaemonSystemPrompt = async ({
     agentId,
     projectId,
@@ -4019,6 +4033,44 @@ export async function startServer({
       }
     }
 
+    // Additional inspiration systems (picker multi-select): resolve each id
+    // through the same reader chain as the primary so the run prompt carries
+    // their actual DESIGN.md content, not just their names — a user-authored
+    // `user:...` system otherwise contributes nothing the agent can honor.
+    // Bounded: primary excluded, capped count, each body truncated.
+    const inspirationDesignSystems = [];
+    const inspirationIdsForPrompt =
+      !isWebCloneRun && Array.isArray(metadata?.inspirationDesignSystemIds)
+        ? Array.from(new Set(metadata.inspirationDesignSystemIds))
+            .filter(
+              (id) =>
+                typeof id === 'string' && id.length > 0 && id !== effectiveDesignSystemId,
+            )
+            .slice(0, MAX_INSPIRATION_PROMPT_SYSTEMS)
+        : [];
+    if (inspirationIdsForPrompt.length > 0) {
+      const systems = await listAllDesignSystems();
+      for (const id of inspirationIdsForPrompt) {
+        const summary = systems.find((s) => s.id === id);
+        if (!summary || !isProjectUsableDesignSystem(summary)) continue;
+        try {
+          const workspaceBody = await readDesignSystemWorkspaceTextFile(db, summary, 'DESIGN.md');
+          const body = workspaceBody ?? (await readAvailableDesignSystem(id));
+          if (typeof body === 'string' && body.trim().length > 0) {
+            inspirationDesignSystems.push({
+              id,
+              title: summary.title,
+              body: truncateInspirationPromptBody(body),
+            });
+          }
+        } catch (err) {
+          console.warn(
+            `[design-systems] inspiration resolve failed for ${id}: ${err?.message ?? err}`,
+          );
+        }
+      }
+    }
+
     const excludedCraft = new Set(designSystemCraftExemptions);
     // Web-clone fidelity exemption — see `isWebCloneRun` above.
     const requestedCraft = isWebCloneRun
@@ -4198,6 +4250,8 @@ export async function startServer({
       designSystemFixtureHtml,
       designSystemPullIndex,
       designSystemImportMode,
+      inspirationDesignSystems:
+        inspirationDesignSystems.length > 0 ? inspirationDesignSystems : undefined,
       craftBody,
       craftSections,
       memoryBody,
