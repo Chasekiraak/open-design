@@ -107,7 +107,16 @@
   left: 50%;
   transform: translateX(-50%);
   max-width: 480px;
-  padding: 10px 14px;
+  /* Right padding must clear the absolutely-positioned .od-toast-close
+     footprint (right: 8px, width: 26px → 34px inset from the edge), plus a
+     breathing buffer equal to the toast's own left padding — the same ratio
+     the .od-toast-browser-snapshot variant below already uses (52px right
+     padding = 34px close-button footprint + 18px left padding). Without
+     this, the toast's shrink-to-fit width sizes to content + 14px padding
+     on every side, so the message text's right edge always lands inside the
+     close button's 8–34px inset range and gets visually covered by it,
+     regardless of message length (recvqaZAbIdfz1). */
+  padding: 10px 48px 10px 14px;
   border-radius: var(--radius-sm, 4px);
   background: color-mix(in srgb, var(--text-strong, #1f2328) 78%, transparent);
   -webkit-backdrop-filter: var(--glass-backdrop);
