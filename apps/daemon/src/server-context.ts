@@ -54,7 +54,13 @@ export interface ResourceDeps {
   // explicit local pin first and the workspace context otherwise; null when
   // signed out / single-player.
   resolveWorkspaceScope?: () => Promise<string | null>;
-  listAllSkills: () => Promise<Array<SkillInfo & { source?: string }>>;
+  // `workspaceId` scopes user-imported skills to one workspace, same
+  // one-way "unclaimed visible everywhere, claimed elsewhere hidden" rule
+  // as `listAllDesignSystems` above. Omit it to resolve a skill by id (or
+  // compose the system prompt) from anywhere.
+  listAllSkills: (options?: {
+    workspaceId?: string | null;
+  }) => Promise<Array<SkillInfo & { source?: string }>>;
   // Mirrors listAllSkills but scans DESIGN_TEMPLATE_ROOTS so the Templates
   // surface only sees rendering-catalogue entries.
   listAllDesignTemplates: () => Promise<Array<SkillInfo & { source?: string }>>;

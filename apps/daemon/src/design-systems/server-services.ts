@@ -53,12 +53,19 @@ type DesignSystemListOptions = {
 };
 
 export function createDesignSystemServerServices({
+  getDb,
   roots,
   paths,
   skills,
   designSystems,
   projects,
 }: {
+  // Only consulted by `listAllSkills` below for its optional workspace scope
+  // filter — every other service in this factory stays filesystem-only. A
+  // getter (not the db value itself) because this factory runs BEFORE
+  // server.ts opens its database connection; the closure defers the read
+  // until a request actually needs it, long after `openDatabase()` has run.
+  getDb?: () => Database.Database;
   roots: {
     SKILL_ROOTS: string[];
     DESIGN_TEMPLATE_ROOTS: string[];
@@ -70,7 +77,10 @@ export function createDesignSystemServerServices({
     USER_DESIGN_SYSTEMS_DIR: string;
   };
   skills: {
-    listSkills: (roots: string[]) => Promise<SkillEntry[]>;
+    listSkills: (
+      roots: string[],
+      options?: { db?: Database.Database; workspaceId?: string | null },
+    ) => Promise<SkillEntry[]>;
     findSkillById: (skills: SkillEntry[], id: string) => SkillEntry | undefined;
   };
   designSystems: {
@@ -98,8 +108,19 @@ export function createDesignSystemServerServices({
     isSafeId: (id: string) => boolean;
   };
 }) {
-  async function listAllSkills() {
-    return skills.listSkills(roots.SKILL_ROOTS);
+  /**
+   * The functional-skills catalog. `workspaceId` narrows it to the
+   * user-imported skills that workspace may see (mirrors
+   * `listAllDesignSystems` below) — only `GET /api/skills` passes it. Callers
+   * that resolve a skill BY ID (system-prompt composition, install/import
+   * lookups, `/api/skills/:id/example`) must keep omitting it.
+   */
+  async function listAllSkills(options: { workspaceId?: string | null } = {}) {
+    const db = getDb?.();
+    return skills.listSkills(
+      roots.SKILL_ROOTS,
+      db && options.workspaceId ? { db, workspaceId: options.workspaceId } : undefined,
+    );
   }
 
   async function listAllDesignTemplates() {

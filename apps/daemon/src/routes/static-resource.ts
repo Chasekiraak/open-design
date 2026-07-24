@@ -18,6 +18,17 @@ import {
   splitDerivedSkillId,
   updateUserSkill,
 } from '../skills.js';
+import {
+  deleteWorkspaceResourceByResourceId,
+  ensureWorkspaceResource,
+  getWorkspaceResource,
+  getWorkspaceResourceByResourceId,
+} from '../db.js';
+import {
+  enforceWorkspaceResourceMutation,
+  headerValue,
+  workspaceResourceContext,
+} from '../collab/workspace-resource-mutation.js';
 import { listCodexPets, readCodexPetSpritesheet } from '../codex-pets.js';
 import { syncCommunityPets } from '../community-pets-sync.js';
 import { readDesignSystem } from '../design-systems/index.js';
@@ -39,7 +50,7 @@ export interface RegisterAtomRoutesDeps {
   resources: { FIRST_PARTY_ATOMS: Array<{ id: string; taskKinds: string[]; [key: string]: unknown }> };
 }
 
-export interface RegisterStaticResourceRoutesDeps extends RouteDeps<'http' | 'paths' | 'resources'> {
+export interface RegisterStaticResourceRoutesDeps extends RouteDeps<'db' | 'http' | 'paths' | 'resources'> {
   tokenContractRebuild?: {
     maybeStartForImportedDesignSystem?: (
       designSystemId: string,
@@ -77,6 +88,7 @@ export function registerAtomRoutes(app: Express, ctx: RegisterAtomRoutesDeps) {
 }
 
 export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticResourceRoutesDeps) {
+  const { db } = ctx;
   const {
     RUNTIME_DATA_DIR,
     RUNTIME_DATA_DIR_CANONICAL,
@@ -104,6 +116,48 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     if (isLocalSameOrigin(req, resolvedPortRef.current)) return true;
     sendApiError(res, 403, 'FORBIDDEN', 'local origin required');
     return false;
+  };
+  // Stamp a freshly imported/installed skill with the caller's workspace, the
+  // same moment plugin install does (`installOrUpgradePlugin` in server.ts).
+  // A caller with no workspace headers (`od skill import`, a not-logged-in
+  // web session) leaves the skill unbound — visible everywhere, same as
+  // every skill imported before this shipped ("no retroactive tagging").
+  const bindImportedSkillToWorkspace = (req: any, skillId: string): void => {
+    const workspaceIdForImport = headerValue(req, 'x-od-workspace-id');
+    if (!workspaceIdForImport) return;
+    const ctx = workspaceResourceContext(req, workspaceIdForImport);
+    if (!ctx || ctx.memberStatus !== 'active') return;
+    ensureWorkspaceResource(db, 'skill', ctx.workspaceId, skillId, {
+      visibility: 'personal',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: ctx.workspaceMemberId,
+      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+    });
+  };
+  // Gate a mutation route for a skill bound into `workspace_resources`. Only
+  // applies when the skill actually carries a binding row (installed/imported
+  // through the workspace-aware routes above after this shipped) — an unbound
+  // legacy skill stays outside the isolation regime, mirroring the plugin
+  // uninstall route's same conditional gate.
+  const enforceSkillWorkspaceMutation = (
+    req: any,
+    res: any,
+    skillId: string,
+    capability: 'delete' | 'writeFiles',
+  ): boolean => {
+    const binding = getWorkspaceResourceByResourceId(db, 'skill', skillId);
+    if (!binding) return true;
+    return enforceWorkspaceResourceMutation(
+      'skill',
+      req,
+      res,
+      sendApiError,
+      (dbArg, workspaceId, resourceId) => getWorkspaceResource(dbArg as typeof db, 'skill', workspaceId, resourceId),
+      (dbArg, resourceId) => getWorkspaceResourceByResourceId(dbArg as typeof db, 'skill', resourceId),
+      db,
+      skillId,
+      capability,
+    );
   };
   const importedDesignSystemResponse = async <T extends { id: string }>(designSystem: T) => {
     let tokenContractRebuild: DesignSystemTokenContractRebuildJobResponse | undefined;
@@ -171,9 +225,13 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     }
   });
 
-  app.get('/api/skills', async (_req, res) => {
+  app.get('/api/skills', async (req, res) => {
     try {
-      const skills = await listAllSkills();
+      // Workspace-scoped (see `skillVisibleFromWorkspace` in skills.ts): a
+      // skill imported into a different workspace than the caller's is
+      // hidden, same one-way rule `GET /api/plugins` already applies.
+      const workspaceId = headerValue(req, 'x-od-workspace-id');
+      const skills = await listAllSkills({ workspaceId });
       // Strip full body + on-disk dir from the listing — frontend fetches the
       // body via /api/skills/:id when needed (keeps the listing payload small).
       res.json({
@@ -235,6 +293,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
   app.post('/api/skills/import', async (req, res) => {
     try {
       const result = await importUserSkill(USER_SKILLS_DIR, req.body || {});
+      bindImportedSkillToWorkspace(req, result.id);
       const skills = await listAllSkills();
       const skill = findSkillById(skills, result.id);
       if (!skill) {
@@ -279,6 +338,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
       if (teamResources) {
         await enforceTeamResourceCopyAllowed(teamResources, { kind: 'skill', resourceId: skill.id });
       }
+      if (!enforceSkillWorkspaceMutation(req, res, skill.id, 'writeFiles')) return;
       const result = await updateUserSkill(USER_SKILLS_DIR, {
         ...(req.body || {}),
         id: skill.id,
@@ -646,6 +706,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
       if (!skill) {
         return res.status(500).json({ error: `installed skill was not found in catalog: ${result.dir}` });
       }
+      bindImportedSkillToWorkspace(req, skill.id);
       res.json({
         skill: {
           ...skill,
@@ -659,11 +720,25 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     }
   });
 
+  // This route used to carry NO permission check at all: any caller (any
+  // workspace, any role) could delete any skill, including one installed by
+  // someone else or pulled in from a team share. Now gated the same way
+  // `POST /api/plugins/:id/uninstall` is, via the shared
+  // `enforceWorkspaceResourceMutation` — see `enforceSkillWorkspaceMutation`
+  // above for the "only when a binding row exists" conditional.
   app.delete('/api/skills/:id', async (req, res) => {
     if (!requireLocalOrigin(req, res)) return;
     try {
+      if (!enforceSkillWorkspaceMutation(req, res, req.params.id, 'delete')) return;
       const result = await uninstallById(req.params.id, USER_SKILLS_DIR, SKILLS_DIR, 'skill');
       if (!result.ok) return res.status(result.status || 400).json({ error: result.error });
+      // Clean up the binding row too — `workspace_resources` has no
+      // FOREIGN KEY ... ON DELETE CASCADE (see db.ts's doc comment on the
+      // table), so skipping this would leave an orphan binding that
+      // re-importing the same skill id would find and silently reuse (stale
+      // workspace/visibility). A DELETE against a row that never existed is a
+      // no-op.
+      deleteWorkspaceResourceByResourceId(db, 'skill', req.params.id);
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: String(err) });

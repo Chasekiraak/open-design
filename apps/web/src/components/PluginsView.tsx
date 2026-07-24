@@ -1058,7 +1058,10 @@ export function ExtensionsMarketplace({
         setToast({ message: input.error.message, tone: 'error' });
         return;
       }
-      const result = await importSkill(input);
+      // Stamp the imported skill with the acting workspace, same as the
+      // plugin upload path just above — see `fetchSkills(workspaceContext)`
+      // in `refresh()` below for the read-side counterpart.
+      const result = await importSkill(input, workspaceContext);
       if ('error' in result) {
         setToast({ message: result.error.message, tone: 'error' });
         return;
@@ -1081,7 +1084,11 @@ export function ExtensionsMarketplace({
       listPlugins(),
       listPlugins({ includeHidden: true }),
       listPluginMarketplaces(),
-      fetchSkills(),
+      // Carry the acting workspace so the daemon's `GET /api/skills` applies
+      // its workspace-scoped filter — mirrors `listPlugins`'s
+      // `workspaceContext` in `PluginsView` above (routes/plugins/index.ts's
+      // `GET /api/plugins`).
+      fetchSkills(workspaceContext),
     ]);
     setPlugins(rows);
     setAllInstalledPlugins(allRows);
@@ -1231,7 +1238,7 @@ export function ExtensionsMarketplace({
       const ok =
         kind === 'plugins'
           ? await uninstallPlugin(id)
-          : 'ok' in (await uninstallSkill(id));
+          : 'ok' in (await uninstallSkill(id, workspaceContext));
       if (!ok) {
         setToast({ message: t('pluginsView.uninstallFailed', { title }), tone: 'error' });
         return;

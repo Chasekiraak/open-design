@@ -9,9 +9,13 @@
 import type { Dirent } from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import { parseFrontmatter } from "./design-systems/frontmatter.js";
 import type { SkillCritiquePolicy } from "./critique/rollout.js";
 import { skillCwdAliasSegment, SKILLS_CWD_ALIAS } from "./cwd-aliases.js";
+import { getWorkspaceResourceByResourceId } from "./db.js";
+
+type SqliteDb = Database.Database;
 
 // Persisted skill ids on existing projects can outlive a folder rename.
 // listSkills() derives the id from the SKILL.md frontmatter `name`, so once
@@ -136,6 +140,44 @@ export function findSkillById(skills: unknown, id: unknown): SkillInfo | undefin
   return (skills as SkillInfo[]).find((s) => s.id === canonical);
 }
 
+export interface ListSkillsOptions {
+  /**
+   * Narrow the listing to skills visible from this workspace (see
+   * `workspace_resources` in `db.ts`). Requires `db` — both are optional so
+   * every existing caller (system-prompt composition, id resolution,
+   * install/import lookups, the bundled-scenario scan) keeps getting the
+   * unscoped catalog unchanged. Only `GET /api/skills` passes both.
+   */
+  db?: SqliteDb;
+  workspaceId?: string | null;
+}
+
+/**
+ * Is this skill visible from `scope` (the requesting workspace)?
+ *
+ * Same one-way rule design-systems (`designSystemVisibleFromWorkspace`,
+ * design-systems/index.ts) and plugins (`pluginVisibleFromWorkspace`,
+ * plugins/registry.ts) already ship, applied to the generic
+ * `workspace_resources` table: a skill CLAIMED by another workspace (a
+ * binding row whose `workspace_id` differs) is hidden, and an UNCLAIMED
+ * skill (no binding row — every skill imported before workspace isolation
+ * shipped looks like this) stays visible everywhere. Only a skill imported
+ * AFTER this shipped, into a specific workspace, can be hidden from a
+ * different one.
+ */
+function skillVisibleFromWorkspace(
+  db: SqliteDb,
+  skillId: string,
+  scope: string | null | undefined,
+): boolean {
+  const scopeId = scope?.trim();
+  if (!scopeId) return true;
+  const binding = getWorkspaceResourceByResourceId(db, "skill", skillId);
+  const ownerId = typeof binding?.workspaceId === "string" ? binding.workspaceId.trim() : "";
+  if (!ownerId) return true;
+  return ownerId === scopeId;
+}
+
 // Accept either a single root path or an array. When given multiple roots,
 // the first one wins on id collisions so user-imported skills under
 // USER_SKILLS_DIR can shadow a built-in skill of the same name without
@@ -144,6 +186,7 @@ export function findSkillById(skills: unknown, id: unknown): SkillInfo | undefin
 // UI can render an origin pill and gate the delete control.
 export async function listSkills(
   skillsRoots: string | readonly string[],
+  options: ListSkillsOptions = {},
 ): Promise<SkillInfo[]> {
   const roots = Array.isArray(skillsRoots) ? skillsRoots : [skillsRoots];
   const out: SkillInfo[] = [];
@@ -310,7 +353,18 @@ export async function listSkills(
       }
     }
   }
-  return out;
+  if (!options.db || !options.workspaceId) return out;
+  const scopeDb = options.db;
+  const scopeId = options.workspaceId;
+  // A derived `<parent>:<child>` example card has no `workspace_resources`
+  // row of its own — only the parent skill is ever bound (see
+  // `importUserSkill`'s caller) — so resolve derived ids back to their
+  // parent before checking visibility.
+  return out.filter((entry) => {
+    const derived = splitDerivedSkillId(entry.id);
+    const bindingId = derived ? derived.parentId : entry.id;
+    return skillVisibleFromWorkspace(scopeDb, bindingId, scopeId);
+  });
 }
 
 // Discover example artifacts that live alongside SKILL.md under

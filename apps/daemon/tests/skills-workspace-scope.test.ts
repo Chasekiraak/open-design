@@ -1,0 +1,199 @@
+// Skill's workspace-isolation onboarding (specs/current/
+// 04-resource-workspace-isolation.md §9.1): skill previously had NO
+// persistent attribution at all — no table, no metadata.json, nothing —
+// which meant `GET /api/skills` returned one flat list to every workspace
+// and `DELETE /api/skills/:id` let ANY caller delete ANY skill regardless of
+// who imported it or whether it was a team share. Skill now binds into the
+// generic `workspace_resources` table (see db.ts) exactly like plugin does:
+//
+//   - `listSkills`'s workspace filter (skills.ts's `skillVisibleFromWorkspace`)
+//     — mirrors `listInstalledPlugins`'s one-way "unclaimed visible
+//     everywhere, claimed elsewhere hidden" rule.
+//   - `DELETE /api/skills/:id` is gated by the shared
+//     `enforceWorkspaceResourceMutation` (collab/workspace-resource-mutation.ts),
+//     the same gate `POST /api/plugins/:id/uninstall` uses — see
+//     tests/plugins-uninstall-workspace-gate.test.ts for the plugin
+//     equivalent this file mirrors.
+//
+// Follows the same "seed the skill folder directly on disk, alongside the
+// real running server, then bind it via db.ts" pattern as the plugin test:
+// db.ts caches one SQLite instance per resolved data dir, and
+// RUNTIME_DATA_DIR / OD_DATA_DIR agree within one vitest file, so this
+// reuses the server's own connection instead of racing a second one.
+
+import type http from 'node:http';
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { startServer } from '../src/server.js';
+import {
+  ensureWorkspaceResource,
+  getWorkspaceResourceByResourceId,
+  openDatabase,
+  updateWorkspaceResource,
+} from '../src/db.js';
+
+let server: http.Server;
+let baseUrl: string;
+let shutdown: (() => Promise<void> | void) | undefined;
+let userSkillsDir: string;
+
+beforeAll(async () => {
+  const started = (await startServer({ port: 0, returnServer: true })) as {
+    url: string;
+    server: http.Server;
+    shutdown?: () => Promise<void> | void;
+  };
+  baseUrl = started.url;
+  server = started.server;
+  shutdown = started.shutdown;
+  // Same data root the running server resolved RUNTIME_DATA_DIR from (see
+  // server.ts's `USER_SKILLS_DIR = path.join(RUNTIME_DATA_DIR, 'skills')`);
+  // tests/setup.ts pins OD_DATA_DIR to an isolated temp dir before any test
+  // imports server.ts, and it is already absolute, so resolveDataDir()
+  // returns it unchanged.
+  userSkillsDir = path.join(process.env.OD_DATA_DIR!, 'skills');
+});
+
+afterAll(async () => {
+  await Promise.resolve(shutdown?.());
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+function workspaceHeaders(memberId: string, role: 'owner' | 'admin' | 'member', workspaceId: string) {
+  return {
+    'x-od-workspace-id': workspaceId,
+    'x-od-workspace-member-id': memberId,
+    'x-od-workspace-role': role,
+  };
+}
+
+async function seedSkillFolder(skillId: string): Promise<string> {
+  const folder = path.join(userSkillsDir, skillId);
+  await mkdir(folder, { recursive: true });
+  await writeFile(
+    path.join(folder, 'SKILL.md'),
+    `---\nname: "${skillId}"\ndescription: "Test skill ${skillId}."\n---\n\nBody for ${skillId}.\n`,
+  );
+  return folder;
+}
+
+function bindSkillToWorkspace(skillId: string, workspaceId: string, createdByWorkspaceMemberId: string) {
+  const db = openDatabase(process.cwd(), { dataDir: process.env.OD_DATA_DIR! });
+  return ensureWorkspaceResource(db, 'skill', workspaceId, skillId, {
+    visibility: 'personal',
+    resourceState: 'active',
+    createdByWorkspaceMemberId,
+    updatedByWorkspaceMemberId: createdByWorkspaceMemberId,
+  });
+}
+
+async function fetchSkillIds(workspaceId?: string): Promise<string[]> {
+  const resp = await fetch(
+    `${baseUrl}/api/skills`,
+    workspaceId ? { headers: { 'x-od-workspace-id': workspaceId } } : undefined,
+  );
+  const body = (await resp.json()) as { skills: Array<{ id: string }> };
+  return body.skills.map((s) => s.id);
+}
+
+describe('GET /api/skills — workspace visibility scope', () => {
+  it('keeps an unclaimed (unbound) skill visible from every workspace', async () => {
+    const skillId = `wsscope-unclaimed-${Date.now()}`;
+    await seedSkillFolder(skillId);
+
+    expect(await fetchSkillIds('ws-scope-a')).toContain(skillId);
+    expect(await fetchSkillIds('ws-scope-b')).toContain(skillId);
+    // Also visible with no workspace header at all (unscoped catalog).
+    expect(await fetchSkillIds()).toContain(skillId);
+  });
+
+  it('hides a skill claimed by a different workspace, but shows it from its own', async () => {
+    const skillId = `wsscope-claimed-${Date.now()}`;
+    await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'ws-scope-owner', 'member-owner');
+
+    expect(await fetchSkillIds('ws-scope-owner')).toContain(skillId);
+    expect(await fetchSkillIds('ws-scope-other')).not.toContain(skillId);
+  });
+});
+
+describe('DELETE /api/skills/:id — workspace ownership gate', () => {
+  it('rejects a non-owner, non-privileged member of the same workspace', async () => {
+    const skillId = `wsgate-member-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'skill-gate-1', 'member-owner');
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, {
+      method: 'DELETE',
+      headers: workspaceHeaders('member-other', 'member', 'skill-gate-1'),
+    });
+
+    expect(resp.status).toBe(403);
+    expect(existsSync(folder)).toBe(true);
+  });
+
+  it('allows the member who imported the skill to delete it', async () => {
+    const skillId = `wsgate-self-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'skill-gate-2', 'member-owner');
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, {
+      method: 'DELETE',
+      headers: workspaceHeaders('member-owner', 'member', 'skill-gate-2'),
+    });
+
+    expect(resp.status).toBe(200);
+    expect(existsSync(folder)).toBe(false);
+    // The binding row is cleaned up too — no orphan left behind for a future
+    // re-import of the same id to find and silently reuse.
+    const db = openDatabase(process.cwd(), { dataDir: process.env.OD_DATA_DIR! });
+    expect(getWorkspaceResourceByResourceId(db, 'skill', skillId)).toBeUndefined();
+  });
+
+  it('allows a workspace admin to delete a skill imported by someone else', async () => {
+    const skillId = `wsgate-admin-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'skill-gate-3', 'member-owner');
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, {
+      method: 'DELETE',
+      headers: workspaceHeaders('member-admin', 'admin', 'skill-gate-3'),
+    });
+
+    expect(resp.status).toBe(200);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  // No retroactive tagging (spec's stated design principle, same rule
+  // design-systems and plugin already ship): a skill with no
+  // workspace_resources row — every skill imported before this round shipped
+  // — stays outside the isolation regime rather than becoming permanently
+  // un-deletable the moment a caller happens to carry workspace headers.
+  it('still allows deleting a legacy skill with no workspace binding at all', async () => {
+    const skillId = `wsgate-legacy-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, {
+      method: 'DELETE',
+      headers: workspaceHeaders('member-someone-else', 'member', 'skill-gate-4'),
+    });
+
+    expect(resp.status).toBe(200);
+    expect(existsSync(folder)).toBe(false);
+  });
+
+  it('rejects a headerless caller against a team-visibility skill', async () => {
+    const skillId = `wsgate-team-${Date.now()}`;
+    const folder = await seedSkillFolder(skillId);
+    bindSkillToWorkspace(skillId, 'skill-gate-5', 'member-owner');
+    const db = openDatabase(process.cwd(), { dataDir: process.env.OD_DATA_DIR! });
+    updateWorkspaceResource(db, 'skill', 'skill-gate-5', skillId, { visibility: 'team' });
+
+    const resp = await fetch(`${baseUrl}/api/skills/${skillId}`, { method: 'DELETE' });
+
+    expect(resp.status).toBe(401);
+    expect(existsSync(folder)).toBe(true);
+  });
+});

@@ -578,6 +578,7 @@ import {
   updatePreviewCommentStatus,
   updateProject,
   updateWorkspaceProject,
+  updateWorkspaceResource,
   rebindWorkspaceProject,
   updateRoutine,
   updateRoutineRun,
@@ -2233,6 +2234,10 @@ export async function startServer({
   }
 
   const designSystemServices = createDesignSystemServerServices({
+    // `db` (below) is not initialized yet at this point in `startServer` —
+    // pass a getter so `listAllSkills`'s workspace filter reads it lazily,
+    // once the first request that needs it actually arrives.
+    getDb: () => db,
     roots: { SKILL_ROOTS, DESIGN_TEMPLATE_ROOTS, ALL_SKILL_LIKE_ROOTS },
     paths: { PROJECTS_DIR, DESIGN_SYSTEMS_DIR, USER_DESIGN_SYSTEMS_DIR },
     skills: { listSkills, findSkillById },
@@ -3630,14 +3635,37 @@ export async function startServer({
       typeof resource.ownerMemberId === 'string' &&
       typeof currentContext?.workspaceMemberId === 'string' &&
       resource.ownerMemberId === currentContext.workspaceMemberId;
+    // Claim the pulled copy for the workspace whose hub served it — a
+    // team-shared skill is workspace-owned by construction, same rule
+    // syncSharedTeamDesignSystem's markTeamSynced already ships (#145).
+    // Fills the gap this resource type previously had no binding row at
+    // all: `enforceSkillWorkspaceMutation` (routes/static-resource.ts) and
+    // `listSkills`'s workspace filter (skills.ts) both read this row.
+    function markTeamSynced(): void {
+      if (isOwnedByCurrentMember || !workspaceId) return;
+      ensureWorkspaceResource(db, 'skill', workspaceId, resource.id, {
+        visibility: 'team',
+        resourceState: 'active',
+      });
+      updateWorkspaceResource(db, 'skill', workspaceId, resource.id, {
+        visibility: 'team',
+        resourceState: 'active',
+      });
+    }
     if (isOwnedByCurrentMember) return;
     if (
       fs.existsSync(targetDir) &&
       workspaceId &&
       resource.versionId &&
       teamResourceVersions.get(workspaceId, 'skill', resource.id) === resource.versionId
-    ) return;
-    if (fs.existsSync(targetDir) && !resource.versionId) return;
+    ) {
+      markTeamSynced();
+      return;
+    }
+    if (fs.existsSync(targetDir) && !resource.versionId) {
+      markTeamSynced();
+      return;
+    }
 
     const stagedFolder = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'od-team-skill-'));
     try {
@@ -3654,6 +3682,7 @@ export async function startServer({
       await fs.promises.rm(targetDir, { recursive: true, force: true });
       await fs.promises.mkdir(USER_SKILLS_DIR, { recursive: true });
       await fs.promises.rename(stagedFolder, targetDir);
+      markTeamSynced();
       if (workspaceId && resource.versionId) {
         await teamResourceVersions.set(
           workspaceId,
@@ -4436,6 +4465,7 @@ export async function startServer({
 
   // Resource catalog
   registerStaticResourceRoutes(app, {
+    db,
     http: httpDeps,
     paths: pathDeps,
     teamResources: collab.teamResources,

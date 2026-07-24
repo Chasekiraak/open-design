@@ -223,9 +223,20 @@ export async function fetchAgentsStream(args: {
   return collected;
 }
 
-export async function fetchSkills(): Promise<SkillSummary[]> {
+// `workspaceContext`, when present, attaches the same workspace identity
+// headers project/plugin reads already carry (`workspaceProjectHeaders`) so
+// the daemon's `GET /api/skills` can apply its workspace-scoped filter
+// (skills.ts's `skillVisibleFromWorkspace`, mirroring `listInstalledPlugins`'s
+// one-way "unclaimed visible everywhere, claimed elsewhere hidden" rule).
+// Omit for callers that want the unfiltered, pre-workspace-isolation list.
+export async function fetchSkills(
+  workspaceContext?: WorkspaceCollabContext | null,
+): Promise<SkillSummary[]> {
   try {
-    const resp = await fetch('/api/skills');
+    const resp = await fetch(
+      '/api/skills',
+      workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : undefined,
+    );
     if (!resp.ok) return [];
     const json = (await resp.json()) as { skills: SkillSummary[] };
     return json.skills ?? [];
@@ -337,13 +348,22 @@ export interface SkillImportError {
   message: string;
 }
 
+// `workspaceContext`, when present, stamps the imported skill with the
+// acting workspace (see `fetchSkills` above) so the daemon's
+// `bindImportedSkillToWorkspace` (routes/static-resource.ts) has a workspace
+// identity to bind against. Omit for callers that intentionally leave the
+// skill unclaimed (visible everywhere).
 export async function importSkill(
   input: SkillImportInput,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ skill: SkillSummary } | { error: SkillImportError }> {
   try {
     const resp = await fetch('/api/skills/import', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     });
     if (!resp.ok) {
@@ -380,14 +400,22 @@ export interface SkillUpdateInput {
   triggers?: string[];
 }
 
+// `workspaceContext`, when present, proves the caller's workspace membership
+// against the daemon's `enforceWorkspaceResourceMutation` gate (see
+// `fetchSkills` above) — required once the skill being edited carries a
+// `workspace_resources` binding row; a no-op for an unbound (legacy) skill.
 export async function updateSkill(
   id: string,
   input: SkillUpdateInput,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ skill: SkillSummary } | { error: SkillImportError }> {
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     });
     if (!resp.ok) {
@@ -431,12 +459,19 @@ export async function fetchSkillFiles(id: string): Promise<SkillFileEntry[]> {
   }
 }
 
+// `workspaceContext`, when present, proves the caller's workspace membership
+// against the daemon's `enforceWorkspaceResourceMutation` gate (see
+// `fetchSkills` above) — required once the skill being deleted carries a
+// `workspace_resources` binding row (installed/imported by someone else, or
+// pulled in from a team share); a no-op for an unbound (legacy) skill.
 export async function deleteSkill(
   id: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ ok: true } | { error: SkillImportError }> {
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
     });
     if (!resp.ok) {
       const payload = (await resp.json().catch(() => null)) as
@@ -2660,12 +2695,19 @@ export async function installSkill(
   }
 }
 
+// `workspaceContext`, when present, proves the caller's workspace membership
+// against the daemon's `enforceWorkspaceResourceMutation` gate — see
+// `deleteSkill` above for the same pattern on the user-authored skill CRUD
+// surface; this is the counterpart for the marketplace "已安装" uninstall
+// action (`PluginsView.tsx`'s `uninstallResource`).
 export async function uninstallSkill(
   id: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ ok: true } | { error: string }> {
   try {
     const resp = await fetch(`/api/skills/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
     });
     const json = await resp.json();
     if (!resp.ok) return { error: json.error ?? 'Uninstall failed' };
