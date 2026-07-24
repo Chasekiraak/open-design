@@ -163,6 +163,8 @@ interface ChatRun {
   clients: Set<SseClient>;
   analyticsContext?: AnalyticsContext;
   analyticsTelemetry?: RunTelemetryTimestamps;
+  resolvedModelId?: string | null;
+  preflightAgentCliVersion?: string | null;
   // E-lite root-cause telemetry read at run_finished. `stdinBackpressure`: the
   // prompt write to child stdin was queued (pipe buffer full). `lastAgentActivityAt`:
   // the inactivity-watchdog clock, used to derive `last_progress_age_ms`.
@@ -1265,8 +1267,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         });
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
-          : modelIdForTracking(usageAnalytics.agent_reported_model);
+          : modelIdForTracking(
+              usageAnalytics.agent_reported_model ?? run.resolvedModelId,
+            );
         const runtimeVersions = getDetectedRuntimeVersions(run.agentId);
+        const agentCliVersion =
+          run.preflightAgentCliVersion ?? runtimeVersions?.agentCliVersion;
         for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
           design.analytics.capture({
             eventName: retryEvent.event,
@@ -1335,8 +1341,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             ...(run.contextBudget?.omittedTranscriptMessageBlocks !== undefined
               ? { omitted_transcript_message_blocks: run.contextBudget.omittedTranscriptMessageBlocks }
               : {}),
-            ...(runtimeVersions?.agentCliVersion
-              ? { agent_cli_version: runtimeVersions.agentCliVersion }
+            ...(agentCliVersion
+              ? { agent_cli_version: agentCliVersion }
               : {}),
             ...(runtimeVersions?.runtimeCompanionName
               ? { runtime_companion_name: runtimeVersions.runtimeCompanionName }

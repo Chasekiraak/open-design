@@ -353,6 +353,21 @@ function modelUnavailableDetail(text: string): TrackingRunFailureDetail | null {
   return null;
 }
 
+function wasBlockedByModelCapabilityPreflight(
+  events: RunEventForFailureClassification[] | undefined,
+): boolean {
+  return (events ?? []).some((event) => {
+    if (event.event !== 'diagnostic' || !event.data || typeof event.data !== 'object') {
+      return false;
+    }
+    const data = event.data as Record<string, unknown>;
+    return (
+      data.type === 'model_capability_preflight' &&
+      data.status === 'incompatible'
+    );
+  });
+}
+
 function authDetail(text: string): TrackingRunFailureDetail {
   if (/\brefresh token (?:was )?(?:already used|expired|invalid)|access token could not be refreshed\b/i
     .test(text)) {
@@ -696,7 +711,10 @@ export function classifyRunFailure(
     return classification(
       'model_unavailable',
       modelDetail,
-      'model_select',
+      modelDetail === 'cli_version_incompatible' &&
+        wasBlockedByModelCapabilityPreflight(input.events)
+        ? 'preflight'
+        : 'model_select',
       false,
       'switch_model',
     );
