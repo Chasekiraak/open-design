@@ -351,15 +351,22 @@ describe('shouldFullyRedactToolPayload (fail-closed)', () => {
     expect(shouldFullyRedactToolPayload('unknown')).toBe(true);
   });
 
-  it('labels known content tools vs unknown custom names in placeholders', () => {
+  it('labels known content tools without embedding untrusted custom names', () => {
     expect(toolPayloadRedactionPlaceholder('Read', 'output')).toBe(
       '[REDACTED:tool_output:content_tool:Read]',
     );
+    // Unknown/custom ACP names must not appear in the placeholder string.
     expect(toolPayloadRedactionPlaceholder('mcp__filesystem__read_file', 'output')).toBe(
-      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
+      '[REDACTED:tool_output:unknown_tool]',
     );
     expect(toolPayloadRedactionPlaceholder('  ', 'input')).toBe(
-      '[REDACTED:tool_input:unknown_tool:unnamed]',
+      '[REDACTED:tool_input:unknown_tool]',
+    );
+    expect(toolPayloadRedactionPlaceholder('/Users/alice/secret-tool', 'output')).toBe(
+      '[REDACTED:tool_output:unknown_tool]',
+    );
+    expect(toolPayloadRedactionPlaceholder('/Users/alice/secret-tool', 'output')).not.toContain(
+      '/Users/alice',
     );
   });
 });
@@ -469,17 +476,42 @@ describe('buildTracePayload', () => {
         ],
       }),
     );
-    const custom = bodyOf(batch, 'span-create', 'tool:mcp__filesystem__read_file');
-    expect(custom.input).toBe(
-      '[REDACTED:tool_input:unknown_tool:mcp__filesystem__read_file]',
-    );
-    expect(custom.output).toBe(
-      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
-    );
+    // Custom ACP/MCP names are canonicalized to the allowlisted `other` family
+    // for span labels and metadata — never shipped raw to Langfuse.
+    const custom = bodyOf(batch, 'span-create', 'tool:other');
+    expect(custom.metadata.toolName).toBe('other');
+    expect(custom.input).toBe('[REDACTED:tool_input:unknown_tool]');
+    expect(custom.output).toBe('[REDACTED:tool_output:unknown_tool]');
     const payload = JSON.stringify(batch);
     expect(payload).not.toContain('super-secret');
     expect(payload).not.toContain('also-secret');
     expect(payload).not.toContain('/Users/alice/secrets.env');
+    expect(payload).not.toContain('mcp__filesystem__read_file');
+  });
+
+  it('does not ship path-like custom tool names when content telemetry is off', () => {
+    const batch = buildTracePayload(
+      makeCtx({
+        prefs: { metrics: true, content: false, artifactManifest: false },
+        tools: [
+          {
+            id: 'path-tool-1',
+            name: '/Users/alice/.ssh/id_rsa',
+            startedAt: 1_700_000_001_000,
+            endedAt: 1_700_000_001_800,
+            input: 'ignored-when-content-off',
+            output: 'ignored-when-content-off',
+          },
+        ],
+      }),
+    );
+    const custom = bodyOf(batch, 'span-create', 'tool:other');
+    expect(custom.metadata.toolName).toBe('other');
+    expect(custom.input).toBeUndefined();
+    expect(custom.output).toBeUndefined();
+    const payload = JSON.stringify(batch);
+    expect(payload).not.toContain('/Users/alice');
+    expect(payload).not.toContain('id_rsa');
   });
 
   it('adds full prompt-stack content once on generation input and flat metadata elsewhere', () => {

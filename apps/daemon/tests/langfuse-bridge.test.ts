@@ -1456,12 +1456,13 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
 
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     const batch = JSON.parse(init.body as string).batch as any[];
-    const read = bodyOf(batch, 'span-create', 'tool:read');
-    const write = bodyOf(batch, 'span-create', 'tool:write');
-    expect(read.input).toBe('[REDACTED:tool_input:content_tool:read]');
-    expect(read.output).toBe('[REDACTED:tool_output:content_tool:read]');
-    expect(write.input).toBe('[REDACTED:tool_input:content_tool:write]');
-    expect(write.output).toBe('[REDACTED:tool_output:content_tool:write]');
+    // Lowercase ACP kind tokens are canonicalized to Title-case family labels.
+    const read = bodyOf(batch, 'span-create', 'tool:Read');
+    const write = bodyOf(batch, 'span-create', 'tool:Write');
+    expect(read.input).toBe('[REDACTED:tool_input:content_tool:Read]');
+    expect(read.output).toBe('[REDACTED:tool_output:content_tool:Read]');
+    expect(write.input).toBe('[REDACTED:tool_input:content_tool:Write]');
+    expect(write.output).toBe('[REDACTED:tool_output:content_tool:Write]');
     // startedAt on tool_use should drive span startTime earlier than event log ts.
     expect(new Date(read.startTime).getTime()).toBe(toolStartedAt);
     const payload = JSON.stringify(batch);
@@ -1537,17 +1538,16 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
 
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     const batch = JSON.parse(init.body as string).batch as any[];
-    const custom = bodyOf(batch, 'span-create', 'tool:mcp__filesystem__read_file');
-    expect(custom.input).toBe(
-      '[REDACTED:tool_input:unknown_tool:mcp__filesystem__read_file]',
-    );
-    expect(custom.output).toBe(
-      '[REDACTED:tool_output:unknown_tool:mcp__filesystem__read_file]',
-    );
+    // Span label + toolName metadata use the allowlisted `other` family only.
+    const custom = bodyOf(batch, 'span-create', 'tool:other');
+    expect(custom.metadata.toolName).toBe('other');
+    expect(custom.input).toBe('[REDACTED:tool_input:unknown_tool]');
+    expect(custom.output).toBe('[REDACTED:tool_output:unknown_tool]');
     const payload = JSON.stringify(batch);
     expect(payload).not.toContain('super-secret');
     expect(payload).not.toContain('also-secret');
     expect(payload).not.toContain('/Users/alice/secrets.env');
+    expect(payload).not.toContain('mcp__filesystem__read_file');
   });
 
   it('redacts Linux home paths in ACP Bash tool inputs when content telemetry is on', async () => {

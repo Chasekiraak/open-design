@@ -448,16 +448,47 @@ function acpToolNameFromTitle(title: string): string | null {
 }
 
 /**
+ * Sanitizes an ACP custom/adapter tool name before it enters the transcript.
+ *
+ * Kind `other` tools may ship free-text `name` values that embed paths, URLs,
+ * tokens, or other user-specific strings. Those names flow into tool_use events
+ * and then into Langfuse span labels / toolName metadata (even when content
+ * telemetry is off). Only identifier-like names are kept; everything else
+ * collapses to the opaque family label `Other`. Langfuse additionally
+ * canonicalizes non-allowlisted names at the telemetry boundary.
+ */
+export function sanitizeAcpCustomToolName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return 'Other';
+  // Paths, URLs, free-text titles, and overlong strings are never safe labels.
+  if (
+    trimmed.includes('/') ||
+    trimmed.includes('\\') ||
+    trimmed.includes('://') ||
+    /\s/.test(trimmed) ||
+    trimmed.length > 64
+  ) {
+    return 'Other';
+  }
+  // Identifier-like only (snake_case, TitleCase, mcp__server__tool, …).
+  if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(trimmed)) {
+    return 'Other';
+  }
+  return trimmed;
+}
+
+/**
  * Resolves a stable Claude-shaped tool name from an ACP tool-call update.
  * Trusted ACP `kind` wins over both explicit `name` and title heuristics when
  * the kind is a known tool family (so `kind: read` + `name: read_file` or
  * title "update …" stays Read). That keeps content-tool redaction and analytics
  * families aligned with Langfuse's canonical name set. Kind `other` is the
  * exception: it is recognized for stickiness but is not a family, so an
- * explicit name still wins there (UI/transcript keep the real custom name).
- * Telemetry redaction for those custom names is fail-closed in Langfuse
- * (`shouldFullyRedactToolPayload`) so arbitrary MCP/content tools cannot leak
- * file bodies under only lexical masking. Write-label override to Write/Edit
+ * explicit identifier-like name still wins there for UI/transcript. Untrusted
+ * free-text names (paths, tokens, titles) are collapsed to `Other` before the
+ * event is emitted so Langfuse span labels cannot carry user-specific strings.
+ * Payloads for unknown tools still fail closed in Langfuse
+ * (`shouldFullyRedactToolPayload`). Write-label override to Write/Edit
  * applies only when there is no recognized non-write kind, so
  * `countNewArtifacts` keeps working for title-only write frames.
  */
@@ -477,15 +508,17 @@ export function acpToolName(update: JsonObject): string {
     // still fail closed in Langfuse, but canonical families stay precise).
     name = kindName;
   } else if (typeof update.name === 'string' && update.name.trim()) {
-    // kind:other / custom: preserve adapter name for UI + analytics labels.
-    // Langfuse fully redacts unknown tool payloads fail-closed.
-    name = update.name.trim();
+    // kind:other / custom: keep only identifier-like adapter names. Paths,
+    // tokens, and free text collapse to Other before the event is emitted.
+    name = sanitizeAcpCustomToolName(update.name);
   } else if (recognizedKind && kindName) {
     // kind:other without an explicit name (title-case "Other"), or remaining
     // recognized kinds without a preferred name.
     name = kindName;
   } else if (typeof update.title === 'string' && update.title.trim()) {
-    name = acpToolNameFromTitle(update.title);
+    const fromTitle = acpToolNameFromTitle(update.title);
+    // Title heuristics can still surface path-like first tokens; sanitize.
+    name = fromTitle ? sanitizeAcpCustomToolName(fromTitle) : null;
   } else if (kindName) {
     name = kindName;
   }

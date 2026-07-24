@@ -709,6 +709,42 @@ test('kind:other keeps explicit custom tool name', () => {
   assert.equal((toolUse.payload as { name?: string }).name, 'my_special_tool');
 });
 
+test('kind:other redacts path-like custom tool names before transcript emit', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'custom tool path name',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'custom-path-1',
+    kind: 'other',
+    // Untrusted free-text that must not become a tool_use name / Langfuse label.
+    name: '/Users/alice/.ssh/id_rsa',
+    status: 'completed',
+    rawOutput: 'ok',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Other');
+  const serialized = JSON.stringify(events);
+  assert.equal(serialized.includes('/Users/alice'), false);
+  assert.equal(serialized.includes('id_rsa'), false);
+});
+
 test('sticky thinkOnly: pending Thinking then status-only completed emits no tool events', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];

@@ -28,9 +28,10 @@ import {
   type PromptTelemetrySection,
   type PromptStackTelemetry,
 } from './prompt-telemetry.js';
-import type {
-  RunTelemetryTimestamps,
-  RunTimingAnalytics,
+import {
+  canonicalizeToolAnalyticsName,
+  type RunTelemetryTimestamps,
+  type RunTimingAnalytics,
 } from './run-analytics-observability.js';
 import type { RunFailureClassification } from './run-failure-classification.js';
 import { redactSecrets } from './redact.js';
@@ -905,10 +906,12 @@ function buildToolPerformanceDiagnostics(
 
   for (const tool of list) {
     const d = durationMs(tool.startedAt, tool.endedAt);
+    // Aggregate under allowlisted family names only — never raw ACP/MCP labels.
+    const safeName = telemetrySafeToolName(tool.name);
     const current =
-      byName.get(tool.name) ??
+      byName.get(safeName) ??
       {
-        tool_name: tool.name,
+        tool_name: safeName,
         call_count: 0,
         error_count: 0,
         total_duration_ms: 0,
@@ -924,7 +927,7 @@ function buildToolPerformanceDiagnostics(
       current.error_count += 1;
       current.failure_types.add('tool_result_error');
     }
-    byName.set(tool.name, current);
+    byName.set(safeName, current);
   }
 
   return {
@@ -1401,17 +1404,30 @@ export function shouldFullyRedactToolPayload(toolName: string): boolean {
 }
 
 /**
+ * Map an arbitrary tool name to a Langfuse-safe label (bounded family allowlist).
+ * Custom ACP/MCP names, paths, and free text never leave the host as span names
+ * or toolName metadata — even when content telemetry is off.
+ */
+export function telemetrySafeToolName(toolName: string): string {
+  return canonicalizeToolAnalyticsName(toolName);
+}
+
+/**
  * Builds the fixed placeholder used when tool I/O is fully redacted for
- * content telemetry. Known content families keep `content_tool`; everything
- * else (including custom ACP/MCP names) uses `unknown_tool`.
+ * content telemetry. Known content families keep `content_tool` plus a
+ * allowlisted family label; everything else uses `unknown_tool` without
+ * embedding the untrusted custom name (paths/tokens/MCP ids must not leak).
  */
 export function toolPayloadRedactionPlaceholder(
   toolName: string,
   direction: 'input' | 'output',
 ): string {
   const label = toolName.trim() || 'unnamed';
-  const reason = isContentToolName(label) ? 'content_tool' : 'unknown_tool';
-  return `[REDACTED:tool_${direction}:${reason}:${label}]`;
+  if (isContentToolName(label)) {
+    // Stable allowlisted family only — never the raw adapter string.
+    return `[REDACTED:tool_${direction}:content_tool:${telemetrySafeToolName(label)}]`;
+  }
+  return `[REDACTED:tool_${direction}:unknown_tool]`;
 }
 
 function redactLocalPaths(value: string | undefined): string | undefined {
@@ -1797,6 +1813,9 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
       const toolStartedAt = new Date(tool.startedAt).toISOString();
       const toolEndedAt = new Date(tool.endedAt).toISOString();
       const toolDurationMs = durationMs(tool.startedAt, tool.endedAt);
+      // Redaction policy still keys off the producer name (Bash vs content vs
+      // unknown); only the labels we emit to Langfuse are allowlisted.
+      const safeToolName = telemetrySafeToolName(tool.name);
       const toolInput = wantsContent
         ? truncate(
             traceSafeToolPayload(tool.name, 'input', tool.input),
@@ -1817,7 +1836,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
           id: toolSpanId,
           traceId,
           parentObservationId: toolParentObservationId,
-          name: `tool:${tool.name}`,
+          name: `tool:${safeToolName}`,
           startTime: toolStartedAt,
           endTime: toolEndedAt,
           input: toolInput,
@@ -1825,7 +1844,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
           level: tool.isError ? 'ERROR' : 'DEFAULT',
           metadata: {
             toolCallId: tool.id,
-            toolName: tool.name,
+            toolName: safeToolName,
             durationMs: toolDurationMs,
             hasInput: tool.input !== undefined,
             hasOutput: tool.output !== undefined,
