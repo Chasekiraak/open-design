@@ -19,7 +19,7 @@ import {
   AmrAccountControl,
   AmrLoginPill,
 } from '../../src/components/AmrLoginPill';
-import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
+import { AMR_LOGIN_STATUS_EVENT, AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
 import type { VelaLoginStatus } from '../../src/providers/daemon';
 
@@ -567,6 +567,61 @@ describe('AmrLoginPill', () => {
     });
     expect(screen.getByText('leaf@example.com')).toBeTruthy();
     expect(screen.queryByText('Signing in…')).toBeNull();
+  });
+
+  // This pill is what Settings' "Sign in / Register" cloud callout and the
+  // Open Design agent card's "Authorize" action both render (SettingsDialog
+  // renders it from a full-page `/settings` route, so the entry rail — and
+  // its `useWorkspaceContext` hook — is unmounted the whole time the user is
+  // on that page). The pill itself never calls
+  // notifyWorkspaceContextRefresh()/notifyWorkspaceBillingRefresh()/
+  // notifyTeamProjectsChanged() the way CloudSignInTip's finishSignedIn() and
+  // EntryShell's pollAmrLoginCompletion() do — instead, App.tsx listens for
+  // this AMR_LOGIN_STATUS_EVENT globally and resets every open tab down to a
+  // fresh Home tab on any identity change (see `deriveTabIdentityScope` /
+  // WorkspaceTabsBar). That fresh EntryShell mount seeds `useWorkspaceContext`
+  // from a null module-level cache, which starts it in `loading: true` —
+  // landing on the exact same rail loading-skeleton state CloudSignInTip
+  // drives directly. This test locks in the one signal that whole chain
+  // depends on: verified via a real end-to-end settings-page walkthrough
+  // (Playwright, screenshotted) rather than asserted here from code reading
+  // alone.
+  it('dispatches AMR_LOGIN_STATUS_EVENT once polling confirms signed-in, so identity-scope listeners outside this pill (e.g. the entry rail after a Settings sign-in) learn about it too', async () => {
+    let loginPosted = false;
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({
+          body: loginPosted
+            ? { loggedIn: true, profile: 'prod', configPath: '/x', user: { id: 'u', email: 'leaf@example.com' } }
+            : { loggedIn: false, profile: 'prod', user: null, configPath: '/x' },
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        loginPosted = true;
+        return jsonResponse({ status: 202, body: { pid: 4242 } });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const events: string[] = [];
+    const onEvent = () => events.push('fired');
+    window.addEventListener(AMR_LOGIN_STATUS_EVENT, onEvent);
+    try {
+      renderPill();
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+      });
+      // 'login-started' (on click) + the poll's success dispatch — the
+      // second one is what a Settings-page sign-in relies on to eventually
+      // reach the entry rail once the user navigates back to Home.
+      expect(events.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      window.removeEventListener(AMR_LOGIN_STATUS_EVENT, onEvent);
+    }
   });
 
   it('does not reuse stale activation details when a new login starts after a canceled attempt', async () => {
