@@ -1793,6 +1793,122 @@ test('attachAcpSession honors caller-supplied stageTimeoutMs override', async ()
   }
 });
 
+test('fail paths flush open ACP tools as errored tool_use/tool_result pairs', async () => {
+  // tool_use is deferred until terminal status. If the session fails while a
+  // tool is still open (stage timeout / child exit), the pending entry must
+  // still appear in the transcript as isError so Langfuse/PostHog keep it.
+  vi.useFakeTimers();
+  try {
+    const child = new FakeAcpChild();
+    const events: Array<{ event: string; payload: unknown }> = [];
+
+    attachAcpSession({
+      child: child as never,
+      prompt: 'run a long bash',
+      cwd: '/tmp/od-project',
+      model: null,
+      mcpServers: [],
+      send: (event, payload) => events.push({ event, payload }),
+      stageTimeoutMs: 1_000,
+    });
+
+    writeAcpResult(child, 1, {});
+    writeAcpResult(child, 2, { sessionId: 'session-1' });
+    writeAcpUpdate(child, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'open-bash-1',
+      kind: 'execute',
+      title: 'bash',
+      status: 'in_progress',
+      rawInput: { command: 'sleep 999' },
+    });
+    // No terminal tool_call_update — session dies mid-tool.
+
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const error = events.find((e) => e.event === 'error');
+    assert.ok(error, 'expected stage-timeout failure');
+
+    const toolUse = events.find(
+      (e) =>
+        e.event === 'agent' &&
+        (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+        (e.payload as { id?: string }).id === 'open-bash-1',
+    );
+    assert.ok(toolUse, 'open tool must be flushed as tool_use on fail');
+    assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
+
+    const toolResult = events.find(
+      (e) =>
+        e.event === 'agent' &&
+        (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+        (e.payload as { toolUseId?: string }).toolUseId === 'open-bash-1',
+    );
+    assert.ok(toolResult, 'open tool must be flushed as tool_result on fail');
+    assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
+
+    // tool pair must precede the terminal error event so analytics consumers
+    // that stop at first error still see the open tool.
+    const toolUseIdx = events.indexOf(toolUse);
+    const errorIdx = events.indexOf(error);
+    assert.ok(toolUseIdx < errorIdx, 'flush open tools before sending error');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('child-exit fail path flushes open ACP tools as errored pairs', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read a file',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'open-read-1',
+    kind: 'read',
+    title: 'Read src/app.ts',
+    status: 'pending',
+    locations: [{ path: 'src/app.ts' }],
+  });
+  // Process dies before terminal tool_call_update.
+  child.emit('close', 1, null);
+
+  const error = events.find((e) => e.event === 'error');
+  assert.ok(error, 'expected exit-before-completion failure');
+  assert.match(
+    (error.payload as { message?: string }).message ?? '',
+    /exited before completion/,
+  );
+
+  const toolUse = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'open-read-1',
+  );
+  assert.ok(toolUse, 'open tool must be flushed on child-exit fail');
+  assert.equal((toolUse.payload as { name?: string }).name, 'Read');
+
+  const toolResult = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === 'open-read-1',
+  );
+  assert.ok(toolResult, 'open tool must flush tool_result on child-exit fail');
+  assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
+});
+
 test('attachAcpSession treats stageTimeoutMs <= 0 as a watchdog disable, not an immediate-failure schedule', async () => {
   vi.useFakeTimers();
   try {

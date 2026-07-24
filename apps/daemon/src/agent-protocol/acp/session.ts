@@ -238,11 +238,14 @@ export function attachAcpSession({
     emittedConcreteToolEvent = true;
   };
 
-  const flushOpenAcpTools = () => {
+  // Flush tools that never received a terminal `tool_call_update`. Clean
+  // completion uses isError=false (best-effort close); fail paths use
+  // isError=true so Langfuse/PostHog and the persisted transcript keep the
+  // open tool as an errored result instead of dropping it entirely.
+  const flushOpenAcpTools = (isError = false) => {
     for (const [toolCallId, st] of acpToolRunEventState) {
       if (st.emitted) continue;
-      // Incomplete tools: best-effort flush so traces stay complete.
-      emitTerminalToolPair(toolCallId, st, false);
+      emitTerminalToolPair(toolCallId, st, isError);
     }
     acpToolRunEventState.clear();
   };
@@ -288,6 +291,9 @@ export function attachAcpSession({
 
   const failWithPayload = (payload: unknown) => {
     if (finished) return;
+    // Emit pending tools as errored before terminal state so deferred
+    // tool_use pairs are not lost on timeout / process death / RPC error.
+    flushOpenAcpTools(true);
     finished = true;
     fatal = true;
     clearStageTimer();
@@ -300,6 +306,9 @@ export function attachAcpSession({
     options: { forceModelUnavailable?: boolean; details?: unknown; retryable?: boolean } = {},
   ) => {
     if (finished) return;
+    // Emit pending tools as errored before terminal state so deferred
+    // tool_use pairs are not lost on timeout / process death / RPC error.
+    flushOpenAcpTools(true);
     finished = true;
     fatal = true;
     clearStageTimer();
