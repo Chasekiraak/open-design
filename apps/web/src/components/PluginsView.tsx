@@ -1917,9 +1917,6 @@ export function ExtensionsMarketplace({
                   nothing mounts, so this dialog was import/upload only. */}
               {onCreatePlugin && createKind === 'plugin' ? (
                 <article>
-                  <span className="plugin-marketplace__create-option-icon" aria-hidden>
-                    <Icon name="sparkles" size={20} />
-                  </span>
                   <div>
                     <h3>{t('pluginsView.createWithAgent')}</h3>
                     <p>{t('pluginsView.createWithAgentBody')}</p>
@@ -1939,9 +1936,6 @@ export function ExtensionsMarketplace({
                 </article>
               ) : null}
               <article>
-                <span className="plugin-marketplace__create-option-icon" aria-hidden>
-                  <Icon name="external-link" size={20} />
-                </span>
                 <div>
                   <h3>{t('pluginsView.importFromUrl')}</h3>
                   <p>{t('pluginsView.importUrlBody', { kind: pluginKindLabel(createKind, t) })}</p>
@@ -1970,9 +1964,6 @@ export function ExtensionsMarketplace({
                 </div>
               </article>
               <article>
-                <span className="plugin-marketplace__create-option-icon" aria-hidden>
-                  <Icon name="folder" size={20} />
-                </span>
                 <div>
                   <h3>{t('pluginsView.uploadFolder')}</h3>
                   <p>
