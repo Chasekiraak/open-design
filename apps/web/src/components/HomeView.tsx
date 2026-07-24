@@ -117,7 +117,13 @@ import {
   recentProjectChipId,
   type HomeOnboardingRole,
 } from './home-hero/main-flow';
+import {
+  HomeDemoStatePanel,
+  type HomeDemoState,
+} from './home-hero/HomeDemoStatePanel';
 import { AnimatePresence } from 'motion/react';
+
+const HOME_DEMO_STATE_PANEL_ENABLED = process.env.NODE_ENV === 'development';
 
 export interface ActivePlugin {
   record: InstalledPluginRecord;
@@ -414,13 +420,15 @@ export function HomeView({
     text: string;
     chipId: string | null;
   } | null>(null);
-  const [onboardingRole] = useState<HomeOnboardingRole>(() => {
+  const [storedOnboardingRole] = useState<HomeOnboardingRole>(() => {
     const role = readOnboardingProfile()?.role;
     if (role === 'designer') return 'designer';
     // The current onboarding label “Marketing / agency” persists as `agency`;
     // growth shares the same zero-to-one campaign-page entry path.
     return role === 'marketing' || role === 'agency' || role === 'growth' ? 'marketing' : null;
   });
+  const [homeDemoState, setHomeDemoStateValue] = useState<HomeDemoState | null>(null);
+  const onboardingRole = homeDemoState?.role ?? storedOnboardingRole;
   // A designer's self-reported onboarding role is the sole passive visual
   // selection. Everyone else starts on Ask's lightweight execution route, but
   // sees the neutral mode trigger until they choose a mode or a visual intent
@@ -584,6 +592,12 @@ export function HomeView({
       : null),
     [projects],
   );
+  const mockRecentChipId = onboardingRole === 'designer' ? 'prototype' : 'landing-page';
+  const homeRecentChipId = homeDemoState?.journey === 'new'
+    ? null
+    : homeDemoState?.journey === 'returning'
+      ? mostRecentHomeChipId ?? mockRecentChipId
+      : mostRecentHomeChipId;
   const consumedHandoffIdRef = useRef<number | null>(null);
   const pendingPromptFocusEndRef = useRef(false);
   const activePluginApplyRequestRef = useRef(0);
@@ -905,6 +919,16 @@ export function HomeView({
     setSessionMode('chat');
     setHasVisibleModeSelection(false);
     setModeSuggestion(null);
+  }
+
+  function handleHomeDemoStateChange(next: HomeDemoState | null) {
+    setHomeDemoStateValue(next);
+    sessionModeManuallySelectedRef.current = false;
+    const role = next?.role ?? storedOnboardingRole;
+    setSessionMode(role === 'designer' ? 'design' : 'chat');
+    setHasVisibleModeSelection(role === 'designer');
+    setModeSuggestion(null);
+    clearActiveChipSelection();
   }
 
   function acceptHomeModeSuggestion(mode: Exclude<ReturnType<typeof inferHomeModeSuggestion>, null>) {
@@ -2189,7 +2213,16 @@ export function HomeView({
 
   // #5517: with no recent projects the home (logo + heading + composer)
   // centers vertically instead of hugging the top, and the strip is skipped.
-  const recentProjectsEmpty = !projectsLoading && projects.length === 0;
+  const recentProjectsEmpty = homeDemoState?.journey === 'new'
+    ? true
+    : homeDemoState?.journey === 'returning'
+      ? false
+      : !projectsLoading && projects.length === 0;
+  const firstRunGuide = homeDemoState?.journey === 'new'
+    ? true
+    : homeDemoState?.journey === 'returning'
+      ? false
+      : projectsLoading ? undefined : projects.length === 0;
 
   return (
     <div
@@ -2198,10 +2231,17 @@ export function HomeView({
       ref={homeViewRef}
     >
       {isActive ? <AppWashKineticGrid clipBottomTo=".home-hero" /> : null}
+      {HOME_DEMO_STATE_PANEL_ENABLED ? (
+        <HomeDemoStatePanel
+          actualRole={storedOnboardingRole}
+          value={homeDemoState}
+          onChange={handleHomeDemoStateChange}
+        />
+      ) : null}
       <HomeHero
         ref={inputRef}
         active={isActive}
-        firstRunGuide={projectsLoading ? undefined : projects.length === 0}
+        firstRunGuide={firstRunGuide}
         prompt={prompt}
         onPromptChange={handlePromptChange}
         onSubmit={submit}
@@ -2211,7 +2251,8 @@ export function HomeView({
         selectedSessionMode={hasVisibleModeSelection ? sessionMode : null}
         onClearSessionModeSelection={clearHomeModeSelection}
         onboardingRole={onboardingRole}
-        recentChipId={mostRecentHomeChipId}
+        recentChipId={homeRecentChipId}
+        demoStateKey={homeDemoState ? `${homeDemoState.journey}:${homeDemoState.role ?? 'neutral'}` : null}
         onCreateIntent={useCreateModeForVisualIntent}
         modeSuggestion={modeSuggestion}
         onAcceptModeSuggestion={acceptHomeModeSuggestion}

@@ -78,6 +78,16 @@ describe('HomeHero scenario cards', () => {
     expect(screen.getByTestId('home-hero-rail-deck').textContent).toContain('Slide deck');
   });
 
+  it('overlays the primary recommendation badge instead of placing it in card copy', () => {
+    renderHero({ onboardingRole: 'designer' });
+
+    const card = screen.getByTestId('home-hero-rail-prototype');
+    const badge = card.querySelector('.home-hero__recommendation-badge');
+    expect(badge?.textContent).toBe('For you');
+    expect(badge?.parentElement).toBe(card);
+    expect(card.querySelector('.home-hero__scenario-card-body .home-hero__recommendation-badge')).toBeNull();
+  });
+
   it('keeps Website clone source-first, followed by Landing page creation', () => {
     const ordered = orderedCreateChips();
     expect(ordered[0]?.id).toBe('web-clone');

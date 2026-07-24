@@ -263,6 +263,8 @@ interface Props {
   modeSuggestion?: HomeModeSuggestion;
   onAcceptModeSuggestion?: (mode: Exclude<HomeModeSuggestion, null>) => void;
   onDismissModeSuggestion?: () => void;
+  /** Development-only state-switcher token; a change restores Home's recommendation surface. */
+  demoStateKey?: string | null;
   // Personalized first-run starting point (spec §7). Rendered directly under
   // the composer card — before the template section — so a brand-new user sees
   // their recommended entry without scrolling.
@@ -418,6 +420,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     modeSuggestion = null,
     onAcceptModeSuggestion,
     onDismissModeSuggestion,
+    demoStateKey = null,
     recommendationSlot,
   },
   ref,
@@ -535,6 +538,12 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   useEffect(() => {
     if (hasContextForNewbie) dismissTemplateRecommendation();
   }, [dismissTemplateRecommendation, hasContextForNewbie]);
+
+  useEffect(() => {
+    if (demoStateKey === null) return;
+    setShowTemplateRecommendation(true);
+    setTemplateGridOpen(true);
+  }, [demoStateKey]);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
     dismissTemplateRecommendation();
@@ -3671,6 +3680,9 @@ function RailGroup({
           aria-selected={isActive}
           title={nextStep}
         >
+          {recommendedChipId === chip.id ? (
+            <span className="home-hero__recommendation-badge">For you</span>
+          ) : null}
           <span className="home-hero__scenario-card-art" aria-hidden>
             <ScenarioArt chipId={chip.id} fallbackIcon={chip.icon} />
           </span>
@@ -3678,9 +3690,6 @@ function RailGroup({
             <span className="home-hero__scenario-card-title home-hero__type-tab-label">
               {homeHeroChipLabel(chip.id, t)}
             </span>
-            {recommendedChipId === chip.id ? (
-              <span className="home-hero__recommendation-badge">For you</span>
-            ) : null}
             {description ? (
               <span className="home-hero__scenario-card-desc">{description}</span>
             ) : null}

@@ -3364,6 +3364,7 @@ button.home-hero__capability-word:focus-visible {
 }
 
 .home-hero__scenario-card.home-hero__type-tab {
+  position: relative;
   flex: 0 0 156px;
   flex-direction: column;
   align-items: stretch;
@@ -3395,13 +3396,17 @@ button.home-hero__capability-word:focus-visible {
 }
 .home-hero__recommendation-badge {
   display: inline-flex;
-  align-self: flex-start;
-  margin-top: 2px;
-  padding: 2px 5px;
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  left: 8px;
+  padding: 3px 6px;
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--accent-tint) 76%, var(--bg-panel));
   font-size: 10px;
+  line-height: 1.1;
   letter-spacing: 0.01em;
+  pointer-events: none;
 }
 @keyframes home-hero-recommendation-enter {
   from { opacity: 0.5; transform: translateY(4px); }
