@@ -2305,14 +2305,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           {showTemplateRecommendation ? (
             <div className="home-hero__template-recommendation" data-testid="home-hero-template-recommendation">
               {templateRecommendation.primaryChipId ? (
-                <>
-                  <span className="home-hero__template-recommendation-label">Recommended for you</span>
-                  {templateRecommendation.secondaryChipId ? (
-                    <span className="home-hero__template-recommendation-secondary">
-                      Also consider {homeHeroChipLabel(templateRecommendation.secondaryChipId, t)}
-                    </span>
-                  ) : null}
-                </>
+                <span className="home-hero__template-recommendation-label">Recommended for you</span>
               ) : (
                 <span>{templateRecommendation.emptyStateMessage}</span>
               )}
