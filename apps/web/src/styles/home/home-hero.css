@@ -1578,9 +1578,8 @@ button.home-hero__capability-word:focus-visible {
   background: var(--border);
   opacity: 0.7;
 }
-/* The directory trigger stays borderless like the fixed Design System entry.
-   Its label matches the selected Design System chip's type emphasis, so the
-   two kinds of persistent context do not read at different hierarchy levels. */
+/* The directory trigger stays at the same quiet hierarchy as the fixed Design
+   System entry beside it; neither is an active/selected context chip. */
 .home-hero__working-dir-picker [data-testid='working-dir-trigger'] {
   min-height: 36px;
   gap: 6px;
@@ -1592,8 +1591,8 @@ button.home-hero__capability-word:focus-visible {
   font-size: 13px;
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger'] span {
-  color: var(--text);
-  font-weight: 600;
+  color: inherit;
+  font-weight: 400;
 }
 .home-hero__working-dir-picker [data-testid='working-dir-trigger'] svg {
   width: 13px;
