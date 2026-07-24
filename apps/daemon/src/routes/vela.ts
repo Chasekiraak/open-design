@@ -48,6 +48,64 @@ const AMR_API_PROXY_PREFIX = '/api/integrations/vela/api-proxy';
 const VELA_MESSAGE_CENTER_PREFIX = '/api/integrations/vela/message-center';
 const AMR_API_UPSTREAM_ORIGIN = 'https://amr-api.open-design.ai';
 
+/**
+ * Upper bound, in ms, on how long a cold-cache `/status` read waits for the
+ * live billing fetch before answering without `account`. `vela billing
+ * summary` is a real subprocess spawn (up to the 10s exec timeout in
+ * fetchVelaBillingSummary) and every logout clears the live-account cache
+ * (see `clearAllVelaLiveAccounts`), so "sign out then sign back in" always
+ * lands here cold. Without a bound, a slow or hung billing probe delays the
+ * whole login-status response — the very check the avatar/menu/settings
+ * surfaces need FIRST — by however long the subprocess takes. Kept short
+ * (well under the exec timeout) so /status stays fast even when billing is
+ * slow; the single-flight fetch is NOT canceled when the wait lapses, so it
+ * keeps running and populates the cache (see `setVelaLiveAccount`) for the
+ * next read. Every consumer already re-reads /status on its own (mount,
+ * window focus/visibilitychange, or the `od:amr-login-status-change` event
+ * dispatched right after sign-in resolves), so the plan/balance simply
+ * arrives on that next read instead of holding this one hostage.
+ */
+const VELA_STATUS_LIVE_ACCOUNT_WAIT_MS = 1_200;
+
+/** Sentinel returned by {@link raceVelaLiveAccountFetch} when the wait lapses. */
+const VELA_LIVE_ACCOUNT_PENDING = Symbol('vela-live-account-pending');
+
+/**
+ * Race an in-flight live-account fetch against a short timeout. Resolves with
+ * the fetched account (or null on failure — the fetch itself never rejects,
+ * see {@link fetchVelaLiveAccountSingleFlight}'s `.catch`) when it lands
+ * before `timeoutMs`; otherwise resolves with the pending sentinel WITHOUT
+ * touching `pending` — the fetch keeps running and still populates the
+ * live-account cache when it eventually settles.
+ */
+function raceVelaLiveAccountFetch(
+  pending: Promise<VelaLiveAccount | null>,
+  timeoutMs: number,
+): Promise<VelaLiveAccount | null | typeof VELA_LIVE_ACCOUNT_PENDING> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(VELA_LIVE_ACCOUNT_PENDING);
+    }, timeoutMs);
+    pending.then(
+      (account) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(account);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
 type ReadAppConfig = (dataDir: string) => Promise<AppConfigPrefs>;
 type PublicBaseUrlResolver = (req: Request) => string;
 
@@ -364,20 +422,32 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
           });
           applyVelaLiveAccount(status, liveAccount);
         } else if (!cachedAccount) {
-          // Cold cache (or a fetch already in flight): BLOCK on the single-flight
-          // billing fetch so the first open already carries plan/balance. The
-          // consumers (settings card, inline switcher, avatar) read /status once
-          // and do not re-poll, so returning config-only here would hide the
-          // fields until the user refocuses. On failure the helper resolves null
-          // and the refresh throttle becomes a short negative cache/backoff, so
-          // repeated menu/focus polls degrade to config-only instead of each
-          // awaiting the same optional billing probe.
-          const liveAccount =
+          // Cold cache (or a fetch already in flight): wait up to
+          // VELA_STATUS_LIVE_ACCOUNT_WAIT_MS for the single-flight billing
+          // fetch so the first open still carries plan/balance in the common
+          // case (billing typically answers in well under a second). On
+          // failure the helper resolves null and the refresh throttle
+          // becomes a short negative cache/backoff, so repeated menu/focus
+          // polls degrade to config-only instead of each awaiting the same
+          // slow probe. If billing is genuinely slow (or hung), the wait
+          // lapses and this response goes out with `account` absent rather
+          // than blocking the login-status check itself — the fetch is left
+          // running and populates the cache for the next /status read (see
+          // VELA_STATUS_LIVE_ACCOUNT_WAIT_MS's docblock for why that is
+          // always reached soon after).
+          if (
             inFlightVelaAccountFetches.has(accountCacheKey) ||
             shouldRefreshVelaLiveAccount(accountCacheKey)
-              ? await fetchVelaLiveAccountSingleFlight(accountCacheKey, probe)
-              : null;
-          applyVelaLiveAccount(status, liveAccount);
+          ) {
+            const pending = fetchVelaLiveAccountSingleFlight(accountCacheKey, probe);
+            const liveAccount = await raceVelaLiveAccountFetch(
+              pending,
+              VELA_STATUS_LIVE_ACCOUNT_WAIT_MS,
+            );
+            if (liveAccount !== VELA_LIVE_ACCOUNT_PENDING) {
+              applyVelaLiveAccount(status, liveAccount);
+            }
+          }
         } else {
           // Warm cache: serve it immediately; refresh in the background for the
           // next poll once the TTL has lapsed.
