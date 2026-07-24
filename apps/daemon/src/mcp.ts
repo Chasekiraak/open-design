@@ -30,6 +30,7 @@ import {
   OPEN_DESIGN_BRIEF_APP_HTML,
   OPEN_DESIGN_BRIEF_APP_VERSION,
 } from './mcp-apps/brief-resource.js';
+import { DEFAULT_AMR_RECHARGE_URL } from './integrations/vela-errors.js';
 
 const SERVER_NAME = 'open-design';
 const SERVER_VERSION = '0.2.0';
@@ -50,7 +51,7 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
 interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
 type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
 interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
-interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; byokProfile?: unknown; apiKey?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown }
+interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; byokProfile?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown }
 interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
 interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; active: ActiveContext | null; resolved?: ResolvedProject | null }
 interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
@@ -569,6 +570,16 @@ export const TOOL_DEFS = [
           description:
             'Secure profile id from list_byok_profiles. Selects the local BYOK OpenCode runtime; raw API keys are never accepted by MCP.',
         },
+        requestId: {
+          type: 'string',
+          description:
+            'Stable id for this confirmed generation action. Generate it once before calling start_run and reuse it verbatim if the tool response is lost or retried; a different payload with the same id is rejected.',
+        },
+        resume: {
+          type: 'boolean',
+          description:
+            'Set true only after the user has topped up a failed Cloud/Vela run. Reuse the exact original requestId and payload; Open Design resumes the same logical run.',
+        },
       },
       additionalProperties: false,
     },
@@ -731,8 +742,14 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
         '    returned list will actually spawn on this machine.',
         ' - create_project(name) first if you need a fresh project to',
         '    generate into; start_run requires an existing project.',
-        ' - start_run(prompt, [skill], [plugin], [inputs]) kicks off generation in',
-        '    the active or named project and returns a runId immediately.',
+        ' - start_run(prompt, requestId, [skill], [plugin], [inputs]) kicks off',
+        '    generation in the active or named project and returns a runId.',
+        '    Generate requestId once per confirmed user action and reuse the',
+        '    exact same value after a timeout/lost response. Do not call',
+        '    start_run again while get_run reports the original run in flight.',
+        '    If get_run returns failureAction:"recharge", show rechargeUrl;',
+        '    after the user confirms top-up, call the exact original start_run',
+        '    once with the same requestId and resume:true.',
         '    Open Design spawns its own agent to do the work.',
         ' - get_run(runId) polls until status is succeeded/failed/canceled;',
         '    on success it returns a previewUrl you can open in a browser',
@@ -1402,7 +1419,16 @@ async function startRun(baseUrl: string, args: McpArgs) {
     );
   }
   const { id, resolved, active } = await resolveProjectArg(baseUrl, args.project);
-  const body: JsonObject = { projectId: id };
+  if (args.requestId !== undefined) requireString(args.requestId, 'requestId');
+  const requestId =
+    typeof args.requestId === 'string' && args.requestId.length > 0
+      ? args.requestId
+      : `mcp-${randomUUID()}`;
+  const body: JsonObject = { projectId: id, clientRequestId: requestId };
+  if (args.resume !== undefined) {
+    if (typeof args.resume !== 'boolean') throw new Error('resume must be a boolean');
+    body.resume = args.resume;
+  }
   if (typeof args.prompt === 'string' && args.prompt.length > 0) {
     body.message = args.prompt;
     body.currentPrompt = args.prompt;
@@ -1443,6 +1469,7 @@ async function startRun(baseUrl: string, args: McpArgs) {
     withActiveEcho(
       {
         ...created,
+        requestId,
         ...(studioUrl ? { studioUrl } : {}),
         hint: 'Run started. Open Design generation normally takes 5–30 minutes. Polls showing status:running with no new files / unchanged file mtimes is the inner agent thinking, NOT a hang — DO NOT cancel_run out of impatience and DO NOT substitute write_file to produce the design yourself; OD\'s pipeline is what gives the result its design quality. Poll get_run(runId) every 30–60 seconds; report "still working" to the user between polls and keep waiting. On terminal status the response carries previewUrl + agentMessage which together are the canonical deliverable. When studioUrl is present, ALWAYS show it to the user as a clickable markdown link: `[Open Open Design studio](STUDIO_URL)` — never as inline code or bare text, because Codex / Cursor / Zed render markdown links as navigable in their built-in browser pane and inline code blocks are not clickable.',
       },
@@ -1475,8 +1502,15 @@ async function getRun(baseUrl: string, args: McpArgs) {
     const studioUrl = buildStudioUrl(webBase, status.projectId, status.conversationId, null);
     const enriched: JsonObject = { ...status };
     if (studioUrl) enriched.studioUrl = studioUrl;
+    if (status.failureAction === 'recharge') {
+      enriched.rechargeUrl = DEFAULT_AMR_RECHARGE_URL;
+      enriched.hint =
+        'Open Design Cloud paused this logical run because the wallet balance is insufficient. Preserve the brief and project, show rechargeUrl to the user, and do not switch runtimes. After the user confirms the top-up, call start_run once with the exact original payload, the same requestId, and resume:true; Open Design and Vela will resume the existing local run and cloud billing operation.';
+    }
     if (typeof status.eventsLogPath === 'string' && status.eventsLogPath.length > 0) {
-      enriched.hint = 'Run still in flight. Tail eventsLogPath in your own shell (e.g. `tail -n 50 -f "' + status.eventsLogPath + '"`) to see live text_delta / tool_use events from the inner agent — that is your in-flight progress signal. Keep polling get_run every 30–60s; do not cancel because file mtimes look static, that is the agent thinking between writes.';
+      if (status.failureAction !== 'recharge') {
+        enriched.hint = 'Run still in flight. Tail eventsLogPath in your own shell (e.g. `tail -n 50 -f "' + status.eventsLogPath + '"`) to see live text_delta / tool_use events from the inner agent — that is your in-flight progress signal. Keep polling get_run every 30–60s; do not cancel because file mtimes look static, that is the agent thinking between writes.';
+      }
       if (studioUrl) {
         enriched.hint += ` Once you have something to show the user, give them a clickable markdown link to studioUrl — render it as \`[Watch progress in Open Design studio](${studioUrl})\`, NEVER as inline code or bare text, so clients like Codex / Cursor / Zed make it navigable in their built-in browser pane.`;
       }

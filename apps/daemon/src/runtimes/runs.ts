@@ -33,6 +33,8 @@ function durableRunState(run) {
     projectId: run.projectId,
     conversationId: run.conversationId,
     assistantMessageId: run.assistantMessageId,
+    clientRequestId: run.clientRequestId,
+    requestFingerprint: run.requestFingerprint,
     agentId: run.agentId,
     status: run.status,
     createdAt: run.createdAt,
@@ -41,6 +43,10 @@ function durableRunState(run) {
     signal: run.signal,
     error: run.error,
     errorCode: run.errorCode,
+    failureCategory: run.failureCategory ?? null,
+    failureDetail: run.failureDetail ?? null,
+    failureAction: run.failureAction ?? null,
+    resumable: run.resumable ?? false,
     artifactCount: Number.isFinite(run.artifactCount) ? run.artifactCount : 0,
     endedWithUnfinishedWork: Boolean(run.endedWithUnfinishedWork),
     ...(typeof run.userPrompt === 'string' ? { userPrompt: run.userPrompt } : {}),
@@ -82,6 +88,40 @@ function extractErrorDetails(data) {
   };
 }
 
+function readDurableRunState(statePath) {
+  try {
+    const value = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    if (
+      !value
+      || typeof value !== 'object'
+      || value.schemaVersion !== RUN_STATE_SCHEMA_VERSION
+      || typeof value.id !== 'string'
+      || typeof value.status !== 'string'
+    ) {
+      return null;
+    }
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function readDurableRunEvents(eventsLogPath) {
+  try {
+    return fs.readFileSync(eventsLogPath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((record) =>
+        record
+        && typeof record === 'object'
+        && Number.isFinite(record.id)
+        && typeof record.event === 'string');
+  } catch {
+    return [];
+  }
+}
+
 export function createChatRunService({
   createSseResponse,
   createSseErrorPayload,
@@ -103,6 +143,64 @@ export function createChatRunService({
   onEventEmitted = null,
 }) {
   const runs = new Map();
+  const runIdsByClientRequestId = new Map();
+
+  if (runsLogDir) {
+    try {
+      for (const entry of fs.readdirSync(runsLogDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const state = readDurableRunState(path.join(runsLogDir, entry.name, 'state.json'));
+        if (
+          typeof state?.clientRequestId === 'string'
+          && state.clientRequestId
+          && typeof state.id === 'string'
+        ) {
+          runIdsByClientRequestId.set(state.clientRequestId, state.id);
+        }
+      }
+    } catch {
+      // A fresh data root has no runs directory yet.
+    }
+  }
+
+  const hydrateDurableRun = (id) => {
+    if (!runsLogDir || typeof id !== 'string' || !id) return null;
+    const statePath = path.join(runsLogDir, id, 'state.json');
+    const state = readDurableRunState(statePath);
+    if (!state || state.id !== id || !TERMINAL_RUN_STATUSES.has(state.status)) return null;
+    const eventsLogPath = path.join(runsLogDir, id, 'events.jsonl');
+    const events = readDurableRunEvents(eventsLogPath);
+    const run = {
+      ...state,
+      projectId: typeof state.projectId === 'string' ? state.projectId : null,
+      conversationId: typeof state.conversationId === 'string' ? state.conversationId : null,
+      assistantMessageId:
+        typeof state.assistantMessageId === 'string' ? state.assistantMessageId : null,
+      clientRequestId:
+        typeof state.clientRequestId === 'string' ? state.clientRequestId : null,
+      requestFingerprint:
+        typeof state.requestFingerprint === 'string' ? state.requestFingerprint : null,
+      agentId: typeof state.agentId === 'string' ? state.agentId : null,
+      projectMetadata: null,
+      events,
+      nextEventId: events.reduce((max, record) => Math.max(max, record.id), 0) + 1,
+      clients: new Set(),
+      waiters: new Set(),
+      child: null,
+      acpSession: null,
+      childPid: null,
+      processGroupId: null,
+      cancelRequested: false,
+      eventsLogPath,
+      statePath,
+      eventsLogStream: null,
+      eventsLogClosed: true,
+      mediaExecution: normalizeMediaExecutionPolicyForRun(null),
+      toolBundle: normalizeRunToolBundleForRun(null),
+    };
+    runs.set(id, run);
+    return run;
+  };
 
   const create = (meta = {}) => {
     const now = Date.now();
@@ -113,6 +211,10 @@ export function createChatRunService({
       conversationId: typeof meta.conversationId === 'string' && meta.conversationId ? meta.conversationId : null,
       assistantMessageId: typeof meta.assistantMessageId === 'string' && meta.assistantMessageId ? meta.assistantMessageId : null,
       clientRequestId: typeof meta.clientRequestId === 'string' && meta.clientRequestId ? meta.clientRequestId : null,
+      requestFingerprint:
+        typeof meta.requestFingerprint === 'string' && meta.requestFingerprint
+          ? meta.requestFingerprint
+          : null,
       agentId: typeof meta.agentId === 'string' && meta.agentId ? meta.agentId : null,
       projectMetadata:
         meta.projectMetadata && typeof meta.projectMetadata === 'object' && !Array.isArray(meta.projectMetadata)
@@ -190,10 +292,39 @@ export function createChatRunService({
       // Set once finish() has closed the log stream, so a late post-finish emit
       // can't lazily re-open a stream nothing will ever close (FD leak).
       eventsLogClosed: false,
+      cleanupGeneration: 0,
     };
     runs.set(run.id, run);
+    if (run.clientRequestId) runIdsByClientRequestId.set(run.clientRequestId, run.id);
     if (run.statePath) atomicWriteJson(run.statePath, durableRunState(run));
     return run;
+  };
+
+  const createOrReuse = (meta = {}) => {
+    const clientRequestId =
+      typeof meta.clientRequestId === 'string' && meta.clientRequestId
+        ? meta.clientRequestId
+        : null;
+    if (clientRequestId) {
+      const existingId = runIdsByClientRequestId.get(clientRequestId);
+      const existing = existingId
+        ? runs.get(existingId) ?? hydrateDurableRun(existingId)
+        : null;
+      if (existing) {
+        const fingerprint =
+          typeof meta.requestFingerprint === 'string' ? meta.requestFingerprint : null;
+        if (
+          fingerprint
+          && typeof existing.requestFingerprint === 'string'
+          && existing.requestFingerprint
+          && fingerprint !== existing.requestFingerprint
+        ) {
+          return { kind: 'conflict', run: existing };
+        }
+        return { kind: 'reused', run: existing };
+      }
+    }
+    return { kind: 'created', run: create(meta) };
   };
 
   const persistState = (run) => {
@@ -222,12 +353,62 @@ export function createChatRunService({
     persistState(run);
   };
 
-  const get = (id) => runs.get(id) ?? null;
+  const get = (id) => runs.get(id) ?? hydrateDurableRun(id);
 
   const scheduleCleanup = (run) => {
+    const generation = (run.cleanupGeneration ?? 0) + 1;
+    run.cleanupGeneration = generation;
     setTimeout(() => {
-      if (TERMINAL_RUN_STATUSES.has(run.status)) runs.delete(run.id);
+      if (
+        run.cleanupGeneration === generation
+        && TERMINAL_RUN_STATUSES.has(run.status)
+      ) {
+        runs.delete(run.id);
+      }
     }, ttlMs).unref?.();
+  };
+
+  const prepareRestart = (run) => {
+    if (!run || !TERMINAL_RUN_STATUSES.has(run.status)) return null;
+    // Invalidate the cleanup timer scheduled for the prior terminal attempt.
+    run.cleanupGeneration = (run.cleanupGeneration ?? 0) + 1;
+    run.status = 'queued';
+    run.updatedAt = Date.now();
+    run.exitCode = null;
+    run.signal = null;
+    run.error = null;
+    run.errorCode = null;
+    run.failureCategory = null;
+    run.failureDetail = null;
+    run.failureAction = null;
+    run.resumable = false;
+    run.cancelRequested = false;
+    run.runtimeFailureObservedBeforeCancellation = false;
+    run.retryRestartTimer = null;
+    run.retryAttemptCount = 0;
+    run.retryFinalResult = undefined;
+    run.retrySuppressedReason = undefined;
+    run.retryOriginFailure = null;
+    run.retryOriginErrorCode = null;
+    run.artifactCount = undefined;
+    run.artifactOutcome = undefined;
+    run.endedWithUnfinishedWork = false;
+    run.child = null;
+    run.acpSession = null;
+    run.childPid = null;
+    run.processGroupId = null;
+    run.childExitObservedAt = null;
+    run.stdinOpen = false;
+    run.eventsLogStream = null;
+    run.eventsLogClosed = false;
+    run.manualResumeAttemptCount = (run.manualResumeAttemptCount ?? 0) + 1;
+    persistState(run);
+    emit(run, 'run_resume_attempted', {
+      runId: run.id,
+      attempt: run.manualResumeAttemptCount,
+      reason: 'recharge',
+    });
+    return run;
   };
 
   // Lazily open the per-run event log on first emit. The directory may
@@ -300,6 +481,7 @@ export function createChatRunService({
     projectId: run.projectId,
     conversationId: run.conversationId,
     assistantMessageId: run.assistantMessageId,
+    clientRequestId: run.clientRequestId ?? null,
     agentId: run.agentId,
     designSystemId: run.designSystemId ?? null,
     designSystemRequestedId: run.designSystemRequestedId ?? null,
@@ -321,6 +503,7 @@ export function createChatRunService({
     errorCode: run.errorCode ?? null,
     failureCategory: run.failureCategory ?? null,
     failureDetail: run.failureDetail ?? null,
+    failureAction: run.failureAction ?? null,
     resumable: run.resumable ?? false,
     endedWithUnfinishedWork: !!run.endedWithUnfinishedWork,
     ...(Number.isFinite(run.artifactCount) ? { artifactCount: run.artifactCount } : {}),
@@ -672,6 +855,12 @@ export function createChatRunService({
       try { finalize(); } catch { /* best-effort */ }
     }
     runs.delete(run.id);
+    if (
+      run.clientRequestId
+      && runIdsByClientRequestId.get(run.clientRequestId) === run.id
+    ) {
+      runIdsByClientRequestId.delete(run.clientRequestId);
+    }
     if (run.statePath) {
       try { fs.unlinkSync(run.statePath); } catch { /* best-effort */ }
     }
@@ -690,6 +879,8 @@ export function createChatRunService({
 
   return {
     create,
+    createOrReuse,
+    prepareRestart,
     start,
     get,
     list,

@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import type Database from 'better-sqlite3';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   defaultScenarioPluginIdForProjectMetadata,
   RUN_RESULT_PACKAGE_SCHEMA,
@@ -142,6 +142,8 @@ interface ChatRun {
   projectId: string | null;
   conversationId: string | null;
   assistantMessageId: string | null;
+  clientRequestId?: string | null;
+  requestFingerprint?: string | null;
   agentId: string | null;
   model?: string | null;
   status: ChatRunStatus;
@@ -152,6 +154,7 @@ interface ChatRun {
   signal?: string | null;
   error?: string | null;
   errorCode?: string | null;
+  failureAction?: string | null;
   projectMetadata?: ProjectMetadata;
   appliedPluginSnapshotId?: string | null;
   pluginId?: string | null;
@@ -202,6 +205,8 @@ interface RunCreateMeta extends JsonRecord {
   projectId?: string;
   conversationId?: string;
   assistantMessageId?: string;
+  clientRequestId?: string;
+  requestFingerprint?: string;
   agentId?: string;
   pluginId?: string;
   appliedPluginSnapshotId?: string;
@@ -218,6 +223,11 @@ interface RunListFilters {
 
 interface ChatRunService {
   create(meta: RunCreateMeta): ChatRun;
+  createOrReuse(meta: RunCreateMeta):
+    | { kind: 'created'; run: ChatRun }
+    | { kind: 'reused'; run: ChatRun }
+    | { kind: 'conflict'; run: ChatRun };
+  prepareRestart(run: ChatRun): ChatRun | null;
   get(id: string): ChatRun | null;
   list(filters: RunListFilters): ChatRun[];
   statusBody(run: ChatRun): ChatRunStatusResponse;
@@ -492,6 +502,44 @@ function withoutSensitiveRunInput(body: JsonRecord): JsonRecord {
   return sanitized;
 }
 
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as JsonRecord)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalJsonValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function runRequestFingerprint(meta: RunCreateMeta): string {
+  const logicalRequest = {
+    projectId: meta.projectId ?? null,
+    conversationId: meta.conversationId ?? null,
+    agentId: meta.agentId ?? null,
+    message: meta.message ?? null,
+    currentPrompt: meta.currentPrompt ?? null,
+    skillId: meta.skillId ?? null,
+    skillIds: meta.skillIds ?? null,
+    designSystemId: meta.designSystemId ?? null,
+    pluginId: meta.pluginId ?? null,
+    appliedPluginSnapshotId: meta.appliedPluginSnapshotId ?? null,
+    pluginInputs: meta.pluginInputs ?? null,
+    model: meta.model ?? null,
+    reasoning: meta.reasoning ?? null,
+    serviceTier: meta.serviceTier ?? null,
+    byokProfileId: meta.byokProfileId ?? null,
+    sessionMode: meta.sessionMode ?? null,
+    mediaExecution: meta.mediaExecution ?? null,
+    toolBundle: meta.toolBundle ?? null,
+  };
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalJsonValue(logicalRequest)))
+    .digest('hex');
+}
+
 const CREDENTIAL_FIELD_PATTERN =
   /^(?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|secret|password)$/iu;
 
@@ -733,6 +781,10 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     if (runProject?.metadata) {
       meta.projectMetadata = runProject.metadata;
     }
+    let fallbackUserMessage: {
+      conversationId: string;
+      content: string;
+    } | null = null;
     if (
       typeof meta.projectId === 'string' &&
       meta.projectId &&
@@ -760,13 +812,10 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
               ? meta.message
               : null;
           if (promptForUserMessage) {
-            upsertMessage(db, defaultConv.id, {
-              id: randomUUID(),
-              role: 'user',
+            fallbackUserMessage = {
+              conversationId: defaultConv.id,
               content: promptForUserMessage,
-              startedAt: Date.now(),
-              endedAt: Date.now(),
-            });
+            };
           }
         }
       } catch (err) {
@@ -794,7 +843,60 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
         ? normalizeConversationSessionMode(meta.sessionMode)
         : normalizeConversationSessionMode(conversationSession?.sessionMode);
-    const run = design.runs.create(meta);
+    meta.requestFingerprint = runRequestFingerprint(meta);
+    const creation = design.runs.createOrReuse(meta);
+    if (creation.kind === 'conflict') {
+      return sendApiError(
+        res,
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId is already associated with a different logical run request',
+      );
+    }
+    const run = creation.run;
+    let resumed = false;
+    if (creation.kind === 'reused') {
+      const resumeRequested = requestBody.resume === true;
+      const rechargeFailure =
+        run.status === 'failed'
+        && run.agentId === 'amr'
+        && (
+          run.failureAction === 'recharge'
+          || run.errorCode === 'AMR_INSUFFICIENT_BALANCE'
+        );
+      if (!resumeRequested) {
+        return res.status(202).json({
+          runId: run.id,
+          conversationId: run.conversationId ?? null,
+          assistantMessageId: run.assistantMessageId ?? null,
+          clientRequestId: run.clientRequestId ?? null,
+          reused: true,
+          resumed: false,
+          ...(run.appliedPluginSnapshotId
+            ? { appliedPluginSnapshotId: run.appliedPluginSnapshotId }
+            : {}),
+          ...(run.pluginId ? { pluginId: run.pluginId } : {}),
+        });
+      }
+      if (!rechargeFailure || !design.runs.prepareRestart(run)) {
+        return sendApiError(
+          res,
+          409,
+          'RUN_NOT_RECHARGE_RESUMABLE',
+          'Only a failed Open Design Cloud run waiting for recharge can be resumed with the same request',
+        );
+      }
+      resumed = true;
+    }
+    if (creation.kind === 'created' && fallbackUserMessage) {
+      upsertMessage(db, fallbackUserMessage.conversationId, {
+        id: randomUUID(),
+        role: 'user',
+        content: fallbackUserMessage.content,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+      });
+    }
     try {
       pinAssistantMessageOnRunCreate(db, run);
     } catch (err) {
@@ -819,6 +921,9 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       runId: run.id,
       conversationId: run.conversationId ?? null,
       assistantMessageId: run.assistantMessageId ?? null,
+      clientRequestId: run.clientRequestId ?? null,
+      reused: creation.kind === 'reused',
+      resumed,
       ...(resolvedSnapshot?.ok
         ? {
             appliedPluginSnapshotId: resolvedSnapshot.snapshotId,
@@ -827,7 +932,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         : {}),
     };
     res.status(202).json(body);
-    if (resolvedSnapshot?.ok && resolvedSnapshot.snapshot.pipeline) {
+    if (!resumed && resolvedSnapshot?.ok && resolvedSnapshot.snapshot.pipeline) {
       firePipelineForRun({
         run,
         snapshot: resolvedSnapshot.snapshot,
@@ -1673,13 +1778,27 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         byokInputError,
       );
     }
-    const meta = {
+    const meta: RunCreateMeta = {
       ...withoutSensitiveRunInput(requestBody),
       mediaExecution: mediaExecution.policy,
       toolBundle: toolBundle.bundle,
       ...(chatProject?.metadata ? { projectMetadata: chatProject.metadata } : {}),
     };
-    const run = design.runs.create(meta);
+    meta.requestFingerprint = runRequestFingerprint(meta);
+    const creation = design.runs.createOrReuse(meta);
+    if (creation.kind === 'conflict') {
+      return sendApiError(
+        res,
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'clientRequestId is already associated with a different logical run request',
+      );
+    }
+    const run = creation.run;
+    if (creation.kind === 'reused') {
+      design.runs.stream(run, req, res);
+      return;
+    }
     try {
       pinAssistantMessageOnRunCreate(db, run);
     } catch (err) {

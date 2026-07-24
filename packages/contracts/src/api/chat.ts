@@ -26,6 +26,7 @@ import type {
 // producer and consumer can't drift.
 export type RunFailureCategory = TrackingRunFailureCategory;
 export type RunFailureDetail = TrackingRunFailureDetail;
+export type RunFailureAction = 'relogin' | 'recharge' | 'upgrade' | 'retry' | 'none';
 
 export type ChatRole = 'user' | 'assistant';
 export type ChatSessionMode = 'design' | 'chat' | 'plan';
@@ -302,6 +303,8 @@ export interface ChatRunCreateRequest extends ChatRequest {
  */
 export interface McpRunCreateRequest {
   projectId: string;
+  /** Stable id generated once per confirmed user action and reused on transport retry. */
+  clientRequestId?: string;
   message?: string;
   agentId?: string;
   skillId?: string;
@@ -456,6 +459,8 @@ export interface ChatRunStatusResponse {
   projectId: string | null;
   conversationId: string | null;
   assistantMessageId: string | null;
+  /** Stable caller request id used to suppress duplicate logical runs. */
+  clientRequestId?: string | null;
   agentId: string | null;
   /** Design system whose prompt context was actually injected for this run. */
   designSystemId?: string | null;
@@ -488,6 +493,8 @@ export interface ChatRunStatusResponse {
    *  cli_not_installed, invalid_api_key, …). Primary key the UI maps to a named
    *  failure type + fix. Absent on success / older daemons. */
   failureDetail?: RunFailureDetail | null;
+  /** Recommended recovery action derived from the same failure classification. */
+  failureAction?: RunFailureAction | null;
   /** True when this terminal failure can be recovered by resuming the agent's
    *  existing CLI session (a transient upstream drop / inactivity timeout on a
    *  session-resuming runtime), rather than only restarting from scratch. The

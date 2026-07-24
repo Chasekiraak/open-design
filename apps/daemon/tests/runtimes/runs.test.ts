@@ -52,6 +52,43 @@ describe('chat run service shutdown', () => {
     });
   });
 
+  it('reopens the same logical run for an explicit recharge recovery attempt', () => {
+    const runs = createRuns();
+    const run = runs.create({
+      projectId: 'project-1',
+      conversationId: 'conv-1',
+      clientRequestId: 'brief-1-cloud',
+      requestFingerprint: 'same-logical-request',
+      agentId: 'amr',
+    });
+    (run as any).failureAction = 'recharge';
+    runs.emit(run, 'error', {
+      error: {
+        code: 'AMR_INSUFFICIENT_BALANCE',
+        message: 'insufficient balance',
+        retryable: false,
+      },
+    });
+    runs.finish(run, 'failed', 1, null);
+
+    const resumed = runs.prepareRestart(run);
+
+    expect(resumed).toBe(run);
+    expect(runs.get(run.id)).toBe(run);
+    expect(runs.statusBody(run)).toMatchObject({
+      id: run.id,
+      clientRequestId: 'brief-1-cloud',
+      status: 'queued',
+      error: null,
+      errorCode: null,
+      failureAction: null,
+    });
+    expect(run.events.at(-1)).toMatchObject({
+      event: 'run_resume_attempted',
+      data: { runId: run.id, attempt: 1, reason: 'recharge' },
+    });
+  });
+
 
 
   it('ignores subsequent finish attempts after the run reaches a terminal state', async () => {
