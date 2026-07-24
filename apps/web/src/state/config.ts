@@ -1,4 +1,9 @@
-import type { AppConfigPrefs } from '@open-design/contracts';
+import type {
+  AppConfigPrefs,
+  ByokCredentialProfile,
+  ByokCredentialProfilesResponse,
+  UpsertByokCredentialProfileRequest,
+} from '@open-design/contracts';
 import { MEDIA_PROVIDERS } from '../media/models';
 import { isOpenAICompatible } from '../providers/openai-compatible';
 import type {
@@ -678,8 +683,48 @@ export function loadConfig(): AppConfig {
       notifications: normalizeNotifications(parsed.notifications),
       orbit: normalizeOrbit(parsed.orbit),
     };
+    // Browser storage is allowed to remember which non-secret profile the
+    // user selected, but never to assert that the credential still exists.
+    // Startup hydration re-enables it only after the daemon confirms the
+    // secure-store entry.
+    if (merged.byokProfileId) {
+      merged.byokCredentialConfigured = false;
+      merged.byokCredentialTail = undefined;
+    }
 
     let migratedConfig = false;
+    // API keys written by older browser builds must not survive either in
+    // localStorage or in the hydrated in-memory config. A secure profile is
+    // deliberately not inferred from a legacy plaintext key: the user must
+    // explicitly save it through the daemon-owned credential endpoint.
+    const hadLegacyByokSecret = Boolean(
+      merged.apiKey?.trim()
+      || Object.values(merged.apiProtocolConfigs ?? {}).some(
+        (entry) => Boolean(entry?.apiKey?.trim()),
+      )
+      || Object.values(merged.byokProviderConfigDrafts ?? {}).some(
+        (draft) => Boolean(draft?.apiConfig.apiKey?.trim()),
+      ),
+    );
+    if (hadLegacyByokSecret) {
+      merged.apiKey = '';
+      merged.apiProtocolConfigs = Object.fromEntries(
+        Object.entries(merged.apiProtocolConfigs ?? {}).map(([protocol, entry]) => [
+          protocol,
+          entry ? { ...entry, apiKey: '' } : entry,
+        ]),
+      ) as AppConfig['apiProtocolConfigs'];
+      merged.byokProviderConfigDrafts = Object.fromEntries(
+        Object.entries(merged.byokProviderConfigDrafts ?? {}).map(([key, draft]) => [
+          key,
+          {
+            ...draft,
+            apiConfig: { ...draft.apiConfig, apiKey: '' },
+          },
+        ]),
+      );
+      migratedConfig = true;
+    }
     const parsedMigrationVersion =
       typeof parsed.configMigrationVersion === 'number'
         ? parsed.configMigrationVersion
@@ -780,6 +825,62 @@ export function loadConfig(): AppConfig {
 interface PublicComposioConfigResponse {
   configured?: boolean;
   apiKeyTail?: string;
+}
+
+export async function fetchByokCredentialProfilesFromDaemon(): Promise<
+  ByokCredentialProfilesResponse | null
+> {
+  try {
+    const response = await fetch('/api/byok/profiles');
+    if (!response.ok) return null;
+    return await response.json() as ByokCredentialProfilesResponse;
+  } catch {
+    return null;
+  }
+}
+
+export async function persistByokCredentialProfileToDaemon(
+  input: UpsertByokCredentialProfileRequest,
+): Promise<ByokCredentialProfile> {
+  const response = await fetch('/api/byok/profiles', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to save BYOK credential (${response.status})`);
+  }
+  const payload = await response.json() as { profile?: ByokCredentialProfile };
+  if (!payload.profile?.id || !payload.profile.configured) {
+    throw new Error('Daemon did not confirm the BYOK credential profile');
+  }
+  return payload.profile;
+}
+
+/**
+ * Reconciles a locally selected non-secret profile reference with the daemon.
+ * No automatic "first profile" selection is made: changing execution
+ * credentials must remain an explicit user choice.
+ */
+export function mergeByokCredentialProfiles(
+  config: AppConfig,
+  response: ByokCredentialProfilesResponse | null,
+): AppConfig {
+  if (!config.byokProfileId || !response) return config;
+  const profile = response.profiles.find((candidate) => candidate.id === config.byokProfileId);
+  if (!response.available || !profile?.configured) {
+    return {
+      ...config,
+      byokProfileId: undefined,
+      byokCredentialConfigured: false,
+      byokCredentialTail: undefined,
+    };
+  }
+  return {
+    ...config,
+    byokCredentialConfigured: true,
+    byokCredentialTail: profile.keyTail,
+  };
 }
 
 interface PublicMediaProviderConfigEntry {
@@ -994,7 +1095,28 @@ function sanitizeAgentCliEnv(agentCliEnv: AppConfig['agentCliEnv']): AppConfig['
 }
 
 export function saveConfig(config: AppConfig): void {
-  const sanitized: AppConfig = { ...config, agentCliEnv: sanitizeAgentCliEnv(config.agentCliEnv) };
+  const apiProtocolConfigs = config.apiProtocolConfigs
+    ? Object.fromEntries(Object.entries(config.apiProtocolConfigs).map(([protocol, entry]) => [
+        protocol,
+        entry ? { ...entry, apiKey: '' } : entry,
+      ])) as AppConfig['apiProtocolConfigs']
+    : config.apiProtocolConfigs;
+  const byokProviderConfigDrafts = config.byokProviderConfigDrafts
+    ? Object.fromEntries(Object.entries(config.byokProviderConfigDrafts).map(([key, draft]) => [
+        key,
+        {
+          ...draft,
+          apiConfig: { ...draft.apiConfig, apiKey: '' },
+        },
+      ]))
+    : config.byokProviderConfigDrafts;
+  const sanitized: AppConfig = {
+    ...config,
+    apiKey: '',
+    apiProtocolConfigs,
+    byokProviderConfigDrafts,
+    agentCliEnv: sanitizeAgentCliEnv(config.agentCliEnv),
+  };
   for (const key of DAEMON_OWNED_KEYS) {
     delete (sanitized as unknown as Record<string, unknown>)[key];
   }

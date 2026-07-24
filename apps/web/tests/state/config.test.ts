@@ -4,13 +4,16 @@ import {
   BYOK_PROVIDER_PRESETS,
   DEFAULT_CONFIG,
   defaultKnownProviderModel,
+  fetchByokCredentialProfilesFromDaemon,
   fetchMediaProvidersFromDaemon,
   isStoredMediaProviderEntryEmpty,
   isStoredMediaProviderEntryPresent,
   KNOWN_PROVIDERS,
   loadConfig,
   mergeDaemonConfig,
+  mergeByokCredentialProfiles,
   mergeDaemonMediaProviders,
+  persistByokCredentialProfileToDaemon,
   saveConfig,
   shouldSyncLocalMediaProvidersToDaemon,
   syncComposioConfigToDaemon,
@@ -1101,11 +1104,13 @@ describe('loadConfig', () => {
     const config = loadConfig();
 
     expect(config.apiProtocol).toBe('openai');
-    expect(config.apiKey).toBe('sk-proxy');
+    expect(config.apiKey).toBe('');
     expect(config.apiVersion).toBe('2024-01-01');
     expect(config.baseUrl).toBe('https://proxy.example.com/bedrock-runtime/v1');
     expect(config.model).toBe('gpt-4o');
-    expect(store.get('open-design:config')).toBe(JSON.stringify(persisted));
+    const migrated = JSON.parse(store.get('open-design:config') ?? '{}');
+    expect(migrated.apiKey).toBe('');
+    expect(store.get('open-design:config')).not.toContain('sk-proxy');
   });
 
   it('migrates legacy Anthropic API configs to an explicit apiProtocol', () => {
@@ -1186,7 +1191,7 @@ describe('loadConfig', () => {
     expect(config.apiProviderBaseUrl).toBe(DEFAULT_CONFIG.apiProviderBaseUrl);
     expect(config.apiProtocolConfigs?.bedrock).toBeUndefined();
     expect(config.apiProtocolConfigs?.openai).toEqual({
-      apiKey: 'sk-openai',
+      apiKey: '',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o',
     });
@@ -1200,7 +1205,7 @@ describe('loadConfig', () => {
     expect(persisted.baseUrl).toBe(DEFAULT_CONFIG.baseUrl);
     expect(persisted.apiProtocolConfigs?.bedrock).toBeUndefined();
     expect(persisted.apiProtocolConfigs?.openai).toEqual({
-      apiKey: 'sk-openai',
+      apiKey: '',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o',
     });
@@ -1317,7 +1322,7 @@ describe('loadConfig', () => {
     const config = loadConfig();
 
     expect(config.mode).toBe('api');
-    expect(config.apiKey).toBe('sk-test');
+    expect(config.apiKey).toBe('');
     expect(config.baseUrl).toBe('https://[broken-ipv6');
     expect(config.model).toBe('custom-model');
     expect(config.apiProtocol).toBe('anthropic');
@@ -1372,6 +1377,43 @@ describe('loadConfig', () => {
 });
 
 describe('saveConfig', () => {
+  it('keeps every BYOK API-key projection out of localStorage while preserving a secure profile reference', () => {
+    saveConfig({
+      ...DEFAULT_CONFIG,
+      mode: 'api',
+      apiKey: 'top-level-secret',
+      byokProfileId: 'byok-openrouter-1',
+      byokCredentialConfigured: true,
+      apiProtocolConfigs: {
+        openai: {
+          apiKey: 'protocol-secret',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: 'openrouter/free',
+        },
+      },
+      byokProviderConfigDrafts: {
+        openrouter: {
+          apiConfig: {
+            apiKey: 'draft-secret',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            model: 'openrouter/free',
+          },
+        },
+      },
+    });
+
+    const raw = store.get('open-design:config') ?? '';
+    const saved = JSON.parse(raw);
+    expect(raw).not.toContain('top-level-secret');
+    expect(raw).not.toContain('protocol-secret');
+    expect(raw).not.toContain('draft-secret');
+    expect(saved.apiKey).toBe('');
+    expect(saved.apiProtocolConfigs.openai.apiKey).toBe('');
+    expect(saved.byokProviderConfigDrafts.openrouter.apiConfig.apiKey).toBe('');
+    expect(saved.byokProfileId).toBe('byok-openrouter-1');
+    expect(saved.byokCredentialConfigured).toBe(true);
+  });
+
   it('keeps daemon-owned privacy fields out of localStorage', () => {
     saveConfig({
       ...DEFAULT_CONFIG,
@@ -1424,5 +1466,80 @@ describe('saveConfig', () => {
       claude: { apiKeyOverride: true },
       codex: { apiKeyOverride: true },
     });
+  });
+});
+
+describe('secure BYOK profiles', () => {
+  afterEach(() => {
+    vi.stubGlobal('fetch', originalFetch);
+  });
+
+  it('persists a key only through the daemon profile endpoint and returns non-secret metadata', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body));
+      expect(request.apiKey).toBe('draft-secret');
+      return Response.json({
+        profile: {
+          id: 'byok-openrouter-1',
+          label: request.label,
+          protocol: request.protocol,
+          baseUrl: request.baseUrl,
+          model: request.model,
+          requiresApiKey: true,
+          configured: true,
+          keyTail: 'cret',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const profile = await persistByokCredentialProfileToDaemon({
+      label: 'OpenRouter',
+      protocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: 'openrouter/free',
+      apiKey: 'draft-secret',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/byok/profiles',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(profile).not.toHaveProperty('apiKey');
+    expect(profile.id).toBe('byok-openrouter-1');
+  });
+
+  it('hydrates only an explicitly selected secure profile reference', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      available: true,
+      backend: 'macos-keychain',
+      profiles: [{
+        id: 'byok-openrouter-1',
+        label: 'OpenRouter',
+        protocol: 'openai',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model: 'openrouter/free',
+        requiresApiKey: true,
+        configured: true,
+        keyTail: '1234',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    })));
+
+    const response = await fetchByokCredentialProfilesFromDaemon();
+    const merged = mergeByokCredentialProfiles({
+      ...DEFAULT_CONFIG,
+      byokProfileId: 'byok-openrouter-1',
+    }, response);
+
+    expect(merged).toMatchObject({
+      byokProfileId: 'byok-openrouter-1',
+      byokCredentialConfigured: true,
+      byokCredentialTail: '1234',
+    });
+    expect(merged.apiKey).toBe('');
   });
 });

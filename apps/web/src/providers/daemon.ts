@@ -306,6 +306,8 @@ export interface DaemonStreamOptions {
   reasoning?: string | null;
   serviceTier?: string | null;
   byokProvider?: ByokChatProviderConfig;
+  /** Non-secret reference resolved by the daemon from the OS credential store. */
+  byokProfileId?: string;
   byokMediaDefaults?: ChatRequest['byokMediaDefaults'];
   research?: ResearchOptions;
   context?: RunContextSelection;
@@ -646,6 +648,7 @@ export async function streamViaDaemon({
   reasoning,
   serviceTier,
   byokProvider,
+  byokProfileId,
   byokMediaDefaults,
   research,
   context,
@@ -685,6 +688,7 @@ export async function streamViaDaemon({
     reasoning: reasoning ?? null,
     serviceTier: serviceTier ?? null,
     ...(byokProvider ? { byokProvider } : {}),
+    ...(byokProfileId ? { byokProfileId } : {}),
     ...(byokMediaDefaults ? { byokMediaDefaults } : {}),
     locale,
     ...(appliedPluginSnapshotId ? { appliedPluginSnapshotId } : {}),

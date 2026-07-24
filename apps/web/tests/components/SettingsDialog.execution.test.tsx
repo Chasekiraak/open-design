@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenDesignHostUpdaterStatusSnapshot } from '@open-design/host';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import type { UpsertByokCredentialProfileRequest } from '@open-design/contracts';
 import { en } from '../../src/i18n/locales/en';
 
 function optionNames(container: HTMLElement): string[] {
@@ -282,6 +283,19 @@ function renderSettingsDialog(
 ) {
   const onPersist = vi.fn();
   const onPersistComposioKey = vi.fn();
+  const onPersistByokCredential = vi.fn(async (input: UpsertByokCredentialProfileRequest) => ({
+    id: input.id ?? 'byok-test-profile',
+    label: input.label,
+    protocol: input.protocol,
+    baseUrl: input.baseUrl,
+    model: input.model,
+    apiVersion: input.apiVersion,
+    requiresApiKey: input.requiresApiKey ?? true,
+    configured: true,
+    keyTail: input.apiKey?.slice(-4),
+    createdAt: 1,
+    updatedAt: 1,
+  }));
   const onSilentUpdatePreferenceChange: (allowSilentUpdates: boolean) => Promise<void> =
     options.onSilentUpdatePreferenceChange
     ?? (async () => undefined);
@@ -300,6 +314,7 @@ function renderSettingsDialog(
       onPersist={onPersist}
       onSilentUpdatePreferenceChange={onSilentUpdatePreferenceChange}
       onPersistComposioKey={onPersistComposioKey}
+      onPersistByokCredential={onPersistByokCredential}
       onClose={onClose}
       onRefreshAgents={onRefreshAgents}
     />,
@@ -309,6 +324,7 @@ function renderSettingsDialog(
     onPersist,
     onSilentUpdatePreferenceChange,
     onPersistComposioKey,
+    onPersistByokCredential,
     onClose,
     onRefreshAgents,
     ...view,
