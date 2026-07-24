@@ -91,6 +91,19 @@ export interface RegisterDesignSystemRoutesDeps extends RouteDeps<'db' | 'paths'
     ) => Promise<{ ok: true; synced: string[] } | { ok: false; reason: 'not-found' | 'no-workspace-project' }>;
     updateUserDesignSystem: (root: string, id: string, input: UserDesignSystemInput) => Promise<DesignSystemSummary | null>;
     updateUserDesignSystemRevisionStatus: (root: string, id: string, revisionId: string, status: 'accepted' | 'rejected') => Promise<DesignSystemRevision | null>;
+    /**
+     * spec 04 §11: unshare `id` from the team hub BEFORE the local delete
+     * proceeds, but only when it is CURRENTLY on the live team share list
+     * (`designSystemsTeamShare.sharedResources()` in server.ts) — never on
+     * `isTeamSyncedUserDesignSystem` alone. That flag is true only on a
+     * teammate's PULLED copy; the sharer deleting their OWN original always
+     * reads `teamSynced: false`, which is exactly why the hub index used to
+     * survive this route untouched and teammates kept seeing the deleted
+     * design system. Returns whether an unshare actually ran (false when the
+     * system was never shared, or team sharing isn't configured) so tests can
+     * assert on the real state transition instead of a call-was-made mock.
+     */
+    unshareTeamDesignSystemIfShared: (id: string) => Promise<boolean>;
   };
   generationJobs: {
     get: (jobId: string) => DesignSystemGenerationJob | null;
@@ -132,6 +145,7 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
     renderDesignSystemPreview,
     renderDesignSystemShowcase,
     syncUserDesignSystemAssetsFromWorkspace,
+    unshareTeamDesignSystemIfShared,
     updateUserDesignSystem,
     updateUserDesignSystemRevisionStatus,
   } = ctx.designSystems;
@@ -452,6 +466,16 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
       if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req))) {
         return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
       }
+      // spec 04 §11: drop the hub-side share BEFORE the local delete, so a
+      // sharer deleting their OWN design system does not leave the hub index
+      // pointing at a canonical directory that is about to stop existing —
+      // otherwise `syncSharedTeamDesignSystem` (server.ts) keeps re-stamping
+      // `markTeamSynced()` onto every teammate's already-synced local copy
+      // forever, because the hub still reports the resource as shared. A
+      // thrown error here (e.g. the caller cannot actually manage the share)
+      // aborts before `deleteUserDesignSystem` runs, matching "unshare must
+      // succeed before the local delete proceeds".
+      await unshareTeamDesignSystemIfShared(req.params.id);
       const ok = await deleteUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id);
       if (!ok) {
         return res.status(404).json({ error: 'editable design system not found' });

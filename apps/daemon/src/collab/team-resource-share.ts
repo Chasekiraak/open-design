@@ -193,6 +193,36 @@ async function defaultRun(args: string[], workspaceId?: string): Promise<string>
   return runVelaResourceCommand(args, workspaceId);
 }
 
+/**
+ * spec 04 §11: unshare `resourceId` from `service`'s team hub, but ONLY when
+ * it is CURRENTLY on the LIVE `sharedResources()` list — never inferred from
+ * a caller-side "was this ever synced locally" flag. A resource's own
+ * sharer never carries a local "teamSynced" marker (that flag is only ever
+ * stamped onto a TEAMMATE's pulled copy — see `isTeamSyncedUserDesignSystem`
+ * in design-systems/index.ts), so gating an unshare on it would let the
+ * sharer delete their own shared resource without ever touching the hub's
+ * index, leaving a dangling entry that keeps re-syncing onto every teammate.
+ * This is the exact bug a resource-delete route must close for every
+ * resource kind that can be team-shared (design system today; the analogous
+ * project fix lives in `routes/project/index.ts`'s DELETE handler, reusing
+ * `requestTeamVisibility`/`collabSync.requestTeamUnshare` instead of this
+ * helper because projects don't go through `TeamResourceShareService`).
+ *
+ * Returns whether an unshare actually ran, so a caller — and its tests — can
+ * assert on the real state transition instead of a "was unshare called" mock.
+ * Deliberately does NOT swallow a thrown `TeamResourceShareForbiddenError`:
+ * the caller's delete must abort rather than proceed past a failed unshare.
+ */
+export async function unshareIfCurrentlyShared(
+  service: Pick<TeamResourceShareService, 'sharedResources' | 'unshare'>,
+  resourceId: string,
+): Promise<boolean> {
+  const resources = await service.sharedResources();
+  if (!resources.some((resource) => resource.id === resourceId)) return false;
+  await service.unshare(resourceId);
+  return true;
+}
+
 interface SharedResourceListPayload {
   resources?: Array<{
     id?: unknown;

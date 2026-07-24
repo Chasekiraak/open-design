@@ -3300,6 +3300,24 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         project.id,
         'delete',
       )) return;
+      // spec 04 §11: a team-visible project must be unshared from the hub
+      // BEFORE it disappears locally — mirrors the 'personal' branch of
+      // /move's `requestTeamVisibility`, the one other place this daemon
+      // already knows how to take a project out of the team space. Without
+      // this, `dbDeleteProject` only ever touches THIS caller's own
+      // `workspace_projects` row: the hub's published resource (and every
+      // OTHER member's already-bound local row) never learns the project is
+      // gone, so teammates keep seeing it. `enforceWorkspaceProjectMutation`
+      // just above already proved the caller may mutate this exact row, so
+      // no separate `canShareProjects` gate is layered on top here — the
+      // whole project is about to stop existing regardless.
+      const workspaceRow = getWorkspaceProjectByProjectId(db, project.id);
+      if (workspaceRow?.visibility === 'team') {
+        const teamCtx = workspaceProjectContextFromRequest(req);
+        if (teamCtx && teamCtx !== 'missing') {
+          await requestTeamVisibility([project.id], teamCtx, 'personal');
+        }
+      }
       // Stop any live agent run in this project before its row and directory
       // are removed, otherwise the CLI subprocess is orphaned — it keeps
       // billing and writes into a directory that no longer exists (#5468).

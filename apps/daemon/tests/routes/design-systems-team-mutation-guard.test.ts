@@ -91,6 +91,7 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
       renderDesignSystemPreview: () => '<!doctype html>',
       renderDesignSystemShowcase: () => '<!doctype html>',
       syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
+      unshareTeamDesignSystemIfShared: async () => false,
       updateUserDesignSystem,
       updateUserDesignSystemRevisionStatus: async () => null,
     },

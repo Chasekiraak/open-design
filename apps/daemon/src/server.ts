@@ -689,6 +689,7 @@ import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
   createTeamResourceShareService,
+  unshareIfCurrentlyShared,
   type TeamResourceShareRecord,
   type TeamResourceShareService,
 } from './collab/team-resource-share.js';
@@ -4584,6 +4585,16 @@ export async function startServer({
       },
       createUserDesignSystem: createWorkspaceOwnedDesignSystem,
       deleteUserDesignSystem,
+      // spec 04 §11: unshare `id` from the team hub before DELETE proceeds
+      // locally, but ONLY when it is on the LIVE team share list — never
+      // `isTeamSyncedUserDesignSystem` alone. That flag is
+      // true only for a teammate's PULLED copy; the sharer deleting their own
+      // original always reads `teamSynced: false`, so a check gated on it
+      // would keep letting the sharer's own delete sail past unnoticed, which
+      // is exactly how the hub index used to survive this route untouched
+      // and `syncSharedTeamDesignSystem` kept re-stamping `markTeamSynced()`
+      // onto every teammate forever.
+      unshareTeamDesignSystemIfShared: (id) => unshareIfCurrentlyShared(designSystemsTeamShare, id),
       ensureUserDesignSystemWorkspaceProject,
       listAllDesignSystems,
       listUserDesignSystemFiles,
