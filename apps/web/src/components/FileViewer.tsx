@@ -211,7 +211,6 @@ async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean>
 import { HandoffButton } from './HandoffButton';
 import { SocialShareGrid } from './SocialShareGrid';
 import { Toast } from './Toast';
-import { teamConsoleUrl } from './EntryNavRail';
 import {
   PreviewDrawOverlay,
   ANNOTATION_EVENT,
@@ -6363,41 +6362,6 @@ function ReactComponentViewer({
                             </button>
                           )}
                         </div>
-                        ) : null}
-                        {/* Team-only, same as HtmlViewer's copy of this card below — see
-                            the comment there (recvqae3pK5hyx). This must NOT also require
-                            `!canPublishPublic`: a signed-in personal workspace gets the
-                            public-publish card above but never a team, so gating this on
-                            BOTH being absent left it silently blank right under a working
-                            card — the dogfood report's "missing option, blank area" shot.
-                            Swap in the narrower title when the publish card already
-                            answered "is there anything to share" so the two cards don't
-                            contradict each other. */}
-                        {!workspaceContextHasTeamIdentity(workspaceContext) ? (
-                          <div className="chrome-share-card chrome-share-card--empty">
-                            <div className="chrome-share-card__header">
-                              <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
-                              <span className="share-menu-text">
-                                <span>
-                                  {canPublishPublic
-                                    ? t('fileViewer.shareTeamMissingTitle')
-                                    : t('fileViewer.shareEmptyStateTitle')}
-                                </span>
-                                <small>{t('fileViewer.shareEmptyStateDescription')}</small>
-                              </span>
-                            </div>
-                            {workspaceContext?.workspaceSettingsUrl ? (
-                              <a
-                                className="chrome-publish-primary"
-                                href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                              >
-                                <RemixIcon name="add-line" size={15} />
-                                {t('fileViewer.shareEmptyStateCreateTeam')}
-                              </a>
-                            ) : null}
-                          </div>
                         ) : null}
                       </div>
                     ) : null}
@@ -13127,51 +13091,6 @@ function HtmlViewer({
                           </button>
                         )}
                       </div>
-                      ) : null}
-                      {/* recvqae3pK5hyx: the team-share card above is gated on
-                          workspaceContextHasTeamIdentity alone — a personal/free
-                          account (or signed-out session) never gets it. This used
-                          to ALSO require `!canPublishPublic`, on the premise that
-                          the tab was only worth explaining when neither card could
-                          render. But a signed-in personal workspace DOES get the
-                          public-publish card above (canPublishPublic only needs a
-                          workspace, not a team), so that guard left this section
-                          silently blank right under a working "Publish file" card
-                          — exactly the dogfood report's screenshot: one option
-                          visible, an unexplained empty area where team sharing
-                          should be. Show the hint whenever there is no team,
-                          regardless of whether publish is available, and swap in
-                          the narrower title when the publish card already answered
-                          "is there anything to share" so the two don't contradict
-                          each other. Point at the same B console create-team flow
-                          the entry rail's workspace switcher uses; render plain
-                          text instead of a dead link when B has not given us a
-                          console URL to send them to. */}
-                      {!workspaceContextHasTeamIdentity(workspaceContext) ? (
-                        <div className="chrome-share-card chrome-share-card--empty">
-                          <div className="chrome-share-card__header">
-                            <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
-                            <span className="share-menu-text">
-                              <span>
-                                {canPublishPublic
-                                  ? t('fileViewer.shareTeamMissingTitle')
-                                  : t('fileViewer.shareEmptyStateTitle')}
-                              </span>
-                              <small>{t('fileViewer.shareEmptyStateDescription')}</small>
-                            </span>
-                          </div>
-                          {workspaceContext?.workspaceSettingsUrl ? (
-                            <a
-                              className="chrome-publish-primary"
-                              href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                            >
-                              <RemixIcon name="add-line" size={15} />
-                              {t('fileViewer.shareEmptyStateCreateTeam')}
-                            </a>
-                          ) : null}
-                        </div>
                       ) : null}
                       </div>
                     ) : null}
