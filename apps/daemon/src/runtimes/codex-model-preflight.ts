@@ -43,6 +43,7 @@ export type CodexModelPreflightResult =
         | 'custom_provider'
         | 'config_overlay'
         | 'auth_override'
+        | 'system_config'
         | 'managed_config'
         | 'version_unavailable'
         | 'no_known_requirement'
@@ -282,6 +283,33 @@ function hasAuthOrEndpointOverride(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+function envValueCaseInsensitive(
+  env: NodeJS.ProcessEnv,
+  expectedKey: string,
+): string | null {
+  const matched = Object.entries(env).find(
+    ([key, value]) =>
+      key.toUpperCase() === expectedKey
+      && typeof value === 'string'
+      && value.trim().length > 0,
+  )?.[1];
+  return matched?.trim() || null;
+}
+
+async function hasSystemConfigLayer(
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  const configPath = process.platform === 'win32'
+    ? path.join(
+        envValueCaseInsensitive(env, 'PROGRAMDATA') ?? 'C:\\ProgramData',
+        'OpenAI',
+        'Codex',
+        'config.toml',
+      )
+    : '/etc/codex/config.toml';
+  return await pathState(configPath) !== 'missing';
+}
+
 async function hasMacManagedConfigPreference(
   env: NodeJS.ProcessEnv,
 ): Promise<boolean> {
@@ -337,7 +365,13 @@ async function hasMacManagedConfigPreference(
 
 async function hasManagedConfigLayer(env: NodeJS.ProcessEnv): Promise<boolean> {
   const configDir = path.dirname(resolveCodexConfigPath(env));
-  const candidates = [path.join(configDir, 'managed_config.toml')];
+  const candidates = [
+    path.join(configDir, 'managed_config.toml'),
+    // Codex stores fetched enterprise config bundles here. We do not parse the
+    // signed payload or assume it is current; presence alone means a non-user
+    // layer may affect the effective provider or endpoint, so fail open.
+    path.join(configDir, 'cloud-config-bundle-cache.json'),
+  ];
   if (process.platform !== 'win32') {
     candidates.push('/etc/codex/managed_config.toml');
   }
@@ -416,6 +450,9 @@ export async function preflightCodexDefaultModel(
     };
   }
 
+  if (await hasSystemConfigLayer(input.env)) {
+    return { status: 'unknown', reason: 'system_config' };
+  }
   if (await hasManagedConfigLayer(input.env)) {
     return { status: 'unknown', reason: 'managed_config' };
   }
@@ -426,6 +463,12 @@ export async function preflightCodexDefaultModel(
   // before blocking the child process.
   if (!await hasConfirmedChatGptAuth(input.launchPath, input.env)) {
     return { status: 'unknown', reason: 'auth_unconfirmed' };
+  }
+  // `codex login status` loads the effective Codex config and can populate the
+  // enterprise bundle cache on a first run. Re-check after that probe so a
+  // newly materialized cloud layer cannot race the incompatibility decision.
+  if (await hasManagedConfigLayer(input.env)) {
+    return { status: 'unknown', reason: 'managed_config' };
   }
   return {
     status: 'incompatible',

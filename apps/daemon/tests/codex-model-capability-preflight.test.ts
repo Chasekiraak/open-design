@@ -23,6 +23,28 @@ type RunStatus = {
   failureDetail?: string | null;
 };
 
+const CODEX_AUTH_OR_ENDPOINT_ENV_KEYS = [
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'OPENAI_API_BASE',
+  'CODEX_API_KEY',
+] as const;
+
+const EXTERNAL_ENV_KEYS = [
+  'LANGFUSE_PUBLIC_KEY',
+  'LANGFUSE_SECRET_KEY',
+  'LANGFUSE_BASE_URL',
+  'OPEN_DESIGN_TELEMETRY_RELAY_URL',
+  'POSTHOG_KEY',
+  'POSTHOG_HOST',
+  ...CODEX_AUTH_OR_ENDPOINT_ENV_KEYS,
+] as const;
+
+type EnvSnapshot = {
+  keys: readonly string[];
+  entries: Array<[string, string]>;
+};
+
 describe('Codex configured-model capability preflight', () => {
   const originalEnv = snapshotEnv();
   let started: StartedServer | null = null;
@@ -53,7 +75,10 @@ describe('Codex configured-model capability preflight', () => {
       'utf8',
     );
 
-    disableExternalTelemetry();
+    // Exercise the host-dependent case explicitly: the suite must remove even
+    // mixed-case inherited keys before starting the server.
+    process.env.OpenAI_Api_Key = 'ambient-test-only';
+    isolateExternalProcessEnv();
     started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
     await putConfig(started.url, {
       agentId: 'codex',
@@ -90,7 +115,7 @@ describe('Codex configured-model capability preflight', () => {
       'utf8',
     );
 
-    disableExternalTelemetry();
+    isolateExternalProcessEnv();
     started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
     await putConfig(started.url, {
       agentId: 'codex',
@@ -127,7 +152,7 @@ describe('Codex configured-model capability preflight', () => {
       'utf8',
     );
 
-    disableExternalTelemetry();
+    isolateExternalProcessEnv();
     started = (await startServer({ port: 0, returnServer: true })) as StartedServer;
     await putConfig(started.url, {
       agentId: 'codex',
@@ -163,31 +188,35 @@ describe('Codex configured-model capability preflight', () => {
   });
 });
 
-function snapshotEnv(): Record<string, string | undefined> {
+function snapshotEnv(): EnvSnapshot {
   return {
-    LANGFUSE_PUBLIC_KEY: process.env.LANGFUSE_PUBLIC_KEY,
-    LANGFUSE_SECRET_KEY: process.env.LANGFUSE_SECRET_KEY,
-    LANGFUSE_BASE_URL: process.env.LANGFUSE_BASE_URL,
-    OPEN_DESIGN_TELEMETRY_RELAY_URL: process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL,
-    POSTHOG_KEY: process.env.POSTHOG_KEY,
-    POSTHOG_HOST: process.env.POSTHOG_HOST,
+    keys: EXTERNAL_ENV_KEYS,
+    entries: Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === 'string'
+        && EXTERNAL_ENV_KEYS.some(
+          (expected) => entry[0].toUpperCase() === expected,
+        ),
+    ),
   };
 }
 
-function restoreEnv(env: Record<string, string | undefined>): void {
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
+function deleteEnvKeysCaseInsensitive(keys: readonly string[]): void {
+  const normalized = new Set(keys.map((key) => key.toUpperCase()));
+  for (const key of Object.keys(process.env)) {
+    if (normalized.has(key.toUpperCase())) delete process.env[key];
   }
 }
 
-function disableExternalTelemetry(): void {
-  delete process.env.POSTHOG_KEY;
-  delete process.env.POSTHOG_HOST;
-  delete process.env.LANGFUSE_PUBLIC_KEY;
-  delete process.env.LANGFUSE_SECRET_KEY;
-  delete process.env.LANGFUSE_BASE_URL;
-  delete process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL;
+function restoreEnv(snapshot: EnvSnapshot): void {
+  deleteEnvKeysCaseInsensitive(snapshot.keys);
+  for (const [key, value] of snapshot.entries) {
+    process.env[key] = value;
+  }
+}
+
+function isolateExternalProcessEnv(): void {
+  deleteEnvKeysCaseInsensitive(EXTERNAL_ENV_KEYS);
 }
 
 async function writeFakeCodex(
@@ -274,10 +303,6 @@ function codexTestEnv(fakeCodex: string, codexHome: string): Record<string, stri
   return {
     CODEX_BIN: fakeCodex,
     CODEX_HOME: codexHome,
-    OPENAI_API_KEY: '',
-    OPENAI_BASE_URL: '',
-    OPENAI_API_BASE: '',
-    CODEX_API_KEY: '',
   };
 }
 

@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   extractCodexRootModelConfig,
@@ -17,10 +17,24 @@ import {
   preflightCodexDefaultModel,
 } from '../../src/runtimes/codex-model-preflight.js';
 
+const { statPathFixtures } = vi.hoisted(() => ({
+  statPathFixtures: new Map<string, string>(),
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    stat: (filePath: Parameters<typeof actual.stat>[0]) =>
+      actual.stat(statPathFixtures.get(String(filePath)) ?? filePath),
+  };
+});
+
 describe('Codex model capability preflight', () => {
   const tempDirs: string[] = [];
 
   afterEach(async () => {
+    statPathFixtures.clear();
     await Promise.all(
       tempDirs.splice(0).map((dir) =>
         rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
@@ -98,6 +112,34 @@ describe('Codex model capability preflight', () => {
       model: 'gpt-5.6-terra',
       cliVersion: 'codex-cli 0.142.5',
       requiredCliVersion: '0.143.0',
+    });
+  });
+
+  it('fails open when a system config layer can override the endpoint', async () => {
+    const fixture = await createFixture({
+      config: 'model = "gpt-5.6-terra"\n',
+      version: 'codex-cli 0.142.5',
+      loginStatus: 'Logged in using ChatGPT',
+    });
+    const systemConfigFixture = path.join(
+      path.dirname(fixture.codexHome),
+      'system-config.toml',
+    );
+    await writeFile(
+      systemConfigFixture,
+      'openai_base_url = "https://system.example.invalid/v1"\n',
+      'utf8',
+    );
+    statPathFixtures.set(codexSystemConfigPath(), systemConfigFixture);
+
+    await expect(preflightCodexDefaultModel({
+      launchPath: fixture.bin,
+      env: cleanCodexEnv(fixture.codexHome),
+      requestedModel: 'default',
+      projectRoot: fixture.projectRoot,
+    })).resolves.toEqual({
+      status: 'unknown',
+      reason: 'system_config',
     });
   });
 
@@ -286,6 +328,25 @@ describe('Codex model capability preflight', () => {
       status: 'unknown',
       reason: 'managed_config',
     });
+
+    const cloudManaged = await createFixture({
+      config: 'model = "gpt-5.6-terra"\n',
+      version: 'codex-cli 0.142.5',
+    });
+    await writeFile(
+      path.join(cloudManaged.codexHome, 'cloud-config-bundle-cache.json'),
+      '{"signed_payload":{"bundle":{"config":{"openai_base_url":"https://enterprise.example.invalid/v1"}}}}\n',
+      'utf8',
+    );
+    await expect(preflightCodexDefaultModel({
+      launchPath: cloudManaged.bin,
+      env: cleanCodexEnv(cloudManaged.codexHome),
+      requestedModel: 'default',
+      projectRoot: cloudManaged.projectRoot,
+    })).resolves.toEqual({
+      status: 'unknown',
+      reason: 'managed_config',
+    });
   });
 
   it('fails open for prerelease versions and models without a known requirement', async () => {
@@ -337,6 +398,17 @@ describe('Codex model capability preflight', () => {
       ...env
     } = process.env;
     return { ...env, CODEX_HOME: codexHome };
+  }
+
+  function codexSystemConfigPath(): string {
+    if (process.platform !== 'win32') return '/etc/codex/config.toml';
+    const programData = Object.entries(process.env).find(
+      ([key, value]) =>
+        key.toUpperCase() === 'PROGRAMDATA'
+        && typeof value === 'string'
+        && value.trim().length > 0,
+    )?.[1] ?? 'C:\\ProgramData';
+    return path.join(programData, 'OpenAI', 'Codex', 'config.toml');
   }
 
   async function createFixture(input: {
