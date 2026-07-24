@@ -22,6 +22,12 @@ const autofixWorkflowPath = join(workspaceRoot, ".github", "workflows", "autofix
 const reportWorkflowPath = join(workspaceRoot, ".github", "workflows", "report.atom.yml");
 const bakePluginPreviewsWorkflowPath = join(workspaceRoot, ".github", "workflows", "bake-plugin-previews.yml");
 const bakePluginPreviewsPrWorkflowPath = join(workspaceRoot, ".github", "workflows", "bake-plugin-previews-pr.yml");
+const daemonPackageSmokeWorkflowPath = join(
+  workspaceRoot,
+  ".github",
+  "workflows",
+  "daemon-package-smoke.yml",
+);
 const dockerImageWorkflowPath = join(workspaceRoot, ".github", "workflows", "docker-image.yml");
 const flakePath = join(workspaceRoot, "flake.nix");
 const backportAutomergeWorkflowPath = join(workspaceRoot, ".github", "workflows", "backport-automerge.yml");
@@ -306,8 +312,120 @@ describe("packaged smoke workflow", () => {
     expect(workflow).not.toContain("Smoke PR mac packaged runtime");
     expect(workflow).not.toContain("Smoke PR windows packaged runtime");
     expect(workflow).not.toContain("Smoke PR linux headless packaged runtime");
+    expect(workflow).not.toContain("daemon_package_smoke");
+    expect(workflow).not.toContain("Daemon package smoke");
+    expect(workflow).not.toContain("tools-pack server smoke");
     expect(workflow).not.toContain("OD_PACKAGED_E2E_");
     expect(workflow).not.toContain("actions/cache/save");
+  });
+
+  it("[P2] keeps native daemon package smoke standalone across all supported targets", async () => {
+    const workflow = await readFile(daemonPackageSmokeWorkflowPath, "utf8");
+    const trigger = sectionBetween(workflow, "on:", "\npermissions:");
+
+    expect(trigger).toContain("pull_request:");
+    expect(trigger).toContain("push:");
+    expect(trigger).toContain("branches: [main]");
+    expect(trigger).toContain("workflow_dispatch:");
+    expect(trigger).not.toContain("merge_group:");
+    expect(trigger).not.toContain("workflow_run:");
+    expect(trigger).not.toContain("workflow_call:");
+    for (const path of [
+      ".github/actions/setup-workspace/**",
+      ".github/workflows/daemon-package-smoke.yml",
+      "apps/daemon/**",
+      "apps/web/**",
+      "assets/community-pets/**",
+      "assets/frames/**",
+      "craft/**",
+      "data/plugin-previews/**",
+      "design-systems/**",
+      "design-templates/**",
+      "package.json",
+      "packages/**",
+      "plugins/**",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "prompt-templates/**",
+      "scripts/postinstall.mjs",
+      "skills/**",
+      "tools/pack/**",
+    ]) {
+      expect(trigger).toContain(`- "${path}"`);
+    }
+
+    expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).not.toContain("packages: write");
+    expect(workflow).not.toContain("id-token: write");
+    expect(workflow).not.toContain("secrets.");
+    expect(workflow).toContain(
+      "group: daemon-package-smoke-${{ github.event.pull_request.number || github.ref }}",
+    );
+    expect(workflow).toContain("cancel-in-progress: true");
+    expect(workflow).toContain("runs-on: ${{ matrix.runner }}");
+    expect(workflow).toContain("timeout-minutes: 45");
+    expect(workflow).toContain("fail-fast: false");
+
+    const matrixTargets = [...workflow.matchAll(/^\s+- target: (\S+)$/gm)].map((match) => match[1]);
+    expect(matrixTargets).toEqual([
+      "mac_arm64",
+      "mac_x64",
+      "linux_arm64",
+      "linux_x64",
+      "win_x64",
+      "win_arm64",
+    ]);
+    for (const matrixEntry of [
+      ["mac_arm64", "macos-14", "darwin", "arm64"],
+      ["mac_x64", "macos-15-intel", "darwin", "x64"],
+      ["linux_arm64", "ubuntu-22.04-arm", "linux", "arm64"],
+      ["linux_x64", "ubuntu-22.04", "linux", "x64"],
+      ["win_x64", "windows-latest", "win32", "x64"],
+      ["win_arm64", "windows-11-arm", "win32", "arm64"],
+    ] as const) {
+      const [target, runner, platform, arch] = matrixEntry;
+      expect(workflow).toContain(
+        `- target: ${target}\n            runner: ${runner}\n            platform: ${platform}\n            arch: ${arch}`,
+      );
+    }
+
+    expect(workflow).toContain("uses: ./.github/actions/setup-workspace");
+    expect(workflow).toContain('node-version: "24"');
+    expect(workflow).toContain("if: ${{ runner.os != 'Windows' }}");
+    expect(workflow).toContain("shell: bash");
+    expect(workflow).toContain("if: ${{ runner.os == 'Windows' }}");
+    expect(workflow).toContain("shell: pwsh");
+    expect(workflow).toContain(
+      "pnpm.cmd --dir tools/pack exec vitest run `",
+    );
+    expect(workflow).toContain("tests/server-bootstrap-resources.test.ts");
+    expect(workflow).toContain("tests/server-install.test.ts");
+    expect(workflow).toContain("pnpm tools-pack server build");
+    expect(workflow).toContain("pnpm tools-pack server smoke");
+    expect(workflow).toContain("pnpm.cmd tools-pack server build");
+    expect(workflow).toContain("pnpm.cmd tools-pack server smoke");
+    expect(workflow).toContain('--app-version 0.0.0-smoke');
+    expect(workflow).toContain('--release-id "smoke-${GITHUB_RUN_ID}"');
+    expect(workflow).toContain('--release-id "smoke-$env:GITHUB_RUN_ID"');
+    expect(workflow).toContain("if: ${{ always() }}");
+    expect(workflow).toContain("daemon-package-smoke-${{ github.run_id }}-${{ matrix.target }}");
+  });
+
+  it("[P2] exempts the standalone daemon package workflow from core validation scopes", async () => {
+    const plan = await runScopesPrint(
+      "workflow_dispatch",
+      { inputs: { ci_mode: "hot" } },
+      [".github/workflows/daemon-package-smoke.yml"],
+    );
+
+    expect(plan).toMatchObject({
+      workspace_validation_required: false,
+      ui_critical_validation_required: false,
+      run_playwright_critical: false,
+      run_ui_p0: false,
+    });
+    expect(plan).not.toHaveProperty("run_daemon_package_smoke");
+    expect(plan).not.toHaveProperty("daemon_package_smoke_required");
   });
 
   it("[P2] runs Windows launcher payload archive validation when tools-pack is touched", async () => {
@@ -1018,16 +1136,19 @@ process.stdin.on("end", () => {
     });
   });
 
-  it("[P2] keeps packaging (nix/docker) off the core Validate workspace gate", async () => {
+  it("[P2] keeps packaging (nix/docker/daemon package) off the core Validate workspace gate", async () => {
     const workflow = await readFile(ciWorkflowPath, "utf8");
     const validate = sectionBetween(workflow, "  validate:", "  runtime_summary:");
 
     expect(workflow).not.toContain("nix_validation:");
     expect(workflow).not.toContain("docker_pr:");
+    expect(workflow).not.toContain("daemon_package_smoke:");
     expect(validate).not.toContain("nix_validation");
     expect(validate).not.toContain("docker_pr");
+    expect(validate).not.toContain("daemon_package_smoke");
     expect(validate).not.toContain("run_nix_validation");
     expect(validate).not.toContain("run_docker_build");
+    expect(validate).not.toContain("run_daemon_package_smoke");
     expect(validate).toContain("Check workspace validation jobs");
 
     const baseOutputs = {

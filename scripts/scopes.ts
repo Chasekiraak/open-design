@@ -343,6 +343,7 @@ function isWorkspaceValidationExemptFile(file: string): boolean {
       ".github/workflows/autofix.atom.yml",
       ".github/workflows/comment.atom.yml",
       ".github/workflows/report.atom.yml",
+      ".github/workflows/daemon-package-smoke.yml",
       ".github/workflows/docker-image.yml",
       ".github/workflows/nix.yml",
     ].includes(file)

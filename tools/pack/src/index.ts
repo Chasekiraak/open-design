@@ -41,6 +41,9 @@ import {
   uninstallPackedLinuxApp,
   uninstallPackedLinuxHeadless,
 } from "./linux.js";
+import { buildServerPackage } from "./server/build.js";
+import { resolveServerPackConfig } from "./server/config.js";
+import { smokeServerPackage } from "./server/smoke.js";
 
 type CliOptions = ToolPackCliOptions;
 
@@ -258,6 +261,34 @@ addBuildOptions(addSharedOptions(cli.command("linux <action>", "Linux packaging 
         return;
       default:
         throw new Error(`unsupported linux action: ${action}`);
+    }
+  });
+
+cli
+  .command("server <action>", "Native daemon + static Web package commands: build|smoke")
+  .option("--app-version <version>", "release application version")
+  .option("--arch <arch>", "native target architecture: arm64|x64")
+  .option("--archive <path>", "override the server archive path")
+  .option("--dir <path>", "tools-pack output root directory")
+  .option("--json", "print JSON")
+  .option("--platform <platform>", "native target platform: darwin|linux|win32")
+  .option("--release-id <id>", "immutable release identifier")
+  .option("--skip-workspace-build", "reuse existing daemon and static Web build outputs")
+  .action(async (action: string, options: CliOptions) => {
+    const config = resolveServerPackConfig(options);
+    switch (action) {
+      case "build":
+        printJson(
+          await buildServerPackage(config, {
+            skipWorkspaceBuild: options.skipWorkspaceBuild === true,
+          }),
+        );
+        return;
+      case "smoke":
+        printJson(await smokeServerPackage(config));
+        return;
+      default:
+        throw new Error(`unsupported server action: ${action}`);
     }
   });
 

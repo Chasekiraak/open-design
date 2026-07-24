@@ -22,6 +22,8 @@ export type ToolPackAmrProfile = "prod" | "test" | "local";
 
 export type ToolPackCliOptions = {
   appVersion?: string;
+  arch?: string;
+  archive?: string;
   cacheDir?: string;
   containerized?: boolean;
   dir?: string;
@@ -36,6 +38,7 @@ export type ToolPackCliOptions = {
   path?: string;
   payloadPath?: string;
   portable?: boolean;
+  platform?: string;
   removeCache?: boolean;
   removeData?: boolean;
   removeLogs?: boolean;
@@ -44,10 +47,12 @@ export type ToolPackCliOptions = {
   requireVelaCli?: boolean;
   signed?: boolean;
   silent?: boolean;
+  skipWorkspaceBuild?: boolean;
   statusPollCount?: string | number;
   statusPollIntervalMs?: string | number;
   to?: string;
   updateAction?: string;
+  releaseId?: string;
 };
 
 export type ToolPackRoots = {
