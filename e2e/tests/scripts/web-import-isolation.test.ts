@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   collectWebImportIsolationViolationsFromSource,
   isWebImportIsolationSourcePath,
-} from "./guard.ts";
+} from "../../../scripts/guard.ts";
 
 test("web import isolation rejects daemon private source imports", () => {
   const violations = collectWebImportIsolationViolationsFromSource(

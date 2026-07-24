@@ -2,26 +2,26 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   DESIGN_SYSTEM_PROJECT_SCHEMA_VERSION,
   type DesignSystemProjectManifest,
   validateDesignSystemProjectManifest,
-} from "../design-systems/_schema/manifest.schema.ts";
-import { TOKEN_SCHEMA } from "../design-systems/_schema/tokens.schema.ts";
+} from "../../../design-systems/_schema/manifest.schema.ts";
+import { TOKEN_SCHEMA } from "../../../design-systems/_schema/tokens.schema.ts";
 import {
   renderDesignTokensJson,
   renderTailwindV4Css,
   type DerivedDesignTokenBinding,
-} from "../packages/contracts/src/design-systems/derived-token-outputs.ts";
-import { extractComponentsManifest } from "../packages/contracts/src/design-systems/components-manifest.ts";
+} from "../../../packages/contracts/src/design-systems/derived-token-outputs.ts";
+import { extractComponentsManifest } from "../../../packages/contracts/src/design-systems/components-manifest.ts";
 import {
   validateComponentsManifestCache,
   validateDesignTokensJson,
   validateManifestSemantics,
   validateTailwindV4Css,
-} from "./check-design-system-manifests.ts";
+} from "../../../scripts/check-design-system-manifests.ts";
 
 const REPORT_PATH = "source/token-contract.report.json";
 

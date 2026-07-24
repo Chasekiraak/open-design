@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   type AppDirectoryRegistry,
   collectCrossAppImportViolationsFromSource,
   isCrossAppImportSourceFile,
   loadAppDirectoryRegistry,
-} from "./check-cross-app-imports.ts";
+} from "../../../scripts/check-cross-app-imports.ts";
 
 const registry: AppDirectoryRegistry = {
   packageNameByDirectory: new Map([

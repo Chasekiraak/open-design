@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { test } from "vitest";
 
 import {
   collectCraftReferences,
   extractCraftRequiresSlugs,
   findCraftReferenceViolations,
-} from "./lint-craft-references.ts";
+} from "../../../scripts/lint-craft-references.ts";
 
 test("craft reference parser reads only od.craft.requires and preserves malformed entries", () => {
   const inlineSource = `---
@@ -63,14 +65,27 @@ test("craft reference violations allow present and planned slugs while reporting
 });
 
 test("bad bundled scenario manifest craft references are reported", async () => {
-  const fixtureRoot = fileURLToPath(new URL("./fixtures/lint-craft-references", import.meta.url));
-  const references = await collectCraftReferences(fixtureRoot);
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "lint-craft-references-"));
+  const manifestPath = path.join(
+    fixtureRoot,
+    "plugins/_official/scenarios/bad-scenario/open-design.json",
+  );
+  await mkdir(path.dirname(manifestPath), { recursive: true });
+  await writeFile(
+    manifestPath,
+    JSON.stringify({ od: { context: { craft: ["typograpy"] } } }),
+  );
 
-  assert.deepEqual(findCraftReferenceViolations(references, new Set(), new Set()), [
-    {
-      kind: "unresolved",
-      manifestPath: "plugins/_official/scenarios/bad-scenario/open-design.json",
-      slug: "typograpy",
-    },
-  ]);
+  try {
+    const references = await collectCraftReferences(fixtureRoot);
+    assert.deepEqual(findCraftReferenceViolations(references, new Set(), new Set()), [
+      {
+        kind: "unresolved",
+        manifestPath: "plugins/_official/scenarios/bad-scenario/open-design.json",
+        slug: "typograpy",
+      },
+    ]);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
 });

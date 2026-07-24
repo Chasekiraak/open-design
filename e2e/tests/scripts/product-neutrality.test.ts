@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   collectProductNeutralityViolationsFromSource,
   isProductNeutralityCheckedPath,
-} from "./guard.ts";
+} from "../../../scripts/guard.ts";
 
 test("product-neutrality check rejects named orchestrator examples on public surfaces", () => {
   const violations = collectProductNeutralityViolationsFromSource(

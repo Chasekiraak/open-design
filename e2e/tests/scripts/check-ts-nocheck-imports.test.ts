@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   collectRelativeSpecifiers,
   collectTsNocheckImportViolationsFromSource,
   hasLeadingTsNocheck,
   resolvesRelativeSpecifier,
-} from "./check-ts-nocheck-imports.ts";
+} from "../../../scripts/check-ts-nocheck-imports.ts";
 
 test("hasLeadingTsNocheck detects a leading pragma, including after an author comment", () => {
   assert.equal(hasLeadingTsNocheck("// @ts-nocheck\nimport x from './x.js';"), true);

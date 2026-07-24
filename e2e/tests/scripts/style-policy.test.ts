@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
-import { collectCssHardcodedColorMatches, collectCssNamedColorMatches } from "./style-policy.ts";
+import { collectCssHardcodedColorMatches, collectCssNamedColorMatches } from "../../../scripts/style-policy.ts";
 
 test("collectCssNamedColorMatches finds named colors inside CSS shorthands and functions", () => {
   const source = [

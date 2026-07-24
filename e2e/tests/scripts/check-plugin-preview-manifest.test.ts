@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
-import { validatePreviewManifest } from "./check-plugin-preview-manifest.ts";
+import { validatePreviewManifest } from "../../../scripts/check-plugin-preview-manifest.ts";
 
 const HASH_A = "a2e7f0664e7ceed4";
 const HASH_B = "0123456789abcdef";
