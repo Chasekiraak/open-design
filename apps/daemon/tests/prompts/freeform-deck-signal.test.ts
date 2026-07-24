@@ -8,6 +8,7 @@ const DECK_FRAMEWORK_HEADING = '# Slide deck — fixed framework';
 describe('detectDeckIntentSignal', () => {
   it('fires on English deck vocabulary', () => {
     expect(detectDeckIntentSignal('build me a pitch deck for investors')).toBe(true);
+    expect(detectDeckIntentSignal('Write a Seed Pitch like a Top Pre-Seed Founder')).toBe(true);
     expect(detectDeckIntentSignal('a 10-slide keynote')).toBe(true);
     expect(detectDeckIntentSignal('export the PPT')).toBe(true);
     expect(detectDeckIntentSignal('make a slideshow of the trip')).toBe(true);

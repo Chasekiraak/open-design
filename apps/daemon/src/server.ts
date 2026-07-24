@@ -428,7 +428,7 @@ import {
 } from './design/index.js';
 import { buildDocumentPreview } from './document-preview.js';
 import { lintArtifact, renderFindingsForAgent } from './lint-artifact.js';
-import { loadCraftSections } from './craft.js';
+import { loadCraftSections, resolveCraftRequirements } from './craft.js';
 import { skillCwdAliasSegment, stageActiveSkill } from './cwd-aliases.js';
 import { buildDesktopArtifactExportInput, buildDesktopPdfExportInput } from './pdf-export.js';
 import { generateMedia } from './media/index.js';
@@ -5444,13 +5444,15 @@ export async function startServer({
       }
     }
 
-    const excludedCraft = new Set(designSystemCraftExemptions);
-    // Web-clone fidelity exemption — see `isWebCloneRun` above.
-    const requestedCraft = isWebCloneRun
-      ? []
-      : Array.from(
-          new Set([...skillCraftRequires, ...designSystemCraftApplies]),
-        ).filter((slug) => !excludedCraft.has(slug));
+    const requestedCraft = resolveCraftRequirements({
+      isWebCloneRun,
+      metadataKind: metadata?.kind,
+      skillModes,
+      freeformDeckSignal,
+      skillRequires: skillCraftRequires,
+      designSystemApplies: designSystemCraftApplies,
+      designSystemExemptions: designSystemCraftExemptions,
+    });
     if (requestedCraft.length > 0) {
       const loaded = await loadCraftSections(CRAFT_DIR, requestedCraft);
       if (loaded.body) {
