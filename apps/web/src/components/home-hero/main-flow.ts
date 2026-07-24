@@ -34,7 +34,7 @@ const ROLE_FIRST_TEMPLATE_IDS: Record<Exclude<HomeOnboardingRole, null>, readonl
 const HOME_HERO_CAPABILITIES: readonly HomeHeroCapability[] = [
   {
     id: 'design-system',
-    label: 'your design system',
+    label: 'design system',
     subtitle: 'Keep every screen aligned with your visual language.',
   },
   {

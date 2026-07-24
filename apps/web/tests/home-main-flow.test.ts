@@ -95,7 +95,7 @@ describe('Home Hero capability carousel', () => {
     expect(heroCapabilitiesForHome(null)).toEqual([
       {
         id: 'design-system',
-        label: 'your design system',
+        label: 'design system',
         subtitle: 'Keep every screen aligned with your visual language.',
       },
       {

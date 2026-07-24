@@ -129,7 +129,7 @@
   justify-content: center;
   /* Reserve room for the longest phrase, so the immutable “Start with”
      prefix and the overall title never shift as the capability rotates. */
-  width: 15.5ch;
+  width: 11.5ch;
 }
 .home-hero__capability-value {
   display: inline-flex;
