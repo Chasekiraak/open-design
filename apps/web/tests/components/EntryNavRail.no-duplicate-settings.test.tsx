@@ -46,9 +46,9 @@ describe('EntryNavRail settings entry', () => {
       </I18nProvider>,
     );
 
-    expect(screen.getAllByTestId('entry-nav-settings')).toHaveLength(1);
+    expect(screen.getAllByTestId('entry-settings-button')).toHaveLength(1);
     expect(screen.getByTestId('fake-updater-popup')).toBeTruthy();
-    screen.getByTestId('entry-nav-settings').click();
+    screen.getByTestId('entry-settings-button').click();
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -67,6 +67,6 @@ describe('EntryNavRail settings entry', () => {
       </I18nProvider>,
     );
 
-    expect(screen.queryByTestId('entry-nav-settings')).toBeNull();
+    expect(screen.queryByTestId('entry-settings-button')).toBeNull();
   });
 });

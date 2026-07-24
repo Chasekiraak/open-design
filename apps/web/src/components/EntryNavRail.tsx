@@ -24,6 +24,7 @@
 // personal_byok workspace still has full team features.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Button } from '@open-design/components';
 import { coalescedGet } from '../lib/coalesced-get';
 import type {
   WorkspaceActiveResponse,
@@ -49,6 +50,7 @@ import {
 } from '../collab/useWorkspaceContext';
 import { resolvePlanLabelTier } from '../collab/team-plan';
 import type { EntryHomeView } from '../router';
+import styles from './EntryNavRail.module.css';
 
 const REPO_URL = 'https://github.com/nexu-io/open-design';
 const GITHUB_HELP_URL = `${REPO_URL}/issues/new`;
@@ -904,27 +906,30 @@ export function EntryNavRail({
             >
               <Icon name="puzzle" size={16} />
             </NavButton>
-            {/* Signed-in workspace users keep Settings in the account menu.
-                Signed-out/local users have no account menu, so retain one
-                direct rail entry for local CLI and BYOK configuration. */}
-            <NavButton
-              active={false}
-              ariaLabel={t('entry.openSettingsAria')}
-              tooltip={t('entry.openSettingsTitle')}
-              onClick={() => onOpenSettings?.()}
-              testId="entry-nav-settings"
-            >
-              <Icon name="settings" size={16} />
-            </NavButton>
           </>
         )}
       </div>
       {/* Skip the footer entirely when it has nothing to show — an empty
           shell here read as a dead white strip under the account row. */}
-      {footerNotice || footerExtra ? (
+      {footerNotice || footerExtra || (!context && onOpenSettings) ? (
         <div className="entry-nav-rail__footer">
           {footerNotice}
           {footerExtra ? <div className="entry-rail-actions">{footerExtra}</div> : null}
+          {!context && onOpenSettings ? (
+            <div className={styles.settingsSlot}>
+              <Button
+                variant="ghost"
+                className={styles.settingsButton}
+                onClick={onOpenSettings}
+                aria-label={t('entry.openSettingsAria')}
+                title={t('entry.openSettingsTitle')}
+                data-testid="entry-settings-button"
+              >
+                <Icon name="settings" size={16} />
+                <span>{t('entry.accountSettings')}</span>
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       </div>
