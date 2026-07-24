@@ -467,7 +467,8 @@ test('attachAcpSession mirrors artifact-write tool calls into countable tool_use
     toolCallId: 'write-1',
     status: 'completed',
   });
-  // A read-only tool call must NOT surface as an artifact.
+  // A read-only tool call must still produce tool_use/tool_result, but must
+  // NOT surface as an artifact.
   writeAcpUpdate(child, {
     sessionUpdate: 'tool_call',
     toolCallId: 'grep-1',
@@ -482,17 +483,32 @@ test('attachAcpSession mirrors artifact-write tool calls into countable tool_use
     .filter((e) => e.event === 'agent')
     .map((e) => ({ event: 'agent', data: e.payload }));
 
-  const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
-  assert.ok(toolUse, 'expected a tool_use event for the ACP write tool call');
-  assert.equal((toolUse.data as { name?: string }).name, 'Write');
+  const toolUses = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_use');
+  const writeUse = toolUses.find((e) => (e.data as { id?: string }).id === 'write-1');
+  assert.ok(writeUse, 'expected a tool_use event for the ACP write tool call');
+  assert.equal((writeUse.data as { name?: string }).name, 'Write');
   assert.equal(
-    (toolUse.data as { input?: { file_path?: string } }).input?.file_path,
+    (writeUse.data as { input?: { file_path?: string } }).input?.file_path,
     'index.html',
   );
 
-  const toolResult = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_result');
-  assert.ok(toolResult, 'expected a paired tool_result event');
-  assert.equal((toolResult.data as { isError?: boolean }).isError, false);
+  const grepUse = toolUses.find((e) => (e.data as { id?: string }).id === 'grep-1');
+  assert.ok(grepUse, 'expected a tool_use event for the read-only grep call');
+  assert.notEqual((grepUse.data as { name?: string }).name, 'Write');
+  const grepResult = runEvents.find(
+    (e) =>
+      (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.data as { toolUseId?: string }).toolUseId === 'grep-1',
+  );
+  assert.ok(grepResult, 'expected a paired tool_result for grep');
+
+  const writeResult = runEvents.find(
+    (e) =>
+      (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.data as { toolUseId?: string }).toolUseId === 'write-1',
+  );
+  assert.ok(writeResult, 'expected a paired tool_result event');
+  assert.equal((writeResult.data as { isError?: boolean }).isError, false);
 
   // Before the fix this returned 0 for every ACP run; the read-only grep call
   // must not inflate the count.
@@ -527,15 +543,17 @@ test('a truly PATHLESS ACP write is NOT coerced into an artifact (no false posit
     .map((e) => ({ event: 'agent', data: e.payload }));
 
   const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
+  assert.ok(toolUse, 'pathless edit may still emit tool_use');
   const filePath = (toolUse?.data as { input?: { file_path?: string } } | undefined)?.input?.file_path ?? '';
   assert.doesNotMatch(filePath, /\.html$/, 'must not fabricate a synthetic .html extension');
+  assert.notEqual(filePath, 'edit-1', 'must not use toolCallId as file_path');
   assert.equal(countNewArtifacts(runEvents), 0);
 });
 
 test('an ACP artifact path arriving only on the completing frame is still counted', () => {
-  // ACP frequently sends `locations` only on the terminal update. Emission is
-  // deferred to the terminal frame so that late path is used for classification
-  // (emitting on the first/pending frame would have missed it).
+  // ACP frequently sends `locations` only on the terminal update. Accumulate
+  // partial frames and emit exactly one tool_use + tool_result at terminal
+  // with the late path so classification sees landing.html.
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
 
@@ -562,9 +580,303 @@ test('an ACP artifact path arriving only on the completing frame is still counte
   const runEvents = events
     .filter((e) => e.event === 'agent')
     .map((e) => ({ event: 'agent', data: e.payload }));
-  const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
-  assert.equal((toolUse?.data as { input?: { file_path?: string } } | undefined)?.input?.file_path, 'landing.html');
+  const toolUses = runEvents.filter(
+    (e) =>
+      (e.data as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.data as { id?: string }).id === 'w-2',
+  );
+  const toolResults = runEvents.filter(
+    (e) =>
+      (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.data as { toolUseId?: string }).toolUseId === 'w-2',
+  );
+  assert.equal(toolUses.length, 1, 'exactly one tool_use even when path arrives late');
+  assert.equal(toolResults.length, 1, 'exactly one tool_result');
+  assert.equal(
+    (toolUses[0]?.data as { input?: { file_path?: string } } | undefined)?.input?.file_path,
+    'landing.html',
+  );
   assert.equal(countNewArtifacts(runEvents), 1);
+});
+
+test('kind:read + title containing update stays Read, not Write', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read file',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'read-upd',
+    kind: 'read',
+    title: 'update cache from disk',
+    status: 'completed',
+    locations: [{ path: 'cache.json' }],
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
+  assert.ok(toolUse);
+  assert.equal((toolUse.data as { name?: string }).name, 'Read');
+  assert.equal(countNewArtifacts(runEvents), 0);
+});
+
+test('sticky thinkOnly: pending Thinking then status-only completed emits no tool events', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'think',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'think-1',
+    title: 'Thinking',
+    status: 'pending',
+  });
+  // Terminal frame is status-only (no title) — must not clear sticky thinkOnly.
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'think-1',
+    status: 'completed',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUses = events.filter(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  const toolResults = events.filter(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_result',
+  );
+  assert.equal(toolUses.length, 0, 'think-only must not emit tool_use');
+  assert.equal(toolResults.length, 0, 'think-only must not emit tool_result');
+});
+
+test('exactly-once emission: repeated terminal frames for same toolCallId emit one pair', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'write once',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'once-1',
+    kind: 'write',
+    status: 'pending',
+    locations: [{ path: 'page.html' }],
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'once-1',
+    status: 'completed',
+  });
+  // Duplicate terminal (agent retry / replay) must not double-emit.
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'once-1',
+    status: 'completed',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUses = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'once-1',
+  );
+  const toolResults = events.filter(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.payload as { toolUseId?: string }).toolUseId === 'once-1',
+  );
+  assert.equal(toolUses.length, 1);
+  assert.equal(toolResults.length, 1);
+});
+
+test('sticky kind name: kind:read pending then title-only completed stays Read', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read file',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'read-sticky',
+    kind: 'read',
+    status: 'pending',
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'read-sticky',
+    title: 'Update cache',
+    status: 'completed',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const toolUse = events.find(
+    (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_use',
+  );
+  assert.ok(toolUse);
+  assert.equal((toolUse.payload as { name?: string }).name, 'Read');
+});
+
+test('tool_use carries startedAt from firstSeenAt for duration analytics', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+  const before = Date.now();
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'bash',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'dur-1',
+    kind: 'execute',
+    status: 'pending',
+    rawInput: { command: 'echo hi' },
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'dur-1',
+    status: 'completed',
+    rawOutput: 'hi\n',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+  const after = Date.now();
+
+  const toolUse = events.find(
+    (e) =>
+      e.event === 'agent' &&
+      (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.payload as { id?: string }).id === 'dur-1',
+  );
+  assert.ok(toolUse);
+  const startedAt = (toolUse.payload as { startedAt?: number }).startedAt;
+  assert.equal(typeof startedAt, 'number');
+  assert.ok(Number.isFinite(startedAt));
+  assert.ok(startedAt! >= before && startedAt! <= after);
+});
+
+test('rawInput.filePath (camelCase) is recognized as file_path', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'write page',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'fp-1',
+    kind: 'write',
+    status: 'completed',
+    rawInput: { filePath: 'pages/home.html' },
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
+  assert.ok(toolUse);
+  assert.equal(
+    (toolUse.data as { input?: { file_path?: string } }).input?.file_path,
+    'pages/home.html',
+  );
+  assert.equal(countNewArtifacts(runEvents), 1);
+});
+
+test('terminal status-only frame keeps earlier rawOutput content', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'run cmd',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'out-1',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'echo hi' },
+    rawOutput: 'hi\n',
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'out-1',
+    status: 'completed',
+    // status-only — no rawOutput on terminal frame
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolResult = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_result');
+  assert.ok(toolResult);
+  assert.equal((toolResult.data as { content?: string }).content, 'hi\n');
 });
 
 test('an ACP write whose title names a NON-artifact file is not counted', () => {
@@ -597,6 +909,176 @@ test('an ACP write whose title names a NON-artifact file is not counted', () => 
     .filter((e) => e.event === 'agent')
     .map((e) => ({ event: 'agent', data: e.payload }));
   assert.equal(countNewArtifacts(runEvents), 0);
+});
+
+test('attachAcpSession mirrors bash-like ACP tools with command input and rawOutput result', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'list files',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'bash-1',
+    kind: 'execute',
+    title: 'ls',
+    status: 'pending',
+    rawInput: { command: 'ls -la' },
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'bash-1',
+    status: 'completed',
+    rawOutput: 'total 0\n.',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolUse = runEvents.find(
+    (e) =>
+      (e.data as { type?: string; id?: string }).type === 'tool_use' &&
+      (e.data as { id?: string }).id === 'bash-1',
+  );
+  assert.ok(toolUse, 'expected bash tool_use');
+  assert.equal((toolUse.data as { name?: string }).name, 'Bash');
+  assert.equal(
+    (toolUse.data as { input?: { command?: string } }).input?.command,
+    'ls -la',
+  );
+  const toolResult = runEvents.find(
+    (e) =>
+      (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
+      (e.data as { toolUseId?: string }).toolUseId === 'bash-1',
+  );
+  assert.ok(toolResult);
+  assert.equal((toolResult.data as { content?: string }).content, 'total 0\n.');
+  assert.equal(countNewArtifacts(runEvents), 0);
+});
+
+test('ACP title Image.open must not become file_path', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'open image',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'img-1',
+    title: 'Image.open',
+    status: 'completed',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolUse = runEvents.find((e) => (e.data as { type?: string }).type === 'tool_use');
+  assert.ok(toolUse);
+  const filePath = (toolUse.data as { input?: { file_path?: string } }).input?.file_path;
+  assert.notEqual(filePath, 'Image.open');
+  assert.equal(countNewArtifacts(runEvents), 0);
+});
+
+test('ACP tool_result content is forwarded from rawOutput and truncated when huge', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'read big file',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  const huge = 'x'.repeat(9000);
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'read-1',
+    kind: 'read',
+    status: 'completed',
+    rawOutput: huge,
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolResult = runEvents.find(
+    (e) => (e.data as { type?: string }).type === 'tool_result',
+  );
+  assert.ok(toolResult);
+  const content = (toolResult.data as { content?: string }).content ?? '';
+  assert.ok(content.endsWith('\n…[truncated]'), 'expected truncation suffix');
+  assert.ok(content.length < huge.length);
+  assert.ok(content.startsWith('xxxx'));
+});
+
+test('attachAcpSession emits tool_use pairs for write + bash in one turn', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'write and list',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'w-multi',
+    title: 'Write index.html',
+    status: 'completed',
+    locations: [{ path: 'index.html' }],
+  });
+  writeAcpUpdate(child, {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'b-multi',
+    kind: 'bash',
+    status: 'completed',
+    rawInput: { command: 'ls' },
+    rawOutput: 'index.html\n',
+  });
+  writeAcpResult(child, 3, { usage: { inputTokens: 1, outputTokens: 2 } });
+
+  const runEvents = events
+    .filter((e) => e.event === 'agent')
+    .map((e) => ({ event: 'agent', data: e.payload }));
+  const toolUses = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_use');
+  const toolResults = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_result');
+  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === 'w-multi'));
+  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === 'b-multi'));
+  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === 'w-multi'));
+  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === 'b-multi'));
+  assert.equal(countNewArtifacts(runEvents), 1);
 });
 
 test('attachAcpSession suppresses incremental artifact echo after earlier assistant text', () => {

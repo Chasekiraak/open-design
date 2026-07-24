@@ -36,12 +36,17 @@ import {
 } from './rpc.js';
 import {
   acpRawEventShape,
-  isAcpCompletedStatus,
   isAcpTerminalFailureStatus,
   acpToolCallId,
   isAcpArtifactWriteLabel,
   isAcpArtifactWriteUpdate,
-  acpArtifactWritePath,
+  isAcpTerminalToolStatus,
+  isAcpThinkOnlyTool,
+  isAcpRecognizedKind,
+  acpArtifactWritePathRanked,
+  acpToolName,
+  acpToolInput,
+  acpToolResultContent,
   promotedAmrRetryStatusPayload,
   promotedAmrStderrPayload,
 } from './updates.js';
@@ -97,7 +102,8 @@ export interface AttachAcpSessionOptions {
  * 5. Streams `session/update` events to the `send` callback, translating:
  *    - `agent_thought_chunk` → `thinking_start` / `thinking_delta`
  *    - `agent_message_chunk` → `text_delta` (with DSML and tool-call text suppression)
- *    - `tool_call` / `tool_call_update` → deferred `tool_use` / `tool_result` pairs
+ *    - `tool_call` / `tool_call_update` → full `tool_use` / `tool_result` transcript
+ *      (all tools; write tools keep Claude-shaped names + `file_path` for artifact count)
  *    - status updates → `agent.status` events
  * 6. Handles `session/request_permission` calls by auto-approving.
  * 7. On prompt completion, flushes suppression buffers, emits usage, and closes stdin.
@@ -180,12 +186,66 @@ export function attachAcpSession({
     closedBlocks: 0,
   };
   const acpArtifactWriteToolCallIds = new Set<string>();
-  // Per artifact-write tool call, accumulate the best concrete file path seen
-  // across its frames and whether we have already mirrored it into canonical
-  // tool_use/tool_result events. Emission is deferred to the terminal frame so
-  // a `locations`/`rawInput` path that ACP only sends on a later update is used
-  // for classification, instead of locking in a first-frame guess.
-  const acpArtifactRunEventState = new Map<string, { path: string | null; emitted: boolean }>();
+  // Per toolCallId: accumulate name/input/path/result across partial ACP frames
+  // and emit exactly one tool_use + one tool_result at terminal status (or on
+  // prompt flush for still-open tools). Think-only tools are tracked but never
+  // transcribed and never flip emittedConcreteToolEvent. Entries stay after
+  // emit so a repeated terminal frame cannot re-create + re-emit.
+  type AcpToolNameSource = 'kind' | 'other';
+  type AcpToolRunState = {
+    name: string;
+    nameSource: AcpToolNameSource;
+    input: Record<string, unknown>;
+    path: string | null;
+    pathRank: number;
+    resultContent: string;
+    /** Sticky: once true, never cleared by later status-only frames. */
+    thinkOnly: boolean;
+    firstSeenAt: number;
+    emitted: boolean;
+  };
+  const acpToolRunEventState = new Map<string, AcpToolRunState>();
+
+  const buildToolUseInput = (st: AcpToolRunState): Record<string, unknown> => {
+    const input = { ...st.input };
+    if (st.path) input.file_path = st.path;
+    else delete input.file_path;
+    return input;
+  };
+
+  const emitTerminalToolPair = (toolCallId: string, st: AcpToolRunState, isError: boolean) => {
+    if (st.emitted) return;
+    st.emitted = true;
+    // Think/reason frames are activity noise for AMR no-output detection and
+    // must not appear as concrete tool_use/tool_result events.
+    if (st.thinkOnly) return;
+    send('agent', {
+      type: 'tool_use',
+      id: toolCallId,
+      name: st.name,
+      input: buildToolUseInput(st),
+      // Wall-clock start of the first ACP frame for this toolCallId so analytics
+      // can compute real duration even though tool_use is emitted at terminal.
+      startedAt: st.firstSeenAt,
+    });
+    send('agent', {
+      type: 'tool_result',
+      toolUseId: toolCallId,
+      content: st.resultContent,
+      isError,
+    });
+    // Concrete only on terminal tool_result for a real (non-think) tool.
+    emittedConcreteToolEvent = true;
+  };
+
+  const flushOpenAcpTools = () => {
+    for (const [toolCallId, st] of acpToolRunEventState) {
+      if (st.emitted) continue;
+      // Incomplete tools: best-effort flush so traces stay complete.
+      emitTerminalToolPair(toolCallId, st, false);
+    }
+    acpToolRunEventState.clear();
+  };
 
   const stageWatchdogDisabled = stageTimeoutMs <= 0;
   const resetStageTimer = (label: string) => {
@@ -408,8 +468,24 @@ export function attachAcpSession({
     nextId += 1;
   };
 
+  // Best-effort: emit provider usage before terminal fail/success so failed
+  // ACP runs still contribute token fields to PostHog/Langfuse when the agent
+  // returned a usage object on the prompt result.
+  const emitUsageIfPresent = (usageSource?: unknown) => {
+    const usage = formatUsage(usageSource);
+    if (!usage) return;
+    send('agent', {
+      type: 'usage',
+      usage,
+      durationMs: Date.now() - runStartedAt,
+    });
+  };
+
   const finishCleanPrompt = (usageSource?: unknown) => {
     if (finished) return;
+    // Flush any tools still open when the prompt completes so traces stay
+    // complete (one tool_use + tool_result per id).
+    flushOpenAcpTools();
     const flushedToolText = toolCallTextSuppressor.flush();
     noteToolCallTextSuppression('tool_call_xml_flush');
     const flushedText = flushedToolText ? (dsmlArtifactSuppressor?.strip(flushedToolText) ?? flushedToolText) : '';
@@ -419,14 +495,7 @@ export function attachAcpSession({
     noteArtifactTextSuppression('artifact_flush');
     emitToolCallTextSuppressionSummary();
     emitArtifactTextSuppressionSummary();
-    const usage = formatUsage(usageSource);
-    if (usage) {
-      send('agent', {
-        type: 'usage',
-        usage,
-        durationMs: Date.now() - runStartedAt,
-      });
-    }
+    emitUsageIfPresent(usageSource);
     finished = true;
     clearStageTimer();
     stdin.end();
@@ -633,51 +702,62 @@ export function attachAcpSession({
         if (toolCallId && isAcpArtifactWriteLabel(update)) {
           acpArtifactWriteToolCallIds.add(toolCallId);
         }
-        // Mirror artifact-write tool calls into the daemon's canonical
-        // tool_use/tool_result event shape so `countNewArtifacts`
-        // (run-artifacts.ts) can see ACP file writes. Without this, every ACP
-        // agent (AMR, Hermes, Kilo, Kiro, Devin, Vibe, …) reported
-        // run_finished.artifact_count: 0 even when the run wrote artifacts,
-        // because the ACP adapter emitted only text/status/thinking events and
-        // never the tool_use/tool_result pair the counter scans for.
-        //
-        // This path only feeds the NO-PROJECT fallback (project runs use the
-        // filesystem snapshot). Two correctness rules, both learned the hard
-        // way in review:
-        //   1. Defer emission to the TERMINAL frame and accumulate the best
-        //      concrete path across frames — ACP often sends `locations` only
-        //      on the completing update, and emitting on the first frame would
-        //      lock in a wrong/empty guess that a later path can't correct.
-        //   2. Never fabricate an artifact extension. `isArtifactPath` is what
-        //      decides whether a write counts; feeding it a real path lets it
-        //      correctly EXCLUDE non-artifact edits (`config.json`, `README.md`)
-        //      and INCLUDE real artifacts. A write that never carries a concrete
-        //      path stays keyed on its (extension-less) toolCallId, so it is
-        //      simply not counted rather than inflating the metric with a
-        //      synthetic `.html` — under-counting a truly opaque write is
-        //      acceptable; a false-positive artifact is not.
+        // Full ACP tool transcript → canonical tool_use/tool_result events for
+        // Langfuse/PostHog and `countNewArtifacts` (run-artifacts.ts). Every
+        // non-think tool is mirrored once at terminal status (accumulate
+        // partial frames first). Write tools keep Claude-shaped Write/Edit
+        // names and a real `file_path` when present. Never use toolCallId as
+        // file_path.
         if (toolCallId) {
-          const isWriteCall =
-            isAcpArtifactWriteLabel(update) || acpArtifactWriteToolCallIds.has(toolCallId);
-          if (isWriteCall) {
-            let st = acpArtifactRunEventState.get(toolCallId);
-            if (!st) {
-              st = { path: null, emitted: false };
-              acpArtifactRunEventState.set(toolCallId, st);
+          const nextName = acpToolName(update);
+          const nextInput = acpToolInput(update);
+          const nextPath = acpArtifactWritePathRanked(update);
+          const nextResult = acpToolResultContent(update);
+          const nextThinkOnly = isAcpThinkOnlyTool(update);
+          const kindRaw = typeof update.kind === 'string' ? update.kind.trim() : '';
+          const nameFromKind = Boolean(kindRaw && isAcpRecognizedKind(kindRaw));
+          let st = acpToolRunEventState.get(toolCallId);
+          if (!st) {
+            st = {
+              name: nextName,
+              nameSource: nameFromKind ? 'kind' : 'other',
+              input: nextInput,
+              path: nextPath?.path ?? null,
+              pathRank: nextPath?.rank ?? 0,
+              resultContent: nextResult,
+              thinkOnly: nextThinkOnly,
+              firstSeenAt: Date.now(),
+              emitted: false,
+            };
+            acpToolRunEventState.set(toolCallId, st);
+          } else if (!st.emitted) {
+            // Kind-locked names must not be overwritten by later title-only frames
+            // (e.g. kind:read then title "Update cache" must stay Read).
+            if (nameFromKind) {
+              st.name = nextName;
+              st.nameSource = 'kind';
+            } else if (st.nameSource !== 'kind') {
+              // Prefer a more specific name over the generic fallback.
+              if (nextName !== 'Tool' || st.name === 'Tool') st.name = nextName;
             }
-            if (!st.path) st.path = acpArtifactWritePath(update);
+            // Shallow merge rawInput; later keys win.
+            st.input = { ...st.input, ...nextInput };
+            // Upgrade path when a higher-precedence source appears.
+            if (nextPath && (!st.path || nextPath.rank >= st.pathRank)) {
+              st.path = nextPath.path;
+              st.pathRank = nextPath.rank;
+            }
+            // Keep last non-empty result payload (terminal may be status-only).
+            if (nextResult) st.resultContent = nextResult;
+            // Sticky think-only: once classified, never clear on later frames
+            // (terminal status-only frames have no title and would otherwise
+            // flip thinkOnly false and emit a fake concrete tool).
+            if (nextThinkOnly) st.thinkOnly = true;
+          }
+          if (isAcpTerminalToolStatus(update)) {
             const failed = isAcpTerminalFailureStatus(update);
-            if (!st.emitted && (failed || isAcpCompletedStatus(update))) {
-              st.emitted = true;
-              send('agent', {
-                type: 'tool_use',
-                id: toolCallId,
-                name: 'Write',
-                input: { file_path: st.path ?? toolCallId },
-              });
-              send('agent', { type: 'tool_result', toolUseId: toolCallId, isError: failed });
-              emittedConcreteToolEvent = true;
-            }
+            emitTerminalToolPair(toolCallId, st, failed);
+            // Keep the entry (emitted=true) so a repeated terminal cannot re-emit.
           }
         }
         if (isAcpArtifactWriteUpdate(update, acpArtifactWriteToolCallIds)) {
@@ -770,6 +850,8 @@ export function attachAcpSession({
       if (!emittedVisibleTextChunk && !emittedConcreteToolEvent && modelUnavailableErrorCode) {
         const outputTokens = usage?.output_tokens;
         const hadCompletionTokens = typeof outputTokens === 'number' && outputTokens > 0;
+        // Emit usage before fail so analytics still sees provider tokens.
+        emitUsageIfPresent(result.usage);
         if (hadCompletionTokens || emittedToolCall || emittedTextChunk) {
           fail(
             'ACP session completed after reporting model activity, but did not produce visible assistant text, concrete tool results, or artifacts.',

@@ -4,6 +4,7 @@ import {
   buildFeedbackPayload,
   buildTracePayload,
   deriveLangfuseDeliveryState,
+  isContentToolName,
   readLangfuseConfig,
   readRunTelemetrySinkConfig,
   readTelemetrySinkConfig,
@@ -300,6 +301,29 @@ describe('deriveLangfuseDeliveryState', () => {
       langfuse_expected: true,
       langfuse_delivery_status: 'queued',
     });
+  });
+});
+
+describe('isContentToolName', () => {
+  it('matches Claude-shaped names case-insensitively', () => {
+    expect(isContentToolName('Read')).toBe(true);
+    expect(isContentToolName('read')).toBe(true);
+    expect(isContentToolName('WRITE')).toBe(true);
+    expect(isContentToolName('write')).toBe(true);
+    expect(isContentToolName('Edit')).toBe(true);
+    expect(isContentToolName('edit')).toBe(true);
+    expect(isContentToolName('grep')).toBe(true);
+    expect(isContentToolName('search')).toBe(true);
+    expect(isContentToolName('fetch')).toBe(true);
+    expect(isContentToolName('think')).toBe(true);
+    expect(isContentToolName('create_file')).toBe(true);
+    expect(isContentToolName('str_replace_edit')).toBe(true);
+  });
+
+  it('does not treat Bash as a content tool', () => {
+    expect(isContentToolName('Bash')).toBe(false);
+    expect(isContentToolName('bash')).toBe(false);
+    expect(isContentToolName('')).toBe(false);
   });
 });
 

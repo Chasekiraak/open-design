@@ -1363,6 +1363,112 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(payload).not.toContain('<!doctype html>');
   });
 
+  it('redacts lowercase ACP content-tool names like read/write', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-1',
+      telemetry: { metrics: true, content: true, artifactManifest: true },
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 207 }));
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    const now = Date.now();
+    const toolStartedAt = now - 4000;
+    const toolEndedAt = now - 500;
+    try {
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({
+          'conv-1': [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'Use this private reference.',
+              attachments: [],
+            },
+            {
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'Done.',
+              producedFiles: [],
+            },
+          ],
+        }),
+        dataDir,
+        run: makeRun({
+          createdAt: now - 4500,
+          updatedAt: now,
+          events: [
+            {
+              id: 1,
+              event: 'agent',
+              // Event log time is late (terminal); startedAt is first frame.
+              timestamp: toolEndedAt,
+              data: {
+                type: 'tool_use',
+                id: 'read-lc',
+                name: 'read',
+                input: { file_path: '/Users/alice/secret.txt', content: 'SECRET_BODY' },
+                startedAt: toolStartedAt,
+              },
+            },
+            {
+              id: 2,
+              event: 'agent',
+              timestamp: toolEndedAt,
+              data: {
+                type: 'tool_result',
+                toolUseId: 'read-lc',
+                content: 'SECRET_BODY',
+                isError: false,
+              },
+            },
+            {
+              id: 3,
+              event: 'agent',
+              timestamp: toolEndedAt,
+              data: {
+                type: 'tool_use',
+                id: 'write-lc',
+                name: 'write',
+                input: { file_path: '/Users/alice/out.html', content: '<html>SECRET</html>' },
+              },
+            },
+            {
+              id: 4,
+              event: 'agent',
+              timestamp: toolEndedAt,
+              data: {
+                type: 'tool_result',
+                toolUseId: 'write-lc',
+                content: 'ok',
+                isError: false,
+              },
+            },
+          ],
+        }) as any,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const batch = JSON.parse(init.body as string).batch as any[];
+    const read = bodyOf(batch, 'span-create', 'tool:read');
+    const write = bodyOf(batch, 'span-create', 'tool:write');
+    expect(read.input).toBe('[REDACTED:tool_input:content_tool:read]');
+    expect(read.output).toBe('[REDACTED:tool_output:content_tool:read]');
+    expect(write.input).toBe('[REDACTED:tool_input:content_tool:write]');
+    expect(write.output).toBe('[REDACTED:tool_output:content_tool:write]');
+    // startedAt on tool_use should drive span startTime earlier than event log ts.
+    expect(new Date(read.startTime).getTime()).toBe(toolStartedAt);
+    const payload = JSON.stringify(batch);
+    expect(payload).not.toContain('SECRET_BODY');
+    expect(payload).not.toContain('<html>SECRET</html>');
+  });
+
   it('forwards run prompt telemetry into trace and generation metadata', async () => {
     await writeAppCfg({
       installationId: 'install-uuid-1',
@@ -1628,6 +1734,53 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(trace.metadata.tokens.output).toBeUndefined();
     // …and onto the Langfuse generation usage so cost/token views populate.
     expect(generation.usage.total).toBe(512);
+  });
+
+  it('forwards thought_tokens from ACP-shaped usage into Langfuse metadata', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-thought',
+      telemetry: { metrics: true, content: true, artifactManifest: false },
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 207 }));
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    try {
+      const run = makeRun() as any;
+      run.events = [
+        {
+          id: 1,
+          event: 'agent',
+          timestamp: run.createdAt + 1000,
+          data: {
+            type: 'usage',
+            usage: {
+              input_tokens: 1_000,
+              output_tokens: 50,
+              cached_read_tokens: 200,
+              thought_tokens: 77,
+              total_tokens: 1_127,
+            },
+          },
+        },
+      ];
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({ 'conv-1': [] }),
+        dataDir,
+        run,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const batch = JSON.parse(init.body as string).batch as any[];
+    const trace = batch[0].body;
+    expect(trace.metadata.tokens.thought).toBe(77);
+    expect(trace.metadata.tokens.total).toBe(1_127);
+    expect(trace.metadata.tokens.cacheReadInput).toBe(200);
   });
 
   it('uses the default model bucket for a default-model run with no status/model event', async () => {

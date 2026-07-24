@@ -39,6 +39,7 @@ import {
   type TraceObjectSummary,
   type ToolCallSummary,
   type TurnInfo,
+  isContentToolName,
 } from './langfuse-trace.js';
 import type { PromptStackTelemetry } from './prompt-telemetry.js';
 import { redactSecrets } from './redact.js';
@@ -318,6 +319,7 @@ function messageUsageFromAnalytics(
     usage.input_tokens_effective !== undefined ||
     usage.output_tokens !== undefined ||
     usage.total_tokens !== undefined ||
+    usage.thought_tokens !== undefined ||
     usage.cache_read_input_tokens !== undefined ||
     usage.cache_creation_input_tokens !== undefined ||
     usage.uncached_input_tokens !== undefined ||
@@ -335,6 +337,7 @@ function messageUsageFromAnalytics(
   }
   if (usage.output_tokens !== undefined) out.outputTokens = usage.output_tokens;
   if (usage.total_tokens !== undefined) out.totalTokens = usage.total_tokens;
+  if (usage.thought_tokens !== undefined) out.thoughtTokens = usage.thought_tokens;
   if (usage.cache_read_input_tokens !== undefined) {
     out.cacheReadInputTokens = usage.cache_read_input_tokens;
   }
@@ -363,14 +366,6 @@ function eventTimestamp(
     : fallback;
 }
 
-const CONTENT_TOOL_NAMES = new Set([
-  'Read',
-  'Write',
-  'Edit',
-  'MultiEdit',
-  'NotebookEdit',
-]);
-
 function redactLocalPaths(value: string): string {
   return value
     .replace(/\/Users\/[^/\s"']+(?:\/[^ \n\r\t"'`<>)]*)?/g, '[REDACTED:local_path]')
@@ -382,7 +377,7 @@ function serializeToolPayload(
   opts: { toolName: string; direction: 'input' | 'output' },
 ): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (CONTENT_TOOL_NAMES.has(opts.toolName)) {
+  if (isContentToolName(opts.toolName)) {
     return `[REDACTED:tool_${opts.direction}:content_tool:${opts.toolName}]`;
   }
   if (typeof value === 'string') return redactLocalPaths(redactSecrets(value));
@@ -414,19 +409,43 @@ function collectToolCalls(
       | null
       | undefined;
     if (data?.type === 'tool_use' && typeof data.id === 'string') {
-      const timestamp = eventTimestamp(rec, runStartedAt + rec.id);
-      const summary: ToolCallSummary = {
-        id: data.id,
-        name: typeof data.name === 'string' && data.name ? data.name : 'unknown',
-        startedAt: timestamp,
-        endedAt: timestamp,
-      };
-      const input = serializeToolPayload(data.input, {
-        toolName: summary.name,
-        direction: 'input',
-      });
-      if (input !== undefined) summary.input = input;
-      tools.set(data.id, summary);
+      const eventTs = eventTimestamp(rec, runStartedAt + rec.id);
+      // Prefer producer-supplied start time (ACP firstSeenAt) over event log ts.
+      const payloadStartedAt =
+        typeof (data as { startedAt?: unknown }).startedAt === 'number' &&
+        Number.isFinite((data as { startedAt: number }).startedAt)
+          ? (data as { startedAt: number }).startedAt
+          : undefined;
+      const timestamp = payloadStartedAt ?? eventTs;
+      const name = typeof data.name === 'string' && data.name ? data.name : 'unknown';
+      const existing = tools.get(data.id);
+      if (existing) {
+        // Second tool_use for the same id: refresh name/input, keep original startedAt.
+        existing.name = name;
+        const input = serializeToolPayload(data.input, {
+          toolName: name,
+          direction: 'input',
+        });
+        if (input !== undefined) existing.input = input;
+        else delete existing.input;
+        // If a later frame carries an earlier startedAt, prefer the earlier one.
+        if (payloadStartedAt !== undefined && payloadStartedAt < existing.startedAt) {
+          existing.startedAt = payloadStartedAt;
+        }
+      } else {
+        const summary: ToolCallSummary = {
+          id: data.id,
+          name,
+          startedAt: timestamp,
+          endedAt: eventTs,
+        };
+        const input = serializeToolPayload(data.input, {
+          toolName: name,
+          direction: 'input',
+        });
+        if (input !== undefined) summary.input = input;
+        tools.set(data.id, summary);
+      }
     } else if (
       data?.type === 'tool_result' &&
       typeof data.toolUseId === 'string'

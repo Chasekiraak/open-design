@@ -72,6 +72,13 @@ export function isAcpTerminalFailureStatus(update: JsonObject): boolean {
   return status === 'failed' || status === 'failure' || status === 'error' || status === 'cancelled' || status === 'canceled';
 }
 /**
+ * Returns `true` when the update's status is a terminal tool outcome
+ * (completed or failed). Used to decide when to emit `tool_result`.
+ */
+export function isAcpTerminalToolStatus(update: JsonObject): boolean {
+  return isAcpCompletedStatus(update) || isAcpTerminalFailureStatus(update);
+}
+/**
  * Returns `true` when the update's status is `'retry'`. Signals that the AMR
  * agent wants to restart the request; the session promoter maps this to a
  * structured error payload via `promotedAmrRetryStatusPayload`.
@@ -185,20 +192,130 @@ export function acpToolCallId(update: JsonObject): string | null {
     ? update.toolCallId.trim()
     : null;
 }
+/** True when ACP `kind` is a recognized write/edit family token. */
+function isAcpWriteEditKind(kind: string): boolean {
+  const token = kind.trim().toLowerCase();
+  return (
+    token === 'edit' ||
+    token === 'write' ||
+    token === 'create' ||
+    token === 'patch' ||
+    token === 'replace' ||
+    token === 'update' ||
+    token === 'save'
+  );
+}
+
 /**
- * Returns `true` when the update's `title` or `name` field contains a word
- * that indicates a file-write operation (`edit`, `write`, `create`, `update`,
- * `save`, `patch`, or `replace`). Used to heuristically identify
- * artifact-write tool calls before their `toolCallId` is known.
+ * True when ACP `kind` is a known tool family we trust over title heuristics.
+ * Unknown kinds still map to a display name but do not lock the tool name
+ * across partial frames (agents sometimes invent kind strings).
+ */
+export function isAcpRecognizedKind(kind: string): boolean {
+  const token = kind.trim().toLowerCase();
+  if (!token) return false;
+  if (isAcpWriteEditKind(token)) return true;
+  return (
+    token === 'read' ||
+    token === 'execute' ||
+    token === 'bash' ||
+    token === 'shell' ||
+    token === 'terminal' ||
+    token === 'search' ||
+    token === 'grep' ||
+    token === 'glob' ||
+    token === 'think' ||
+    token === 'thought' ||
+    token === 'reason' ||
+    token === 'reasoning' ||
+    token === 'fetch' ||
+    token === 'web' ||
+    token === 'other'
+  );
+}
+
+/**
+ * Returns `true` when the update's `kind`, `title`, or `name` field indicates
+ * a file-write operation (`edit`, `write`, `create`, `update`, `save`,
+ * `patch`, or `replace`). Used to identify artifact-write tool calls for the
+ * DSML suppressor (including kind-only write frames with no title words).
  *
  * @param update - A parsed ACP `session/update` params object.
  */
 export function isAcpArtifactWriteLabel(update: JsonObject): boolean {
+  if (typeof update.kind === 'string' && isAcpWriteEditKind(update.kind)) {
+    return true;
+  }
   const label = [
     typeof update.title === 'string' ? update.title : '',
     typeof update.name === 'string' ? update.name : '',
   ].join(' ');
   return /\b(?:edit|write|create|update|save|patch|replace)\b/i.test(label);
+}
+
+/**
+ * Returns `true` when the tool is pure think/reason activity and must not
+ * count as a concrete tool event for AMR no-output detection (and is omitted
+ * from the tool_use/tool_result transcript).
+ */
+export function isAcpThinkOnlyTool(update: JsonObject): boolean {
+  const kind = typeof update.kind === 'string' ? update.kind.trim().toLowerCase() : '';
+  if (
+    kind === 'think' ||
+    kind === 'thought' ||
+    kind === 'reason' ||
+    kind === 'reasoning'
+  ) {
+    return true;
+  }
+  const name = typeof update.name === 'string' ? update.name.trim() : '';
+  if (name && /^(think|thinking|thought|reason|reasoning)$/i.test(name)) {
+    return true;
+  }
+  const title = typeof update.title === 'string' ? update.title.trim() : '';
+  if (title && /^(think|thinking|thought|reason|reasoning)\b/i.test(title)) {
+    return true;
+  }
+  return false;
+}
+
+/** Path source rank: higher wins when merging partial ACP frames. */
+export const ACP_PATH_RANK_LOCATIONS = 3;
+export const ACP_PATH_RANK_RAW_INPUT = 2;
+export const ACP_PATH_RANK_TITLE = 1;
+
+export type AcpPathCandidate = { path: string; rank: number };
+
+/**
+ * Best-effort path extraction with a precedence rank so partial-frame merges
+ * can upgrade a weak title path when locations/rawInput arrive later.
+ */
+export function acpArtifactWritePathRanked(update: JsonObject): AcpPathCandidate | null {
+  // 1. ACP `locations: [{ path }]` and `content: [{ path }]` (diff entries).
+  for (const field of [update.locations, update.content]) {
+    if (!Array.isArray(field)) continue;
+    for (const entry of field) {
+      const path = asObject(entry)?.path;
+      if (typeof path === 'string' && path.trim()) {
+        return { path: path.trim(), rank: ACP_PATH_RANK_LOCATIONS };
+      }
+    }
+  }
+  // 2. Tool input: path / file_path / filename / filePath (camelCase).
+  const rawInput = asObject(update.rawInput);
+  for (const key of ['path', 'file_path', 'filename', 'filePath']) {
+    const value = rawInput?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      return { path: value.trim(), rank: ACP_PATH_RANK_RAW_INPUT };
+    }
+  }
+  // 3. A path-like filename token in the human title (reject `Image.open`).
+  const title = typeof update.title === 'string' ? update.title : '';
+  const match = title.match(/[\w./\\-]+\.[A-Za-z0-9]+/);
+  if (match?.[0] && isAcpPathLikeToken(match[0])) {
+    return { path: match[0], rank: ACP_PATH_RANK_TITLE };
+  }
+  return null;
 }
 /**
  * Returns `true` when an ACP update represents the terminal completion of an
@@ -214,44 +331,252 @@ export function isAcpArtifactWriteUpdate(update: JsonObject, writeToolCallIds: S
   const toolCallId = acpToolCallId(update);
   return isAcpArtifactWriteLabel(update) || (toolCallId ? writeToolCallIds.has(toolCallId) : false);
 }
-// Best-effort file path for an ACP artifact-write tool call. ACP can carry a
-// `locations: [{ path }]` array and/or `content: [{ type:'diff', path }]`
-// entries, but many agents omit both and send only a human `title` ("edit").
-// Returns null when no concrete path is present; the caller then falls back to
-// the toolCallId as a dedup key.
+/** Tool names that `countNewArtifacts` treats as write/edit operations. */
+const ACP_WRITE_OR_EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'Write',
+  'create_file',
+  'Edit',
+  'str_replace_edit',
+  'MultiEdit',
+  'multi_edit',
+]);
+
+/** Extensions that make a dotted title token look like a real file path. */
+const ACP_PATH_LIKE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'html',
+  'htm',
+  'css',
+  'js',
+  'ts',
+  'tsx',
+  'jsx',
+  'mjs',
+  'cjs',
+  'md',
+  'mdx',
+  'json',
+  'jsonc',
+  'yaml',
+  'yml',
+  'toml',
+  'svg',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'avif',
+  'ico',
+  'mp4',
+  'mov',
+  'webm',
+  'mp3',
+  'wav',
+  'm4a',
+  'pdf',
+  'txt',
+  'csv',
+  'xml',
+  'py',
+  'go',
+  'rs',
+  'rb',
+  'php',
+  'sh',
+  'bash',
+  'zsh',
+  'vue',
+  'svelte',
+  'astro',
+  'scss',
+  'less',
+  'map',
+  'wasm',
+]);
+
 /**
- * Best-effort extraction of a concrete file path from an ACP artifact-write
- * tool call update, checking three sources in priority order:
+ * Returns `true` when `token` looks like a filesystem path rather than a
+ * dotted identifier (`Image.open`, `f.read`, `pptx.util`).
+ */
+export function isAcpPathLikeToken(token: string): boolean {
+  const value = token.trim();
+  if (!value) return false;
+  if (value.startsWith('.') || value.includes('/') || value.includes('\\')) return true;
+  const dot = value.lastIndexOf('.');
+  if (dot <= 0 || dot === value.length - 1) return false;
+  const ext = value.slice(dot + 1).toLowerCase();
+  return ACP_PATH_LIKE_EXTENSIONS.has(ext);
+}
+
+/**
+ * Maps a common ACP `kind` string to a stable Claude-shaped tool name.
+ */
+function acpToolNameFromKind(kind: string): string | null {
+  const token = kind.trim().toLowerCase();
+  if (!token) return null;
+  if (token === 'edit' || token === 'patch' || token === 'replace' || token === 'update') {
+    return 'Edit';
+  }
+  if (token === 'write' || token === 'create' || token === 'save') return 'Write';
+  if (token === 'read') return 'Read';
+  if (token === 'execute' || token === 'bash' || token === 'shell' || token === 'terminal') {
+    return 'Bash';
+  }
+  if (token === 'search' || token === 'grep' || token === 'glob') return 'Grep';
+  if (token === 'think' || token === 'thought' || token === 'reason' || token === 'reasoning') {
+    return 'Think';
+  }
+  if (token === 'fetch' || token === 'web') return 'Fetch';
+  // Title-case unknown kinds for a stable display name.
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+/**
+ * Derives a tool name from a human `title` when `name`/`kind` are absent.
+ */
+function acpToolNameFromTitle(title: string): string | null {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  if (/\b(?:grep|search|glob)\b/i.test(trimmed)) return 'Grep';
+  if (/\b(?:bash|shell|execute|terminal|run)\b/i.test(trimmed)) return 'Bash';
+  if (/\bread\b/i.test(trimmed)) return 'Read';
+  if (/\b(?:edit|patch|replace)\b/i.test(trimmed)) return 'Edit';
+  if (/\b(?:write|create|save|update)\b/i.test(trimmed)) return 'Write';
+  const first = trimmed.split(/\s+/)[0];
+  if (!first) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+/**
+ * Resolves a stable Claude-shaped tool name from an ACP tool-call update.
+ * Trusted ACP `kind` wins over title heuristics when the kind is recognized
+ * (so `kind: read` + title "update …" stays Read). Explicit `name` still wins
+ * when present. Write-label override to Write/Edit applies only when there is
+ * no recognized non-write kind, so `countNewArtifacts` keeps working for
+ * title-only write frames.
+ */
+export function acpToolName(update: JsonObject): string {
+  const kindRaw = typeof update.kind === 'string' ? update.kind.trim() : '';
+  const recognizedKind = kindRaw ? isAcpRecognizedKind(kindRaw) : false;
+  const kindName = kindRaw ? acpToolNameFromKind(kindRaw) : null;
+
+  let name: string | null = null;
+  if (typeof update.name === 'string' && update.name.trim()) {
+    name = update.name.trim();
+  } else if (recognizedKind && kindName) {
+    // Kind is authoritative over title heuristics.
+    name = kindName;
+  } else if (typeof update.title === 'string' && update.title.trim()) {
+    name = acpToolNameFromTitle(update.title);
+  } else if (kindName) {
+    name = kindName;
+  }
+  if (!name) name = 'Tool';
+
+  // Write-label override: only when kind is absent/unrecognized, or is already
+  // a write/edit family kind. Never turn kind:read into Write because the title
+  // contains "update".
+  if (isAcpArtifactWriteLabel(update) && !ACP_WRITE_OR_EDIT_TOOL_NAMES.has(name)) {
+    if (recognizedKind && !isAcpWriteEditKind(kindRaw)) {
+      return name;
+    }
+    const label = [
+      typeof update.title === 'string' ? update.title : '',
+      typeof update.name === 'string' ? update.name : '',
+      typeof update.kind === 'string' ? update.kind : '',
+    ].join(' ');
+    if (/\b(?:edit|patch|replace)\b/i.test(label)) return 'Edit';
+    return 'Write';
+  }
+  return name;
+}
+
+/**
+ * Builds a Claude-shaped tool input object from an ACP tool-call update.
+ * Starts from `rawInput` when present, attaches `file_path` when a real path
+ * is available, and never fabricates a path from `toolCallId`.
+ */
+export function acpToolInput(update: JsonObject): Record<string, unknown> {
+  const rawInput = asObject(update.rawInput);
+  const input: Record<string, unknown> = rawInput ? { ...rawInput } : {};
+  const path = acpArtifactWritePath(update);
+  if (path) {
+    input.file_path = path;
+  }
+  if (Object.keys(input).length === 0) {
+    if (typeof update.title === 'string' && update.title.trim()) {
+      return { title: update.title.trim() };
+    }
+    return {};
+  }
+  return input;
+}
+
+/**
+ * Extracts tool-result text from an ACP terminal tool-call update.
+ * Prefers `rawOutput`, then text/diff content entries. Truncates large
+ * payloads so trace storage stays bounded.
+ */
+export function acpToolResultContent(update: JsonObject, maxChars = 8000): string {
+  const rawOutput = update.rawOutput;
+  let text = '';
+  if (typeof rawOutput === 'string') {
+    text = rawOutput;
+  } else if (rawOutput !== undefined && rawOutput !== null) {
+    try {
+      text = JSON.stringify(rawOutput);
+    } catch {
+      text = String(rawOutput);
+    }
+  } else if (Array.isArray(update.content)) {
+    const parts: string[] = [];
+    for (const entry of update.content) {
+      const obj = asObject(entry);
+      if (!obj) {
+        if (typeof entry === 'string' && entry) parts.push(entry);
+        continue;
+      }
+      if (typeof obj.text === 'string' && obj.text) {
+        parts.push(obj.text);
+        continue;
+      }
+      if (typeof obj.diff === 'string' && obj.diff) {
+        parts.push(obj.diff);
+        continue;
+      }
+      // ACP diff entries often carry oldText/newText instead of a unified diff.
+      const oldText = typeof obj.oldText === 'string' ? obj.oldText : '';
+      const newText = typeof obj.newText === 'string' ? obj.newText : '';
+      if (oldText || newText) {
+        parts.push(`--- old\n${oldText}\n+++ new\n${newText}`);
+        continue;
+      }
+      const extracted = extractAcpUpdateText(obj);
+      if (extracted) parts.push(extracted);
+    }
+    text = parts.join('\n');
+  } else {
+    text = extractAcpUpdateText(update) ?? '';
+  }
+  if (!text) return '';
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n…[truncated]`;
+}
+
+/**
+ * Best-effort extraction of a concrete file path from an ACP tool-call update,
+ * checking three sources in priority order:
  * 1. `locations` or `content` array entries with a `path` field.
- * 2. `rawInput.path`, `rawInput.file_path`, or `rawInput.filename`.
- * 3. A filename token embedded in the human-readable `title` field.
+ * 2. `rawInput.path`, `rawInput.file_path`, `rawInput.filename`, or `rawInput.filePath`.
+ * 3. A path-like filename token embedded in the human-readable `title` field
+ *    (rejects dotted identifiers like `Image.open`).
  *
- * Returns `null` when no concrete path is present; the caller then falls
- * back to the toolCallId as a dedup key.
+ * Returns `null` when no concrete path is present. Does not use `toolCallId`
+ * as a path — callers decide how to key pathless writes.
  *
  * @param update - A parsed ACP `session/update` params object.
  * @returns An absolute or relative file path string, or `null` when absent.
  */
 export function acpArtifactWritePath(update: JsonObject): string | null {
-  // 1. ACP `locations: [{ path }]` and `content: [{ path }]` (diff entries).
-  for (const field of [update.locations, update.content]) {
-    if (!Array.isArray(field)) continue;
-    for (const entry of field) {
-      const path = asObject(entry)?.path;
-      if (typeof path === 'string' && path.trim()) return path.trim();
-    }
-  }
-  // 2. Tool input echoed by some agents as `rawInput.{path,file_path,filename}`.
-  const rawInput = asObject(update.rawInput);
-  for (const key of ['path', 'file_path', 'filename']) {
-    const value = rawInput?.[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  // 3. A filename token embedded in the human title, e.g. "Write index.html".
-  // Keeping the real extension lets `isArtifactPath` correctly EXCLUDE
-  // non-artifact writes (e.g. "edit config.json"), matching the claude path.
-  const title = typeof update.title === 'string' ? update.title : '';
-  const match = title.match(/[\w./-]+\.[A-Za-z0-9]+/);
-  if (match?.[0]) return match[0];
-  return null;
+  return acpArtifactWritePathRanked(update)?.path ?? null;
 }

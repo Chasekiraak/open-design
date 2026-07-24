@@ -151,6 +151,7 @@ export interface MessageSummary {
     inputTokensEffective?: number;
     outputTokens?: number;
     totalTokens?: number;
+    thoughtTokens?: number;
     cacheReadInputTokens?: number;
     cacheCreationInputTokens?: number;
     uncachedInputTokens?: number;
@@ -655,6 +656,7 @@ function tokenUsageSummary(
     input_effective: usage.inputTokensEffective,
     output: usage.outputTokens,
     total: usage.totalTokens,
+    thought: usage.thoughtTokens,
     cache_read_input: usage.cacheReadInputTokens,
     cache_creation_input: usage.cacheCreationInputTokens,
     uncached_input: usage.uncachedInputTokens,
@@ -1295,6 +1297,7 @@ function usageTotal(usage: MessageSummary['usage']): number {
     usage.inputTokensEffective,
     usage.outputTokens,
     usage.totalTokens,
+    usage.thoughtTokens,
     usage.cacheReadInputTokens,
     usage.cacheCreationInputTokens,
     usage.uncachedInputTokens,
@@ -1316,13 +1319,51 @@ function redactArtifactBlocks(value: string | undefined): string | undefined {
   );
 }
 
-const CONTENT_TOOL_NAMES = new Set([
+/**
+ * Tool names whose input/output payloads are fully redacted in Langfuse
+ * (content-bearing read/write/search/think tools, including ACP aliases).
+ * Bash stays on secret+path redaction only.
+ *
+ * Matching is case-insensitive. Canonical Claude-shaped names are listed
+ * here; lowercase ACP kind tokens (read/write/edit/…) are covered via the
+ * lowercased lookup set built below.
+ */
+export const CONTENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   'Read',
   'Write',
   'Edit',
   'MultiEdit',
   'NotebookEdit',
+  'create_file',
+  'str_replace_edit',
+  'multi_edit',
+  'Grep',
+  'Search',
+  'Glob',
+  'Fetch',
+  'Think',
+  'Thinking',
+  // Common lowercase ACP kind / title tokens (also matched case-insensitively).
+  'read',
+  'write',
+  'edit',
+  'grep',
+  'search',
+  'fetch',
+  'think',
+  'glob',
 ]);
+
+const CONTENT_TOOL_NAMES_LOWER: ReadonlySet<string> = new Set(
+  [...CONTENT_TOOL_NAMES].map((name) => name.toLowerCase()),
+);
+
+/** True when tool payloads should be fully content-redacted for telemetry. */
+export function isContentToolName(toolName: string): boolean {
+  const normalized = toolName.trim().toLowerCase();
+  if (!normalized) return false;
+  return CONTENT_TOOL_NAMES_LOWER.has(normalized);
+}
 
 function redactLocalPaths(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -1337,7 +1378,7 @@ function traceSafeToolPayload(
   value: string | undefined,
 ): string | undefined {
   if (value === undefined) return undefined;
-  if (CONTENT_TOOL_NAMES.has(toolName)) {
+  if (isContentToolName(toolName)) {
     return `[REDACTED:tool_${direction}:content_tool:${toolName}]`;
   }
   return redactLocalPaths(redactArtifactBlocks(value));
@@ -1403,6 +1444,7 @@ export function buildTracePayload(ctx: ReportContext): unknown[] {
         inputEffective: ctx.message.usage.inputTokensEffective,
         output: ctx.message.usage.outputTokens,
         total: ctx.message.usage.totalTokens,
+        thought: ctx.message.usage.thoughtTokens,
         cacheReadInput: ctx.message.usage.cacheReadInputTokens,
         cacheCreationInput: ctx.message.usage.cacheCreationInputTokens,
         uncachedInput: ctx.message.usage.uncachedInputTokens,
