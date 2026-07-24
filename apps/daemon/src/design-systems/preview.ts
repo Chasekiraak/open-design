@@ -42,11 +42,12 @@ export function renderDesignSystemPreview(id: string, raw: string): string {
     pickColor(colors, ['surface', 'card', 'background-secondary', 'panel', 'elevated'])
     ?? '#ffffff';
 
-  const display = fonts.display
-    ?? fonts.heading
-    ?? "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-  const body = fonts.body ?? display;
-  const mono = fonts.mono ?? "ui-monospace, 'JetBrains Mono', monospace";
+  const display = sanitizeFontStack(
+    fonts.display ?? fonts.heading,
+    "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+  );
+  const body = sanitizeFontStack(fonts.body, display);
+  const mono = sanitizeFontStack(fonts.mono, "ui-monospace, 'JetBrains Mono', monospace");
 
   const renderedMarkdown = renderMarkdownLite(raw);
 
@@ -330,8 +331,8 @@ export function renderDesignSystemCard(id: string, raw: string): string {
     pickColor(colors, ['surface', 'card', 'background-secondary', 'panel', 'elevated'])
     ?? bg;
 
-  const display = fonts.display ?? fonts.heading ?? "system-ui, -apple-system, sans-serif";
-  const body = fonts.body ?? display;
+  const display = sanitizeFontStack(fonts.display ?? fonts.heading, 'system-ui, -apple-system, sans-serif');
+  const body = sanitizeFontStack(fonts.body, display);
   const displayName = display.split(',')[0]?.replace(/['"]/g, '').trim() || 'System';
   const bodyName = body.split(',')[0]?.replace(/['"]/g, '').trim() || displayName;
   const fontLabel = displayName === bodyName ? displayName : `${displayName} / ${bodyName}`;
@@ -542,6 +543,53 @@ function extractFonts(raw: string): FontHints {
     else if (/mono|code/.test(label) && !out.mono) out.mono = value;
   }
   return out;
+}
+
+// CSS generic/system family keywords that must stay unquoted to keep their
+// meaning (quoting `serif` would turn it into a literal face name).
+const GENERIC_FONT_FAMILIES = new Set([
+  'serif',
+  'sans-serif',
+  'monospace',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-serif',
+  'ui-sans-serif',
+  'ui-monospace',
+  'ui-rounded',
+  'emoji',
+  'math',
+  'fangsong',
+  '-apple-system',
+]);
+
+// One font-family name: letters/digits, spaces, hyphens, underscores, with an
+// optional leading hyphen for vendor names like `-apple-system`.
+const FONT_FAMILY_NAME_RE = /^-?[A-Za-z0-9][A-Za-z0-9 _-]*$/;
+
+/**
+ * Serialize a DESIGN.md-extracted font stack through a strict font-family
+ * grammar. `extractFonts` is deliberately permissive about prose shapes, and
+ * its output is interpolated into generated `<style>` raw text, so this is
+ * the HTML boundary: each comma-separated family must be a plain name
+ * (optionally quoted); families containing any other character are dropped,
+ * and a stack with no surviving family falls back to the trusted default.
+ * The result is rebuilt from the validated names only — input text never
+ * reaches the document verbatim, so a value like
+ * "Karla</style><img src=…>" can never close the style element.
+ */
+function sanitizeFontStack(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const families: string[] = [];
+  for (const part of value.split(',')) {
+    let name = part.trim();
+    const quoted = /^(['"])(.+)\1$/.exec(name);
+    if (quoted) name = (quoted[2] ?? '').trim();
+    if (!name || name.length > 60 || !FONT_FAMILY_NAME_RE.test(name)) continue;
+    families.push(GENERIC_FONT_FAMILIES.has(name.toLowerCase()) ? name : `'${name}'`);
+  }
+  return families.length > 0 ? families.join(', ') : fallback;
 }
 
 function pickColor(colors: ColorToken[], hints: string[]): string | null {
