@@ -96,6 +96,7 @@ const es: DeepPartial<CodexSlidesCopy> = {
     { label: "Relaciones de aspecto", values: "16:9 · 4:3 · 1:1 · 9:16 · 3:4" },
   ],
 
+  duoTitle: "Rápido y sin fricción",
   fastTitle: "Fast mode",
   fastLead:
     "Las páginas se renderizan en paralelo —hasta cuatro a la vez y el resto en cola— en lugar de una tras otra, mientras el esquema aprobado y la dirección visual quedan fijados. Una presentación de diez diapositivas suele aterrizar en unos cuatro o cinco minutos, y una ejecución interrumpida se reanuda desde el estado guardado del proyecto en vez de empezar de cero.",

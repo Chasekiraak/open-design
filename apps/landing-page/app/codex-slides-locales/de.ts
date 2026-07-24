@@ -96,6 +96,7 @@ const de: DeepPartial<CodexSlidesCopy> = {
     { label: 'Seitenverhältnisse', values: '16:9 · 4:3 · 1:1 · 9:16 · 3:4' },
   ],
 
+  duoTitle: 'Schnell und reibungslos',
   fastTitle: 'Fast mode',
   fastLead:
     'Seiten werden parallel gerendert — bis zu vier gleichzeitig, der Rest in der Warteschlange — statt eine nach der anderen, während die freigegebene Gliederung und die visuelle Richtung gesetzt bleiben. Ein Deck mit zehn Folien ist typischerweise in rund vier bis fünf Minuten fertig, und ein unterbrochener Lauf setzt am gespeicherten Projektstand wieder an, statt von vorn zu beginnen.',

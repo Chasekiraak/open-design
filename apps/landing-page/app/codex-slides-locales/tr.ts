@@ -96,6 +96,7 @@ const tr: DeepPartial<CodexSlidesCopy> = {
     { label: "En boy oranları", values: "16:9 · 4:3 · 1:1 · 9:16 · 3:4" },
   ],
 
+  duoTitle: "Hızlı ve zahmetsiz",
   fastTitle: "Fast mode",
   fastLead:
     "Sayfalar arka arkaya değil paralel render edilir — aynı anda dörde kadar, kalanlar sırada — ve bu sırada onaylanmış taslak ile görsel yön sabit kalır. On slaytlık bir deste genellikle dört beş dakikada hazır olur; yarıda kesilen bir çalışma da baştan başlamak yerine projenin kaydedilmiş durumundan devam eder.",

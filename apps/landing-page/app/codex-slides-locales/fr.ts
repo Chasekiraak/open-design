@@ -96,6 +96,7 @@ const fr: DeepPartial<CodexSlidesCopy> = {
     { label: "Formats d'image", values: "16:9 · 4:3 · 1:1 · 9:16 · 3:4" },
   ],
 
+  duoTitle: "Rapide et sans friction",
   fastTitle: "Fast mode",
   fastLead:
     "Les pages sont rendues en parallèle — jusqu'à quatre en vol, le reste en file d'attente — au lieu de l'une après l'autre, pendant que le plan approuvé et la direction visuelle restent verrouillés. Un deck de dix diapositives arrive en général en quatre à cinq minutes, et une exécution interrompue reprend depuis l'état enregistré du projet plutôt que de tout recommencer.",

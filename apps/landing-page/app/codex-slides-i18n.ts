@@ -104,6 +104,7 @@ export type CodexSlidesCopy = {
   formatsLead: string;
   formatsRows: [FormatRow, FormatRow, FormatRow];
 
+  duoTitle: string;
   fastTitle: string;
   fastLead: string;
   installTitle: string;
@@ -219,6 +220,7 @@ const EN: CodexSlidesCopy = {
     { label: 'Aspect ratios', values: '16:9 · 4:3 · 1:1 · 9:16 · 3:4' },
   ],
 
+  duoTitle: 'Fast and frictionless',
   fastTitle: 'Fast mode',
   fastLead:
     'Pages render in parallel, up to four at a time with the rest queued, instead of one after another, while the approved outline and visual direction stay locked. A ten-slide deck typically lands in about four to five minutes, and an interrupted run resumes from the saved project state rather than starting over.',

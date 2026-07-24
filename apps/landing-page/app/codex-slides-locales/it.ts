@@ -96,6 +96,7 @@ const it: DeepPartial<CodexSlidesCopy> = {
     { label: "Formati", values: "16:9 · 4:3 · 1:1 · 9:16 · 3:4" },
   ],
 
+  duoTitle: "Veloce e senza attriti",
   fastTitle: "Fast mode",
   fastLead:
     "Le pagine vengono renderizzate in parallelo — fino a quattro alla volta, le altre in coda — invece che una dopo l'altra, mentre la scaletta approvata e la direzione visiva restano bloccate. Una presentazione da dieci slide di solito arriva in circa quattro o cinque minuti, e un'esecuzione interrotta riprende dallo stato salvato del progetto invece di ripartire da capo.",

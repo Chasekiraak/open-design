@@ -281,15 +281,18 @@ const studioTiles = copy.inside.map((tile, i) => ({ ...tile, src: STUDIO_SHOTS[i
     </dl>
   </section>
 
-  <section class="ha-section ha-duo" aria-label={`${copy.fastTitle} · ${copy.installTitle}`}>
-    <div class="ha-note">
-      <h2 id="cs-fast" class="ha-note-h">{copy.fastTitle}</h2>
-      <p>{copy.fastLead}</p>
-    </div>
-    <div class="ha-note">
-      <h2 id="cs-install" class="ha-note-h">{copy.installTitle}</h2>
-      <p>{copy.installLead}</p>
-      <pre class="cs-code"><code>{INSTALL_COMMANDS}</code></pre>
+  <section class="ha-section" aria-labelledby="cs-duo">
+    <h2 id="cs-duo" class="ha-h2">{copy.duoTitle}</h2>
+    <div class="ha-duo">
+      <div class="ha-note">
+        <h3 class="ha-note-h">{copy.fastTitle}</h3>
+        <p>{copy.fastLead}</p>
+      </div>
+      <div class="ha-note">
+        <h3 class="ha-note-h">{copy.installTitle}</h3>
+        <p>{copy.installLead}</p>
+        <pre class="cs-code"><code>{INSTALL_COMMANDS}</code></pre>
+      </div>
     </div>
   </section>
 
