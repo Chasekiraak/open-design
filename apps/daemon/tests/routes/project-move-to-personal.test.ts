@@ -218,28 +218,23 @@ describe('project move to personal on an unbound (never-locally-shared) project'
 
   it('never locally binds the backing project a real design-system extraction creates', async () => {
     // Real production call, no hand-written database rows: this is exactly
-    // `POST /api/brands` → `startBrandExtraction` (apps/daemon/src/brand-routes.ts),
-    // driven fully offline via a pasted DESIGN.md so no network/agent is needed.
-    let backgroundExtraction: Promise<unknown> | null = null;
+    // `POST /api/brands` → `startBrandExtraction` (apps/daemon/src/brand-routes.ts).
+    // Deliberately omits `userDesignSystemsRoot` so the pipeline takes its
+    // synchronous, non-programmatic path (no backgrounded network-touching
+    // work left dangling past this call) — the exact line under test
+    // (brands/index.ts's unconditional `insertProject` with no workspace
+    // binding) runs on BOTH paths, so this stays a faithful real-code repro
+    // of the root cause without the flakiness of a real font/network fetch.
     const result = await startBrandExtraction({
       designMd: DESIGN_MD_INPUT,
       brandsRoot,
       projectsRoot,
-      userDesignSystemsRoot,
       skillsRoot: SKILLS_ROOT,
       db,
-      designSystemWorkspaceId: TEAM_WORKSPACE_ID,
       logoFallback: NO_LOGO_FALLBACK,
       imageryFallback: NO_IMAGERY_FALLBACK,
       seedFallback: NO_SEED_FALLBACK,
-      onBackgroundExtraction: (settled) => {
-        backgroundExtraction = settled;
-      },
     });
-    // Let the programmatic-first background finalize fully settle before
-    // asserting — it is what registers the design system; the project's own
-    // workspace binding (or lack of it) is decided synchronously above.
-    await backgroundExtraction;
 
     expect(getProject(db, result.projectId)).toBeTruthy();
     // The actual bug precondition, produced by real code: the backing
@@ -248,23 +243,16 @@ describe('project move to personal on an unbound (never-locally-shared) project'
   });
 
   it('moves a real design-system-extraction project back to personal once the team hub confirms it is shared (recvqfNnRETNtM)', async () => {
-    let backgroundExtraction: Promise<unknown> | null = null;
     const result = await startBrandExtraction({
       designMd: DESIGN_MD_INPUT,
       brandsRoot,
       projectsRoot,
-      userDesignSystemsRoot,
       skillsRoot: SKILLS_ROOT,
       db,
-      designSystemWorkspaceId: TEAM_WORKSPACE_ID,
       logoFallback: NO_LOGO_FALLBACK,
       imageryFallback: NO_IMAGERY_FALLBACK,
       seedFallback: NO_SEED_FALLBACK,
-      onBackgroundExtraction: (settled) => {
-        backgroundExtraction = settled;
-      },
     });
-    await backgroundExtraction;
     // Precondition, from real code: still unbound.
     expect(getWorkspaceProjectByProjectId(db, result.projectId)).toBeUndefined();
 
@@ -328,23 +316,16 @@ describe('project move to personal on an unbound (never-locally-shared) project'
     // behavior today when the hub genuinely has no opinion (e.g. catalog
     // unconfigured) — the code must fall back to reporting "not currently
     // team" rather than guessing.
-    let backgroundExtraction: Promise<unknown> | null = null;
     const result = await startBrandExtraction({
       designMd: DESIGN_MD_INPUT,
       brandsRoot,
       projectsRoot,
-      userDesignSystemsRoot,
       skillsRoot: SKILLS_ROOT,
       db,
-      designSystemWorkspaceId: TEAM_WORKSPACE_ID,
       logoFallback: NO_LOGO_FALLBACK,
       imageryFallback: NO_IMAGERY_FALLBACK,
       seedFallback: NO_SEED_FALLBACK,
-      onBackgroundExtraction: (settled) => {
-        backgroundExtraction = settled;
-      },
     });
-    await backgroundExtraction;
 
     const app = express();
     app.use(express.json());
