@@ -412,20 +412,106 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
-async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<boolean> {
+/**
+ * `isTeamShared` is the hub-backed truth: `/api/workspace/projects/team`
+ * reads the team's resource-hub catalog directly (see
+ * `apps/daemon/src/routes/collab-context.ts`), not this daemon's local
+ * sqlite. It stays true the instant the hub confirms the project is shared
+ * to the caller's team, well before the pull below has materialized a local
+ * row. Callers that need to distinguish "not on the hub catalog" (genuinely
+ * not shared / no access) from "on the catalog but the local mirror hasn't
+ * landed yet" must branch on `isTeamShared`, not on `pulled` — a pull can
+ * return `ok: true` with no bytes materialized yet (see collab-sync.ts's
+ * `/collab/pull` handler, which only registers the local project once
+ * `pullLatest` resolves a non-null version).
+ */
+type TeamSharedProjectPullOutcome = {
+  isTeamShared: boolean;
+  pulled: boolean;
+};
+
+async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<TeamSharedProjectPullOutcome> {
   try {
     const listResponse = await fetch('/api/workspace/projects/team');
-    if (!listResponse.ok) return false;
+    if (!listResponse.ok) return { isTeamShared: false, pulled: false };
     const body = (await listResponse.json()) as WorkspaceTeamProjectsResponse;
     const isTeamShared = (body.projects ?? []).some((project) => project.projectId === projectId);
-    if (!isTeamShared) return false;
+    if (!isTeamShared) return { isTeamShared: false, pulled: false };
     const pullResponse = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/pull`, {
       method: 'POST',
     });
-    return pullResponse.ok;
+    return { isTeamShared: true, pulled: pullResponse.ok };
   } catch {
-    return false;
+    return { isTeamShared: false, pulled: false };
   }
+}
+
+// A member's first-ever open of a just-shared project races the daemon's
+// local materialization (POST /collab/pull's registerPulledProject, or
+// ProjectView's own /collab/status poll firing ensureSharedProjectPlaceholder
+// — see collab-sync.ts) against the deep-link bootstrap effect below. Give
+// that materialization a short bounded window instead of trusting a single
+// immediate miss.
+const DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS = 4;
+const DEEP_LINK_TEAM_SHARE_RETRY_DELAY_MS = 600;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type DeepLinkedProjectResolution =
+  | { kind: 'found'; project: Project }
+  // The hub confirmed team membership at least once during the retry window:
+  // the project exists and the caller has access. Local materialization is
+  // still catching up — the caller must NOT treat this as "not found".
+  | { kind: 'still-materializing' }
+  // Never confirmed as team-shared within the retry window (or genuinely not
+  // shared at all) — the caller's existing not-found handling applies.
+  | { kind: 'not-found' };
+
+/**
+ * Resolves a project a member has just deep-linked to but has no local
+ * record of yet. Bounded-retries `getProject` + `pullTeamSharedProjectIfAvailable`
+ * so a first-ever open of a freshly team-shared project survives the local
+ * materialization race instead of being misread as "doesn't exist" on the
+ * first miss. Pulled out of the App.tsx bootstrap effect as a plain async
+ * function (no React, no timers beyond the injected `delay`) so the retry
+ * decision — when does "not found yet" become "still materializing" versus
+ * "genuinely not found" — is unit-testable without mounting the component.
+ */
+export async function resolveDeepLinkedTeamSharedProject(
+  projectId: string,
+  deps: {
+    getProject: (id: string) => Promise<Project | null>;
+    pullTeamSharedProjectIfAvailable: (id: string) => Promise<TeamSharedProjectPullOutcome>;
+    delay: (ms: number) => Promise<void>;
+    retryAttempts?: number;
+    retryDelayMs?: number;
+    isCancelled?: () => boolean;
+  },
+): Promise<DeepLinkedProjectResolution> {
+  const attempts = deps.retryAttempts ?? DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS;
+  const retryDelayMs = deps.retryDelayMs ?? DEEP_LINK_TEAM_SHARE_RETRY_DELAY_MS;
+  const isCancelled = () => deps.isCancelled?.() ?? false;
+  let everConfirmedTeamShared = false;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await deps.delay(retryDelayMs);
+      if (isCancelled()) return { kind: 'still-materializing' };
+    }
+    const project = await deps.getProject(projectId).catch(() => null);
+    if (isCancelled()) return { kind: 'still-materializing' };
+    if (project) return { kind: 'found', project };
+    const { isTeamShared, pulled } = await deps.pullTeamSharedProjectIfAvailable(projectId);
+    if (isCancelled()) return { kind: 'still-materializing' };
+    if (isTeamShared) everConfirmedTeamShared = true;
+    if (pulled) {
+      const pulledProject = await deps.getProject(projectId).catch(() => null);
+      if (isCancelled()) return { kind: 'still-materializing' };
+      if (pulledProject) return { kind: 'found', project: pulledProject };
+    }
+  }
+  return everConfirmedTeamShared ? { kind: 'still-materializing' } : { kind: 'not-found' };
 }
 
 export function App() {
@@ -2165,7 +2251,7 @@ function AppInner() {
         navigate({ kind: 'project', projectId: id, fileName: routeFileName });
         return true;
       }
-      const pulled = await pullTeamSharedProjectIfAvailable(id);
+      const { pulled } = await pullTeamSharedProjectIfAvailable(id);
       if (pulled) {
         const pulledProject = await getProject(id);
         if (pulledProject) {
@@ -2379,54 +2465,66 @@ function AppInner() {
   const activeProject = loadedActiveProject ?? routeProjectPlaceholder;
 
   // Deep-linked route to a project we don't have yet (e.g. after a refresh
-  // that finishes after the project list comes back). Fetch it in the
+  // that finishes after the project list comes back, OR a member's first-ever
+  // open of a project their team just shared with them). Fetch it in the
   // background so the view can render rather than bouncing to home.
+  //
+  // A member's first open of a freshly-shared project is a genuine race: the
+  // hub already confirms the project belongs to their team, but the local
+  // sqlite mirror (materialized by POST /collab/pull's registerPulledProject,
+  // or by ProjectView's own /collab/status poll firing
+  // ensureSharedProjectPlaceholder — see collab-sync.ts) hasn't landed yet. A
+  // single immediate miss used to be indistinguishable from "this project
+  // doesn't exist / I have no access", and navigated the member straight back
+  // to Home mid-sync. `pullTeamSharedProjectIfAvailable`'s
+  // `isTeamShared` is the reliable signal here: it comes from the hub-backed
+  // `/api/workspace/projects/team` catalog, not from local sqlite state that
+  // can simply be running behind. Retry on that signal for a short bounded
+  // window, and once the hub has confirmed team membership even once, never
+  // fall through to the not-found/navigate-home path for this project — only
+  // a hub-confirmed absence does.
   useEffect(() => {
     if (route.kind !== 'project') return;
     if (loadedActiveProject) return;
     if (!projects.length && !daemonLive) return;
     if (projects.some((p) => p.id === route.projectId)) return;
     let cancelled = false;
+    const projectId = route.projectId;
     (async () => {
-      const project = await getProject(route.projectId).catch(() => null);
+      const resolution = await resolveDeepLinkedTeamSharedProject(projectId, {
+        getProject,
+        pullTeamSharedProjectIfAvailable,
+        delay,
+        isCancelled: () => cancelled,
+      });
       if (cancelled) return;
-      if (project) {
+      if (resolution.kind === 'found') {
+        const fetched = resolution.project;
         setProjects((curr) => {
-          const existingIndex = curr.findIndex((candidate) => candidate.id === project.id);
+          const existingIndex = curr.findIndex((candidate) => candidate.id === fetched.id);
           if (existingIndex < 0) {
-            return [...curr, project];
+            return [...curr, fetched];
           }
-          return curr.map((candidate) => (candidate.id === project.id ? project : candidate));
+          return curr.map((candidate) => (candidate.id === fetched.id ? fetched : candidate));
         });
         return;
       }
-      const pulled = await pullTeamSharedProjectIfAvailable(route.projectId);
-      if (cancelled) return;
-      if (pulled) {
-        const pulledProject = await getProject(route.projectId).catch(() => null);
-        if (cancelled) return;
-        if (pulledProject) {
-          setProjects((curr) => {
-            const existingIndex = curr.findIndex((candidate) => candidate.id === pulledProject.id);
-            if (existingIndex < 0) {
-              return [...curr, pulledProject];
-            }
-            return curr.map((candidate) => (candidate.id === pulledProject.id ? pulledProject : candidate));
-          });
-          return;
-        }
-      }
+      // The hub confirmed at least once during the retry window that this
+      // project belongs to the caller's team: it exists and they have access.
+      // Local materialization is just still catching up — leave the route
+      // alone instead of bouncing the member off a project they can see.
+      if (resolution.kind === 'still-materializing') return;
       const request = beginProjectListRequest();
       const list = await listCurrentWorkspaceProjects({ workspaceView: 'all' }).catch(() => []);
       if (cancelled) return;
       const applied = reconcileFetchedProjects(list, request);
       if (!applied) return;
-      const fetchedProject = locallyDeletedProjectIdsRef.current.has(route.projectId)
+      const fetchedProject = locallyDeletedProjectIdsRef.current.has(projectId)
         ? undefined
-        : list.find((p) => p.id === route.projectId);
+        : list.find((p) => p.id === projectId);
       const staleRequest = request.mutationVersion < projectListMutationVersionRef.current;
       const knownLocalProject =
-        staleRequest && pendingLocalProjectIdsRef.current.has(route.projectId);
+        staleRequest && pendingLocalProjectIdsRef.current.has(projectId);
       if (!fetchedProject && !knownLocalProject) {
         setProjectOpenError(t('project.missing'));
         navigate({ kind: 'home', view: 'home' }, { replace: true });
