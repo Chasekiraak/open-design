@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type
 import type { AgentModelOption } from '../types';
 import { useT } from '../i18n';
 import { Icon } from './Icon';
+import { modelProviderIconSrc } from './modelProviderIcon';
 import {
   getModelCostTier,
   getModelCapabilityTag,
@@ -342,7 +343,15 @@ export const SearchableModelSelect = forwardRef<
         return;
       }
 
-      const desiredWidth = Math.max(rect.width, popoverMinWidth ?? 0);
+      // Wide triggers (e.g. the settings dialog's full-width model field)
+      // must not drag the popover to field width — 560px comfortably fits
+      // the two-level company/model browse and the widest model rows; a
+      // caller-provided popoverMinWidth beyond that still wins.
+      const POPOVER_MAX_WIDTH = 560;
+      const desiredWidth = Math.min(
+        Math.max(rect.width, popoverMinWidth ?? 0),
+        Math.max(POPOVER_MAX_WIDTH, popoverMinWidth ?? 0),
+      );
       const maxWidth = Math.max(0, boundaryRight - boundaryLeft);
       const width = Math.min(desiredWidth, maxWidth);
       const left = Math.min(
@@ -433,8 +442,14 @@ export const SearchableModelSelect = forwardRef<
     const optionDescriptionIds = [optionCostId, optionTagId, optionDisabledId]
       .filter(Boolean)
       .join(' ') || undefined;
+    const optionLogoSrc = modelProviderIconSrc(option.id);
     const optionContent = (
       <span className="model-select-searchable__option-content">
+        {optionLogoSrc ? (
+          <span className="model-select-searchable__option-logo" aria-hidden="true">
+            <img src={optionLogoSrc} alt="" width={16} height={16} />
+          </span>
+        ) : null}
         <span className="model-select-searchable__option-copy">
           <span className="model-select-searchable__option-label">
             <span id={optionLabelId}>{option.label}</span>
@@ -609,7 +624,7 @@ export const SearchableModelSelect = forwardRef<
                   id={listboxId}
                   role="listbox"
                   style={{
-                    maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                    maxHeight: `${Math.max(96, popoverStyle.maxHeight - (shouldShowSearch ? 68 : 16))}px`,
                   }}
                 >
                   {companyGroups.length === 0 ? (
@@ -620,6 +635,9 @@ export const SearchableModelSelect = forwardRef<
                         {companyGroups.map((group) => {
                           const isActive = group.key === activeCompanyKey;
                           const hasSelected = group.options.some((o) => o.id === value);
+                          const companyLogoSrc = modelProviderIconSrc(
+                            group.options[0]?.id ?? group.key,
+                          );
                           return (
                             <button
                               key={group.key}
@@ -630,7 +648,18 @@ export const SearchableModelSelect = forwardRef<
                               onFocus={() => setHoverCompany(group.key)}
                               onClick={() => setHoverCompany(group.key)}
                             >
-                              <span className="model-select-searchable__company-name">{group.name}</span>
+                              <span className="model-select-searchable__company-name">
+                                {companyLogoSrc ? (
+                                  <img
+                                    className="model-select-searchable__company-logo"
+                                    src={companyLogoSrc}
+                                    alt=""
+                                    width={16}
+                                    height={16}
+                                  />
+                                ) : null}
+                                {group.name}
+                              </span>
                               <span className="model-select-searchable__company-count" aria-hidden>{group.options.length}</span>
                             </button>
                           );
@@ -650,7 +679,7 @@ export const SearchableModelSelect = forwardRef<
                   id={listboxId}
                   role="listbox"
                   style={{
-                    maxHeight: `${Math.max(0, popoverStyle.maxHeight - (shouldShowSearch ? 52 : 12))}px`,
+                    maxHeight: `${Math.max(0, popoverStyle.maxHeight - (shouldShowSearch ? 68 : 16))}px`,
                   }}
                 >
                   {filteredOptions.map((option, index) => renderModelOption(option, index))}

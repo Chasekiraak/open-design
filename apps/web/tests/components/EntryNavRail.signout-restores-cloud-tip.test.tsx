@@ -73,7 +73,6 @@ describe('EntryNavRail sign-out (recvqbkcLqIFH7)', () => {
           onViewChange={() => {}}
           onNewProject={() => {}}
           open
-          onClose={() => {}}
           context={context()}
         />
       </I18nProvider>,

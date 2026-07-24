@@ -33,7 +33,7 @@ import {
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { amrConsoleUrlForProfile, amrProfileBadgeLabel } from '../runtime/amr-guidance';
 
@@ -44,6 +44,7 @@ interface AmrLoginPillProps {
   initialStatus?: VelaLoginStatus | null;
   skipInitialRefresh?: boolean;
   signInLabel?: string;
+  signInIcon?: IconName;
   amrEntrySourceDetail?: TrackingAmrEntrySource;
   metricsConsent?: boolean;
   installationId?: string | null;
@@ -80,6 +81,7 @@ export interface AmrAccountControlProps {
   hideSignedOutStatus?: boolean;
   hideSignedInStatus?: boolean;
   signInLabel?: string;
+  signInIcon?: IconName;
   showConsoleAction?: boolean;
   consoleUrl?: string;
   iconOnlySignOut?: boolean;
@@ -128,6 +130,7 @@ export function AmrAccountControl({
   hideSignedOutStatus = false,
   hideSignedInStatus = false,
   signInLabel,
+  signInIcon,
   showConsoleAction = false,
   consoleUrl,
   iconOnlySignOut = false,
@@ -238,6 +241,7 @@ export function AmrAccountControl({
           disabled={signInDisabled}
           onClick={onSignIn}
         >
+          {signInIcon ? <Icon name={signInIcon} size={15} aria-hidden /> : null}
           {signInLabel ?? t('settings.amrSignIn')}
         </button>
       ) : null}
@@ -279,6 +283,7 @@ export function AmrLoginPill({
   initialStatus = null,
   skipInitialRefresh = false,
   signInLabel,
+  signInIcon,
   amrEntrySourceDetail,
   metricsConsent = false,
   installationId,
@@ -658,6 +663,7 @@ export function AmrLoginPill({
         hideSignedOutStatus={hideSignedOutStatus}
         hideSignedInStatus={hideSignedInStatus}
         signInLabel={signInLabel}
+        signInIcon={signInIcon}
         showConsoleAction={showConsoleAction}
         iconOnlySignOut={iconOnlySignOut}
         signInDisabled={loginInFlight}
