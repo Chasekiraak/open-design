@@ -14,7 +14,11 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CloudSignInTip, resetCloudSignInTipDismissal } from '../../src/components/CloudSignInTip';
+import {
+  CloudSignInTip,
+  RailAccountSyncTip,
+  resetCloudSignInTipDismissal,
+} from '../../src/components/CloudSignInTip';
 import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
 
@@ -146,5 +150,38 @@ describe('CloudSignInTip', () => {
 
     renderTip();
     expect(await screen.findByTestId('entry-cloud-signin-tip')).toBeTruthy();
+  });
+});
+
+// recvqgpXSYFNTq: "退出登录后再登录，左下角的头像加载的有些慢" — the rail's
+// bottom-left callout slot used to go fully blank between `CloudSignInTip`
+// unmounting (sign-in just succeeded) and the account row appearing (the
+// workspace-context re-read landing). `EntryShell` now renders this in that
+// exact same footer slot instead of `null` for that window.
+describe('RailAccountSyncTip', () => {
+  function renderSyncTip() {
+    return render(
+      <I18nProvider initial="en">
+        <RailAccountSyncTip />
+      </I18nProvider>,
+    );
+  }
+
+  it('renders an inert status readout instead of leaving the slot blank', async () => {
+    renderSyncTip();
+    const status = await screen.findByTestId('entry-rail-account-sync-tip');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    // Same headline as the callout it replaces, so the swap reads as a state
+    // change on the same card rather than a different, unrelated one.
+    expect(status.textContent).toContain('Open Design Cloud');
+    expect(status.textContent).toContain('Loading');
+  });
+
+  it('is not interactive — no button/section semantics or click affordance', async () => {
+    renderSyncTip();
+    const status = await screen.findByTestId('entry-rail-account-sync-tip');
+    expect(status.tagName).toBe('DIV');
+    expect(status.querySelector('button')).toBeNull();
   });
 });
