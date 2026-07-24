@@ -146,6 +146,18 @@ export interface ProjectCollab {
   ownerDisplayName: string | null;
   /** The owner's team role (owner/admin/member); null when unresolved. */
   ownerRole: CollabMemberRole | null;
+  /**
+   * True while a non-owner member's local mirror has not (yet, provably)
+   * caught up to the published head. Starts true on every mount — this hook
+   * always issues at least one pull per project open to land on the latest
+   * head rather than trusting a possibly-stale local copy (see the auto-pull
+   * effect below) — and flips false once that pull confirms freshness or the
+   * project turns out not to need one. Drives the "downloading" loading
+   * treatment so a slow/stuck pull cannot look identical to a project with no
+   * files (recvqghymxqQQq): `GET /api/projects/:id/files` is a plain local-
+   * disk read and returns `[]` for both cases.
+   */
+  downloadPending: boolean;
   reportChange: () => void;
   requestPublish: () => void;
   /** Refresh the presence roster now (hub push-channel consumer). */
@@ -327,6 +339,14 @@ export function useProjectCollab(
     })();
   }, [shouldAutoPull, publishedVersion, pull, pullTick]);
 
+  // True until the pull above (or a subsequent one, if the head advances
+  // again) has provably landed: status hasn't answered yet, a newer head is
+  // known and not yet fetched, or a pull is actively in flight. `pullTick`
+  // is not read directly, but the state bump that drives it is what forces
+  // this render to see `pulledVersionRef.current`'s latest value.
+  const downloadPending = shouldAutoPull
+    && (publishedVersion == null || publishedVersion > pulledVersionRef.current || pullInFlightRef.current);
+
   return {
     enabled: collabEnabled,
     member,
@@ -337,6 +357,7 @@ export function useProjectCollab(
     isOwner,
     ownerDisplayName: collab.ownerDisplayName,
     ownerRole: collab.ownerRole,
+    downloadPending,
     reportChange: collab.reportChange,
     requestPublish: collab.requestPublish,
     refreshPresence: collab.refreshPresence,

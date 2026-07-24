@@ -3577,6 +3577,8 @@ export interface Dict {
   'workspace.deleteFileConfirm': string;
   'workspace.readonlyNotice': string;
   'workspace.readonlyNoticeBy': string;
+  'workspace.fileSyncDownloading': string;
+  'workspace.fileSyncUploading': string;
   'workspace.deleteSelectedFilesConfirm': string;
   'workspace.deleteSelectedFilesPartial': string;
   'workspace.openFromDesignFiles': string;
@@ -3612,6 +3614,7 @@ export interface Dict {
   'designFiles.newDocument': string;
   'designFiles.newDocumentTitle': string;
   'designFiles.empty': string;
+  'designFiles.syncing': string;
   'designFiles.refresh': string;
   'designFiles.delete': string;
   'designFiles.searchPlaceholder': string;

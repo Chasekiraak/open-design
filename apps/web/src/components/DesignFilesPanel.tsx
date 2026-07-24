@@ -16,6 +16,7 @@ import {
 import { isVisualStabilityMode } from '../utils/visualStability';
 import type { PluginFolderAgentAction } from './design-files/pluginFolderActions';
 import { getPluginFolderCandidates } from './design-files/pluginFolders';
+import { FileSyncBadge } from '../collab/FileSyncBadge';
 import { Icon } from './Icon';
 import { LiveArtifactBadges } from './LiveArtifactBadges';
 import { RemixIcon } from './RemixIcon';
@@ -33,6 +34,14 @@ interface Props {
   projectId: string;
   /** Read-only viewer of a team-shared project: withholds create/upload actions. */
   viewerOnly?: boolean;
+  /**
+   * True while a non-owner member's local mirror has not yet caught up to the
+   * project's published head — the file-list read below is honest (it reads
+   * local disk directly), but an empty result here can mean either "nothing
+   * was ever shared" or "the pull just hasn't landed yet". Swaps the empty
+   * state for a syncing notice so the two cannot look identical.
+   */
+  downloadPending?: boolean;
   // Basename of the project's working directory when the user has chosen a
   // real folder (e.g. "openclaw"). Shown as the breadcrumb root instead of
   // the generic "project" label. Undefined for default-storage projects.
@@ -291,6 +300,7 @@ function RotatingTip({ auxiliary = false }: { auxiliary?: boolean }) {
 export function DesignFilesPanel({
   projectId,
   viewerOnly = false,
+  downloadPending = false,
   rootDirName,
   reloading,
   running = false,
@@ -1337,54 +1347,72 @@ export function DesignFilesPanel({
             </div>
           ) : null}
           {files.length === 0 && liveArtifacts.length === 0 && (folders?.length ?? 0) === 0 ? (
-            <div className="df-empty" data-testid="design-files-empty">
-              <div className="df-empty-pill">
-                <span className="df-empty-title">
-                  {t('designFiles.empty')}
-                </span>
-                {/* Product call: the empty state shows this component with its
-                    CTAs for EVERY empty project, shared read-only ones
-                    included — the create actions themselves stay guarded by
-                    the read-only enforcement downstream. */}
-                <div className="df-empty-actions">
-                  <button
-                    type="button"
-                    className="df-empty-cta df-empty-cta-primary"
-                    data-testid="design-files-empty-new-sketch"
-                    onClick={onNewSketch}
-                    title={t('designFiles.newSketch')}
-                  >
-                    <Icon name="pencil" size={13} />
-                    <span>{t('designFiles.newSketch')}</span>
-                  </button>
-                  {onOpenBrowser ? (
-                    <button
-                      type="button"
-                      className="df-empty-cta df-empty-cta-secondary"
-                      data-testid="design-files-empty-open-browser"
-                      onClick={onOpenBrowser}
-                      aria-label={t('workspace.newBrowserDescription')}
-                      title={t('workspace.newBrowserDescription')}
-                    >
-                      <Icon name="globe" size={13} />
-                      <span>{t('workspace.newBrowser')}</span>
-                    </button>
-                  ) : null}
-                  {onCreateDesignSystem ? (
-                    <button
-                      type="button"
-                      className="df-empty-cta df-empty-cta-tertiary"
-                      data-testid="design-files-empty-create-design-system"
-                      onClick={onCreateDesignSystem}
-                      title={t('dsManager.createTitle')}
-                    >
-                      <Icon name="blocks" size={14} />
-                      <span>{t('dsManager.createTitle')}</span>
-                    </button>
-                  ) : null}
+            downloadPending ? (
+              // A shared project whose local mirror has not caught up yet
+              // reads as EXACTLY the same zero-files result as a genuinely
+              // empty project (this list is a plain local-disk read — see
+              // `downloadPending`'s doc comment). Without this branch the two
+              // are indistinguishable and the CTAs below (which create NEW
+              // content) actively mislead a viewer whose project is about to
+              // have real files. Swap them for a syncing notice instead.
+              <div className="df-empty df-empty-syncing" data-testid="design-files-syncing">
+                <div className="df-empty-pill">
+                  <FileSyncBadge state="downloading" size={20} />
+                  <span className="df-empty-title">
+                    {t('designFiles.syncing')}
+                  </span>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="df-empty" data-testid="design-files-empty">
+                <div className="df-empty-pill">
+                  <span className="df-empty-title">
+                    {t('designFiles.empty')}
+                  </span>
+                  {/* Product call: the empty state shows this component with its
+                      CTAs for EVERY empty project, shared read-only ones
+                      included — the create actions themselves stay guarded by
+                      the read-only enforcement downstream. */}
+                  <div className="df-empty-actions">
+                    <button
+                      type="button"
+                      className="df-empty-cta df-empty-cta-primary"
+                      data-testid="design-files-empty-new-sketch"
+                      onClick={onNewSketch}
+                      title={t('designFiles.newSketch')}
+                    >
+                      <Icon name="pencil" size={13} />
+                      <span>{t('designFiles.newSketch')}</span>
+                    </button>
+                    {onOpenBrowser ? (
+                      <button
+                        type="button"
+                        className="df-empty-cta df-empty-cta-secondary"
+                        data-testid="design-files-empty-open-browser"
+                        onClick={onOpenBrowser}
+                        aria-label={t('workspace.newBrowserDescription')}
+                        title={t('workspace.newBrowserDescription')}
+                      >
+                        <Icon name="globe" size={13} />
+                        <span>{t('workspace.newBrowser')}</span>
+                      </button>
+                    ) : null}
+                    {onCreateDesignSystem ? (
+                      <button
+                        type="button"
+                        className="df-empty-cta df-empty-cta-tertiary"
+                        data-testid="design-files-empty-create-design-system"
+                        onClick={onCreateDesignSystem}
+                        title={t('dsManager.createTitle')}
+                      >
+                        <Icon name="blocks" size={14} />
+                        <span>{t('dsManager.createTitle')}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )
           ) : (
             <>
               {availableTabs.length > 0 ? (
