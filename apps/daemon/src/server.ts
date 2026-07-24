@@ -682,6 +682,7 @@ import {
   parseTeamProjectSnapshot,
 } from './collab/sync-snapshot-store.js';
 import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
+import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
@@ -2756,45 +2757,8 @@ export async function startServer({
     createVelaCliTeamProjectCatalogClientFromEnv({
       getWorkspaceId: getActiveWorkspaceId,
     });
-  // Generic stale-while-revalidate cache: after the first load every call
-  // returns the last value for the key immediately and refreshes in the
-  // background once it is older than freshMs; concurrent callers coalesce on the
-  // in-flight fetch. Keyed so a workspace switch is an automatic miss.
-  const createSwrCache = <T>(fetcher: () => Promise<T>, keyFn: () => string, freshMs: number): (() => Promise<T>) => {
-    let entry: { key: string; value: T | null; settledAt: number; inflight: Promise<T> | null } | null = null;
-    const refresh = (key: string) => {
-      if (!entry || entry.key !== key) entry = { key, value: null, settledAt: 0, inflight: null };
-      const cur = entry;
-      const p = fetcher();
-      cur.inflight = p;
-      p.then(
-        (value) => {
-          if (entry === cur) {
-            cur.value = value;
-            cur.settledAt = Date.now();
-            cur.inflight = null;
-          }
-        },
-        () => {
-          if (entry === cur) {
-            cur.inflight = null;
-            if (cur.value === null) entry = null;
-          }
-        },
-      );
-      return p;
-    };
-    return () => {
-      const key = keyFn();
-      if (!entry || entry.key !== key) return refresh(key);
-      if (entry.value !== null) {
-        const cached = entry.value;
-        if (!entry.inflight && Date.now() - entry.settledAt >= freshMs) void refresh(key).catch(() => {});
-        return Promise.resolve(cached);
-      }
-      return entry.inflight ?? refresh(key);
-    };
-  };
+  // Generic stale-while-revalidate cache (with an `invalidate()` escape hatch)
+  // — see collab/swr-cache.ts.
   // Cache the workspace-scoped team catalog behind /api/workspaces/:id/projects
   // ?view=… (the "All projects"/"Recent" pages) the same way — keyed on the
   // active workspace so navigation is instant instead of flashing an empty "no
@@ -3773,11 +3737,20 @@ export async function startServer({
   // request path (~1.5-2.5s each) and serialized behind the browser's
   // 6-connection cap. Materialization still runs, but on the background refresh
   // rather than the hot read.
+  //
+  // `invalidate()` is consumed by registerTeamResourceShareRoutes' share/
+  // unshare handlers below (a local mutation this daemon just made). It has to
+  // drop TWO layers, not one: this cache's own parsed-and-materialized entry,
+  // AND `sharedTeamResourcesCommand` underneath it — `share.sharedResources()`
+  // reads the raw `vela shared --json` listing through that second SWR cache
+  // (shared by all three kinds), so a bare reset of this layer alone would
+  // still hand the immediate post-share/unshare refetch the pre-change hub
+  // listing for up to that cache's own freshMs.
   const cachedTeamResourceList = (
     share: TeamResourceShareService,
     sync?: (resource: TeamResourceShareRecord) => Promise<void>,
-  ) =>
-    createSwrCache(
+  ) => {
+    const listing = createSwrCache(
       async () => {
         const resources = await share.sharedResources();
         if (sync) await Promise.all(resources.map((resource) => sync(resource)));
@@ -3786,6 +3759,14 @@ export async function startServer({
       () => activeWorkspace.get() ?? '',
       3000,
     );
+    const dropListingEntry = listing.invalidate;
+    return Object.assign(listing, {
+      invalidate() {
+        dropListingEntry();
+        sharedTeamResourcesCommand.invalidate();
+      },
+    });
+  };
   const sharedTeamResourcesCommand = createSwrCache(
     async () => {
       const { runVelaResourceCommand } = await import('./collab/vela-cli-resource-adapter.js');
