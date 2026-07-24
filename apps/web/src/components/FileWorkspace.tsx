@@ -3815,6 +3815,7 @@ export function FileWorkspace({
             config={chatConfig}
             agentsById={chatAgentsById}
             locale={chatLocale ?? 'en'}
+            workspaceContext={workspaceContext}
             projectFiles={visibleFiles}
             projectFileNames={sideChatFileNames}
             projectResolvedDir={resolvedDir}

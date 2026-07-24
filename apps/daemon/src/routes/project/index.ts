@@ -217,8 +217,15 @@ function projectAccess(
  * upload) calls this once with its own `ctx.workspaceContext` — never wired
  * up in most unit tests, in which case the gate falls back to trusting the
  * header alone, exactly like before this cross-check existed.
+ *
+ * Exported so `server.ts` can build a SECOND instance (same shape, same
+ * cross-check) for `registerRunRoutes` — POST /api/runs and POST /api/chat
+ * had ZERO `enforceWorkspace*` coverage until that fix, unlike every other
+ * project-mutation route this file itself registers. Run creation borrows
+ * this instance rather than a bespoke copy so its semantics can never drift
+ * from rename/delete/duplicate/writeFiles/comments.
  */
-function createEnforceWorkspaceProjectMutation(
+export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
   const getLastKnownWorkspaceMembership: GetLastKnownWorkspaceMembership | undefined = workspaceContext
@@ -3293,6 +3300,24 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         project.id,
         'delete',
       )) return;
+      // spec 04 §11: a team-visible project must be unshared from the hub
+      // BEFORE it disappears locally — mirrors the 'personal' branch of
+      // /move's `requestTeamVisibility`, the one other place this daemon
+      // already knows how to take a project out of the team space. Without
+      // this, `dbDeleteProject` only ever touches THIS caller's own
+      // `workspace_projects` row: the hub's published resource (and every
+      // OTHER member's already-bound local row) never learns the project is
+      // gone, so teammates keep seeing it. `enforceWorkspaceProjectMutation`
+      // just above already proved the caller may mutate this exact row, so
+      // no separate `canShareProjects` gate is layered on top here — the
+      // whole project is about to stop existing regardless.
+      const workspaceRow = getWorkspaceProjectByProjectId(db, project.id);
+      if (workspaceRow?.visibility === 'team') {
+        const teamCtx = workspaceProjectContextFromRequest(req);
+        if (teamCtx && teamCtx !== 'missing') {
+          await requestTeamVisibility([project.id], teamCtx, 'personal');
+        }
+      }
       // Stop any live agent run in this project before its row and directory
       // are removed, otherwise the CLI subprocess is orphaned — it keeps
       // billing and writes into a directory that no longer exists (#5468).

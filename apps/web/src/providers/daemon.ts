@@ -29,8 +29,10 @@ import type {
   ResearchOptions,
   RunContextSelection,
   SseErrorPayload,
+  WorkspaceCollabContext,
 } from '@open-design/contracts';
 import type { StreamHandlers } from './anthropic';
+import { workspaceProjectHeaders } from '../state/projects';
 
 /**
  * Returns the front-end carrier that's about to send this request:
@@ -312,6 +314,16 @@ export interface DaemonStreamOptions {
   mediaExecution?: MediaExecutionPolicy;
   titleGeneration?: { enabled?: boolean };
   locale?: string;
+  // The caller's current workspace identity, attached as `x-od-workspace-*`
+  // headers on POST /api/runs so the daemon's workspace-resource mutation
+  // gate (see `enforceWorkspaceProjectMutation` in
+  // `apps/daemon/src/routes/runs.ts`) can tell a team member apart from a
+  // headerless caller. Mirrors `workspaceProjectHeaders` usage on every
+  // other project write (rename/delete/duplicate/comments/file writes) —
+  // omitting it here would make POST /api/runs the one write path that
+  // forgets to identify the caller. Null/omitted for signed-out / personal
+  // (non-workspace) usage, matching those other call sites.
+  workspaceContext?: WorkspaceCollabContext | null;
   initialLastEventId?: string | null;
   onRunCreated?: (runId: string) => void;
   onRunStatus?: (status: ChatRunStatus) => void;
@@ -651,6 +663,7 @@ export async function streamViaDaemon({
   mediaExecution,
   titleGeneration,
   locale,
+  workspaceContext,
   initialLastEventId,
   onRunCreated,
   onRunStatus,
@@ -703,6 +716,13 @@ export async function streamViaDaemon({
         // The daemon falls back to a User-Agent sniff when this header is
         // absent (e.g. third-party clients), so omitting it in tests is OK.
         'X-OD-Client': detectClientType(),
+        // Identifies the caller's workspace to the daemon's workspace-resource
+        // mutation gate (see `enforceWorkspaceProjectMutation` in
+        // apps/daemon/src/routes/runs.ts) — without it, a team member's own
+        // run on a team-bound project 401s exactly like an unauthenticated
+        // caller's would. Omitted (headers stay absent) for signed-out /
+        // personal usage, matching every other workspace-gated write.
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
       },
       body,
     });

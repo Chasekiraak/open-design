@@ -55,6 +55,7 @@ function registerRoutes(app: express.Express, staticHtml: string | null) {
       renderDesignSystemShowcase: (id: string, body: string) =>
         `<!doctype html><title>${id} synthetic</title><main>${body}</main>`,
       syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
+      unshareTeamDesignSystemIfShared: async () => false,
       updateUserDesignSystem: async () => null,
       updateUserDesignSystemRevisionStatus: async () => null,
     },

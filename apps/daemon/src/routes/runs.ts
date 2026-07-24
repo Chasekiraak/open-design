@@ -26,6 +26,10 @@ import { newInsertId, readAnalyticsContext } from '../analytics.js';
 import type { AnalyticsContext } from '../analytics.js';
 import { spawnEnvForAgent } from '../agents.js';
 import { agentCliEnvForAgent, readAppConfig } from '../app-config.js';
+import type {
+  BoundWorkspaceResourceMutationGate,
+  WorkspaceResourceAccessInput,
+} from '../collab/workspace-resource-mutation.js';
 import {
   codexSessionIdFromRunEvents,
   readCodexRolloutFirstCall,
@@ -339,6 +343,51 @@ export interface RegisterRunRoutesDeps {
       run: ChatRun,
     ) => void;
   };
+  /**
+   * Workspace-identity gate for POST /api/runs and POST /api/chat — this
+   * file's two "create a run" entry points. Until this fix both had ZERO
+   * `enforceWorkspace*` coverage: unlike rename/delete/duplicate/writeFiles
+   * and comments (all gated per spec 04 §10/§11), any caller who knew a
+   * projectId could spawn an agent run against it — including a project
+   * bound to a TEAM workspace — with no workspace identity headers at all.
+   *
+   * Borrows the SAME `enforceWorkspaceProjectMutation` instance
+   * `routes/project/index.ts` builds via `createEnforceWorkspaceProjectMutation`
+   * (cross-checked against the daemon's own last-known membership) rather
+   * than re-deriving a second, possibly-drifting copy here — see
+   * `routes/project/comments.ts` for the established borrow-the-project's-
+   * gate pattern this mirrors.
+   *
+   * Optional, and a no-op when omitted, so fixtures that only exercise run
+   * creation (most of this file's existing tests, which use plain
+   * non-workspace-bound projects) keep compiling and behaving exactly as
+   * before — an unbound project's runs were never gated either way, since
+   * `enforceWorkspaceResourceMutation` itself passes a `row === null` lookup
+   * straight through regardless of ctx.
+   */
+  enforceWorkspaceProjectMutation?: BoundWorkspaceResourceMutationGate;
+  /**
+   * Paired with `enforceWorkspaceProjectMutation` above: the SAME
+   * `workspace_projects` binding lookups project's own mutation routes
+   * already use, so a run's gate reads the identical row rename/delete/
+   * duplicate/comments already check instead of a second query shape.
+   */
+  projectStore?: {
+    // `db` is typed `any` here (matching `BoundWorkspaceResourceMutationGate`'s
+    // own `db: unknown` seam) purely to sidestep strict-function-type
+    // contravariance: the concrete `db.ts` implementations take `SqliteDb`,
+    // and this field's value is threaded straight into
+    // `enforceWorkspaceProjectMutation`'s matching `db: unknown` parameters.
+    getWorkspaceProject: (
+      db: any,
+      workspaceId: string,
+      projectId: string,
+    ) => WorkspaceResourceAccessInput | null | undefined;
+    getWorkspaceProjectByProjectId: (
+      db: any,
+      projectId: string,
+    ) => WorkspaceResourceAccessInput | null | undefined;
+  };
 }
 
 type TerminalRunStatus = RunStatusForAnalytics & {
@@ -518,6 +567,30 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     reconcileAssistantMessageOnRunEnd,
   } = ctx.messages;
 
+  /**
+   * Workspace-identity gate for run creation, borrowing the PROJECT's own
+   * `enforceWorkspaceProjectMutation` instance (see
+   * `RegisterRunRoutesDeps.enforceWorkspaceProjectMutation` above). Writes
+   * the 401/403 response itself and returns false when denied — both
+   * POST /api/runs and POST /api/chat return immediately on `false` without
+   * ever spawning the agent. A no-op (always allows) when the gate wasn't
+   * wired up, matching how an unbound project's runs behaved before this fix
+   * existed either way.
+   */
+  function enforceRunWorkspaceMutation(req: ApiRequest, res: ApiResponse, projectId: string): boolean {
+    if (!ctx.enforceWorkspaceProjectMutation || !ctx.projectStore) return true;
+    return ctx.enforceWorkspaceProjectMutation(
+      req,
+      res,
+      sendApiError,
+      ctx.projectStore.getWorkspaceProject,
+      ctx.projectStore.getWorkspaceProjectByProjectId,
+      db,
+      projectId,
+      'writeFiles',
+    );
+  }
+
   function runToolBundleDeliveryTargetForProject(
     projectId: unknown,
     metadata: ProjectMetadata,
@@ -555,6 +628,13 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         'VALIDATION_FAILED',
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
+    }
+    if (
+      typeof requestBody.projectId === 'string' &&
+      requestBody.projectId &&
+      !enforceRunWorkspaceMutation(req, res, requestBody.projectId)
+    ) {
+      return;
     }
     let resolvedSnapshot = null;
     if (typeof requestBody.projectId === 'string' && requestBody.projectId) {
@@ -1558,6 +1638,13 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     const toolBundle = parseRunToolBundleForRequest(requestBody.toolBundle);
     if (!toolBundle.ok) {
       return sendApiError(res, 400, 'BAD_REQUEST', toolBundle.message);
+    }
+    if (
+      typeof requestBody.projectId === 'string' &&
+      requestBody.projectId &&
+      !enforceRunWorkspaceMutation(req, res, requestBody.projectId)
+    ) {
+      return;
     }
     let chatProject: ProjectRecord | null = null;
     if (typeof requestBody.projectId === 'string' && requestBody.projectId) {
