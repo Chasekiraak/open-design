@@ -237,11 +237,62 @@ export function readManualEditStyles(source: string, id: string): ManualEditStyl
   const doc = parseSource(source);
   const el = doc ? findEditableElement(doc, id) : null;
   if (!el) return emptyManualEditStyles();
+  return readElementInlineStyles(el);
+}
+
+/**
+ * The style values SOURCE persists for a target, wherever they live: the
+ * element's inline `style` attribute when the target exists in the saved DOM,
+ * otherwise the `style[data-od-manual-edit-runtime-overrides]` rule that
+ * `set-style` patches write for runtime-only targets (brand-kit ids have no
+ * saved markup). History replay must read through this so undo/redo restores
+ * the persisted values instead of treating runtime targets as unstyled.
+ */
+export function readManualEditSavedStyles(source: string, id: string): ManualEditStyles {
+  const doc = parseSource(source);
+  if (!doc) return emptyManualEditStyles();
+  const el = findEditableElement(doc, id);
+  if (el) return readElementInlineStyles(el);
+  return readRuntimeStyleOverride(doc, id);
+}
+
+function readElementInlineStyles(el: Element): ManualEditStyles {
   const style = (el as HTMLElement).style;
   return MANUAL_EDIT_STYLE_PROPS.reduce<ManualEditStyles>((acc, key) => {
     acc[key] = (style[key as unknown as keyof CSSStyleDeclaration] as string | undefined) ?? '';
     return acc;
   }, {} as ManualEditStyles);
+}
+
+/** Whether SOURCE persists a runtime style-override rule for the target —
+ * the persistence a `set-style` save leaves behind when the target has no
+ * saved markup (runtime-only brand-kit ids). */
+export function hasManualEditRuntimeStyleOverride(source: string, id: string): boolean {
+  const doc = parseSource(source);
+  return doc ? runtimeStyleRuleBody(doc, id) != null : false;
+}
+
+function runtimeStyleRuleBody(doc: Document, id: string): string | null {
+  const css = doc.querySelector('style[data-od-manual-edit-runtime-overrides]')?.textContent ?? '';
+  if (!css) return null;
+  const selector = `[data-od-id="${cssStringEscape(id)}"]`;
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? null;
+}
+
+function readRuntimeStyleOverride(doc: Document, id: string): ManualEditStyles {
+  const styles = emptyManualEditStyles();
+  const body = runtimeStyleRuleBody(doc, id);
+  if (body == null) return styles;
+  for (const declaration of body.split(';')) {
+    const colon = declaration.indexOf(':');
+    if (colon < 0) continue;
+    const name = declaration.slice(0, colon).trim();
+    const value = declaration.slice(colon + 1).replace(/!important\s*$/i, '').trim();
+    const key = MANUAL_EDIT_STYLE_PROPS.find((prop) => camelToKebab(prop) === name);
+    if (key && value) styles[key] = value;
+  }
+  return styles;
 }
 
 export function readManualEditAttributes(source: string, id: string): Record<string, string> {

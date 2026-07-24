@@ -1286,6 +1286,62 @@ describe('FileViewer manual edit regressions', () => {
     expect(frame.srcdoc).toBe(srcdocBefore);
   });
 
+  it('replays runtime-only brand-kit style history in place with the persisted values', async () => {
+    // Runtime-only targets persist set-style in the runtime-overrides <style>
+    // rule, not as element inline styles. Redo must replay the persisted
+    // values through the preview channel — the regression treated the target
+    // as unstyled, cleared the touched property, and still reported success,
+    // leaving the canvas on the undone style while the file held the redo.
+    const source = '<!doctype html><html><head><script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script></head><body><div id="root"></div></body></html>';
+    const { fetchMock, savedBodies } = manualEditWriteMock(source);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={htmlPreviewFile()}
+        liveHtml={source}
+      />,
+    );
+    clickManualTool('manual-edit-mode-toggle');
+    const frame = await previewFrame();
+    await selectManualEditTarget({
+      ...heroTarget(),
+      id: 'brand-name',
+      label: 'Brand name',
+      text: 'Acme',
+      fields: { text: 'Acme' },
+      attributes: { 'data-od-id': 'brand-name' },
+      outerHtml: '<h1 data-od-id="brand-name">Acme</h1>',
+    });
+    const srcdocBefore = frame.srcdoc;
+
+    const sizeInput = await findStyleInput('Size');
+    fireEvent.change(sizeInput, { target: { value: '48' } });
+    const modal = document.querySelector('.manual-edit-modal') as HTMLElement;
+    fireEvent.click(within(modal).getByRole('button', { name: /^Save$/ }));
+    await waitFor(() => expect(savedBodies).toHaveLength(1), { timeout: 4000 });
+    expect(savedBodies[0]!.content).toContain('font-size: 48px !important');
+
+    const postSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+    const previewedFontSizes = () => postSpy.mock.calls
+      .map(([message]) => message as { type?: string; styles?: Record<string, string> })
+      .filter((data) => data?.type === 'od-edit-preview-style')
+      .map((data) => data.styles?.fontSize);
+
+    fireEvent.click(screen.getByTestId('manual-edit-undo'));
+    await waitFor(() => expect(savedBodies).toHaveLength(2), { timeout: 4000 });
+    expect(savedBodies[1]!.content).not.toContain('font-size: 48px');
+    await waitFor(() => expect(previewedFontSizes()).toContain(''));
+
+    postSpy.mockClear();
+    fireEvent.click(screen.getByTestId('manual-edit-redo'));
+    await waitFor(() => expect(savedBodies).toHaveLength(3), { timeout: 4000 });
+    expect(savedBodies[2]!.content).toContain('font-size: 48px !important');
+    // THE regression: redo must preview the persisted value, not clear it.
+    await waitFor(() => expect(previewedFontSizes()).toContain('48px'));
+    // Both replays stayed on the live canvas — no srcDoc reload.
+    expect(frame.srcdoc).toBe(srcdocBefore);
+  });
+
   it('persists sanitized inline formatting for runtime-only brand-kit text', async () => {
     const source = '<!doctype html><html><head><script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script></head><body><div id="root"></div></body></html>';
     const { fetchMock, savedBodies } = manualEditWriteMock(source);

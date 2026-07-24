@@ -204,6 +204,7 @@ import { ManualEditSelectionOverlay, type ManualEditCropRegion } from './ManualE
 import { ManualEditTextToolbar } from './ManualEditTextToolbar';
 import {
   applyManualEditPatch,
+  hasManualEditRuntimeStyleOverride,
   isManualEditFullHtmlDocument,
   manualEditTargetHasNestedMarkup,
   readManualEditAttributes,
@@ -213,6 +214,7 @@ import {
   readManualEditRestoreDescriptor,
   readManualEditRuntimeInnerHtml,
   readManualEditRuntimeOuterHtml,
+  readManualEditSavedStyles,
   readManualEditStyles,
 } from '../edit-mode/source-patches';
 import { MANUAL_EDIT_STYLE_PROPS, manualEditTargetsLightEqual, type ManualEditBridgeMessage, type ManualEditHistoryEntry, type ManualEditPatch, type ManualEditPreviewStyles, type ManualEditRect, type ManualEditStyles, type ManualEditTarget, type ManualEditTextSelectionFormat } from '../edit-mode/types';
@@ -8652,14 +8654,22 @@ function HtmlViewer({
     savedStyles: Partial<ManualEditStyles>,
     savedSource: string,
   ) {
-    if (id !== '__body__' && !readManualEditOuterHtml(savedSource, id)) {
+    // Runtime-only targets never have saved markup — their set-style save
+    // persists into the runtime override rule, so an empty outer-HTML read
+    // alone must not be treated as "target vanished" (that path drops the
+    // selection and reloads the canvas the runtime pages must never flash).
+    if (
+      id !== '__body__'
+      && !readManualEditOuterHtml(savedSource, id)
+      && !hasManualEditRuntimeStyleOverride(savedSource, id)
+    ) {
       setManualEditError('The selected target no longer exists in the saved source. Refreshing the preview.');
       setSelectedManualEditTarget(null);
       setManualEditFrozenSource(null);
       setReloadKey((key) => key + 1);
       return;
     }
-    const sourceStyles = readManualEditStyles(savedSource, id);
+    const sourceStyles = readManualEditSavedStyles(savedSource, id);
     const supersededStyles = manualEditPendingStyleRef.current?.id === id
       ? manualEditPendingStyleRef.current.styles
       : {};
@@ -9469,7 +9479,11 @@ function HtmlViewer({
       );
     }
     if (patch.kind === 'set-style') {
-      const sourceStyles = readManualEditStyles(destSource, patch.id);
+      // Saved-styles read, not the inline-only read: runtime-only targets
+      // (brand-kit ids) persist their set-style patch in the
+      // `style[data-od-manual-edit-runtime-overrides]` rule, so redo must
+      // replay those values instead of clearing the touched properties.
+      const sourceStyles = readManualEditSavedStyles(destSource, patch.id);
       const reset: Partial<ManualEditStyles> = {};
       for (const key of Object.keys(patch.styles) as Array<keyof ManualEditStyles>) {
         reset[key] = sourceStyles[key] ?? '';

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { JSDOM } from 'jsdom';
 import {
   applyManualEditPatch,
+  hasManualEditRuntimeStyleOverride,
   isManualEditFullHtmlDocument,
   readManualEditAttributes,
   readManualEditFields,
@@ -9,6 +10,7 @@ import {
   readManualEditOuterHtml,
   readManualEditRestoreDescriptor,
   readManualEditRuntimeOuterHtml,
+  readManualEditSavedStyles,
   readManualEditStyles,
 } from '../../src/edit-mode/source-patches';
 
@@ -315,6 +317,32 @@ describe('manual edit source patches', () => {
     expect(result.source).toContain('id="od-manual-edit-runtime-apply"');
     expect(result.source).toContain('if (el && el.textContent !== value) el.textContent = value');
     expect(readRuntimeOverrides(result.source).text?.['brand-system-title']).toBe('Component library');
+  });
+
+  it('reads runtime style overrides back through readManualEditSavedStyles', () => {
+    // Runtime-only targets persist set-style in the override <style> rule, not
+    // in element markup — the saved-styles read must surface those values so
+    // history replay (undo → redo) restores them instead of empty strings.
+    const result = applyManualEditPatch(brandKitSource, {
+      kind: 'set-style',
+      id: 'brand-name',
+      styles: { fontSize: '48px', color: '#ff5500' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.source).toContain('data-od-manual-edit-runtime-overrides');
+    const styles = readManualEditSavedStyles(result.source, 'brand-name');
+    expect(styles.fontSize).toBe('48px');
+    expect(styles.color).toBe('#ff5500');
+    // Untouched props stay empty, and a source without the rule reads as unstyled.
+    expect(styles.fontWeight).toBe('');
+    expect(readManualEditSavedStyles(brandKitSource, 'brand-name').fontSize).toBe('');
+    // Source-backed elements keep reading their inline styles.
+    expect(readManualEditSavedStyles(baseSource, 'card').color).toBe('red');
+    // The predicate distinguishes "runtime style persisted" from "target gone".
+    expect(hasManualEditRuntimeStyleOverride(result.source, 'brand-name')).toBe(true);
+    expect(hasManualEditRuntimeStyleOverride(result.source, 'brand-tagline')).toBe(false);
+    expect(hasManualEditRuntimeStyleOverride(brandKitSource, 'brand-name')).toBe(false);
   });
 
   it('hides dynamic brand-kit targets instead of reporting target not found on delete', () => {
