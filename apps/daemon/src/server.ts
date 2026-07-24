@@ -2678,12 +2678,26 @@ export async function startServer({
    * system in every local dev/demo run look unclaimed — silently disabling
    * this filter everywhere except a real production vela session.
    *
-   * The context read is a vela round trip, so it is memoized briefly. The value
-   * only changes on a switch, and a switch writes the pin, which takes priority
-   * and bypasses this cache entirely.
+   * The context read IS a vela round trip, and deliberately carries no cache
+   * of its own (no TTL, no memoization) — this used to memoize the resolved
+   * id for 10s, which read fine for the pinned/single-workspace-per-process
+   * case this was written against, but broke the moment the ACTIVE workspace
+   * could change without a local pin write: B's workspace directory is owned
+   * by Vela Web, not OD (`routes/collab-context.ts`), so "create a new
+   * workspace" happens entirely outside this daemon and never calls `PUT
+   * /api/workspace/active`. The very next `.current()` already observes the
+   * new workspace correctly (confirmed live against a real daemon), but a
+   * cached answer from this function kept serving the OLD workspace's id for
+   * up to 10s afterward — and any design system CREATED inside that window
+   * (`createWorkspaceOwnedDesignSystem` below shares this same resolver) got
+   * permanently stamped with the stale workspace, with no self-heal once the
+   * cache expired. Every other `collab.workspaceContext.current()` caller in
+   * this file (mutation gates, brand routes, resource-hub principal checks)
+   * already awaits it uncached per call, and none of this function's callers
+   * are hot/polled paths (design-system list/create, brand create/finalize
+   * are user-triggered, not polled) — so there is no meaningful request-rate
+   * cost to matching that same uncached shape here.
    */
-  let cachedWorkspaceScope: { id: string | null; at: number } | null = null;
-  const WORKSPACE_SCOPE_TTL_MS = 10_000;
   async function resolveDesignSystemWorkspaceScope(): Promise<string | null> {
     // No live session confirmed yet (never signed in, signed out, or this
     // daemon process hasn't resolved `.current()` even once) — nothing here is
@@ -2692,13 +2706,8 @@ export async function startServer({
     if (!collab.workspaceContext.lastKnown?.()) return null;
     const pinned = getActiveWorkspaceId()?.trim();
     if (pinned) return pinned;
-    if (cachedWorkspaceScope && Date.now() - cachedWorkspaceScope.at < WORKSPACE_SCOPE_TTL_MS) {
-      return cachedWorkspaceScope.id;
-    }
     const context = await collab.workspaceContext.current({}).catch(() => null);
-    const id = context?.workspaceId?.trim() || null;
-    cachedWorkspaceScope = { id, at: Date.now() };
-    return id;
+    return context?.workspaceId?.trim() || null;
   }
 
   /**
