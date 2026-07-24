@@ -22,6 +22,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { attachAcpSession, detectAcpModels } from '../src/agent-protocol/index.js';
+import { acpTelemetryToolCallId } from '../src/agent-protocol/acp/updates.js';
 import { classifyAmrAccountFailure } from '../src/integrations/vela-errors.js';
 import { AmrModelLoadingCache } from '../src/runtimes/amr-model-cache.js';
 import {
@@ -1413,7 +1414,7 @@ describe('AMR ACP transport — end-to-end against fake vela stub', () => {
     expect(agentEvents).toContainEqual(
       expect.objectContaining({
         type: 'tool_use',
-        id: 'write_1',
+        id: acpTelemetryToolCallId('write_1'),
         name: 'Write',
         input: { file_path: 'index.html' },
       }),

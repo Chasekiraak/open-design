@@ -222,8 +222,9 @@ export function attachAcpSession({
     // must not appear as concrete tool_use/tool_result events.
     if (st.thinkOnly) return;
     // Raw ACP toolCallId stays as the local Map key for frame correlation; the
-    // transcript/telemetry id is opaque so path-like adapter ids never leak
-    // into Langfuse span ids or metadata.toolCallId.
+    // transcript/telemetry id is always an opaque hash so adapter-supplied
+    // ids (paths, tokens, JWTs) never leak into Langfuse span ids or
+    // metadata.toolCallId.
     const telemetryToolCallId = acpTelemetryToolCallId(toolCallId);
     send('agent', {
       type: 'tool_use',

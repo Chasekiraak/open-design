@@ -482,23 +482,16 @@ export function sanitizeAcpCustomToolName(raw: string): string {
  * Maps an ACP adapter `toolCallId` to a transcript/telemetry-safe id.
  *
  * Adapters may embed user paths or secrets in toolCallId (for example
- * `read:/home/alice/.env`). Those values would otherwise flow into
- * tool_use/tool_result events, then into Langfuse span ids and
- * `metadata.toolCallId`. Identifier-like ids (UUID, call-1, …) pass through
- * so local correlation stays readable; everything else is replaced with a
- * stable opaque hash. Session-local maps may still key off the raw id.
+ * `read:/home/alice/.env`, `sk-proj-…`, `ghp_…`, or a JWT). Those values
+ * would otherwise flow into tool_use/tool_result events, then into Langfuse
+ * span ids and `metadata.toolCallId`. Every non-empty adapter id is replaced
+ * with a stable opaque hash so identifier-shaped secrets cannot leak even
+ * when they contain no path characters. Session-local maps may still key
+ * off the raw id for frame correlation.
  */
 export function acpTelemetryToolCallId(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return 'acp_empty';
-  // Safe adapter/local ids: alphanumeric with limited separators, no paths.
-  if (
-    trimmed.length <= 128 &&
-    /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(trimmed) &&
-    !trimmed.includes('..')
-  ) {
-    return trimmed;
-  }
   return `acp_${createHash('sha256').update(trimmed, 'utf8').digest('hex').slice(0, 24)}`;
 }
 

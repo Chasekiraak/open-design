@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { test, vi } from 'vitest';
 import { attachAcpSession, buildAcpSessionNewParams, createJsonLineStream, normalizeModels } from '../src/agent-protocol/index.js';
+import { acpTelemetryToolCallId } from '../src/agent-protocol/acp/updates.js';
 import { countNewArtifacts } from '../src/runtimes/run-artifacts.js';
 
 const DEFAULT_MODEL_OPTION = { id: 'default', label: 'Default (CLI config)' };
@@ -484,7 +485,7 @@ test('attachAcpSession mirrors artifact-write tool calls into countable tool_use
     .map((e) => ({ event: 'agent', data: e.payload }));
 
   const toolUses = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_use');
-  const writeUse = toolUses.find((e) => (e.data as { id?: string }).id === 'write-1');
+  const writeUse = toolUses.find((e) => (e.data as { id?: string }).id === acpTelemetryToolCallId('write-1'));
   assert.ok(writeUse, 'expected a tool_use event for the ACP write tool call');
   assert.equal((writeUse.data as { name?: string }).name, 'Write');
   assert.equal(
@@ -492,20 +493,20 @@ test('attachAcpSession mirrors artifact-write tool calls into countable tool_use
     'index.html',
   );
 
-  const grepUse = toolUses.find((e) => (e.data as { id?: string }).id === 'grep-1');
+  const grepUse = toolUses.find((e) => (e.data as { id?: string }).id === acpTelemetryToolCallId('grep-1'));
   assert.ok(grepUse, 'expected a tool_use event for the read-only grep call');
   assert.notEqual((grepUse.data as { name?: string }).name, 'Write');
   const grepResult = runEvents.find(
     (e) =>
       (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.data as { toolUseId?: string }).toolUseId === 'grep-1',
+      (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('grep-1'),
   );
   assert.ok(grepResult, 'expected a paired tool_result for grep');
 
   const writeResult = runEvents.find(
     (e) =>
       (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.data as { toolUseId?: string }).toolUseId === 'write-1',
+      (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('write-1'),
   );
   assert.ok(writeResult, 'expected a paired tool_result event');
   assert.equal((writeResult.data as { isError?: boolean }).isError, false);
@@ -583,12 +584,12 @@ test('an ACP artifact path arriving only on the completing frame is still counte
   const toolUses = runEvents.filter(
     (e) =>
       (e.data as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.data as { id?: string }).id === 'w-2',
+      (e.data as { id?: string }).id === acpTelemetryToolCallId('w-2'),
   );
   const toolResults = runEvents.filter(
     (e) =>
       (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.data as { toolUseId?: string }).toolUseId === 'w-2',
+      (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('w-2'),
   );
   assert.equal(toolUses.length, 1, 'exactly one tool_use even when path arrives late');
   assert.equal(toolResults.length, 1, 'exactly one tool_result');
@@ -823,13 +824,13 @@ test('exactly-once emission: repeated terminal frames for same toolCallId emit o
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'once-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('once-1'),
   );
   const toolResults = events.filter(
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.payload as { toolUseId?: string }).toolUseId === 'once-1',
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('once-1'),
   );
   assert.equal(toolUses.length, 1);
   assert.equal(toolResults.length, 1);
@@ -907,7 +908,7 @@ test('tool_use carries startedAt from firstSeenAt for duration analytics', () =>
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'dur-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('dur-1'),
   );
   assert.ok(toolUse);
   const startedAt = (toolUse.payload as { startedAt?: number }).startedAt;
@@ -1064,7 +1065,7 @@ test('attachAcpSession mirrors bash-like ACP tools with command input and rawOut
   const toolUse = runEvents.find(
     (e) =>
       (e.data as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.data as { id?: string }).id === 'bash-1',
+      (e.data as { id?: string }).id === acpTelemetryToolCallId('bash-1'),
   );
   assert.ok(toolUse, 'expected bash tool_use');
   assert.equal((toolUse.data as { name?: string }).name, 'Bash');
@@ -1075,7 +1076,7 @@ test('attachAcpSession mirrors bash-like ACP tools with command input and rawOut
   const toolResult = runEvents.find(
     (e) =>
       (e.data as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.data as { toolUseId?: string }).toolUseId === 'bash-1',
+      (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('bash-1'),
   );
   assert.ok(toolResult);
   // Execute stdout is replaced with a length summary so private dumps (cat .env)
@@ -1117,13 +1118,13 @@ test('ACP execute tool_result redacts private stdout (cat .env)', () => {
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'bash-secret-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('bash-secret-1'),
   );
   const toolResult = events.find(
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.payload as { toolUseId?: string }).toolUseId === 'bash-secret-1',
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('bash-secret-1'),
   );
   assert.ok(toolUse);
   assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
@@ -1138,7 +1139,28 @@ test('ACP execute tool_result redacts private stdout (cat .env)', () => {
   assert.doesNotMatch(content, /API_KEY|PASSWORD|super-secret/);
 });
 
-test('ACP path-like toolCallId is hashed before tool_use/tool_result emission', () => {
+test('ACP adapter toolCallId is always hashed before tool_use/tool_result emission', () => {
+  // Path-like, identifier-shaped secrets, and plain local ids must all become
+  // opaque hashes — never pass through to Langfuse span ids / metadata.
+  const cases = [
+    'read:/home/alice/.env',
+    'sk-proj-abcdefghijklmnopqrstuvwxyz012345',
+    'ghp_abcdefghijklmnopqrstuvwxyz012345',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature',
+    'call-1',
+  ];
+  for (const rawToolCallId of cases) {
+    assert.match(
+      acpTelemetryToolCallId(rawToolCallId),
+      /^acp_[0-9a-f]{24}$/,
+      `expected opaque hash for ${rawToolCallId.slice(0, 24)}…`,
+    );
+    assert.notEqual(acpTelemetryToolCallId(rawToolCallId), rawToolCallId);
+  }
+  // Empty / whitespace collapses to a fixed non-secret sentinel.
+  assert.equal(acpTelemetryToolCallId(''), 'acp_empty');
+  assert.equal(acpTelemetryToolCallId('   '), 'acp_empty');
+
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
   // Adapter-derived id that embeds a user home path / secret file name.
@@ -1170,17 +1192,15 @@ test('ACP path-like toolCallId is hashed before tool_use/tool_result emission', 
   const toolResult = events.find(
     (e) => e.event === 'agent' && (e.payload as { type?: string }).type === 'tool_result',
   );
-  assert.ok(toolUse, 'expected tool_use for path-like toolCallId');
-  assert.ok(toolResult, 'expected tool_result for path-like toolCallId');
+  assert.ok(toolUse, 'expected tool_use for adapter toolCallId');
+  assert.ok(toolResult, 'expected tool_result for adapter toolCallId');
   const useId = (toolUse.payload as { id?: string }).id ?? '';
   const resultId = (toolResult.payload as { toolUseId?: string }).toolUseId ?? '';
-  // Transcript/telemetry must not carry the raw path-bearing adapter id.
-  assert.notEqual(useId, rawToolCallId);
-  assert.notEqual(resultId, rawToolCallId);
-  assert.equal(useId, resultId, 'tool_use and tool_result stay paired');
+  // Transcript/telemetry must not carry the raw adapter id.
+  assert.equal(useId, acpTelemetryToolCallId(rawToolCallId));
+  assert.equal(resultId, useId, 'tool_use and tool_result stay paired');
   assert.match(useId, /^acp_[0-9a-f]{24}$/);
-  assert.doesNotMatch(useId, /alice|\.env|\/home\//);
-  // Safe identifier-like ids still pass through unchanged.
+  assert.doesNotMatch(useId, /alice|\.env|\/home\/|sk-proj|ghp_/);
   assert.equal(
     events.some(
       (e) =>
@@ -1300,10 +1320,10 @@ test('attachAcpSession emits tool_use pairs for write + bash in one turn', () =>
     .map((e) => ({ event: 'agent', data: e.payload }));
   const toolUses = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_use');
   const toolResults = runEvents.filter((e) => (e.data as { type?: string }).type === 'tool_result');
-  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === 'w-multi'));
-  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === 'b-multi'));
-  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === 'w-multi'));
-  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === 'b-multi'));
+  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === acpTelemetryToolCallId('w-multi')));
+  assert.ok(toolUses.some((e) => (e.data as { id?: string }).id === acpTelemetryToolCallId('b-multi')));
+  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('w-multi')));
+  assert.ok(toolResults.some((e) => (e.data as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('b-multi')));
   assert.equal(countNewArtifacts(runEvents), 1);
 });
 
@@ -1983,7 +2003,7 @@ test('fail paths flush open ACP tools as errored tool_use/tool_result pairs', as
       (e) =>
         e.event === 'agent' &&
         (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-        (e.payload as { id?: string }).id === 'open-bash-1',
+        (e.payload as { id?: string }).id === acpTelemetryToolCallId('open-bash-1'),
     );
     assert.ok(toolUse, 'open tool must be flushed as tool_use on fail');
     assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
@@ -1992,7 +2012,7 @@ test('fail paths flush open ACP tools as errored tool_use/tool_result pairs', as
       (e) =>
         e.event === 'agent' &&
         (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-        (e.payload as { toolUseId?: string }).toolUseId === 'open-bash-1',
+        (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('open-bash-1'),
     );
     assert.ok(toolResult, 'open tool must be flushed as tool_result on fail');
     assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
@@ -2044,7 +2064,7 @@ test('child-exit fail path flushes open ACP tools as errored pairs', () => {
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'open-read-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('open-read-1'),
   );
   assert.ok(toolUse, 'open tool must be flushed on child-exit fail');
   assert.equal((toolUse.payload as { name?: string }).name, 'Read');
@@ -2053,7 +2073,7 @@ test('child-exit fail path flushes open ACP tools as errored pairs', () => {
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.payload as { toolUseId?: string }).toolUseId === 'open-read-1',
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('open-read-1'),
   );
   assert.ok(toolResult, 'open tool must flush tool_result on child-exit fail');
   assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
@@ -2092,7 +2112,7 @@ test('abort flushes open ACP tools as errored pairs', () => {
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'open-bash-cancel-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('open-bash-cancel-1'),
   );
   assert.ok(toolUse, 'open tool must be flushed as tool_use on abort');
   assert.equal((toolUse.payload as { name?: string }).name, 'Bash');
@@ -2101,7 +2121,7 @@ test('abort flushes open ACP tools as errored pairs', () => {
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.payload as { toolUseId?: string }).toolUseId === 'open-bash-cancel-1',
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('open-bash-cancel-1'),
   );
   assert.ok(toolResult, 'open tool must be flushed as tool_result on abort');
   assert.equal((toolResult.payload as { isError?: boolean }).isError, true);
@@ -2233,7 +2253,7 @@ test('successful session/prompt with open concrete tool flushes clean (not no-ou
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; id?: string }).type === 'tool_use' &&
-      (e.payload as { id?: string }).id === 'open-read-1',
+      (e.payload as { id?: string }).id === acpTelemetryToolCallId('open-read-1'),
   );
   assert.ok(toolUse, 'open concrete tool must be clean-flushed as tool_use');
   assert.equal((toolUse.payload as { name?: string }).name, 'Read');
@@ -2242,7 +2262,7 @@ test('successful session/prompt with open concrete tool flushes clean (not no-ou
     (e) =>
       e.event === 'agent' &&
       (e.payload as { type?: string; toolUseId?: string }).type === 'tool_result' &&
-      (e.payload as { toolUseId?: string }).toolUseId === 'open-read-1',
+      (e.payload as { toolUseId?: string }).toolUseId === acpTelemetryToolCallId('open-read-1'),
   );
   assert.ok(toolResult, 'open concrete tool must be clean-flushed as tool_result');
   assert.equal((toolResult.payload as { isError?: boolean }).isError, false);
