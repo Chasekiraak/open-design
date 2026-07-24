@@ -31,11 +31,14 @@ export type ServerPackCliOptions = {
   appVersion?: string;
   arch?: string;
   archive?: string;
+  archivesDir?: string;
   dir?: string;
+  feedDir?: string;
   json?: boolean;
   platform?: string;
   releaseId?: string;
   skipWorkspaceBuild?: boolean;
+  updateLatest?: boolean;
 };
 
 export type ServerPackConfig = {
@@ -48,6 +51,7 @@ export type ServerPackConfig = {
   releaseRoot: string;
   reportPath: string;
   sha256Path: string;
+  sha256SumsPath: string;
   stageRoot: string;
   target: ServerTarget;
   toolPackRoot: string;
@@ -178,6 +182,9 @@ export function resolveServerPackConfig(
     releaseRoot,
     reportPath: join(outputRoot, "smoke-report.json"),
     sha256Path: `${archivePath}.sha256`,
+    // Single-target sums file that matches the hosted bootstrap feed entry
+    // format install.sh / install.ps1 consume from v<version>/SHA256SUMS.
+    sha256SumsPath: join(outputRoot, "SHA256SUMS"),
     stageRoot,
     target,
     toolPackRoot,

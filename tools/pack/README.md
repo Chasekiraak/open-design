@@ -41,6 +41,28 @@ archive before extraction, use system Node only when version 24 and the target
 platform/architecture match, and otherwise download a pinned,
 checksum-verified private Node runtime.
 
+Hosted installs default to `https://releases.open-design.ai/server` and expect:
+
+- `latest/VERSION` — single-line current version (no leading `v`)
+- `v<version>/SHA256SUMS` — GNU-style `sha256  archive-name` lines for every
+  published platform archive
+- `v<version>/open-design-server-<version>-<platform>-<arch>.(tar.gz|zip)`
+
+`server build` writes both `<archive>.sha256` and a single-target `SHA256SUMS`
+next to the archive. Assemble a multi-platform feed before publish:
+
+```bash
+pnpm tools-pack server prepare-feed \
+  --app-version 0.16.1 \
+  --archives-dir /path/to/archives \
+  --feed-dir .tmp/tools-pack/out/server/feed
+```
+
+Publish that feed with `pnpm exec tools-release publish-server` (see
+`tools/release`) or run the standalone `release-server` workflow, which builds
+every native target, prepares the feed, and optionally uploads it under the
+`server/` storage prefix.
+
 The server workflow builds Linux native addons on Ubuntu 22.04 for a
 glibc-based x64/arm64 compatibility baseline. The generic Linux archives do
 not target Alpine or other musl environments.

@@ -43,6 +43,7 @@ import {
 } from "./linux.js";
 import { buildServerPackage } from "./server/build.js";
 import { resolveServerPackConfig } from "./server/config.js";
+import { prepareServerReleaseFeed } from "./server/feed.js";
 import { smokeServerPackage } from "./server/smoke.js";
 
 type CliOptions = ToolPackCliOptions;
@@ -265,28 +266,74 @@ addBuildOptions(addSharedOptions(cli.command("linux <action>", "Linux packaging 
   });
 
 cli
-  .command("server <action>", "Native daemon + static Web package commands: build|smoke")
+  .command(
+    "server <action>",
+    "Native daemon + static Web package commands: build|smoke|prepare-feed",
+  )
   .option("--app-version <version>", "release application version")
   .option("--arch <arch>", "native target architecture: arm64|x64")
   .option("--archive <path>", "override the server archive path")
+  .option(
+    "--archives-dir <path>",
+    "directory of open-design-server archives for prepare-feed",
+  )
   .option("--dir <path>", "tools-pack output root directory")
+  .option(
+    "--feed-dir <path>",
+    "output root for the hosted server bootstrap feed layout",
+  )
   .option("--json", "print JSON")
   .option("--platform <platform>", "native target platform: darwin|linux|win32")
   .option("--release-id <id>", "immutable release identifier")
   .option("--skip-workspace-build", "reuse existing daemon and static Web build outputs")
+  .option("--skip-latest", "prepare-feed without rewriting latest/VERSION")
   .action(async (action: string, options: CliOptions) => {
-    const config = resolveServerPackConfig(options);
     switch (action) {
-      case "build":
+      case "build": {
+        const config = resolveServerPackConfig(options);
         printJson(
           await buildServerPackage(config, {
             skipWorkspaceBuild: options.skipWorkspaceBuild === true,
           }),
         );
         return;
-      case "smoke":
+      }
+      case "smoke": {
+        const config = resolveServerPackConfig(options);
         printJson(await smokeServerPackage(config));
         return;
+      }
+      case "prepare-feed": {
+        const appVersion = options.appVersion;
+        if (appVersion == null || appVersion.length === 0) {
+          throw new Error("server prepare-feed requires --app-version");
+        }
+        const feedDir = options.feedDir;
+        if (feedDir == null || feedDir.length === 0) {
+          throw new Error("server prepare-feed requires --feed-dir");
+        }
+        const archives: string[] = [];
+        if (options.archive != null && options.archive.length > 0) {
+          archives.push(options.archive);
+        }
+        if (options.archivesDir != null && options.archivesDir.length > 0) {
+          archives.push(options.archivesDir);
+        }
+        if (archives.length === 0) {
+          throw new Error(
+            "server prepare-feed requires --archive and/or --archives-dir",
+          );
+        }
+        printJson(
+          await prepareServerReleaseFeed({
+            appVersion,
+            archives,
+            feedRoot: feedDir,
+            updateLatest: options.skipLatest !== true,
+          }),
+        );
+        return;
+      }
       default:
         throw new Error(`unsupported server action: ${action}`);
     }

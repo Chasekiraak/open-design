@@ -53,6 +53,15 @@ describe("server package config", () => {
       ),
     );
     expect(config.sha256Path).toBe(`${config.archivePath}.sha256`);
+    expect(config.sha256SumsPath).toBe(
+      join(
+        "/tmp/open-design-server-pack",
+        "out",
+        "server",
+        "darwin-arm64",
+        "SHA256SUMS",
+      ),
+    );
   });
 
   it("uses zip for native Windows archives", () => {

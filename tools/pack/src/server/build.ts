@@ -30,6 +30,7 @@ import {
   writeServerReleaseManifest,
   type ServerReleaseManifest,
 } from "./manifest.js";
+import { formatSha256SumsEntry, writeSha256SumsFile } from "./feed.js";
 import { materializeServerRuntimeDependencies } from "./runtime-dependencies.js";
 
 export const SERVER_PRIVATE_NODE_VERSION = "24.14.1";
@@ -60,6 +61,7 @@ export type ServerBuildResult = {
   releaseRoot: string;
   sha256: string;
   sha256Path: string;
+  sha256SumsPath: string;
 };
 
 type CommandOptions = {
@@ -407,11 +409,15 @@ export async function buildServerPackage(
   await auditServerRelease(config, manifest);
   await createArchive(config);
   const sha256 = await hashFile(config.archivePath);
-  await writeFile(
-    config.sha256Path,
-    `${sha256}  ${basename(config.archivePath)}\n`,
-    "utf8",
-  );
+  const archiveName = basename(config.archivePath);
+  const checksumLine = formatSha256SumsEntry(sha256, archiveName);
+  await writeFile(config.sha256Path, checksumLine, "utf8");
+  // Hosted bootstrap installs fetch v<version>/SHA256SUMS, not the
+  // per-archive .sha256 sidecar. Emit the same entry in sums form so release
+  // feed assembly can publish without re-hashing or reformatting.
+  await writeSha256SumsFile(config.sha256SumsPath, [
+    { archiveName, sha256 },
+  ]);
 
   return {
     appVersion: config.appVersion,
@@ -422,5 +428,6 @@ export async function buildServerPackage(
     releaseRoot: config.releaseRoot,
     sha256,
     sha256Path: config.sha256Path,
+    sha256SumsPath: config.sha256SumsPath,
   };
 }

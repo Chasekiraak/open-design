@@ -24,12 +24,14 @@ export type ToolPackCliOptions = {
   appVersion?: string;
   arch?: string;
   archive?: string;
+  archivesDir?: string;
   cacheDir?: string;
   containerized?: boolean;
   dir?: string;
   diagnoseAttempts?: string | number;
   expectedVersion?: string;
   expr?: string;
+  feedDir?: string;
   headless?: boolean;
   json?: boolean;
   macCompression?: string;
@@ -47,6 +49,7 @@ export type ToolPackCliOptions = {
   requireVelaCli?: boolean;
   signed?: boolean;
   silent?: boolean;
+  skipLatest?: boolean;
   skipWorkspaceBuild?: boolean;
   statusPollCount?: string | number;
   statusPollIntervalMs?: string | number;

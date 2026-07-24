@@ -346,6 +346,7 @@ function isWorkspaceValidationExemptFile(file: string): boolean {
       ".github/workflows/daemon-package-smoke.yml",
       ".github/workflows/docker-image.yml",
       ".github/workflows/nix.yml",
+      ".github/workflows/release-server.yml",
     ].includes(file)
   );
 }

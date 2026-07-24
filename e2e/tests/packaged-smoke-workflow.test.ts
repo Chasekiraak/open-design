@@ -28,6 +28,12 @@ const daemonPackageSmokeWorkflowPath = join(
   "workflows",
   "daemon-package-smoke.yml",
 );
+const releaseServerWorkflowPath = join(
+  workspaceRoot,
+  ".github",
+  "workflows",
+  "release-server.yml",
+);
 const dockerImageWorkflowPath = join(workspaceRoot, ".github", "workflows", "docker-image.yml");
 const flakePath = join(workspaceRoot, "flake.nix");
 const backportAutomergeWorkflowPath = join(workspaceRoot, ".github", "workflows", "backport-automerge.yml");
@@ -426,6 +432,41 @@ describe("packaged smoke workflow", () => {
     });
     expect(plan).not.toHaveProperty("run_daemon_package_smoke");
     expect(plan).not.toHaveProperty("daemon_package_smoke_required");
+  });
+
+  it("[P2] publishes the hosted server bootstrap feed outside the main CI gate", async () => {
+    const workflow = await readFile(releaseServerWorkflowPath, "utf8");
+    const ciWorkflow = await readFile(ciWorkflowPath, "utf8");
+
+    expect(ciWorkflow).not.toContain("release-server");
+    expect(ciWorkflow).not.toContain("tools-pack server prepare-feed");
+    expect(ciWorkflow).not.toContain("tools-release publish-server");
+
+    expect(workflow).toContain("name: release-server");
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("release_version:");
+    expect(workflow).toContain("publish:");
+    expect(workflow).toContain("pnpm tools-pack server build");
+    expect(workflow).toContain("pnpm.cmd tools-pack server build");
+    expect(workflow).toContain("pnpm tools-pack server prepare-feed");
+    expect(workflow).toContain("pnpm exec tools-release publish-server");
+    expect(workflow).toContain('test -f "$feed_dir/latest/VERSION"');
+    expect(workflow).toContain('test -f "$feed_dir/v${version}/SHA256SUMS"');
+    expect(workflow).toContain("secrets.CLOUDFLARE_R2_RELEASES_AK");
+    expect(workflow).not.toContain("merge_group:");
+    expect(workflow).not.toContain("workflow_call:");
+
+    const plan = await runScopesPrint(
+      "workflow_dispatch",
+      { inputs: { ci_mode: "hot" } },
+      [".github/workflows/release-server.yml"],
+    );
+    expect(plan).toMatchObject({
+      workspace_validation_required: false,
+      ui_critical_validation_required: false,
+      run_playwright_critical: false,
+      run_ui_p0: false,
+    });
   });
 
   it("[P2] runs Windows launcher payload archive validation when tools-pack is touched", async () => {

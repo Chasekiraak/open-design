@@ -16,6 +16,9 @@ describe("server bootstrap resources", () => {
     expect(installer).toContain("fs.renameSync(stage, destination)");
     expect(installer).toContain("process.argv.slice(1)");
     expect(installer).toContain("installed launcher directory is not on PATH");
+    expect(installer).toContain('DEFAULT_RELEASE_BASE_URL="https://releases.open-design.ai/server"');
+    expect(installer).toContain('"$RELEASE_BASE_URL/latest/VERSION"');
+    expect(installer).toContain('"$RELEASE_BASE_URL/v$VERSION/SHA256SUMS"');
   });
 
   it("keeps the Windows PowerShell 5 bootstrap on a short owned extraction drive", async () => {
@@ -32,5 +35,8 @@ describe("server bootstrap resources", () => {
     expect(installer).toContain("COM[1-9]");
     expect(installer).toContain("installed launcher directory is not on PATH");
     expect(installer).not.toContain("Expand-Archive");
+    expect(installer).toContain('$DefaultReleaseBaseUrl = "https://releases.open-design.ai/server"');
+    expect(installer).toContain('"$ReleaseBaseUrl/latest/VERSION"');
+    expect(installer).toContain('"$ReleaseBaseUrl/v$Version/SHA256SUMS"');
   });
 });
