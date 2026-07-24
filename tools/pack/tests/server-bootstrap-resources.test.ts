@@ -35,6 +35,10 @@ describe("server bootstrap resources", () => {
     expect(installer).toContain("COM[1-9]");
     expect(installer).toContain("installed launcher directory is not on PATH");
     expect(installer).not.toContain("Expand-Archive");
+    // Avoid Microsoft.PowerShell.Utility cmdlets; .NET SHA-256 works when
+    // module autoload is unavailable under non-interactive Windows PS 5.1.
+    expect(installer).not.toMatch(/\bGet-FileHash\b/);
+    expect(installer).toContain("[System.Security.Cryptography.SHA256]::Create()");
     expect(installer).toContain('$DefaultReleaseBaseUrl = "https://releases.open-design.ai/server"');
     expect(installer).toContain('"$ReleaseBaseUrl/latest/VERSION"');
     expect(installer).toContain('"$ReleaseBaseUrl/v$Version/SHA256SUMS"');

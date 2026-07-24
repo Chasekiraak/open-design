@@ -63,7 +63,26 @@ function Normalize-Sha256 {
 
 function Get-FileSha256 {
   param([Parameter(Mandatory = $true)][string]$Path)
-  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+  # Use .NET SHA-256 so bootstrap works even when Windows PowerShell module
+  # autoload is unavailable (common under non-interactive CI shells that
+  # inherit a stripped PSModulePath).
+  $stream = $null
+  $hasher = $null
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $hasher.ComputeHash($stream)
+    return (
+      [System.BitConverter]::ToString($hashBytes) -replace "-", ""
+    ).ToLowerInvariant()
+  } finally {
+    if ($null -ne $hasher) {
+      $hasher.Dispose()
+    }
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
 }
 
 function Assert-FileSha256 {
