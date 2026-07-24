@@ -1335,6 +1335,11 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  /* `min-height`, not `height`: a view taller than the scroll port (most of
+     them) must still grow past this and scroll exactly as before. This only
+     matters for a view that's SHORTER than the port — see
+     `.entry-main__view-home` below for why it's needed at all. */
+  min-height: 100%;
 }
 /* Wider variant retained for the Projects / Design systems
    sub-views that historically opted into a wider canvas. The
@@ -1359,6 +1364,23 @@
     padding-left: 20px;
     padding-right: 20px;
   }
+}
+
+/* Bug: an empty workspace's Home never centered (recvqaROkePTP8) — the
+   composer stuck to the top of the scroll column instead. `.home-view
+   --centered`'s `min-height: 100%` (home-hero.css) needs an ancestor with a
+   REAL (non-auto) height to resolve against. `.entry-main__inner` now has
+   one (above), but this view's own wrapper div — a plain block child of that
+   flex column — was still sized to its own content, same as a `height: auto`
+   ancestor would be, breaking the chain one level lower. Make it an actual
+   flexed column that fills the available height instead. Scoped to the home
+   wrapper only: every other view is already taller than the scroll port in
+   practice, so this would only add harmless empty space below its content. */
+.entry-main__view-home {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* Sticky top-right control strip inside the main scroll area.

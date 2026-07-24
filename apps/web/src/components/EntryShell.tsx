@@ -1234,7 +1234,7 @@ export function EntryShell({
               view === 'home' ? '' : 'entry-main__inner--wide',
             ].filter(Boolean).join(' ')}
           >
-            <div data-testid="entry-view-home" data-active={view === 'home' ? 'true' : 'false'} {...inactiveViewProps(view === 'home')}>
+            <div className="entry-main__view-home" data-testid="entry-view-home" data-active={view === 'home' ? 'true' : 'false'} {...inactiveViewProps(view === 'home')}>
               <HomeView
                 isActive={view === 'home'}
                 projects={projects}
