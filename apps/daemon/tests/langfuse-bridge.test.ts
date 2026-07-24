@@ -1550,6 +1550,78 @@ describe('langfuse-bridge.reportRunCompletedFromDaemon', () => {
     expect(payload).not.toContain('/Users/alice/secrets.env');
   });
 
+  it('redacts Linux home paths in ACP Bash tool inputs when content telemetry is on', async () => {
+    await writeAppCfg({
+      installationId: 'install-uuid-1',
+      telemetry: { metrics: true, content: true, artifactManifest: false },
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 207 }));
+    process.env.LANGFUSE_PUBLIC_KEY = 'pk';
+    process.env.LANGFUSE_SECRET_KEY = 'sk';
+    const now = Date.now();
+    try {
+      await reportRunCompletedFromDaemon({
+        db: makeDbWithListMessages({
+          'conv-1': [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'Check env.',
+              attachments: [],
+            },
+            {
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'Done.',
+              producedFiles: [],
+            },
+          ],
+        }),
+        dataDir,
+        run: makeRun({
+          createdAt: now - 2000,
+          updatedAt: now,
+          events: [
+            {
+              id: 1,
+              event: 'agent',
+              data: {
+                type: 'tool_use',
+                id: 'bash-linux-1',
+                name: 'Bash',
+                input: { command: 'cat /home/alice/.env' },
+              },
+            },
+            {
+              id: 2,
+              event: 'agent',
+              data: {
+                type: 'tool_result',
+                toolUseId: 'bash-linux-1',
+                content: 'KEY=value',
+                isError: false,
+              },
+            },
+          ],
+        }) as any,
+        fetchImpl: fetchSpy as any,
+      });
+    } finally {
+      delete process.env.LANGFUSE_PUBLIC_KEY;
+      delete process.env.LANGFUSE_SECRET_KEY;
+    }
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const batch = JSON.parse(init.body as string).batch as any[];
+    const bash = bodyOf(batch, 'span-create', 'tool:Bash');
+    expect(bash.input).toContain('[REDACTED:local_path]');
+    expect(bash.input).toContain('cat');
+    expect(bash.input).not.toContain('/home/alice');
+    expect(JSON.stringify(batch)).not.toContain('/home/alice/.env');
+  });
+
   it('forwards run prompt telemetry into trace and generation metadata', async () => {
     await writeAppCfg({
       installationId: 'install-uuid-1',

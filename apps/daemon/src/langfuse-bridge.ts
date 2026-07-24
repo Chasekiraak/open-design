@@ -368,9 +368,18 @@ function eventTimestamp(
 }
 
 function redactLocalPaths(value: string): string {
+  // macOS /Users, Linux /home + /root, Windows C:\Users — Linux is a primary
+  // supported environment, so Bash inputs like `cat /home/alice/.env` must not
+  // leak home directories into Langfuse tool spans.
   return value
-    .replace(/\/Users\/[^/\s"']+(?:\/[^ \n\r\t"'`<>)]*)?/g, '[REDACTED:local_path]')
-    .replace(/[A-Za-z]:\\Users\\[^\\\s"']+(?:\\[^ \n\r\t"'`<>)]*)?/g, '[REDACTED:local_path]');
+    .replace(
+      /\/(?:Users|home|root)\/[^/\s"']+(?:\/[^ \n\r\t"'`<>)]*)?/g,
+      '[REDACTED:local_path]',
+    )
+    .replace(
+      /[A-Za-z]:\\Users\\[^\\\s"']+(?:\\[^ \n\r\t"'`<>)]*)?/g,
+      '[REDACTED:local_path]',
+    );
 }
 
 function serializeToolPayload(

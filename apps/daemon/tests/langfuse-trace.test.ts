@@ -430,6 +430,29 @@ describe('buildTracePayload', () => {
     expect(write.output).toBe('[REDACTED:tool_output:content_tool:Write]');
   });
 
+  it('redacts Linux home paths in Bash tool inputs when content gate is on', () => {
+    const batch = buildTracePayload(
+      makeCtx({
+        prefs: { metrics: true, content: true, artifactManifest: false },
+        tools: [
+          {
+            id: 'bash-linux-1',
+            name: 'Bash',
+            startedAt: 1_700_000_001_000,
+            endedAt: 1_700_000_001_800,
+            input: '{"command":"cat /home/alice/.env"}',
+            output: 'KEY=value',
+          },
+        ],
+      }),
+    );
+    const bash = bodyOf(batch, 'span-create', 'tool:Bash');
+    expect(bash.input).toContain('[REDACTED:local_path]');
+    expect(bash.input).toContain('cat');
+    expect(bash.input).not.toContain('/home/alice');
+    expect(JSON.stringify(batch)).not.toContain('/home/alice/.env');
+  });
+
   it('fail-closed redacts unknown/custom ACP tool payloads when content gate is on', () => {
     const batch = buildTracePayload(
       makeCtx({
