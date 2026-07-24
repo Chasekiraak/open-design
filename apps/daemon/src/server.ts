@@ -685,6 +685,7 @@ import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
 import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
+import { createShouldPublish } from './collab/should-publish.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
@@ -3210,15 +3211,11 @@ export async function startServer({
   const collabPublishWatcher = createCollabPublishWatcher({
     notifyChanged: (projectId) => collab.scheduler.notifyChanged(projectId, 'file-change'),
     listProjectIds: () => listProjects(db).map((project: { id: string }) => project.id),
-    shouldPublish: async (projectId) => {
-      const owner = await resolveSharedProjectOwner(projectId);
-      if (!owner) return false;
-      const ctx = await collab.workspaceContext.current({});
-      const principal = contextToResourceHubPrincipal(ctx);
-      if (!principal || owner !== principal.memberId) return false;
-      collab.rememberTeamShare(projectId, principal);
-      return true;
-    },
+    shouldPublish: createShouldPublish({
+      resolveSharedProjectOwner,
+      workspaceContext: collab.workspaceContext,
+      rememberTeamShare: collab.rememberTeamShare,
+    }),
     subscribeFiles: (projectId, onChange) => {
       const watchProject = getProject(db, projectId);
       const sub = subscribeFileEvents(PROJECTS_DIR, projectId, (evt) => {
