@@ -113,6 +113,40 @@ describe('ComposerModePicker', () => {
     expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
   });
 
+  it('allows Home to keep the lightweight default neutral until an explicit choice', () => {
+    const onModeChange = vi.fn();
+    const onClearSelection = vi.fn();
+    const { rerender } = render(
+      <ComposerModePicker
+        mode="chat"
+        selectedMode={null}
+        onModeChange={onModeChange}
+        onClearSelection={onClearSelection}
+      />,
+    );
+
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('composer-mode-trigger'));
+    fireEvent.click(screen.getByTestId('composer-mode-menu-chat'));
+    // Selecting Ask is meaningful even though it matches the underlying
+    // lightweight default: it turns the neutral trigger into a user choice.
+    expect(onModeChange).toHaveBeenCalledWith('chat');
+
+    rerender(
+      <ComposerModePicker
+        mode="chat"
+        selectedMode="chat"
+        onModeChange={onModeChange}
+        onClearSelection={onClearSelection}
+      />,
+    );
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Ask');
+    fireEvent.click(screen.getByTestId('composer-mode-clear'));
+    expect(onClearSelection).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps every mode description visible inside the open menu', () => {
     render(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
 

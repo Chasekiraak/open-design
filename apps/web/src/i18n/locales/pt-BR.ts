@@ -878,6 +878,7 @@ export const ptBR: Dict = {
   'homeHero.placeholder': 'Descreva o que você quer gerar…',
   'homeHero.placeholderActive': 'Edite a consulta de exemplo ou escreva a sua própria…',
   'homeHero.carousel.hint': 'Anexe um arquivo, vincule seu design system ou descreva o que você quer criar',
+  'homeHero.carousel.examplePrefix': 'Exemplo de prompt:',
   'homeHero.carousel.onePageBrief': 'Escrever um briefing de projeto de uma página',
   'homeHero.carousel.notesToDeck': 'Transformar minhas anotações em uma apresentação',
   'homeHero.carousel.signupFlow': 'Prototipar um fluxo de cadastro',

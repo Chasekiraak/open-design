@@ -878,6 +878,7 @@ export const de: Dict = {
   'homeHero.placeholder': 'Beschreibe, was du generieren möchtest…',
   'homeHero.placeholderActive': 'Bearbeite die Beispielabfrage oder schreibe eine eigene…',
   'homeHero.carousel.hint': 'Datei anhängen, Designsystem verknüpfen oder beschreiben, was du erstellen möchtest',
+  'homeHero.carousel.examplePrefix': 'Beispiel-Prompt:',
   'homeHero.carousel.onePageBrief': 'Ein einseitiges Projekt-Briefing entwerfen',
   'homeHero.carousel.notesToDeck': 'Meine Notizen in eine Präsentation verwandeln',
   'homeHero.carousel.signupFlow': 'Einen Anmeldeflow entwerfen',

@@ -889,6 +889,7 @@ export const zhCN: Dict = {
   "homeHero.placeholder": "描述你想生成的内容…",
   "homeHero.placeholderActive": "编辑示例请求，或写下你自己的需求…",
   "homeHero.carousel.hint": "上传文件、关联设计系统，或描述你想创作的内容",
+  "homeHero.carousel.examplePrefix": "示例 Prompt：",
   "homeHero.carousel.onePageBrief": "撰写一页项目简介",
   "homeHero.carousel.notesToDeck": "把我的笔记变成演示文稿",
   "homeHero.carousel.signupFlow": "设计一个注册流程",

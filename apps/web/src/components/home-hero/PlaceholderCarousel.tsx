@@ -43,12 +43,20 @@ interface Props {
   // keeps `active` true so Send still submits the current scenario from an
   // empty composer — this only silences the animation.
   paused?: boolean;
+  /** A stable disclosure that the rotating line is executable example copy. */
+  label?: string;
 }
 
 // Pointer-events-none overlay that types the rotating scenario placeholders
 // over the (empty) Lexical editor. It owns the per-character animation state so
 // the frequent re-renders stay confined here and never touch the editor.
-export function PlaceholderCarousel({ scenarios, active, paused = false, onScenarioChange }: Props) {
+export function PlaceholderCarousel({
+  scenarios,
+  active,
+  paused = false,
+  label,
+  onScenarioChange,
+}: Props) {
   const reducedMotion = usePrefersReducedMotion();
   const [state, setState] = useState(initialTypewriterState);
   const onChangeRef = useRef(onScenarioChange);
@@ -106,6 +114,7 @@ export function PlaceholderCarousel({ scenarios, active, paused = false, onScena
   const visible = reducedMotion ? scenario.text : scenario.text.slice(0, state.charCount);
   return (
     <div className="home-hero__carousel" aria-hidden="true" data-testid="home-hero-carousel">
+      {label ? <span className="home-hero__carousel-label">{label}</span> : null}
       <span className="home-hero__carousel-text">{visible}</span>
       <span className="home-hero__carousel-caret" />
     </div>

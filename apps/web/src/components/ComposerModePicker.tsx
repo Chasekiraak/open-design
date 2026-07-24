@@ -8,11 +8,9 @@
 // `ChatSessionMode` ('design' | 'chat' | 'plan') instead of the demo's
 // app-wide mock store: the component is controlled via `mode`/`onModeChange`,
 // so the home composer and the project chat composer each reflect their own
-// conversation's persisted mode. `design` is the app default AND it is shown
-// as selected by default: the composer opens carrying the 「设计 ×」 pill, so
-// the mode the request will actually run in is stated on screen instead of
-// being an invisible default behind a neutral glyph. The × still clears it
-// back to the neutral trigger.
+// conversation's persisted mode. Home can additionally control whether that
+// mode is visibly selected: a neutral first visit still runs the lightweight
+// Ask path, while an explicit visual intent shows Create.
 import {
   useEffect,
   useLayoutEffect,
@@ -104,28 +102,39 @@ const MENU_GAP = 8;
 const MENU_EST_HEIGHT = 290;
 
 export interface ComposerModePickerProps {
-  /** The conversation's real session mode. `design` (the app default) renders
-   *  as a SELECTED pill from first paint; clearing it with the × returns the
-   *  trigger to neutral without changing the session mode. */
+  /** The conversation's real session mode. */
   mode: ChatSessionMode;
   onModeChange?: (mode: ChatSessionMode) => void;
+  /**
+   * Optional controlled display selection. `undefined` preserves the project
+   * chat's legacy rendering; `null` deliberately shows the neutral trigger
+   * while the caller keeps an underlying default execution mode.
+   */
+  selectedMode?: ChatSessionMode | null;
+  /** Called when a controlled visible selection is cleared. */
+  onClearSelection?: () => void;
   /** Collapse the selected pill to icon + clear only (hide the mode name) —
    *  used when the composer row is space-constrained, e.g. while a run streams
    *  and the wide "思考中" button is showing. */
   labelHidden?: boolean;
 }
 
-export function ComposerModePicker({ mode, onModeChange, labelHidden = false }: ComposerModePickerProps) {
+export function ComposerModePicker({
+  mode,
+  onModeChange,
+  selectedMode,
+  onClearSelection,
+  labelHidden = false,
+}: ComposerModePickerProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  // 设计 is the default mode AND the default selection, so the pill is showing
-  // when the composer first paints. This is INITIAL state only — the user's own
-  // choice (picking another mode, or clearing with ×) flips it and is never
-  // re-forced on a later render, which is why it is `useState`'s initial value
-  // and not an effect that resyncs on `mode`.
+  // Legacy project-chat behavior: Design starts visibly selected. Home passes
+  // `selectedMode` so onboarding / intent can own the visible selection.
   const [designExplicit, setDesignExplicit] = useState(true);
-  const selected: ChatSessionMode | null =
-    mode !== 'design' ? mode : designExplicit ? 'design' : null;
+  const hasControlledSelection = selectedMode !== undefined;
+  const selected: ChatSessionMode | null = hasControlledSelection
+    ? selectedMode
+    : mode !== 'design' ? mode : designExplicit ? 'design' : null;
   const [pos, setPos] = useState<CSSProperties | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -222,6 +231,10 @@ export function ComposerModePicker({ mode, onModeChange, labelHidden = false }: 
           aria-label={t('chat.modePicker.clear')}
           title={t('common.clear')}
           onClick={() => {
+            if (hasControlledSelection) {
+              onClearSelection?.();
+              return;
+            }
             setDesignExplicit(false);
             // Clearing returns to the app default (design without the pill).
             if (mode !== 'design') onModeChange?.('design');
@@ -248,8 +261,15 @@ export function ComposerModePicker({ mode, onModeChange, labelHidden = false }: 
                   className={`composer-mode-menu__item${selected === m.id ? ' is-selected' : ''}`}
                   data-testid={`composer-mode-menu-${m.id}`}
                   onClick={() => {
-                    setDesignExplicit(m.id === 'design');
-                    if (m.id !== mode) onModeChange?.(m.id);
+                    if (hasControlledSelection) {
+                      // Home also needs this callback when the selected value
+                      // equals its lightweight default: choosing Ask turns the
+                      // neutral trigger into an explicit user selection.
+                      onModeChange?.(m.id);
+                    } else {
+                      setDesignExplicit(m.id === 'design');
+                      if (m.id !== mode) onModeChange?.(m.id);
+                    }
                     setOpen(false);
                   }}
                 >

@@ -878,6 +878,7 @@ export const tr: Dict = {
   'homeHero.placeholder': 'Ne oluşturmak istediğinizi açıklayın…',
   'homeHero.placeholderActive': 'Örnek sorguyu düzenleyin veya kendinizinkini yazın…',
   'homeHero.carousel.hint': 'Dosya ekle, tasarım sistemini bağla ya da ne yapmak istediğini anlat',
+  'homeHero.carousel.examplePrefix': 'Örnek istem:',
   'homeHero.carousel.onePageBrief': 'Tek sayfalık proje özeti yaz',
   'homeHero.carousel.notesToDeck': 'Notlarımı bir sunuma dönüştür',
   'homeHero.carousel.signupFlow': 'Bir kayıt akışı taslağı oluştur',

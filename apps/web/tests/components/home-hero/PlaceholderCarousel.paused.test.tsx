@@ -21,6 +21,22 @@ const SCENARIOS = [
 ] as const;
 
 describe('PlaceholderCarousel — paused while the editor has focus (#118)', () => {
+  it('marks rotating text as an example prompt', () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <PlaceholderCarousel
+        scenarios={[...SCENARIOS]}
+        active
+        label="Example prompt:"
+        onScenarioChange={() => {}}
+      />,
+    );
+
+    typeAFewCharacters();
+    expect(container.querySelector('.home-hero__carousel-label')?.textContent).toBe('Example prompt:');
+    expect(container.querySelector('.home-hero__carousel-text')?.textContent).not.toBe('');
+  });
+
   it('renders nothing and schedules no timer once paused', () => {
     vi.useFakeTimers();
     const { container, rerender } = render(

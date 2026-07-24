@@ -12,7 +12,7 @@ describe('SessionModeToggle', () => {
   it('shows only the active mode until the menu is opened', () => {
     render(<SessionModeToggle mode="design" onChange={vi.fn()} />);
 
-    expect(screen.getByTestId('session-mode-trigger').textContent).toContain('Design');
+    expect(screen.getByTestId('session-mode-trigger').textContent).toContain('Create');
     expect(screen.queryByRole('menu')).toBeNull();
 
     fireEvent.click(screen.getByTestId('session-mode-trigger'));
@@ -44,22 +44,19 @@ describe('SessionModeToggle', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
-  it('tags each mode with its expected usage/cost', () => {
+  it('keeps execution intensity out of the user-facing mode choice', () => {
     render(<SessionModeToggle mode="design" onChange={vi.fn()} />);
 
     fireEvent.click(screen.getByTestId('session-mode-trigger'));
 
-    // Every option in the menu carries a usage tier so modes can be compared.
     const menu = screen.getByRole('menu');
-    expect(menu.textContent).toContain('Light');
-    expect(menu.textContent).toContain('Standard');
-    expect(menu.textContent).toContain('Heavy');
+    expect(menu.textContent).not.toContain('Light');
+    expect(menu.textContent).not.toContain('Standard');
+    expect(menu.textContent).not.toContain('Heavy');
 
-    // The description card explains the active mode's usage expectation.
     const card = screen.getByRole('tooltip');
-    expect(card.textContent).toContain('Typical usage');
-    expect(card.textContent).toContain('Generates files and multimodal media');
-    expect(screen.getByRole('img', { name: 'Typical usage: Heavy' })).toBeTruthy();
+    expect(card.textContent).toContain('Design mode');
+    expect(screen.queryByRole('img', { name: /Typical usage/i })).toBeNull();
   });
 
   it('shows localized guidance only after opening the menu', () => {

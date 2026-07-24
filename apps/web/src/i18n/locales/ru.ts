@@ -878,6 +878,7 @@ export const ru: Dict = {
   'homeHero.placeholder': 'Опишите, что вы хотите сгенерировать…',
   'homeHero.placeholderActive': 'Измените пример запроса или напишите свой…',
   'homeHero.carousel.hint': 'Прикрепите файл, подключите дизайн-систему или опишите, что хотите создать',
+  'homeHero.carousel.examplePrefix': 'Пример запроса:',
   'homeHero.carousel.onePageBrief': 'Составить одностраничный бриф проекта',
   'homeHero.carousel.notesToDeck': 'Превратить мои заметки в презентацию',
   'homeHero.carousel.signupFlow': 'Сделать макет процесса регистрации',

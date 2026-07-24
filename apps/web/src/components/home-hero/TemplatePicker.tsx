@@ -28,6 +28,19 @@ interface Props {
   // Disables picking a *new* template while an apply is in flight (mirrors the
   // rail's per-card guard); opening + close remain available.
   pickDisabled?: boolean;
+  /** One-time Home recommendation, surfaced on the real template entry point. */
+  recommendedChipId?: string | null;
+  /** A deliberately quieter secondary option for role-based recommendations. */
+  secondaryRecommendedChipId?: string | null;
+  /** The inline first-run catalog already exposes every choice below. */
+  staticEntry?: boolean;
+  /**
+   * When supplied, Home owns the expanded state and renders the same template
+   * catalog inline. The picker remains a compact trigger; its radial fallback
+   * is retained for other callers that do not control this state.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   // Localized label / description for a chip id (reuses HomeHero's chip copy).
   labelFor: (chipId: string) => string;
   descriptionFor: (chipId: string) => string;
@@ -75,13 +88,20 @@ export function TemplatePicker({
   previewChipId = null,
   disabled = false,
   pickDisabled = false,
+  recommendedChipId = null,
+  secondaryRecommendedChipId = null,
+  staticEntry = false,
+  open: controlledOpen,
+  onOpenChange,
   labelFor,
   descriptionFor,
   onPick,
   onClear,
 }: Props) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const openControlled = onOpenChange !== undefined;
+  const open = openControlled ? controlledOpen ?? false : uncontrolledOpen;
   const [hoverId, setHoverId] = useState<string | null>(null);
   // Viewport anchor captured once at open time, clamped so the whole ring
   // stays on screen. The radial is portaled to <body> and position:fixed at
@@ -94,8 +114,13 @@ export function TemplatePicker({
   const radialRef = useRef<HTMLDivElement | null>(null);
 
   const toggleOpen = () => {
-    setOpen((v) => {
-      if (v) return false;
+    if (open) {
+      setUncontrolledOpen(false);
+      return;
+    }
+    // The inline Home catalog does not need a viewport anchor. Keep the
+    // capture only for the standalone radial fallback.
+    if (!openControlled) {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (rect) {
         const half = RADIAL_PX / 2 + 8;
@@ -106,8 +131,10 @@ export function TemplatePicker({
       } else {
         setAnchor(null);
       }
-      return true;
-    });
+      setUncontrolledOpen(true);
+      return;
+    }
+    onOpenChange?.(true);
   };
 
   const active = useMemo(
@@ -120,14 +147,15 @@ export function TemplatePicker({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || openControlled) return undefined;
     function onPointer(event: MouseEvent) {
       if (wrapRef.current?.contains(event.target as Node)) return;
       if (radialRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
+      if (openControlled) onOpenChange?.(false);
+      else setUncontrolledOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') setUncontrolledOpen(false);
     }
     document.addEventListener('mousedown', onPointer);
     document.addEventListener('keydown', onKey);
@@ -135,7 +163,7 @@ export function TemplatePicker({
       document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [onOpenChange, open, openControlled]);
 
   // Invariant: `anchor` is a one-shot VIEWPORT point captured from the trigger
   // at open time, so the open menu is only meaningful while that point still
@@ -146,8 +174,8 @@ export function TemplatePicker({
   // exactly what the capture-once design avoids, because the composer around
   // it reflows asynchronously and lives inside transformed ancestors.
   useEffect(() => {
-    if (!open) return undefined;
-    const dismiss = () => setOpen(false);
+    if (!open || openControlled) return undefined;
+    const dismiss = () => setUncontrolledOpen(false);
     // Capture phase: scroll does not bubble, and the trigger sits inside the
     // entry shell's own scroll container, not the document scroller.
     window.addEventListener('scroll', dismiss, { capture: true, passive: true });
@@ -156,7 +184,7 @@ export function TemplatePicker({
       window.removeEventListener('scroll', dismiss, { capture: true });
       window.removeEventListener('resize', dismiss);
     };
-  }, [open]);
+  }, [onOpenChange, open, openControlled]);
 
   // Hover-preview wins over the committed value so pointing at a rail card
   // updates the pill; falls back to the committed template, then "None".
@@ -166,6 +194,7 @@ export function TemplatePicker({
   const shown = previewChip ?? active;
   const isPreviewing = Boolean(previewChip) && previewChip !== active;
   const hasSelection = Boolean(active);
+  const hasRecommendation = !staticEntry && !hasSelection && Boolean(recommendedChipId);
   const valueLabel = shown ? labelFor(shown.id) : t('common.none');
 
   // Center disc: hovering a wedge previews that template (icon + name, like a
@@ -176,45 +205,60 @@ export function TemplatePicker({
   return (
     <div
       ref={wrapRef}
-      className={`home-hero__footer-option home-hero__footer-option--select home-hero__template-option${open ? ' is-open' : ''}${hasSelection ? ' has-selection' : ''}`}
+      className={`home-hero__footer-option home-hero__footer-option--select home-hero__template-option${open ? ' is-open' : ''}${hasSelection ? ' has-selection' : ''}${hasRecommendation ? ' is-recommended' : ''}${staticEntry ? ' is-inline-catalog' : ''}`}
       data-field-name="template"
       data-testid="home-hero-template-picker"
     >
-      <button
-        type="button"
-        className="home-hero__footer-select-trigger home-hero__template-trigger"
-        data-testid="home-hero-template-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        title={t('homeHero.templatePicker.label')}
-        onClick={toggleOpen}
-      >
-        {/* With a selection the pill reads as `[template icon] Wireframe`:
-            the leading icon IS the selected template's own icon and the gray
-            creation-type kicker drops away. */}
+      {staticEntry ? (
         <span
-          className="home-hero__footer-option-icon home-hero__footer-option-icon--compact"
-          aria-hidden
+          className="home-hero__footer-select-trigger home-hero__template-trigger home-hero__template-trigger--static"
+          data-testid="home-hero-template-entry-hint"
         >
-          <Icon name={shown ? shown.icon : 'grid'} size={16} />
-        </span>
-        {shown ? null : (
-          <span className="home-hero__template-kicker">{t('homeHero.templatePicker.label')}</span>
-        )}
-        {/* No "None" placeholder at rest — the gray kicker alone reads as the
-            empty state; the label slot only appears once a template is set. */}
-        {shown ? (
-          <span
-            className={`home-hero__footer-select-label${isPreviewing ? ' is-preview' : ''}`}
-          >
-            {valueLabel}
+          <span className="home-hero__footer-option-icon home-hero__footer-option-icon--compact" aria-hidden>
+            <Icon name="grid" size={16} />
           </span>
-        ) : null}
-        {/* Once a template is chosen the dropdown chevron gives way to a
-            hairline divider before the clear (×) control. */}
-        {hasSelection ? null : <Icon name="chevron-down" size={16} aria-hidden />}
-      </button>
+          <span className="home-hero__template-kicker">{t('homeHero.templatePicker.label')}</span>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="home-hero__footer-select-trigger home-hero__template-trigger"
+          data-testid="home-hero-template-trigger"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          disabled={disabled}
+          title={t('homeHero.templatePicker.label')}
+          onClick={toggleOpen}
+        >
+          {/* With a selection the pill reads as `[template icon] Wireframe`:
+              the leading icon IS the selected template's own icon and the gray
+              creation-type kicker drops away. */}
+          <span
+            className="home-hero__footer-option-icon home-hero__footer-option-icon--compact"
+            aria-hidden
+          >
+            <Icon name={shown ? shown.icon : 'grid'} size={16} />
+          </span>
+          {shown ? null : (
+            <span className="home-hero__template-kicker">{t('homeHero.templatePicker.label')}</span>
+          )}
+          {/* No "None" placeholder at rest — the gray kicker alone reads as the
+              empty state; the label slot only appears once a template is set. */}
+          {shown ? (
+            <span
+              className={`home-hero__footer-select-label${isPreviewing ? ' is-preview' : ''}`}
+            >
+              {valueLabel}
+            </span>
+          ) : null}
+          {hasRecommendation ? (
+            <span className="home-hero__template-recommendation-badge">For you</span>
+          ) : null}
+          {/* Once a template is chosen the dropdown chevron gives way to a
+              hairline divider before the clear (×) control. */}
+          {hasSelection ? null : <Icon name="chevron-down" size={16} aria-hidden />}
+        </button>
+      )}
       {hasSelection ? <span className="home-hero__template-divider" aria-hidden /> : null}
       {hasSelection ? (
         <button
@@ -226,14 +270,15 @@ export function TemplatePicker({
           data-tooltip={t('common.clear')}
           onClick={(event) => {
             event.stopPropagation();
-            setOpen(false);
+            if (openControlled) onOpenChange?.(false);
+            else setUncontrolledOpen(false);
             onClear();
           }}
         >
           <Icon name="close" size={16} strokeWidth={2.2} />
         </button>
       ) : null}
-      {open ? createPortal(
+      {open && !openControlled ? createPortal(
         <div
           ref={radialRef}
           className="home-hero__template-radial"
@@ -260,11 +305,13 @@ export function TemplatePicker({
             {templates.map((chip, index) => {
               const isActive = chip.id === activeChipId;
               const isHover = chip.id === hoverId;
+              const isRecommended = !hasSelection && chip.id === recommendedChipId;
+              const isSecondaryRecommended = !hasSelection && chip.id === secondaryRecommendedChipId;
               return (
                 <path
                   key={chip.id}
                   d={wedgePath(index, templates.length)}
-                  className={`home-hero__template-radial-wedge${isActive ? ' is-active' : ''}${isHover ? ' is-hover' : ''}`}
+                  className={`home-hero__template-radial-wedge${isActive ? ' is-active' : ''}${isHover ? ' is-hover' : ''}${isRecommended ? ' is-recommended' : ''}${isSecondaryRecommended ? ' is-secondary-recommended' : ''}`}
                   role="option"
                   aria-selected={isActive}
                   aria-disabled={pickDisabled || undefined}
@@ -276,7 +323,7 @@ export function TemplatePicker({
                   onClick={() => {
                     if (pickDisabled) return;
                     onPick(chip);
-                    setOpen(false);
+                    setUncontrolledOpen(false);
                   }}
                 />
               );
@@ -324,7 +371,7 @@ export function TemplatePicker({
             aria-label={t('common.clear')}
             onClick={() => {
               onClear();
-              setOpen(false);
+              setUncontrolledOpen(false);
             }}
           >
             {hovered ? (

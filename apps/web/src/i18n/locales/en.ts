@@ -878,6 +878,7 @@ export const en: Dict = {
   'homeHero.placeholder': 'Describe what you want to generate…',
   'homeHero.placeholderActive': 'Edit the example query or write your own…',
   'homeHero.carousel.hint': 'Attach a file, link your design system, or describe what you want to make',
+  'homeHero.carousel.examplePrefix': 'Example prompt:',
   'homeHero.carousel.onePageBrief': 'Draft a one-page project brief',
   'homeHero.carousel.notesToDeck': 'Turn my notes into a presentation',
   'homeHero.carousel.signupFlow': 'Mock up a signup flow',

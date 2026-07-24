@@ -25,9 +25,8 @@ interface Props {
   /** The selected directory no longer exists on disk — flag it in red. */
   invalid?: boolean;
   /**
-   * Panel direction. `'down'` (default) suits the Home composer where there
-   * is room below; `'up'` suits the in-project composer whose trigger sits at
-   * the bottom of the viewport, so a downward panel would be clipped.
+   * Panel direction. `'down'` is the default; hosts with content immediately
+   * below the trigger can use `'up'` to keep the menu from covering it.
    */
   placement?: 'down' | 'up';
   /** Fired when the panel opens, so the host can re-validate freshness. */
@@ -116,6 +115,7 @@ export function WorkingDirPicker({
           className={`${styles.panel}${placement === 'up' ? ` ${styles.panelUp}` : ''}`}
           role="menu"
           data-testid="working-dir-panel"
+          data-placement={placement}
         >
           <button
             type="button"

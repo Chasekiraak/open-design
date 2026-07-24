@@ -878,6 +878,7 @@ export const ja: Dict = {
   'homeHero.placeholder': '生成したい内容を記述してください…',
   'homeHero.placeholderActive': 'サンプルクエリを編集するか、独自に記述してください…',
   'homeHero.carousel.hint': 'ファイルを添付、デザインシステムをリンク、または作りたいものを説明してください',
+  'homeHero.carousel.examplePrefix': 'プロンプト例：',
   'homeHero.carousel.onePageBrief': '1ページのプロジェクト概要を作成する',
   'homeHero.carousel.notesToDeck': 'メモをプレゼン資料にする',
   'homeHero.carousel.signupFlow': 'サインアップフローを作る',

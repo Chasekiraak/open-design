@@ -111,6 +111,12 @@ import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { RecentProjectsStrip } from './RecentProjectsStrip';
 import type { Recommendation } from '../onboarding/recommendation';
 import type { OnboardingEntry } from '../onboarding/onboarding-entry';
+import { readOnboardingProfile } from '../state/onboarding-profile';
+import {
+  inferHomeModeSuggestion,
+  recentProjectChipId,
+  type HomeOnboardingRole,
+} from './home-hero/main-flow';
 import { AnimatePresence } from 'motion/react';
 
 export interface ActivePlugin {
@@ -408,7 +414,25 @@ export function HomeView({
     text: string;
     chipId: string | null;
   } | null>(null);
-  const [sessionMode, setSessionMode] = useState<ChatSessionMode>('design');
+  const [onboardingRole] = useState<HomeOnboardingRole>(() => {
+    const role = readOnboardingProfile()?.role;
+    if (role === 'designer') return 'designer';
+    // The current onboarding label “Marketing / agency” persists as `agency`;
+    // growth shares the same zero-to-one campaign-page entry path.
+    return role === 'marketing' || role === 'agency' || role === 'growth' ? 'marketing' : null;
+  });
+  // A designer's self-reported onboarding role is the sole passive visual
+  // selection. Everyone else starts on Ask's lightweight execution route, but
+  // sees the neutral mode trigger until they choose a mode or a visual intent
+  // explicitly selects Create.
+  const [sessionMode, setSessionMode] = useState<ChatSessionMode>(() => (
+    onboardingRole === 'designer' ? 'design' : 'chat'
+  ));
+  const [hasVisibleModeSelection, setHasVisibleModeSelection] = useState(
+    () => onboardingRole === 'designer',
+  );
+  const sessionModeManuallySelectedRef = useRef(false);
+  const [modeSuggestion, setModeSuggestion] = useState<ReturnType<typeof inferHomeModeSuggestion>>(null);
   const [activeSkill, setActiveSkill] = useState<SkillSummary | null>(null);
   const [selectedPluginContexts, setSelectedPluginContexts] = useState<SelectedPluginContext[]>([]);
   const [selectedMcpContexts, setSelectedMcpContexts] = useState<SelectedMcpContext[]>([]);
@@ -554,6 +578,12 @@ export function HomeView({
   );
   const inputRef = useRef<HomeHeroHandle | null>(null);
   const homeViewRef = useRef<HTMLDivElement | null>(null);
+  const mostRecentHomeChipId = useMemo(
+    () => recentProjectChipId(projects[0]
+      ? { kind: projects[0].metadata?.kind, intent: projects[0].metadata?.intent }
+      : null),
+    [projects],
+  );
   const consumedHandoffIdRef = useRef<number | null>(null);
   const pendingPromptFocusEndRef = useRef(false);
   const activePluginApplyRequestRef = useRef(0);
@@ -849,6 +879,36 @@ export function HomeView({
     requestAnimationFrame(() => {
       inputRef.current?.focusEnd();
     });
+  }
+
+  // The mode selector is an explicit preference. Product affordances may make
+  // a sensible default before that point, but must never override a choice the
+  // user has already made in this Home session.
+  function setSessionModeFromUser(mode: ChatSessionMode) {
+    sessionModeManuallySelectedRef.current = true;
+    setSessionMode(mode);
+    setHasVisibleModeSelection(true);
+    setModeSuggestion(null);
+  }
+
+  function useCreateModeForVisualIntent() {
+    if (sessionModeManuallySelectedRef.current) return;
+    setSessionMode('design');
+    setHasVisibleModeSelection(true);
+    setModeSuggestion(null);
+  }
+
+  function clearHomeModeSelection() {
+    // Clearing restores Home's neutral, lightweight Ask route. It also gives
+    // a later visual-output choice permission to select Create again.
+    sessionModeManuallySelectedRef.current = false;
+    setSessionMode('chat');
+    setHasVisibleModeSelection(false);
+    setModeSuggestion(null);
+  }
+
+  function acceptHomeModeSuggestion(mode: Exclude<ReturnType<typeof inferHomeModeSuggestion>, null>) {
+    setSessionModeFromUser(mode);
   }
 
   async function usePlugin(
@@ -1257,6 +1317,7 @@ export function HomeView({
 
   function useExamplePlugin(record: InstalledPluginRecord, chipId: string, promptText: string) {
     setError(null);
+    useCreateModeForVisualIntent();
     // P0 ui_click area=chat_composer element=example_prompt: the user picked a
     // plugin-preset example card below the rail. `chip_id` is the active task
     // type, `plugin_id` the preset so example usage breaks down per plugin. (The
@@ -1359,6 +1420,9 @@ export function HomeView({
   function handlePromptChange(nextPrompt: string) {
     setPrompt(nextPrompt);
     setPromptEditedByUser(true);
+    if (!sessionModeManuallySelectedRef.current) {
+      setModeSuggestion(inferHomeModeSuggestion(nextPrompt));
+    }
     if (!active?.queryTemplate) return;
     const extracted = extractPluginInputsFromPrompt(
       active.queryTemplate,
@@ -1722,6 +1786,7 @@ export function HomeView({
   // (`open-template-picker`) forward to callbacks threaded in from EntryShell.
   function pickChip(chip: HomeHeroChip) {
     setError(null);
+    if (chip.group === 'create') useCreateModeForVisualIntent();
     // P0 ui_click area=chat_composer element=plugin_chip|action_chip. The
     // chip's `action.kind` discriminates: plugin-bound chips
     // (apply-scenario / apply-figma-migration) route to a plugin; the rest
@@ -2142,7 +2207,15 @@ export function HomeView({
         onSubmit={submit}
         onSubmitScenario={submitScenario}
         sessionMode={sessionMode}
-        onSessionModeChange={setSessionMode}
+        onSessionModeChange={setSessionModeFromUser}
+        selectedSessionMode={hasVisibleModeSelection ? sessionMode : null}
+        onClearSessionModeSelection={clearHomeModeSelection}
+        onboardingRole={onboardingRole}
+        recentChipId={mostRecentHomeChipId}
+        onCreateIntent={useCreateModeForVisualIntent}
+        modeSuggestion={modeSuggestion}
+        onAcceptModeSuggestion={acceptHomeModeSuggestion}
+        onDismissModeSuggestion={() => setModeSuggestion(null)}
         submitting={sending}
         activePluginTitle={activeBadgeTitle}
         activePluginIsExplicit={activePluginIsExplicit}

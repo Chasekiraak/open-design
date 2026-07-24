@@ -110,9 +110,11 @@
   pointer-events: none;
 }
 .home-hero__title {
-  /* Extra bottom margin widens just the title → input-card gap (adds to the
-     6px flex gap → ~26px total) without touching the logo → title spacing. */
-  margin: 0 0 var(--spacing-20);
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.18em;
+  margin: 0;
   font-family: var(--serif);
   font-weight: 600;
   font-size: 28.8px;
@@ -121,8 +123,44 @@
   color: var(--text-strong);
   text-align: center;
 }
-.home-hero__subtitle {
+.home-hero__capability-slot {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+}
+.home-hero__capability-value {
+  display: inline-flex;
+  align-items: baseline;
+  animation: home-hero-capability-enter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.home-hero__capability-word {
+  appearance: none;
   margin: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  transition: color 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+button.home-hero__capability-word:hover:not(:disabled),
+button.home-hero__capability-word:focus-visible {
+  outline: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--accent) 78%, var(--text-strong));
+}
+@keyframes home-hero-capability-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.home-hero__subtitle {
+  margin: 0 0 var(--spacing-14);
   color: var(--text-muted);
   font-size: 13px;
   text-align: center;
@@ -136,6 +174,33 @@
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--bg-subtle);
+}
+.home-hero__mode-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(640px, calc(100vw - 32px));
+  margin: -3px auto 0;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-tint) 52%, var(--bg-panel));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  animation: home-hero-capability-enter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.home-hero__mode-suggestion-action,
+.home-hero__mode-suggestion-dismiss {
+  min-height: 26px;
+}
+.home-hero__mode-suggestion-action {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+.home-hero__mode-suggestion-dismiss {
+  flex: 0 0 auto;
 }
 /* ---------- Output-type tab bar ----------
    Sits below the input card, Manus-style: the selected creation mode
@@ -789,6 +854,13 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-hero__carousel-label {
+  flex: none;
+  margin-right: 0.45em;
+  color: inherit;
+  font-weight: inherit;
   white-space: nowrap;
 }
 .home-hero__carousel-caret {
@@ -1482,9 +1554,55 @@
 }
 .home-hero__working-dir-picker [data-testid='working-dir-panel'] {
   position: absolute;
-  top: calc(100% + 6px);
   left: 0;
   z-index: 90;
+  box-sizing: border-box;
+  width: 220px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: var(--radius-lg);
+  /* This menu is a floating surface, never a transparent continuation of the
+     Home canvas. A solid fill keeps its choices legible over Hero content. */
+  background: var(--bg-panel);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 10px 28px -10px rgba(0, 0, 0, 0.18);
+}
+.home-hero__working-dir-picker [data-testid='working-dir-panel'] [role='menuitem'] {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.home-hero__working-dir-picker [data-testid='working-dir-panel'] [role='menuitem']:hover,
+.home-hero__working-dir-picker [data-testid='working-dir-panel'] [role='menuitem']:focus-visible {
+  outline: none;
+  background: var(--bg-subtle);
+}
+.home-hero__working-dir-picker [data-testid='working-dir-panel'][data-placement='down'] {
+  top: calc(100% + 6px);
+}
+/* First-run Home renders output cards directly under this row. Keep the
+   directory menu above its trigger so it never obscures the card catalog. */
+.home-hero__working-dir-picker [data-testid='working-dir-panel'][data-placement='up'] {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 /* The working-dir menu is an absolute overlay — float it over the content
    below (lift the card's stacking context) instead of reserving space with a
@@ -3115,6 +3233,25 @@
   line-height: 1.3;
   text-align: center;
 }
+.home-hero__template-recommendation {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+.home-hero__template-recommendation-label,
+.home-hero__recommendation-badge {
+  color: var(--accent);
+  font-weight: 680;
+}
+.home-hero__template-recommendation-secondary {
+  color: var(--text-faint);
+}
 .home-hero__blank-project {
   appearance: none;
   display: inline-flex;
@@ -3248,6 +3385,28 @@
 .home-hero__scenario-card.home-hero__type-tab.is-active {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
+.home-hero__scenario-card.home-hero__type-tab.is-recommended {
+  border-color: color-mix(in srgb, var(--accent) 66%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent), var(--shadow-sm);
+  animation: home-hero-recommendation-enter 200ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.home-hero__scenario-card.home-hero__type-tab.is-secondary-recommended {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.home-hero__recommendation-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-tint) 76%, var(--bg-panel));
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+@keyframes home-hero-recommendation-enter {
+  from { opacity: 0.5; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .home-hero__scenario-card-art {
   display: flex;
@@ -3293,10 +3452,62 @@
   white-space: normal;
 }
 
+.home-hero__context-starter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: min(100%, 760px);
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-panel) 90%, var(--bg-subtle));
+}
+.home-hero__context-kicker {
+  padding-right: 3px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.home-hero__context-action {
+  min-height: 28px;
+  padding: 3px 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.home-hero__context-action svg {
+  color: var(--accent);
+}
+.home-hero__context-summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.home-hero__more-examples {
+  width: 100%;
+  margin-top: 8px;
+}
+.home-hero__more-examples > summary {
+  width: fit-content;
+  margin: 0 auto 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.home-hero__more-examples[open] > summary {
+  color: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .home-hero__scenario-card.home-hero__type-tab,
-  .home-hero__scenario-art-svg {
+  .home-hero__scenario-art-svg,
+  .home-hero__capability-word,
+  .home-hero__capability-value,
+  .home-hero__scenario-card.home-hero__type-tab.is-recommended,
+  .home-hero__mode-suggestion {
     transition: none;
+    animation: none;
   }
 }
 
@@ -3347,11 +3558,41 @@
      line of equal-height controls. */
   height: 36px;
 }
+.home-hero__template-option.is-inline-catalog,
+.home-hero__template-option.is-inline-catalog:hover {
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+}
 .home-hero__template-trigger {
   flex: 1 1 auto;
   max-width: 188px;
   background-color: transparent;
   background-image: none;
+}
+.home-hero__template-trigger--static {
+  cursor: default;
+}
+.home-hero__template-option.is-recommended {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+  animation: home-hero-template-recommendation-enter 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.home-hero__template-recommendation-badge {
+  margin-left: 2px;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+@keyframes home-hero-template-recommendation-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .home-hero__template-option .home-hero__template-trigger,
 .home-hero__template-option .home-hero__template-trigger:hover:not(:disabled),
@@ -3549,6 +3790,14 @@
      fills can't take CSS gradients). */
   fill: url(#od-template-wedge-grad);
 }
+.home-hero__template-radial-wedge.is-recommended {
+  fill: color-mix(in srgb, var(--accent) 16%, transparent);
+  stroke: color-mix(in srgb, var(--accent) 64%, transparent);
+  stroke-width: 2px;
+}
+.home-hero__template-radial-wedge.is-secondary-recommended {
+  fill: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .home-hero__template-radial-wedge.is-hover {
   /* Whisper brand tint — the same fill as the nav rail's active (最近)
      button, so hover here and selection there read as one family. */
@@ -3558,6 +3807,9 @@
    outrank the single-class hover rule above). */
 .home-hero__template-radial-wedge.is-active.is-hover {
   fill: url(#od-template-wedge-grad);
+}
+.home-hero__template-radial-wedge.is-recommended.is-hover {
+  fill: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 .home-hero__template-radial-wedge[aria-disabled='true'] {
   cursor: default;
@@ -3860,6 +4112,9 @@
   .home-hero__template-card .home-hero__scenario-art-svg {
     transition: none;
   }
+  .home-hero__template-option.is-recommended {
+    animation: none;
+  }
 }
 
 /* Collapsible "Start from a template  or  blank project" single row. */
@@ -3900,4 +4155,3 @@
   color: var(--text-faint);
   font-size: 12px;
 }
-

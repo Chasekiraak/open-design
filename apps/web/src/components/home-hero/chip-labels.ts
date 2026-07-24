@@ -16,6 +16,9 @@ export function homeHeroChipLabel(chipId: string, t: Translate): string {
   switch (chipId) {
     case 'prototype': return t('homeHero.chip.prototype');
     case 'web-clone': return t('homeHero.chip.webClone');
+    // This Home main-flow demo intentionally keeps the new zero-to-one page
+    // category in English until the copy is reviewed across all locales.
+    case 'landing-page': return 'Landing page';
     case 'wireframe': return t('homeHero.chip.wireframe');
     case 'mobile': return t('homeHero.chip.mobile');
     case 'live-artifact': return t('homeHero.chip.liveArtifact');

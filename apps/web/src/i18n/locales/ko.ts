@@ -878,6 +878,7 @@ export const ko: Dict = {
   'homeHero.placeholder': '생성하고 싶은 내용을 설명하세요…',
   'homeHero.placeholderActive': '예제 쿼리를 편집하거나 직접 작성하세요…',
   'homeHero.carousel.hint': '파일을 첨부하거나 디자인 시스템을 연결하거나, 만들고 싶은 것을 설명하세요',
+  'homeHero.carousel.examplePrefix': '프롬프트 예시:',
   'homeHero.carousel.onePageBrief': '한 페이지짜리 프로젝트 개요 작성하기',
   'homeHero.carousel.notesToDeck': '메모를 프레젠테이션으로 만들기',
   'homeHero.carousel.signupFlow': '회원가입 플로우 목업 만들기',

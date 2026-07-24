@@ -9,6 +9,7 @@ vi.mock('../../src/components/home-hero/PlaceholderCarousel', () => ({
 
 import { HomeView } from '../../src/components/HomeView';
 import type { DesignSystemSummary, PromptTemplateSummary } from '../../src/types';
+import { saveOnboardingProfile } from '../../src/state/onboarding-profile';
 // HomeHero's prompt input migrated from a <textarea> + highlight overlay to the
 // same Lexical contenteditable the project composer uses. It still has
 // data-testid="home-hero-input" but has no `.value`, so we drive it through the
@@ -60,19 +61,15 @@ afterEach(() => {
 });
 
 describe('HomeView media composer options', () => {
-  it('shows the Home composer mode picker and still defaults to Design mode', async () => {
+  it('keeps an unknown-role Home visit neutral and sends ordinary prompts through Ask', async () => {
     stubFetch();
     const onSubmit = vi.fn();
     renderHome({ onSubmit });
 
     await screen.findByTestId('home-hero-input');
 
-    // 设计 is the app default AND the default SELECTION: the composer opens with
-    // the Design pill showing, so the mode the request will run in is stated on
-    // screen rather than hidden behind a neutral glyph. The submitted payload
-    // carries design either way.
-    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
-    expect(screen.getByTestId('composer-mode-clear')).toBeTruthy();
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    expect(screen.queryByTestId('composer-mode-clear')).toBeNull();
 
     await setHomePrompt('Create a clean loading animation');
     await submitHome();
@@ -80,8 +77,31 @@ describe('HomeView media composer options', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
       prompt: 'Create a clean loading animation',
-      conversationMode: 'design',
+      conversationMode: 'chat',
     });
+  });
+
+  it('shows Design for a designer role, or after selecting a visual output', async () => {
+    saveOnboardingProfile({ role: 'designer' });
+    stubFetch();
+    const onSubmit = vi.fn();
+    const { unmount } = renderHome({ onSubmit });
+
+    await screen.findByTestId('home-hero-input');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
+    fireEvent.click(screen.getByTestId('composer-mode-clear'));
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Choose a mode');
+    await setHomePrompt('Give me advice about this flow');
+    await submitHome();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ conversationMode: 'chat' });
+
+    unmount();
+    window.localStorage.clear();
+
+    renderHome();
+    await clickHomeRailChip('image');
+    expect(screen.getByTestId('composer-mode-trigger').getAttribute('aria-label')).toBe('Mode: Design');
   });
 
   it('renders the design-system popover outside the prompt editor (not clipped by it)', async () => {
@@ -516,18 +536,16 @@ async function openOption(name: string) {
 }
 
 async function clickHomeRailChip(id: string) {
-  // #5517 removed the inline template rail from Home: every scenario template
-  // is picked from the composer footer's radial Template picker. Wait until the
-  // trigger and the wedge are enabled first — plugins load asynchronously, so
-  // both are briefly disabled after mount.
-  const trigger = await screen.findByTestId('home-hero-template-trigger');
-  await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(trigger);
-  const wedgeId = `home-hero-template-wedge-${id}`;
-  await waitFor(() =>
-    expect(screen.getByTestId(wedgeId).getAttribute('aria-disabled')).not.toBe('true'),
-  );
-  fireEvent.click(screen.getByTestId(wedgeId));
+  // New users see the readable inline catalog; returning users reach the exact
+  // same cards through the composer trigger.
+  const cardId = `home-hero-rail-${id}`;
+  if (!screen.queryByTestId(cardId)) {
+    const trigger = await screen.findByTestId('home-hero-template-trigger');
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(trigger);
+  }
+  await waitFor(() => expect((screen.getByTestId(cardId) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByTestId(cardId));
 }
 
 // Drive the Lexical editor and let the OnChange -> onPromptChange -> setPrompt
