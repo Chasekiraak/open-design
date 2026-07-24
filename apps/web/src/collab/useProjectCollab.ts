@@ -156,6 +156,14 @@ export interface ProjectCollab {
    * treatment so a slow/stuck pull cannot look identical to a project with no
    * files (recvqghymxqQQq): `GET /api/projects/:id/files` is a plain local-
    * disk read and returns `[]` for both cases.
+   *
+   * Also true, ahead of `shared` being confirmed, whenever the FIRST
+   * `/collab/status` poll is still in flight and the team catalog cannot
+   * already rule out "shared, not mine" — that first poll is a real, uncached
+   * hub round-trip and can take seconds, and until it answers `shared` is
+   * false by definition. Without this a brand-new team member's first-ever
+   * open of a just-shared project showed the misleading empty-state CTAs for
+   * the entire length of that round-trip instead of the syncing notice.
    */
   downloadPending: boolean;
   reportChange: () => void;
@@ -282,6 +290,26 @@ export function useProjectCollab(
     ? false
     : (statusUnknown && !knownUnshared) || (shared && !isOwner) || lostAccessAfterUnshare;
   const viewerOnly = workspaceContextReadOnly || workspaceReadOnly || sharedReadOnly;
+  // The same fail-closed window `sharedReadOnly` uses for `statusUnknown`,
+  // reused below for `downloadPending`, but widened to ALSO cover the earlier
+  // `workspaceContextLoading` window `workspaceContextReadOnly` covers for
+  // `viewerOnly`. `statusUnknown` is defined as `decision.enabled && syncState
+  // === null` — and `decision.enabled` is itself false for the entire time
+  // `/api/workspace/context` is in flight (`resolveCollabSession(null)`), so
+  // `statusUnknown` alone stays false through that FIRST window too. A cold
+  // deep-linked open (no shell context cached yet) pays BOTH round-trips —
+  // context, then `/collab/status` — before either flag would have gone
+  // true, and for that whole combined window (measured multiple seconds on a
+  // cold real hub + real vela CLI, not just the 5s poll interval)
+  // `downloadPending` was hard-wired to `shared`, which cannot be true until
+  // the SECOND round-trip lands. The design-files empty state rendered the
+  // misleading "new sketch" CTA for the entire combined window instead of the
+  // syncing notice (recvqghymxqQQq, regression re-opened after 6c517f618).
+  // Exempt the same already-known-safe cases `sharedReadOnly` exempts, so an
+  // ordinary personal project never flashes the syncing pill.
+  const relationshipUnknown = Boolean(projectId) && (workspaceContextLoading || statusUnknown);
+  const statusUnknownMaybeSharedNotMine =
+    knownOwnedByViewer || createdByViewerThisSession ? false : relationshipUnknown && !knownUnshared;
 
   // Member content auto-sync (the last link): when a read-only member sees the
   // resource-hub head (`publishedVersion`) advance past what we last pulled,
@@ -343,9 +371,13 @@ export function useProjectCollab(
   // again) has provably landed: status hasn't answered yet, a newer head is
   // known and not yet fetched, or a pull is actively in flight. `pullTick`
   // is not read directly, but the state bump that drives it is what forces
-  // this render to see `pulledVersionRef.current`'s latest value.
-  const downloadPending = shouldAutoPull
-    && (publishedVersion == null || publishedVersion > pulledVersionRef.current || pullInFlightRef.current);
+  // this render to see `pulledVersionRef.current`'s latest value. ORed with
+  // `statusUnknownMaybeSharedNotMine` so the very first render(s) — before
+  // `shared` can even be true — already read as "might be downloading"
+  // instead of "definitely empty"; see that flag's doc comment.
+  const downloadPending = statusUnknownMaybeSharedNotMine
+    || (shouldAutoPull
+      && (publishedVersion == null || publishedVersion > pulledVersionRef.current || pullInFlightRef.current));
 
   return {
     enabled: collabEnabled,
