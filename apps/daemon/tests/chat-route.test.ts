@@ -576,7 +576,7 @@ process.stdin.on('end', () => {
         };
         const provider = parsed.provider?.['open-design-byok'];
         expect(provider).toMatchObject({
-          npm: '@ai-sdk/openai',
+          npm: '@ai-sdk/openai-compatible',
           options: {
             baseURL: 'http://127.0.0.1:8000/v1',
           },

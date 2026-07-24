@@ -384,13 +384,16 @@ export function InlineModelSwitcher({
     let frame = 0;
     const updateAnchorVisibility = () => {
       frame = 0;
-      const triggerRect = chipRef.current?.getBoundingClientRect();
+      const trigger = chipRef.current;
+      const triggerRect = trigger?.getBoundingClientRect();
       if (!triggerRect) return;
       const scrollRect = scrollContainer.getBoundingClientRect();
-      const topbarBottom = scrollContainer
-        .querySelector<HTMLElement>('.entry-main__topbar')
-        ?.getBoundingClientRect().bottom;
-      const safeTop = Math.max(scrollRect.top, topbarBottom ?? scrollRect.top);
+      const topbar = scrollContainer.querySelector<HTMLElement>('.entry-main__topbar');
+      const anchorInTopbar = trigger ? topbar?.contains(trigger) === true : false;
+      const topbarBottom = topbar?.getBoundingClientRect().bottom;
+      const safeTop = anchorInTopbar
+        ? scrollRect.top
+        : Math.max(scrollRect.top, topbarBottom ?? scrollRect.top);
       const safeBottom = Math.min(window.innerHeight, scrollRect.bottom);
       const safeLeft = Math.max(0, scrollRect.left);
       const safeRight = Math.min(window.innerWidth, scrollRect.right);

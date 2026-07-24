@@ -2371,6 +2371,12 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
     sendUpdaterStatus(status);
     return status;
   });
+  ipcMain.handle("od:update:clear-cache", async (event) => {
+    requireMainWindowSender(event);
+    const status = await (options.updater?.clearCache() ?? unavailableUpdaterStatus());
+    sendUpdaterStatus(status);
+    return status;
+  });
   ipcMain.handle("od:update:download", async (event) => {
     requireMainWindowSender(event);
     const status = await (options.updater?.downloadUpdate() ?? unavailableUpdaterStatus());

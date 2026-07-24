@@ -2745,7 +2745,10 @@ function OnboardingView({
                     }}
                     onSelectModel={(model) => {
                       if (!selectedAgent) return;
-                      onAgentModelChange(selectedAgent.id, { model });
+                      onAgentModelChange(selectedAgent.id, {
+                        model,
+                        serviceTier: undefined,
+                      });
                     }}
                     testState={visibleAgentTestState}
                     canTest={canTestAgent}

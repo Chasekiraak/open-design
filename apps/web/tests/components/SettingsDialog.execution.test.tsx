@@ -5353,6 +5353,76 @@ describe('SettingsDialog about interactions', () => {
     expect(screen.getByText('Version 1.2.3-beta.4 is ready to install.')).toBeTruthy();
   });
 
+  it('clears the updater cache from the about page after inline confirmation', async () => {
+    const cleared = updateStatus({ state: 'idle' });
+    const clearCache = vi.fn(async () => cleared);
+    restoreOpenDesignHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          'clear-cache': clearCache,
+          status: vi.fn(async () => updateStatus()),
+        },
+      },
+    });
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        initialSection: 'about',
+        appVersionInfo: {
+          version: '1.2.3-beta.3',
+          channel: 'beta',
+          packaged: true,
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+      },
+    );
+
+    // Two-stage inline confirm: the first click only arms the action.
+    const trigger = await screen.findByTestId('settings-clear-updater-cache');
+    fireEvent.click(trigger);
+    expect(clearCache).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('settings-clear-updater-cache-confirm'));
+
+    await waitFor(() => {
+      expect(clearCache).toHaveBeenCalled();
+    });
+    expect(await screen.findByText(en['settings.clearUpdaterCacheSuccess'])).toBeTruthy();
+  });
+
+  it('hides updater cache recovery when packaged updates are unsupported', async () => {
+    restoreOpenDesignHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          status: vi.fn(async () => updateStatus({
+            platform: 'linux',
+            state: 'unsupported',
+            supported: false,
+          })),
+        },
+      },
+    });
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        initialSection: 'about',
+        appVersionInfo: {
+          version: '1.2.3-beta.3',
+          channel: 'beta',
+          packaged: true,
+          platform: 'linux',
+          arch: 'x64',
+        },
+      },
+    );
+
+    await screen.findByText(en['settings.updateStatusUnsupported']);
+    expect(screen.queryByTestId('settings-clear-updater-cache')).toBeNull();
+  });
+
   it('installs a downloaded payload update from the about page', async () => {
     const payloadReady = updateStatus({
       artifact: {

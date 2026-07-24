@@ -128,9 +128,8 @@ export function PreviewRunStatusBar({
 
   const label = t(statusLabelKey(displayed));
 
-  // Deliberately no elapsed timer here: the floating status pill reads
-  // cleaner as just the stage label, and the chat side already carries
-  // precise timing for anyone who needs it.
+  // Keep the floating preview hint focused on the current stage. Precise run
+  // timing already appears in Chat, so repeating it here obscures the preview.
   return (
     <div
       className={`${styles.root}${leaving ? ` ${styles.leaving}` : ''}`}

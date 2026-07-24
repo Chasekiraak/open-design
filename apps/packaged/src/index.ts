@@ -7,6 +7,7 @@ import {
 } from "@open-design/sidecar-proto";
 import {
   parseLauncherAfterQuitArgs,
+  parseLauncherDelegatedArgs,
   parseLauncherHandoffResumeArgs,
 } from "@open-design/launcher-proto";
 import {
@@ -36,6 +37,7 @@ import {
   applyPackagedElectronPathOverrides,
   claimPackagedSingleInstanceLock,
   ensurePackagedNamespacePaths,
+  stabilizePackagedWorkingDirectory,
 } from "./launch.js";
 import {
   attachPackagedDesktopProcessLogging,
@@ -43,13 +45,13 @@ import {
   type PackagedDesktopLogger,
 } from "./logging.js";
 import { resolvePackagedNamespacePaths } from "./paths.js";
+import { createObsoleteInstalledOuterRetirement } from "./obsolete-installed-outer.js";
 import { launchPackagedPayloadDesktop } from "./payload-desktop-launch.js";
 import { packagedEntryUrl, registerOdProtocol } from "./protocol.js";
 import { startPackagedSidecars } from "./sidecars.js";
 import { reportStartupFailure, resolveStartupDistinctId } from "./startup-telemetry.js";
 import { resolvePackagedWindowTitle } from "./window-title.js";
 import { syncWindowsUninstallDisplayVersion } from "./windows-lifecycle.js";
-import { createObsoleteInstalledOuterRetirement } from "./obsolete-installed-outer.js";
 
 let packagedLogger: PackagedDesktopLogger | null = null;
 let pendingSecondInstanceFocus = false;
@@ -115,6 +117,7 @@ async function main(): Promise<void> {
   const config = await readPackagedConfig();
   const afterQuit = parseLauncherAfterQuitArgs(process.argv.slice(1));
   const handoffResume = parseLauncherHandoffResumeArgs(process.argv.slice(1));
+  const delegated = parseLauncherDelegatedArgs(process.argv.slice(1));
   const argvStamp = readProcessStamp(process.argv.slice(1), OPEN_DESIGN_SIDECAR_CONTRACT);
   const namespace = argvStamp?.namespace ?? config.namespace;
   const namespaceConfig = namespace === config.namespace ? config : { ...config, namespace };
@@ -133,6 +136,7 @@ async function main(): Promise<void> {
   }
   const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);
   const launcherRuntime = await resolvePackagedLauncherRuntime(namespaceConfig, initialPaths, {
+    delegated,
     resume: handoffResume,
   });
   if (await launchPackagedPayloadDesktop(launcherRuntime, stamp)) {
@@ -169,6 +173,7 @@ async function main(): Promise<void> {
   };
 
   await ensurePackagedNamespacePaths(paths);
+  stabilizePackagedWorkingDirectory(paths);
   const downloadAttribution = await discoverPackagedDownloadAttribution(paths, console).catch((error: unknown) => {
     console.warn("[attribution] failed to discover packaged download attribution", error);
     return null;

@@ -6108,6 +6108,7 @@ export function ProjectView({
           mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
           model: config.model,
           reasoning: null,
+          serviceTier: null,
           ...(byokOpenCodeProvider ? { byokProvider: byokOpenCodeProvider } : {}),
           byokMediaDefaults: byokMediaDefaultsForRun({
             imageModelOverride: byokImageModelOverride,
