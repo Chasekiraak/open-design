@@ -50,7 +50,7 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
 interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
 type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
 interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
-interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown }
+interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; byokProfile?: unknown; apiKey?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown }
 interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
 interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; active: ActiveContext | null; resolved?: ResolvedProject | null }
 interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
@@ -507,6 +507,13 @@ export const TOOL_DEFS = [
     annotations: { ...READ_ANNOTATIONS, title: 'List Open Design plugins' },
   },
   {
+    name: 'list_byok_profiles',
+    description:
+      'List secure local BYOK profile references available to start_run.byokProfile. Returns only non-secret metadata; API keys never cross MCP.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { ...READ_ANNOTATIONS, title: 'List secure BYOK profiles' },
+  },
+  {
     name: 'start_vela_login',
     description:
       'Start Open Design Cloud (Vela/AMR) browser sign-in through the local Open Design daemon. Returns the activation URL and user code when manual browser completion is needed.',
@@ -556,6 +563,11 @@ export const TOOL_DEFS = [
         serviceTier: {
           type: 'string',
           description: "Service tier override for the selected model, e.g. 'priority' for Codex Fast. Optional.",
+        },
+        byokProfile: {
+          type: 'string',
+          description:
+            'Secure profile id from list_byok_profiles. Selects the local BYOK OpenCode runtime; raw API keys are never accepted by MCP.',
         },
       },
       additionalProperties: false,
@@ -707,6 +719,9 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
         '    Local Codex, or Local BYOK. Never print or ask the user to copy',
         '    briefDraftId, nonce, or any other internal correlation value.',
         ' - list_skills / list_plugins to see what you can ask OD to make.',
+        ' - list_byok_profiles returns secure local credential references when',
+        '    the user explicitly chooses Local BYOK. Never request or pass a',
+        '    raw API key through MCP; pass only start_run.byokProfile.',
         ' - for agent:"amr" (Open Design Cloud / Vela), call',
         '    get_vela_login_status first. If signed out, call',
         '    start_vela_login once, show its activation URL/code when',
@@ -920,6 +935,21 @@ function requireString(v: unknown, name: string): asserts v is string {
   }
 }
 
+const MCP_CREDENTIAL_FIELD_PATTERN =
+  /^(?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|secret|password)$/iu;
+
+function containsMcpCredentialField(value: unknown, depth = 0): boolean {
+  if (depth > 20) return true;
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsMcpCredentialField(entry, depth + 1));
+  }
+  return Object.entries(value as JsonObject).some(([key, entry]) =>
+    MCP_CREDENTIAL_FIELD_PATTERN.test(key)
+    || containsMcpCredentialField(entry, depth + 1),
+  );
+}
+
 function publicVelaLoginStatus(status: unknown): unknown {
   if (!status || typeof status !== 'object' || Array.isArray(status)) return status;
   const { configPath: _configPath, ...publicStatus } = status as JsonObject;
@@ -1075,6 +1105,8 @@ async function handleMcpToolCall(
         return ok(await getJson<SkillsPayload>(`${baseUrl}/api/skills`));
       case 'list_plugins':
         return ok(await listPlugins(baseUrl));
+      case 'list_byok_profiles':
+        return ok(await listByokProfiles(baseUrl));
       case 'list_agents':
         return ok(await listAgents(baseUrl, args.includeUnavailable === true));
       case 'start_vela_login': {
@@ -1292,6 +1324,58 @@ async function listAgents(baseUrl: string, includeUnavailable: boolean): Promise
   return { agents };
 }
 
+async function listByokProfiles(baseUrl: string): Promise<JsonObject> {
+  const payload = await getJson<JsonObject>(`${baseUrl}/api/byok/profiles`);
+  const rawProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+  const profiles = rawProfiles.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const profile = value as JsonObject;
+    if (
+      typeof profile.id !== 'string'
+      || typeof profile.label !== 'string'
+      || typeof profile.protocol !== 'string'
+      || typeof profile.baseUrl !== 'string'
+      || typeof profile.model !== 'string'
+    ) {
+      return [];
+    }
+    try {
+      const parsed = new URL(profile.baseUrl);
+      if (
+        !['http:', 'https:'].includes(parsed.protocol)
+        || parsed.username.length > 0
+        || parsed.password.length > 0
+        || parsed.search.length > 0
+        || parsed.hash.length > 0
+      ) {
+        return [];
+      }
+    } catch {
+      return [];
+    }
+    return [{
+      id: profile.id,
+      label: profile.label,
+      protocol: profile.protocol,
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+      ...(typeof profile.apiVersion === 'string'
+        ? { apiVersion: profile.apiVersion }
+        : {}),
+      requiresApiKey: profile.requiresApiKey === true,
+      configured: profile.configured === true,
+      ...(typeof profile.keyTail === 'string' ? { keyTail: profile.keyTail } : {}),
+      ...(typeof profile.createdAt === 'number' ? { createdAt: profile.createdAt } : {}),
+      ...(typeof profile.updatedAt === 'number' ? { updatedAt: profile.updatedAt } : {}),
+    }];
+  });
+  return {
+    available: payload.available === true,
+    backend: typeof payload.backend === 'string' ? payload.backend : 'unknown',
+    profiles,
+  };
+}
+
 // Derive a valid project id ([A-Za-z0-9._-], <=128) from a display name,
 // with a short random suffix so repeated creates with the same name
 // don't collide on the daemon's primary key.
@@ -1308,6 +1392,15 @@ function slugifyProjectId(name: string): string {
 // start+poll because MCP is request/response and generation is
 // minutes-long.
 async function startRun(baseUrl: string, args: McpArgs) {
+  if (
+    Object.prototype.hasOwnProperty.call(args, 'apiKey')
+    || Object.prototype.hasOwnProperty.call(args, 'byokProvider')
+    || containsMcpCredentialField(args.inputs)
+  ) {
+    throw new Error(
+      'raw API keys are not accepted by Open Design MCP. Save the key through the Open Design UI or `od byok save --api-key-stdin`, then pass only byokProfile.',
+    );
+  }
   const { id, resolved, active } = await resolveProjectArg(baseUrl, args.project);
   const body: JsonObject = { projectId: id };
   if (typeof args.prompt === 'string' && args.prompt.length > 0) {
@@ -1320,6 +1413,18 @@ async function startRun(baseUrl: string, args: McpArgs) {
   if (typeof args.model === 'string' && args.model.length > 0) body.model = args.model;
   if (typeof args.serviceTier === 'string' && args.serviceTier.length > 0) {
     body.serviceTier = args.serviceTier;
+  }
+  if (args.byokProfile !== undefined) {
+    requireString(args.byokProfile, 'byokProfile');
+    if (
+      typeof args.agent === 'string'
+      && args.agent.length > 0
+      && args.agent !== 'byok-opencode'
+    ) {
+      throw new Error('byokProfile can only be used with the byok-opencode agent.');
+    }
+    body.agentId = 'byok-opencode';
+    body.byokProfileId = args.byokProfile;
   }
   if (args.inputs !== undefined) {
     if (args.inputs === null || typeof args.inputs !== 'object' || Array.isArray(args.inputs)) {
