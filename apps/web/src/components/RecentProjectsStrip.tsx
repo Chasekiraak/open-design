@@ -23,6 +23,7 @@ import { useTeamMembers } from '../collab/useTeamMembers';
 import { notifyTeamProjectsChanged, useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { teamConsoleUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
+import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 
 /** Which project space this strip renders. Drives the per-card 共享 badge
  *  (hidden in the all-shared team space) and the "{creator}创建" line: 'recent'
@@ -182,8 +183,19 @@ export function RecentProjectsStrip({
   const { resolve: resolveMember } = useTeamMembers();
   const { context: workspaceContext } = useWorkspaceContext();
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
+  // `canShareProjects` alone is a ROLE permission ("could this member share IF
+  // a team existed"), not a "does a team exist" signal — a purely personal
+  // workspace's owner still gets `canShareProjects: true`. Without also
+  // requiring `workspaceContextHasTeamIdentity`, this stayed true for a
+  // personal-only workspace and the move-to-team menu item rendered a button
+  // the daemon can only ever 403 (recvqfZsR901YQ "无法共享方案了" /
+  // recvqgif6Xa7Wb "隐藏非 Team workspace 分享到团队的入口") — the exact class
+  // of bug `workspaceContextHasTeamIdentity`'s own doc comment warns about:
+  // "Deriving it twice is how a UI grows a button that can only ever fail."
   const collaborationAvailable =
-    collaborationEnabled ?? workspaceContext?.permissions.canShareProjects === true;
+    collaborationEnabled ??
+    (workspaceContextHasTeamIdentity(workspaceContext) &&
+      workspaceContext?.permissions.canShareProjects === true);
   const canInvite =
     canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true;
   const canManageCollection =
