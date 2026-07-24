@@ -223,6 +223,82 @@ describe('scanRunEventsForUsageAnalytics', () => {
     expect(result.token_count_source).toBe('provider_usage');
   });
 
+  it('merges a later thought-only usage frame with earlier complete input/output', () => {
+    // ACP runtimes can emit a complete usage frame, then a trailing partial
+    // frame with only thought_tokens (or cache counters). Reverse-scan must
+    // keep the complete fields and layer the later thought tokens on top.
+    const result = scanRunEventsForUsageAnalytics(
+      [
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              input_tokens: 12_000,
+              output_tokens: 400,
+              total_tokens: 12_400,
+            },
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: { thought_tokens: 256 },
+          },
+        },
+      ],
+      'amr-model',
+      0,
+    );
+
+    expect(result).toMatchObject({
+      input_tokens: 12_000,
+      output_tokens: 400,
+      total_tokens: 12_400,
+      thought_tokens: 256,
+      token_count_source: 'provider_usage',
+    });
+  });
+
+  it('merges a later cache-only usage frame without dropping earlier input/output', () => {
+    const result = scanRunEventsForUsageAnalytics(
+      [
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              input_tokens: 1000,
+              output_tokens: 50,
+            },
+          },
+        },
+        {
+          event: 'agent',
+          data: {
+            type: 'usage',
+            usage: {
+              cache_read_input_tokens: 250,
+              cache_creation_input_tokens: 100,
+            },
+          },
+        },
+      ],
+      '',
+      0,
+    );
+
+    expect(result).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 50,
+      cache_read_input_tokens: 250,
+      cache_creation_input_tokens: 100,
+      cache_token_source: 'anthropic',
+      token_count_source: 'provider_usage',
+    });
+  });
+
   it('normalizes additive Responses-API / ACP usage where cache_read exceeds input_tokens', () => {
     // Real AMR/vela follow-up shape: the stream reports input_tokens as the
     // UNCACHED remainder with cached_input_tokens reported separately ON TOP, so

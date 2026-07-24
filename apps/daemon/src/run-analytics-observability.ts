@@ -467,7 +467,12 @@ export function scanRunEventsForUsageAnalytics(
   let cacheTokenSource: RunUsageAnalytics['cache_token_source'] = 'unavailable';
   let agentReportedModel: string | null = null;
   const needAgentModel = !hasExplicitRequestedModelForAnalytics(reqBodyModel);
-  let haveUsageTokens = false;
+  // Provider-usage is true for any real token field (including thought/cache-only
+  // ACP frames). Primary usage is input/output/total — enough to stop seeking
+  // older frames. Keeping these separate prevents a later partial `usage`
+  // frame from hiding an earlier complete record.
+  let haveProviderUsage = false;
+  let havePrimaryUsage = false;
 
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
@@ -482,7 +487,7 @@ export function scanRunEventsForUsageAnalytics(
         }
       | null
       | undefined;
-    if (ev?.event === 'agent' && data?.type === 'usage' && !haveUsageTokens) {
+    if (ev?.event === 'agent' && data?.type === 'usage' && !havePrimaryUsage) {
       const usage = data.usage && typeof data.usage === 'object'
         ? data.usage
         : data.modelUsage && typeof data.modelUsage === 'object'
@@ -490,23 +495,50 @@ export function scanRunEventsForUsageAnalytics(
           : null;
       if (usage) {
         const fields = extractUsageCacheFields(usage);
-        inputTokens = fields.inputTokens;
-        outputTokens = fields.outputTokens;
-        providerTotalTokens = fields.totalTokens;
-        thoughtTokens = fields.thoughtTokens;
-        cacheReadInputTokens = fields.cacheReadInputTokens;
-        cacheCreationInputTokens = fields.cacheCreationInputTokens;
-        if (fields.cacheTokenSource) cacheTokenSource = fields.cacheTokenSource;
+        // Reverse-scan merge: most-recent frame wins per field; fill gaps from
+        // older frames so a trailing thought/cache-only update still keeps
+        // earlier input/output/total.
+        if (inputTokens === undefined && fields.inputTokens !== undefined) {
+          inputTokens = fields.inputTokens;
+        }
+        if (outputTokens === undefined && fields.outputTokens !== undefined) {
+          outputTokens = fields.outputTokens;
+        }
+        if (providerTotalTokens === undefined && fields.totalTokens !== undefined) {
+          providerTotalTokens = fields.totalTokens;
+        }
+        if (thoughtTokens === undefined && fields.thoughtTokens !== undefined) {
+          thoughtTokens = fields.thoughtTokens;
+        }
+        if (cacheReadInputTokens === undefined && fields.cacheReadInputTokens !== undefined) {
+          cacheReadInputTokens = fields.cacheReadInputTokens;
+        }
+        if (
+          cacheCreationInputTokens === undefined &&
+          fields.cacheCreationInputTokens !== undefined
+        ) {
+          cacheCreationInputTokens = fields.cacheCreationInputTokens;
+        }
+        if (cacheTokenSource === 'unavailable' && fields.cacheTokenSource) {
+          cacheTokenSource = fields.cacheTokenSource;
+        }
         // Any real provider token field counts as provider_usage (not only
         // input/output) so thought-only or total-only ACP payloads still mark
         // the source correctly for PostHog/Langfuse.
-        haveUsageTokens =
+        if (
+          fields.inputTokens !== undefined ||
+          fields.outputTokens !== undefined ||
+          fields.totalTokens !== undefined ||
+          fields.thoughtTokens !== undefined ||
+          fields.cacheReadInputTokens !== undefined ||
+          fields.cacheCreationInputTokens !== undefined
+        ) {
+          haveProviderUsage = true;
+        }
+        havePrimaryUsage =
           inputTokens !== undefined ||
           outputTokens !== undefined ||
-          providerTotalTokens !== undefined ||
-          thoughtTokens !== undefined ||
-          cacheReadInputTokens !== undefined ||
-          cacheCreationInputTokens !== undefined;
+          providerTotalTokens !== undefined;
       }
     }
 
@@ -527,7 +559,9 @@ export function scanRunEventsForUsageAnalytics(
       }
     }
 
-    if (haveUsageTokens && (!needAgentModel || agentReportedModel)) break;
+    // Stop once we have primary (input/output/total) usage. Thought/cache-only
+    // frames mark provider_usage but do not complete the reverse scan.
+    if (havePrimaryUsage && (!needAgentModel || agentReportedModel)) break;
   }
 
   // Forward scan for the turn's FIRST model-call usage (the reverse loop above
@@ -634,7 +668,7 @@ export function scanRunEventsForUsageAnalytics(
       ? { first_call_cache_hit_ratio: firstCallCacheHitRatio }
       : {}),
     cache_token_source: cacheTokenSource,
-    token_count_source: haveUsageTokens ? 'provider_usage' : 'unknown',
+    token_count_source: haveProviderUsage ? 'provider_usage' : 'unknown',
     agent_reported_model: agentReportedModel,
   };
 }
