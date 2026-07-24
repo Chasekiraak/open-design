@@ -7396,6 +7396,24 @@ function HtmlViewer({
       source.postMessage({ type: 'od:preview-runtime-state-capture', id }, '*');
     });
   }, []);
+  const postAndConsumePreviewRuntimeState = useCallback((target: HTMLIFrameElement | null) => {
+    const runtimeState = previewRuntimeStateRef.current;
+    const win = target?.contentWindow;
+    if (
+      !runtimeState ||
+      !win ||
+      target !== srcDocPreviewIframeRef.current ||
+      target !== iframeRef.current
+    ) {
+      return false;
+    }
+    // This snapshot only bridges the first URL -> srcDoc handoff. Consume it
+    // before posting so later srcDoc reloads cannot overwrite newer source
+    // attributes or runtime navigation with stale transition state.
+    previewRuntimeStateRef.current = null;
+    win.postMessage({ type: 'od:preview-runtime-state-restore', state: runtimeState }, '*');
+    return true;
+  }, []);
   const setCommentComposerHostRef = useCallback((node: HTMLDivElement | null) => {
     setCommentComposerHost((current) => (current === node ? current : node));
   }, []);
@@ -8484,8 +8502,12 @@ function HtmlViewer({
     setUrlSelectionBridgeReady(false);
   }, [effectiveBasePreviewSrcUrl]);
   useEffect(() => {
-    iframeRef.current = useUrlLoadPreview ? urlPreviewIframeRef.current : srcDocPreviewIframeRef.current;
-  }, [useUrlLoadPreview]);
+    const activeFrame = useUrlLoadPreview
+      ? urlPreviewIframeRef.current
+      : srcDocPreviewIframeRef.current;
+    iframeRef.current = activeFrame;
+    if (!useUrlLoadPreview) postAndConsumePreviewRuntimeState(activeFrame);
+  }, [postAndConsumePreviewRuntimeState, useUrlLoadPreview]);
   // Clear a redirect-loop park whenever the artifact changes or the user hits
   // reload (reloadKey bump): the previewed content is fresh, so give it a clean
   // run rather than staying pinned on the "loop detected" placeholder.
@@ -9030,18 +9052,7 @@ function HtmlViewer({
   function syncBridgeModes(target: HTMLIFrameElement | null = iframeRef.current) {
     const win = target?.contentWindow;
     if (!win) return;
-    const runtimeState = previewRuntimeStateRef.current;
-    if (
-      runtimeState &&
-      target === srcDocPreviewIframeRef.current &&
-      !useUrlLoadPreview
-    ) {
-      // This snapshot only bridges the first URL -> srcDoc handoff. Consume it
-      // before posting so later srcDoc reloads cannot overwrite newer source
-      // attributes or runtime navigation with stale transition state.
-      previewRuntimeStateRef.current = null;
-      win.postMessage({ type: 'od:preview-runtime-state-restore', state: runtimeState }, '*');
-    }
+    postAndConsumePreviewRuntimeState(target);
     win.postMessage({
       type: 'od:comment-mode',
       enabled: boardMode,

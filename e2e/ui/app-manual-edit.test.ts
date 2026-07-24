@@ -166,6 +166,14 @@ test('[P0] manual edit mode preserves the current page in a multi-page mobile ap
 
   const preview = artifactPreviewFrame(page);
   await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Code', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Code', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Preview', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Preview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const prewarmedSrcDoc = page.frameLocator('iframe[data-testid="artifact-preview-frame-srcdoc"]');
+  await expect(prewarmedSrcDoc.getByTestId('mobile-page-home')).toBeAttached();
+
   await preview.getByRole('button', { name: 'Profile' }).click();
   await expect(preview.getByTestId('mobile-page-profile')).toBeVisible();
   await expect(preview.getByTestId('mobile-page-home')).toBeHidden();
@@ -206,6 +214,8 @@ test('[P0] manual edit mode preserves the current page in a multi-page mobile ap
   await selectedHtml.fill(editedHtml);
   await inspectSaveButton(page).click();
 
+  // Saving rebuilds the srcDoc transport. The consumed Profile snapshot must
+  // not replay over the newer Home navigation when that later load completes.
   await expectFileSource(page, projectId, 'mobile-app.html', ['data-edit-revision="fresh"']);
   await expect(preview.locator('[data-edit-revision="fresh"]')).toBeVisible();
   await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
