@@ -130,6 +130,10 @@ export interface HomeHeroSubmitHandler {
   (): void;
 }
 
+// Long enough to read the current start path, short enough to keep the Hero
+// feeling alive without competing with the composer below it.
+const HERO_CAPABILITY_CAROUSEL_INTERVAL_MS = 3_600;
+
 // The homepage prompt input now shares the project composer's Lexical
 // editor, so the forwarded handle is a small focus surface rather than a
 // raw <textarea>. HomeView drives `focusEnd()` after seeding a prompt
@@ -524,7 +528,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     if (!heroCapabilityCarouselRunning) return;
     const timer = window.setInterval(() => {
       setHeroCapabilityIndex((current) => (current + 1) % heroCapabilities.length);
-    }, 3600);
+    }, HERO_CAPABILITY_CAROUSEL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [heroCapabilities.length, heroCapabilityCarouselRunning]);
 
@@ -1407,7 +1411,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         <PixelScanLogo className="home-hero__logo home-hero__logo--tiles" />
       </span>
       <h1 className="home-hero__title">
-        <span className="home-hero__title-prefix">start with</span>
+        <span className="home-hero__title-prefix">Start with</span>
         <span className="home-hero__capability-slot">
           {activeHeroCapability ? (
             <span
@@ -1425,7 +1429,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               <span>.</span>
             </span>
           ) : (
-            <span className="home-hero__capability-value">templates.</span>
+            <span className="home-hero__capability-value">a template.</span>
           )}
         </span>
       </h1>

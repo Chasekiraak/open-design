@@ -121,7 +121,7 @@ describe('HomeHero intent rail', () => {
     renderHero();
 
     const title = screen.getByRole('heading', { level: 1 });
-    expect(title.querySelector('.home-hero__title-prefix')?.textContent).toBe('start with');
+    expect(title.querySelector('.home-hero__title-prefix')?.textContent).toBe('Start with');
     expect(title.querySelector('.home-hero__capability-value')).toBeTruthy();
   });
 

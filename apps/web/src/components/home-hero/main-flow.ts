@@ -34,23 +34,23 @@ const ROLE_FIRST_TEMPLATE_IDS: Record<Exclude<HomeOnboardingRole, null>, readonl
 const HOME_HERO_CAPABILITIES: readonly HomeHeroCapability[] = [
   {
     id: 'design-system',
-    label: 'design system',
-    subtitle: 'Keep every screen aligned with your existing visual language.',
+    label: 'your design system',
+    subtitle: 'Keep every screen aligned with your visual language.',
   },
   {
     id: 'visual-references',
     label: 'inspiration',
-    subtitle: 'Turn screenshots and inspiration into a clear visual direction.',
+    subtitle: 'Turn references into a visual direction.',
   },
   {
     id: 'project-files',
     label: 'project files',
-    subtitle: 'Build from the work and context already in your workspace.',
+    subtitle: 'Build from work already in your workspace.',
   },
   {
     id: 'templates',
-    label: 'templates',
-    subtitle: 'Start from a proven output instead of a blank canvas.',
+    label: 'a template',
+    subtitle: 'Start from a proven structure, not a blank canvas.',
   },
 ];
 

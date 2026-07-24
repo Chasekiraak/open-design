@@ -90,6 +90,31 @@ describe('Home Hero capability carousel', () => {
 
     expect(capability?.label).toBe('inspiration');
   });
+
+  it('uses a stable set of start-path labels and explanations', () => {
+    expect(heroCapabilitiesForHome(null)).toEqual([
+      {
+        id: 'design-system',
+        label: 'your design system',
+        subtitle: 'Keep every screen aligned with your visual language.',
+      },
+      {
+        id: 'visual-references',
+        label: 'inspiration',
+        subtitle: 'Turn references into a visual direction.',
+      },
+      {
+        id: 'project-files',
+        label: 'project files',
+        subtitle: 'Build from work already in your workspace.',
+      },
+      {
+        id: 'templates',
+        label: 'a template',
+        subtitle: 'Start from a proven structure, not a blank canvas.',
+      },
+    ]);
+  });
 });
 
 describe('Home mode suggestions', () => {
