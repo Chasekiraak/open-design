@@ -5,7 +5,6 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  readdir,
   readlink,
   realpath,
   rename,
@@ -180,21 +179,6 @@ async function waitForProcessExit(pid: number): Promise<void> {
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
   throw new Error(`timed out waiting for smoke descendant ${String(pid)} to exit`);
-}
-
-async function waitForStagingRelease(releasesRoot: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const entries = await readdir(releasesRoot).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return [];
-        throw error;
-      },
-    );
-    if (entries.some((entry) => entry.startsWith(".staging-"))) return;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 1));
-  }
-  throw new Error(`timed out waiting for staging release: ${releasesRoot}`);
 }
 
 async function within<T>(
@@ -788,43 +772,38 @@ describe("server payload installer", () => {
         releaseId,
         target,
       });
-      const sourceReleaseRoot = join(
-        payloadRoot,
-        "releases",
-        releaseId,
+      const sourceReleaseRoot = join(payloadRoot, "releases", releaseId);
+      const releaseStaged = Promise.withResolvers<void>();
+      const commitRelease = Promise.withResolvers<void>();
+      const installation = installServerPayload(
+        {
+          archiveSha256: "a".repeat(64),
+          binDir,
+          installRoot,
+          nodeBin: process.execPath,
+          payloadRoot,
+        },
+        {
+          beforeReleaseCommit: async () => {
+            releaseStaged.resolve();
+            await commitRelease.promise;
+          },
+        },
       );
-      const raceFilesRoot = join(sourceReleaseRoot, "race-files");
-      await mkdir(raceFilesRoot, { recursive: true });
-      await Promise.all(
-        Array.from({ length: 1_000 }, (_, index) =>
-          writeFile(
-            join(raceFilesRoot, `${String(index).padStart(4, "0")}.txt`),
-            `race fixture ${String(index)}\n`,
-            "utf8",
-          ),
-        ),
-      );
-      await writeServerReleaseManifest({
-        appVersion: "1.2.3",
-        nodeAbi: process.versions.modules,
-        releaseId,
-        releaseRoot: sourceReleaseRoot,
-        target,
-      });
-
-      const installation = installServerPayload({
-        archiveSha256: "a".repeat(64),
-        binDir,
-        installRoot,
-        nodeBin: process.execPath,
-        payloadRoot,
-      });
       const releasesRoot = join(installRoot, "releases");
-      await waitForStagingRelease(releasesRoot);
-      await symlink(
-        sourceReleaseRoot,
-        join(releasesRoot, releaseId),
-      );
+      try {
+        await within(
+          releaseStaged.promise,
+          5_000,
+          "release publication staging",
+        );
+        await symlink(
+          sourceReleaseRoot,
+          join(releasesRoot, releaseId),
+        );
+      } finally {
+        commitRelease.resolve();
+      }
 
       await expect(installation).rejects.toThrow(
         /release destination is not a real directory/,

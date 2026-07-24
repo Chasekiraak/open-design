@@ -40,6 +40,14 @@ export type InstallServerPayloadOptions = {
   smokeTimeoutMs?: number;
 };
 
+export type InstallServerPayloadHooks = {
+  /**
+   * Runs after the staged release is verified and before its atomic rename.
+   * The installer lock remains held until this hook settles.
+   */
+  beforeReleaseCommit?: () => Promise<void>;
+};
+
 export type InstallServerPayloadResult = {
   archiveSha256: string;
   changed: boolean;
@@ -624,6 +632,7 @@ async function publishRelease(
   source: string,
   destination: string,
   manifest: ServerReleaseManifest,
+  hooks: InstallServerPayloadHooks,
 ): Promise<boolean> {
   const existing = await lstat(destination).catch(() => null);
   if (existing != null) {
@@ -642,6 +651,7 @@ async function publishRelease(
   await cp(source, stage, { dereference: true, recursive: true });
   try {
     await verifyServerRelease(stage);
+    await hooks.beforeReleaseCommit?.();
     try {
       await rename(stage, destination);
       return true;
@@ -930,6 +940,7 @@ async function installStableLaunchers(
 
 export async function installServerPayload(
   options: InstallServerPayloadOptions,
+  hooks: InstallServerPayloadHooks = {},
 ): Promise<InstallServerPayloadResult> {
   if (!/^[0-9a-f]{64}$/i.test(options.archiveSha256)) {
     throw new Error("archive sha256 must be exactly 64 hexadecimal characters");
@@ -979,6 +990,7 @@ export async function installServerPayload(
         sourceReleaseRoot,
         destination,
         manifest,
+        hooks,
       );
       const pointerChanged = previousReleaseId !== manifest.releaseId;
       const launcherSnapshots = await captureStableLaunchers(

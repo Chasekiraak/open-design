@@ -194,27 +194,187 @@ function Normalize-Version {
   return $normalized
 }
 
+function Format-NodeProbeText {
+  param([AllowEmptyString()][string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return "<empty>"
+  }
+  $singleLine = [regex]::Replace($Value.Trim(), "[\x00-\x1f]+", " ")
+  if ($singleLine.Length -gt 240) {
+    return ($singleLine.Substring(0, 240) + "...")
+  }
+  return $singleLine
+}
+
+function Invoke-NodeProbe {
+  param(
+    [Parameter(Mandatory = $true)][string]$NodePath,
+    [Parameter(Mandatory = $true)][string]$Arguments
+  )
+
+  # Windows PowerShell 5's legacy native-argument marshalling does not preserve
+  # embedded quotes reliably. Keep the controlled probe arguments quote-free
+  # and use ProcessStartInfo so exit code, stdout, and stderr stay observable.
+  $process = $null
+  try {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $NodePath
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+      throw "Process.Start returned no process"
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $exitCode = $process.ExitCode
+    $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+    $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
+    return [PSCustomObject]@{
+      Succeeded = $exitCode -eq 0
+      Started = $true
+      ExitCode = $exitCode
+      StandardOutput = $stdout
+      StandardError = $stderr
+      StartError = ""
+    }
+  } catch {
+    return [PSCustomObject]@{
+      Succeeded = $false
+      Started = $false
+      ExitCode = $null
+      StandardOutput = ""
+      StandardError = ""
+      StartError = $_.Exception.Message
+    }
+  } finally {
+    if ($null -ne $process) {
+      $process.Dispose()
+    }
+  }
+}
+
+function Format-NodeProbeFailure {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)]$Probe
+  )
+  if (-not $Probe.Started) {
+    return "$Name probe could not start: $(Format-NodeProbeText $Probe.StartError)"
+  }
+  $stdout = Format-NodeProbeText $Probe.StandardOutput
+  $stderr = Format-NodeProbeText $Probe.StandardError
+  return "$Name probe exited with code $($Probe.ExitCode) (stdout: $stdout; stderr: $stderr)"
+}
+
+function Get-NodeIdentity {
+  param([Parameter(Mandatory = $true)][string]$NodePath)
+  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+    return [PSCustomObject]@{
+      IsRunnable = $false
+      Version = ""
+      Platform = ""
+      Architecture = ""
+      Detail = "executable does not exist: $NodePath"
+    }
+  }
+
+  $versionProbe = Invoke-NodeProbe $NodePath "--version"
+  if (-not $versionProbe.Succeeded) {
+    return [PSCustomObject]@{
+      IsRunnable = $false
+      Version = ""
+      Platform = ""
+      Architecture = ""
+      Detail = Format-NodeProbeFailure "version" $versionProbe
+    }
+  }
+  $version = $versionProbe.StandardOutput.Trim()
+  if ($version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $version = $version.Substring(1)
+  }
+  if ([string]::IsNullOrWhiteSpace($version)) {
+    return [PSCustomObject]@{
+      IsRunnable = $false
+      Version = ""
+      Platform = ""
+      Architecture = ""
+      Detail = "version probe returned empty output"
+    }
+  }
+
+  $platformProbe = Invoke-NodeProbe $NodePath "-p process.platform"
+  if (-not $platformProbe.Succeeded) {
+    return [PSCustomObject]@{
+      IsRunnable = $false
+      Version = $version
+      Platform = ""
+      Architecture = ""
+      Detail = Format-NodeProbeFailure "platform" $platformProbe
+    }
+  }
+  $platform = $platformProbe.StandardOutput.Trim()
+
+  $architectureProbe = Invoke-NodeProbe $NodePath "-p process.arch"
+  if (-not $architectureProbe.Succeeded) {
+    return [PSCustomObject]@{
+      IsRunnable = $false
+      Version = $version
+      Platform = $platform
+      Architecture = ""
+      Detail = Format-NodeProbeFailure "architecture" $architectureProbe
+    }
+  }
+  $architecture = $architectureProbe.StandardOutput.Trim()
+
+  return [PSCustomObject]@{
+    IsRunnable = $true
+    Version = $version
+    Platform = $platform
+    Architecture = $architecture
+    Detail = (
+      "reported version $(Format-NodeProbeText $version), " +
+      "platform $(Format-NodeProbeText $platform), " +
+      "architecture $(Format-NodeProbeText $architecture)"
+    )
+  }
+}
+
 function Test-CompatibleNode {
   param(
     [Parameter(Mandatory = $true)][string]$NodePath,
     [Parameter(Mandatory = $true)][string]$Architecture
   )
-  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+  $identity = Get-NodeIdentity $NodePath
+  if (-not $identity.IsRunnable) {
     return $false
   }
-  try {
-    $identity = (
-      & $NodePath -p `
-        'process.versions.node.split(".")[0] + " " + process.platform + "-" + process.arch' `
-        2>$null
-    )
-    return (
-      $LASTEXITCODE -eq 0 -and
-      "$identity".Trim() -ceq "24 win32-$Architecture"
-    )
-  } catch {
+  $versionParts = $identity.Version.Split([char]".")
+  if ($versionParts.Count -eq 0) {
     return $false
   }
+  return (
+    $versionParts[0] -ceq "24" -and
+    $identity.Platform -ceq "win32" -and
+    $identity.Architecture -ceq $Architecture
+  )
+}
+
+function Test-PinnedNodeIdentity {
+  param(
+    [Parameter(Mandatory = $true)]$Identity,
+    [Parameter(Mandatory = $true)][string]$Architecture
+  )
+  return (
+    $Identity.IsRunnable -and
+    $Identity.Version -ceq $NodeVersion -and
+    $Identity.Platform -ceq "win32" -and
+    $Identity.Architecture -ceq $Architecture
+  )
 }
 
 function Test-PinnedNode {
@@ -222,22 +382,8 @@ function Test-PinnedNode {
     [Parameter(Mandatory = $true)][string]$NodePath,
     [Parameter(Mandatory = $true)][string]$Architecture
   )
-  if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
-    return $false
-  }
-  try {
-    $identity = (
-      & $NodePath -p `
-        'process.versions.node + " " + process.platform + "-" + process.arch' `
-        2>$null
-    )
-    return (
-      $LASTEXITCODE -eq 0 -and
-      "$identity".Trim() -ceq "$NodeVersion win32-$Architecture"
-    )
-  } catch {
-    return $false
-  }
+  $identity = Get-NodeIdentity $NodePath
+  return (Test-PinnedNodeIdentity $identity $Architecture)
 }
 
 function Expand-CheckedZip {
@@ -409,8 +555,12 @@ function Install-PrivateNode {
   Expand-CheckedZip $nodeArchive $nodeExtractRoot $nodeArchiveTop $true
   $nodeSource = Join-Path $nodeExtractRoot $nodeArchiveTop
   $sourceNode = Join-Path $nodeSource "node.exe"
-  if (-not (Test-PinnedNode $sourceNode $Architecture)) {
-    throw "private Node archive did not contain Node v$NodeVersion"
+  $sourceIdentity = Get-NodeIdentity $sourceNode
+  if (-not (Test-PinnedNodeIdentity $sourceIdentity $Architecture)) {
+    throw (
+      "private Node archive failed executable validation " +
+      "(expected $NodeVersion win32-$Architecture; $($sourceIdentity.Detail))"
+    )
   }
 
   $publishPrivateNode = @'
