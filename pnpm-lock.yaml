@@ -806,6 +806,9 @@ importers:
 
   tools/release:
     dependencies:
+      '@open-design/launcher-proto':
+        specifier: workspace:*
+        version: link:../../packages/launcher-proto
       '@open-design/release':
         specifier: workspace:*
         version: link:../../packages/release

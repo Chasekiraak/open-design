@@ -3991,6 +3991,9 @@ export const zhTW: Dict = {
   "updater.upToDate": "您已經是最新版本啦",
   "updater.viewVersionFeatures": "查看新版本特色",
   "updater.manualDownload": "手動下載",
+  "updater.reinstallLearnMore": "了解詳情",
+  "updater.reinstallReadyGeneric": "此更新需要完整重新安裝。Open Design 將關閉並開啟安裝程式。",
+  "updater.reinstallReadyVersion": "Open Design {version} 需要完整重新安裝。Open Design 將關閉並開啟安裝程式。",
   "updater.restartAnyway": "仍然重新啟動",
 
   "whatsNew.cta": "看看有什麼新功能",
@@ -4436,6 +4439,12 @@ export const zhTW: Dict = {
   "settings.resetOnboarding": "重置引導流程",
   "settings.resetOnboardingDesc": "重新進行首次設定，包括品牌擷取。",
   "settings.resetOnboardingButton": "重置",
+  "settings.clearUpdaterCacheTitle": "清理更新快取",
+  "settings.clearUpdaterCacheHint": "刪除已下載的更新與殘留的更新快取，並重設更新狀態。當更新疑似卡住時使用。",
+  "settings.clearUpdaterCacheButton": "清理快取",
+  "settings.clearUpdaterCacheConfirmButton": "確認清理",
+  "settings.clearUpdaterCacheSuccess": "更新快取已清理。",
+  "settings.clearUpdaterCacheFailed": "無法清理更新快取。",
   "onboarding.brandTitle": "擷取你的設計系統",
   "onboarding.brandSubtitle":
     "貼上品牌網站，我們會把品牌線索轉成後續可重用的設計系統。",

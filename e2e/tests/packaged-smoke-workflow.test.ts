@@ -1132,6 +1132,20 @@ process.stdin.on("end", () => {
     expect(workflow).not.toContain("needs.runners.outputs.blacksmith_default");
   });
 
+  it("[P1] pins ShellCheck for actionlint across runner profiles", async () => {
+    const workflow = await readFile(ciWorkflowPath, "utf8");
+    const staticGate = sectionBetween(workflow, "  static_gate:", "  preflight:");
+
+    expect(staticGate).toContain("SHELLCHECK_VERSION: 0.11.0");
+    expect(staticGate).toContain("shellcheck_arch=x86_64");
+    expect(staticGate).toContain("shellcheck_arch=aarch64");
+    expect(staticGate).toContain(
+      'koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${shellcheck_arch}.tar.gz',
+    );
+    expect(staticGate).toContain("sudo install -m 0755 shellcheck /usr/local/bin/shellcheck");
+    expect(staticGate).toContain("run: actionlint -color");
+  });
+
   it("[P2] keeps visual ownership and generic full UI sharding explicit", async () => {
     const playwrightConfig = await readFile(playwrightConfigPath, "utf8");
     const benchmarkWorkflow = await readFile(uiExtendedMainWorkflowPath, "utf8");
@@ -2554,6 +2568,16 @@ process.stdin.on("end", () => {
     expect(winBuildScript).not.toContain("fnm");
     expect(winBuildScript).not.toContain("corepack");
     expect(winBuildScript).not.toContain("pnpm install");
+  });
+
+  it("resolves the generated Windows update fixture outside the measured build child scope", async () => {
+    const winBuildScript = await readFile(releaseBetaWindowsBuildScriptPath, "utf8");
+
+    expect(winBuildScript).toMatch(
+      /Measure-Step "tools-pack win build update fixture" \{[\s\S]*?\r?\n    \}\r?\n    \$updateBuild = Get-Content -LiteralPath \$fixtureJsonPath -Raw \| ConvertFrom-Json\r?\n    \$localUpdateArtifactPath = \[string\]\$updateBuild\.installerPath/,
+    );
+    expect(winBuildScript).toContain('$env:OD_PACKAGED_E2E_WIN_UPDATE_FIXTURE = "tools-serve"');
+    expect(winBuildScript).toContain("$env:OD_PACKAGED_E2E_WIN_UPDATE_ARTIFACT_PATH = $localUpdateArtifactPath");
   });
 });
 

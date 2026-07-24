@@ -365,7 +365,7 @@ describe('ProjectView conversation delete', () => {
     renderProjectView(vi.fn());
 
     await waitFor(() => expect(chatPaneProps.activeConversationId).toBe('conv-1'));
-    expect(chatPaneProps.onSubmitQuestionForm).toBeDefined();
+    await waitFor(() => expect(chatPaneProps.onSubmitQuestionForm).toBeDefined());
     expect(chatPaneProps.questionFormSubmitDisabled).toBe(true);
 
     pendingMessages.resolve([assistantMessage]);

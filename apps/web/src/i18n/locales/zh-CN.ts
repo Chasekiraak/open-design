@@ -3985,6 +3985,9 @@ export const zhCN: Dict = {
   "updater.upToDate": "您已经是最新版本啦",
   "updater.viewVersionFeatures": "查看新版本特性",
   "updater.manualDownload": "手动下载",
+  "updater.reinstallLearnMore": "了解详情",
+  "updater.reinstallReadyGeneric": "此更新需要完整重装。Open Design 将关闭并打开安装程序。",
+  "updater.reinstallReadyVersion": "Open Design {version} 需要完整重装。Open Design 将关闭并打开安装程序。",
   "updater.restartAnyway": "仍然重启",
 
   "whatsNew.cta": "看看有什么新功能",
@@ -4429,6 +4432,12 @@ export const zhCN: Dict = {
   "settings.resetOnboarding": "重置引导流程",
   "settings.resetOnboardingDesc": "重新进行首次设置，包括品牌提取。",
   "settings.resetOnboardingButton": "重置",
+  "settings.clearUpdaterCacheTitle": "清理更新缓存",
+  "settings.clearUpdaterCacheHint": "删除已下载的更新与残留的更新缓存，并重置更新状态。当更新疑似卡住时使用。",
+  "settings.clearUpdaterCacheButton": "清理缓存",
+  "settings.clearUpdaterCacheConfirmButton": "确认清理",
+  "settings.clearUpdaterCacheSuccess": "更新缓存已清理。",
+  "settings.clearUpdaterCacheFailed": "更新缓存清理失败。",
   "onboarding.brandTitle": "提取你的设计系统",
   "onboarding.brandSubtitle":
     "粘贴品牌网站，我们会把品牌线索转成后续可复用的设计系统。",
