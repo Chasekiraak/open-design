@@ -117,21 +117,107 @@ const DAEMON_LANE_ALLOWED_TEST_COMMAND =
 
 const CONDITIONAL_CONSUMER = "apps/daemon/tests/runtimes/trae-cli.test.ts";
 
+function workflowRunBodies(workflow: string): string[] {
+  const runBodies: string[] = [];
+  const lines = workflow.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index]?.match(/^(\s*)(?:-\s+)?run:\s*(.*)$/);
+    if (match === null || match === undefined) continue;
+    const indentation = match[1]?.length ?? 0;
+    const value = match[2]?.trim() ?? "";
+    if (!/^[|>][+-]?$/.test(value)) {
+      runBodies.push(value);
+      continue;
+    }
+
+    const bodyLines: string[] = [];
+    while (index + 1 < lines.length) {
+      const nextLine = lines[index + 1] ?? "";
+      const nextIndentation = nextLine.match(/^\s*/)?.[0].length ?? 0;
+      if (nextLine.trim() !== "" && nextIndentation <= indentation) break;
+      index += 1;
+      bodyLines.push(nextLine.slice(Math.min(nextIndentation, indentation + 2)));
+    }
+    runBodies.push(bodyLines.join(value.startsWith(">") ? " " : "\n"));
+  }
+
+  return runBodies;
+}
+
+function shellCommands(body: string): string[][] {
+  const commands: string[][] = [];
+  let command: string[] = [];
+  let token = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  const finishToken = (): void => {
+    if (token !== "") command.push(token);
+    token = "";
+  };
+  const finishCommand = (): void => {
+    finishToken();
+    if (command.length > 0) commands.push(command);
+    command = [];
+  };
+
+  for (const character of body) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      else token += character;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      finishToken();
+      if (character === "\n") finishCommand();
+    } else if (character === ";" || character === "|" || character === "&") {
+      finishCommand();
+    } else {
+      token += character;
+    }
+  }
+  finishCommand();
+  return commands;
+}
+
 export function daemonTestInvocationsFromWorkflow(workflow: string): string[] {
-  return workflow
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => !line.startsWith("#"))
-    .map((line) => line.replace(/^run:\s*/, ""))
-    .map((line) => {
-      const invocation = line.match(
-        /\bpnpm\s+(?:(?:--filter(?:=|\s+)|-F(?:=|\s+))@open-design\/daemon|(?:--dir(?:=|\s+)|-C(?:=|\s+))apps\/daemon)\s+((?:test\b|(?:exec\s+)?vitest\b).*)/,
-      );
-      return invocation === null
-        ? undefined
-        : `pnpm --filter @open-design/daemon ${invocation[1]}`;
-    })
-    .filter((line): line is string => line !== undefined);
+  const invocations: string[] = [];
+
+  for (const tokens of workflowRunBodies(workflow).flatMap(shellCommands)) {
+    const pnpmIndex = tokens.indexOf("pnpm");
+    if (pnpmIndex === -1) continue;
+    const pnpmTokens = tokens.slice(pnpmIndex + 1);
+    const selectsDaemon = pnpmTokens.some(
+      (token, index) =>
+        ((token === "--filter" || token === "-F") && pnpmTokens[index + 1] === "@open-design/daemon") ||
+        token === "--filter=@open-design/daemon" ||
+        token === "-F=@open-design/daemon" ||
+        ((token === "--dir" || token === "-C") && pnpmTokens[index + 1] === "apps/daemon") ||
+        token === "--dir=apps/daemon" ||
+        token === "-C=apps/daemon",
+    );
+    if (!selectsDaemon) continue;
+
+    const testIndex = pnpmTokens.findIndex(
+      (token, index) =>
+        token === "test" ||
+        token === "vitest" ||
+        (token === "exec" && pnpmTokens[index + 1] === "vitest") ||
+        (token === "run" && pnpmTokens[index + 1] === "test"),
+    );
+    if (testIndex === -1) continue;
+    invocations.push(
+      `pnpm --filter @open-design/daemon ${pnpmTokens.slice(testIndex).join(" ")}`,
+    );
+  }
+
+  return invocations;
 }
 
 export function workflowRunsOnlyAllowedDaemonTest(workflow: string): boolean {

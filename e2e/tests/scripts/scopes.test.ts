@@ -632,14 +632,20 @@ jobs:
     "pnpm --filter=@open-design/daemon test",
     "pnpm --dir apps/daemon test",
     "pnpm -C apps/daemon test",
+    "pnpm --filter @open-design/daemon run test",
+    "pnpm --silent --filter @open-design/daemon test",
+    "pnpm -r --filter @open-design/daemon test",
   ]) {
     const narrowPlusBroader = `${narrowOnly}
       - name: Full daemon suite
         run: ${broaderCommand}
 `;
+    const expectedBroaderInvocation = broaderCommand.includes("run test")
+      ? "pnpm --filter @open-design/daemon run test"
+      : "pnpm --filter @open-design/daemon test";
     assert.deepEqual(daemonTestInvocationsFromWorkflow(narrowPlusBroader), [
       narrowCommand,
-      "pnpm --filter @open-design/daemon test",
+      expectedBroaderInvocation,
     ]);
     assert.equal(workflowRunsOnlyAllowedDaemonTest(narrowPlusBroader), false);
   }
