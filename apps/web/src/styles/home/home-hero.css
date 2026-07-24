@@ -3565,6 +3565,10 @@ button.home-hero__capability-word:focus-visible {
 }
 .home-hero__template-option.is-inline-catalog,
 .home-hero__template-option.is-inline-catalog:hover {
+  /* The first-run catalog below the composer is already the template picker.
+     Keeping this non-interactive footer placeholder beside "+" only created
+     an empty outlined circle, so it does not take up any visual space. */
+  display: none;
   border-color: transparent;
   background-color: transparent;
   color: var(--text-faint);
