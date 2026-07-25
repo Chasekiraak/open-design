@@ -677,6 +677,7 @@ import {
   listVelaWorkspaceDirectory,
 } from './collab/vela-workspace-context.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
+import { createProactiveContentPull } from './collab/proactive-content-pull.js';
 import { createSyncDigestReader } from './collab/sync-digest.js';
 import {
   createCollabSyncSnapshotStore,
@@ -3318,7 +3319,7 @@ export async function startServer({
     onError: (error) => console.warn('[od] collab publish watcher error:', error),
   });
   collabPublishWatcher.start();
-  registerCollabSyncRoutes(app, {
+  const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     // Register-on-pull: after a member pulls a shared project, insert a local
     // project record so it appears in /api/projects and opens read-only (the
@@ -3401,6 +3402,36 @@ export async function startServer({
           },
         }
       : {}),
+  });
+  // Hub push-channel consumer for 'project-content-changed' (recvqmKQRiIlYf):
+  // when a teammate publishes new content for a shared project, pull it NOW —
+  // daemon-side, no open tab required — through the SAME flow the member
+  // web's POST /collab/pull runs (collabSyncRoutes.pullSharedProject, which
+  // also coalesces the two when they race). Every guard is fail-closed and
+  // every failure degrades silently to the web's ~5s status polling, which
+  // stays running untouched as the fallback; see
+  // collab/proactive-content-pull.ts for the guard boundary (never pull a
+  // project this member owns, never pull an unbound project, dedupe by hub
+  // version).
+  const proactiveContentPull = createProactiveContentPull({
+    getLocalBinding: (projectId) => {
+      const row = getWorkspaceProjectByProjectId(db, projectId) as
+        | { workspaceId: string; visibility: 'personal' | 'team' }
+        | null;
+      if (!row) return null;
+      return { workspaceId: row.workspaceId, visibility: row.visibility };
+    },
+    // Same active-team-membership shape the workspace-projects reconciler
+    // keys on: only an ACTIVE team member has a principal that may pull.
+    getWorkspaceIdentity: async () => {
+      const context = await collab.workspaceContext.current({});
+      if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
+      return { workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+    },
+    resolveSharedProjectOwner,
+    pullSharedProject: (projectId) => collabSyncRoutes.pullSharedProject(projectId),
+    onError: (error) =>
+      console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
   });
   // Stale-while-revalidate the member directory keyed on the active workspace.
   // The web shell re-reads members on every navigation (and several mounted
@@ -3561,8 +3592,17 @@ export async function startServer({
           break;
         }
         case 'project-content-changed': {
-          // A teammate published a new version. The member web's status loop
-          // picks it up; forward a thin nudge so an open project checks NOW.
+          // A teammate published a new version. Pull it daemon-side NOW so
+          // the local mirror stays fresh even with no tab open; after the
+          // pull lands, the existing post-pull signals (`file-changed` +
+          // `project-metadata-changed`) reach any open view over the same
+          // SSE path a web-triggered pull uses. All ownership/binding guards
+          // live in collab/proactive-content-pull.ts — an owner daemon
+          // receiving its own publish echo never pulls over its working
+          // tree, and failures degrade silently to the web's status polling.
+          void proactiveContentPull.handleContentChanged(event);
+          // Keep the thin nudge for an OPEN project view so its status/banner
+          // refreshes immediately rather than on the next ~5s poll tick.
           if (event.projectId && activeProjectEventSinks.has(event.projectId)) {
             emitProjectEvent(event.projectId, {
               type: 'project-metadata-changed',

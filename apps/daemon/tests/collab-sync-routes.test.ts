@@ -20,6 +20,7 @@ import { readVelaControlApiContext } from '../src/integrations/vela.js';
 import { projectResourceIdFor } from '../src/integrations/vela-team-projects.js';
 import {
   registerCollabSyncRoutes,
+  type CollabSyncRoutesHandle,
   type PulledProjectStore,
   type RegisterCollabSyncRoutesDeps,
   type RegisterPulledProjectInput,
@@ -135,13 +136,14 @@ async function startSyncServer(
     ...(runtimeOptions ?? {}),
     ...(workspaceContext ? { workspaceContext } : {}),
   });
-  registerCollabSyncRoutes(app, { collab: runtime, ...extraDeps });
+  const handle: CollabSyncRoutesHandle = registerCollabSyncRoutes(app, { collab: runtime, ...extraDeps });
   server = http.createServer(app);
   await new Promise<void>((resolve) => server!.listen(0, resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('server did not bind to a TCP port');
   const base = `http://127.0.0.1:${address.port}`;
   return {
+    handle,
     async json(
       route: string,
       options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
@@ -1618,5 +1620,71 @@ describe('collab sync routes', () => {
     // local project. Read-only never fires just because a status probe ran.
     expect(status.body.syncState).toBe('local_only');
     expect(status.body.ownerMemberId).toBeNull();
+  });
+});
+
+// recvqmKQRiIlYf: the hub push channel needs a daemon-internal way to run the
+// SAME pull flow POST /collab/pull runs (revocation gate → pull → register →
+// file/metadata signals) without an HTTP request, and racing pulls for one
+// project (proactive pull vs the member web's poll-triggered POST) must
+// coalesce onto one materialization instead of two full-tree pulls.
+describe('collab sync pull handle (daemon-internal proactive pull)', () => {
+  it('materializes content and fires the same post-pull signals as POST /collab/pull', async () => {
+    const store = fakeProjectStore();
+    const notifyFilesChanged = vi.fn();
+    const api = await startSyncServer(undefined, {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      notifyFilesChanged,
+    });
+
+    await api.json('/api/projects/handle-pull/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/handle-pull/collab/status', null);
+
+    const outcome = await api.handle.pullSharedProject('handle-pull');
+    expect(outcome).toEqual({ status: 'pulled', version: 1 });
+    expect(store.has('handle-pull')).toBe(true);
+    expect(notifyFilesChanged).toHaveBeenCalledTimes(1);
+    expect(notifyFilesChanged).toHaveBeenCalledWith('handle-pull');
+  });
+
+  it('reports revoked (and flags the mirror) when the project is no longer team-shared', async () => {
+    const revoked: Array<{ projectId: string; revoked: boolean }> = [];
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      resolveSharedProject: async () => null,
+      markTeamProjectRevoked: (projectId, value) => revoked.push({ projectId, revoked: value }),
+    });
+
+    const outcome = await api.handle.pullSharedProject('handle-revoked');
+    expect(outcome).toEqual({ status: 'revoked' });
+    expect(revoked).toContainEqual({ projectId: 'handle-revoked', revoked: true });
+  });
+
+  it('coalesces a racing POST /collab/pull and handle pull into one adapter pull', async () => {
+    let releasePull!: () => void;
+    const pullGate = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    const adapterPull = vi.fn(async () => {
+      await pullGate;
+    });
+    const syncLatest = vi.fn(async () => ({ version: 5 }));
+    const publish = vi.fn(async () => ({ version: 5 }));
+    const api = await startSyncServer(undefined, undefined, {
+      adapter: { publish, pull: adapterPull, syncLatest },
+    });
+
+    const viaHandle = api.handle.pullSharedProject('race-pull');
+    const viaRoute = api.json('/api/projects/race-pull/collab/pull', { method: 'POST' });
+    // Let the POST reach the route (and the shared in-flight map) before the
+    // gate opens; the coalescing must hold with both callers waiting.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releasePull();
+
+    const [handleOutcome, routeResponse] = await Promise.all([viaHandle, viaRoute]);
+    expect(handleOutcome).toEqual({ status: 'pulled', version: 5 });
+    expect(routeResponse.status).toBe(200);
+    expect(routeResponse.body.version).toBe(5);
+    expect(adapterPull).toHaveBeenCalledTimes(1);
   });
 });

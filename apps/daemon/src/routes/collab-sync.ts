@@ -110,6 +110,30 @@ export interface RegisterCollabSyncRoutesDeps {
   notifyProjectMetadataChanged?: (projectId: string) => void;
 }
 
+/** Result of one shared-project content pull — the same flow whether it was
+ *  reached over `POST /api/projects/:id/collab/pull` or daemon-internally
+ *  through {@link CollabSyncRoutesHandle.pullSharedProject}. */
+export type CollabSyncPullOutcome =
+  | { status: 'pulled'; version: number | null }
+  | { status: 'revoked' }
+  | { status: 'register_failed' };
+
+/** Daemon-internal surface `registerCollabSyncRoutes` hands back so non-HTTP
+ *  callers (the hub push channel's proactive content pull, server.ts) can run
+ *  the same pull flow the POST route runs. */
+export interface CollabSyncRoutesHandle {
+  /**
+   * Materialize the latest published content for a shared project, exactly as
+   * `POST /api/projects/:id/collab/pull` would: revocation gate, owner-routed
+   * hub pull, register-on-pull, and the `file-changed` /
+   * `project-metadata-changed` signals. The viewer principal is derived from
+   * the daemon's own workspace context (there is no request to read headers
+   * from). Concurrent pulls for the same project+scope — including a member
+   * web's racing POST — coalesce onto one in-flight materialization.
+   */
+  pullSharedProject(projectId: string): Promise<CollabSyncPullOutcome>;
+}
+
 const SYNC_INTENT_EVENTS: ReadonlySet<ProjectSyncIntentEvent> = new Set([
   'project_visibility_changed',
   'project_team_share_requested',
@@ -350,7 +374,10 @@ async function resolveSharedProjectForPublicFile(
   }
 }
 
-export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncRoutesDeps): void {
+export function registerCollabSyncRoutes(
+  app: Express,
+  deps: RegisterCollabSyncRoutesDeps,
+): CollabSyncRoutesHandle {
   const {
     scheduler,
     publishedVersion,
@@ -403,12 +430,17 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
 
   async function resourcePrincipalForSharedProject(
     projectId: string,
+    // Null for daemon-internal callers (the proactive content pull) — there is
+    // no request to read identity headers from, so the viewer principal comes
+    // straight from the workspace context.
     req: {
       get(name: string): string | undefined;
       headers: { authorization?: string | string[] | undefined };
-    },
+    } | null,
   ): Promise<ResourceHubPrincipal | null> {
-    const viewerPrincipal = await principalForRequest(req);
+    const viewerPrincipal = req
+      ? await principalForRequest(req)
+      : contextToResourceHubPrincipal(await workspaceContext.current({}));
     // Only the owner id is needed to route the pull/head at the resource hub, so
     // read it through the cached owner resolver rather than the uncached
     // resolveSharedProject — this keeps /collab/status and the pull principal off
@@ -763,8 +795,18 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     res.json({ ok: true, syncState: projectSyncState(projectId, principal) });
   });
 
-  app.post('/api/projects/:id/collab/pull', async (req, res) => {
-    const projectId = req.params.id;
+  /**
+   * The one shared-project content pull flow, shared verbatim between
+   * `POST /api/projects/:id/collab/pull` and the daemon-internal handle
+   * (`CollabSyncRoutesHandle.pullSharedProject`, driven by the hub push
+   * channel's proactive pull). Extracted so the two entry points cannot
+   * drift: revocation gate → hub pull → register-on-pull → post-pull
+   * signals, in that order.
+   */
+  async function pullSharedProjectOnce(
+    projectId: string,
+    principal: ResourceHubPrincipal | null,
+  ): Promise<CollabSyncPullOutcome> {
     // Revocation gate: a project may only be pulled while it is still shared to
     // the caller's team. Once the owner moves it out of the team its catalog
     // entry disappears, and a stale local copy must stop syncing new content.
@@ -781,10 +823,9 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
         // The project has left the team: mark the stale local mirror revoked so
         // its files stop being served (non-destructive — files remain on disk).
         markTeamProjectRevoked?.(projectId, true);
-        return res.status(403).json({ error: 'WORKSPACE_PROJECT_PULL_DENIED' });
+        return { status: 'revoked' };
       }
     }
-    const principal = await resourcePrincipalForSharedProject(projectId, req);
     const result = await pullLatest(projectId, principal);
     if (result.version !== null) {
       let localRecordChanged = false;
@@ -792,7 +833,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
         localRecordChanged = await registerPulledProject(projectId);
       } catch (error) {
         console.warn('[od] failed to register pulled team project:', error);
-        return res.status(502).json({ error: 'TEAM_PROJECT_PULL_REGISTER_UNAVAILABLE' });
+        return { status: 'register_failed' };
       }
       // The pull already materialized new bytes on disk at this point —
       // notify now rather than relying on the project's chokidar watcher,
@@ -813,7 +854,48 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
     markTeamProjectRevoked?.(projectId, false);
-    res.json({ ok: true, version: result.version });
+    return { status: 'pulled', version: result.version };
+  }
+
+  // In-flight pulls keyed by project + resource-hub scope. A hub-event
+  // proactive pull and a member web's poll-triggered POST that race each
+  // other coalesce onto ONE materialization (the `vela resource pull`
+  // transport replaces the whole project directory, so a duplicate pull is a
+  // full-tree transfer, not a cheap no-op). The scope key includes the
+  // principal's team + member ids because the same project can be shared
+  // under more than one scope (see `scopedProjectKey` in collab/runtime.ts) —
+  // only identically-routed pulls may share a result.
+  const pullsInFlight = new Map<string, Promise<CollabSyncPullOutcome>>();
+
+  function pullSharedProjectCoalesced(
+    projectId: string,
+    principal: ResourceHubPrincipal | null,
+  ): Promise<CollabSyncPullOutcome> {
+    const key = JSON.stringify([projectId, principal?.teamId ?? null, principal?.memberId ?? null]);
+    const existing = pullsInFlight.get(key);
+    if (existing) return existing;
+    const run = (async () => {
+      try {
+        return await pullSharedProjectOnce(projectId, principal);
+      } finally {
+        pullsInFlight.delete(key);
+      }
+    })();
+    pullsInFlight.set(key, run);
+    return run;
+  }
+
+  app.post('/api/projects/:id/collab/pull', async (req, res) => {
+    const projectId = req.params.id;
+    const principal = await resourcePrincipalForSharedProject(projectId, req);
+    const outcome = await pullSharedProjectCoalesced(projectId, principal);
+    if (outcome.status === 'revoked') {
+      return res.status(403).json({ error: 'WORKSPACE_PROJECT_PULL_DENIED' });
+    }
+    if (outcome.status === 'register_failed') {
+      return res.status(502).json({ error: 'TEAM_PROJECT_PULL_REGISTER_UNAVAILABLE' });
+    }
+    res.json({ ok: true, version: outcome.version });
   });
 
   app.get('/api/projects/:id/collab/status', async (req, res) => {
@@ -903,4 +985,11 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
       ...(ownerRole ? { ownerRole } : {}),
     });
   });
+
+  return {
+    async pullSharedProject(projectId: string): Promise<CollabSyncPullOutcome> {
+      const principal = await resourcePrincipalForSharedProject(projectId, null);
+      return pullSharedProjectCoalesced(projectId, principal);
+    },
+  };
 }
