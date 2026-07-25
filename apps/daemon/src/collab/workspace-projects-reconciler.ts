@@ -191,6 +191,21 @@ export interface WorkspaceProjectsReconcilerDeps {
    *  read every other realtime consumer already shares, so this module never
    *  opens a second transport to Vela. */
   listRemoteTeamProjects: () => Promise<readonly RemoteTeamProjectRef[]>;
+  /**
+   * True when this daemon has a local `projects` row for the id — i.e. the
+   * project's content has been materialized here (created locally, or pulled
+   * from the hub). Gates the bind direction: `workspace_projects.project_id`
+   * is a FOREIGN KEY into `projects(id)` (db.ts), so a bind INSERT for a
+   * never-materialized project cannot succeed — and must not be attempted.
+   * Materializing a project is the open/pull path's job
+   * (`ensureSharedProjectPlaceholder` / `registerPulledProject` in
+   * routes/collab-sync.ts), never this reconciler's; a remote catalog entry
+   * with no local `projects` row and no local binding is simply out of this
+   * daemon's scope until the member actually opens it (the team list already
+   * displays it from the remote catalog alone — see
+   * `listRemoteTeamProjectSummaries` in routes/project/index.ts).
+   */
+  hasLocalProject: (projectId: string) => boolean;
   /** Every row this daemon currently has bound `visibility: 'team'` for
    *  `workspaceId` (`listWorkspaceProjects(db, workspaceId)`, pre-filtered). */
   listLocalTeamRows: (workspaceId: string) => readonly LocalTeamProjectBinding[];
@@ -255,10 +270,22 @@ export async function reconcileWorkspaceProjectsWithRemote(
     if (existing) localBindings.set(remote.projectId, existing);
   }
 
+  // Reconciliation corrects the bindings of projects this daemon KNOWS —
+  // a remote catalog entry with neither a local binding nor a local
+  // `projects` row has nothing local to correct, and binding it anyway
+  // would violate `workspace_projects`' FOREIGN KEY into `projects(id)`
+  // (the recvqmnuxxKHaI loop: the same INSERT failing on every pass, for
+  // every never-opened teammate project). Excluding it here is safe for the
+  // demote direction too: demotes only ever come from `localBindings`, and
+  // a project excluded by this filter has, by construction, no entry there.
+  const knownRemoteProjects = remoteProjects.filter(
+    (remote) => localBindings.has(remote.projectId) || deps.hasLocalProject(remote.projectId),
+  );
+
   const actions = planWorkspaceProjectReconciliation({
     workspaceId: identity.workspaceId,
     workspaceMemberId: identity.workspaceMemberId,
-    remoteProjects,
+    remoteProjects: knownRemoteProjects,
     localBindings,
   });
 

@@ -186,10 +186,14 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
   // is fixed to the reader's identity for these tests; the identity-gating
   // behavior itself is covered by the fake-deps unit tests in
   // `workspace-projects-reconciler.test.ts`.
-  function reconcileAsReader(remoteProjects: RemoteTeamProjectRef[]) {
+  function reconcileAsReader(
+    remoteProjects: RemoteTeamProjectRef[],
+    options: { onError?: (error: unknown) => void } = {},
+  ) {
     return reconcileWorkspaceProjectsWithRemote({
       getWorkspaceIdentity: async () => ({ workspaceId: TEAM_WORKSPACE_ID, workspaceMemberId: READER_MEMBER_ID }),
       listRemoteTeamProjects: async () => remoteProjects,
+      hasLocalProject: (projectId) => getProject(db, projectId) != null,
       listLocalTeamRows: (workspaceId): LocalTeamProjectBinding[] =>
         listWorkspaceProjects(db, workspaceId)
           .filter((row: any) => row.workspaceVisibility === 'team')
@@ -219,6 +223,7 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
         ensureWorkspaceProject(db, { projectId, ...patch });
       },
       applyDemote: (workspaceId, projectId, patch) => updateWorkspaceProject(db, workspaceId, projectId, patch),
+      ...(options.onError ? { onError: options.onError } : {}),
     });
   }
 
@@ -311,6 +316,61 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
     }
   });
 
+  // The production P1 this encodes (recvqmnuxxKHaI): a member daemon whose
+  // team catalog lists projects the member has NEVER opened or pulled. Those
+  // projects have no local `projects` row, and `workspace_projects.project_id`
+  // is a FOREIGN KEY into `projects(id)` (db.ts), so the bind fallback's
+  // INSERT threw SQLITE_CONSTRAINT_FOREIGNKEY on every single reconciliation
+  // pass (hub push + ~15s poller), forever — 4700+ log lines across restarts
+  // on the live member instance. Materializing a project is the open/pull
+  // path's job (`ensureSharedProjectPlaceholder` / `registerPulledProject` in
+  // routes/collab-sync.ts); the reconciler must SKIP what has never been
+  // materialized here, exactly like its request-scoped sibling
+  // `reconcileLocalRowWithRemoteTeamAccess` (rebind-only, never inserts).
+  it('skips a remote team project this daemon never materialized locally instead of failing the FK, without disturbing the rest of the pass', async () => {
+    // A materialized project the same pass must still bind…
+    const materializedId = 'materialized-but-unbound';
+    seedProject(materializedId, 'Materialized but unbound');
+    // …and a stale local team row the same pass must still demote.
+    const unsharedId = 'unshared-during-outage';
+    seedProject(unsharedId, 'Unshared during outage');
+    ensureWorkspaceProject(db, {
+      projectId: unsharedId,
+      workspaceId: TEAM_WORKSPACE_ID,
+      visibility: 'team',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: null,
+      updatedByWorkspaceMemberId: OWNER_MEMBER_ID,
+      resourceHubResourceId: `project-${unsharedId}`,
+      syncState: 'synced',
+    });
+    // The culprit: on the remote catalog, never seen locally — no `projects`
+    // row, no `workspace_projects` row.
+    const neverMaterializedId = 'never-materialized-remote-share';
+    expect(getProject(db, neverMaterializedId)).toBeFalsy();
+
+    const onError = vi.fn();
+    const result = await reconcileAsReader(
+      [
+        { projectId: neverMaterializedId, ownerMemberId: OWNER_MEMBER_ID },
+        { projectId: materializedId, ownerMemberId: OWNER_MEMBER_ID },
+      ],
+      { onError },
+    );
+
+    // No FOREIGN KEY error — the unmaterialized project is not an error, it
+    // is simply not this daemon's row to write yet.
+    expect(onError).not.toHaveBeenCalled();
+    expect(getWorkspaceProjectByProjectId(db, neverMaterializedId)).toBeUndefined();
+    // The skip is not counted as work done, and the rest of the pass ran.
+    expect(result).toEqual({ bound: 1, demoted: 1 });
+    expect(getWorkspaceProjectByProjectId(db, materializedId)).toMatchObject({
+      workspaceId: TEAM_WORKSPACE_ID,
+      visibility: 'team',
+    });
+    expect(getWorkspaceProjectByProjectId(db, unsharedId)).toMatchObject({ visibility: 'personal' });
+  });
+
   it('does not demote on a failed remote read, leaving the row (and the HTTP-visible list) untouched', async () => {
     const projectId = 'still-shared';
     seedProject(projectId, 'Still shared');
@@ -330,6 +390,7 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
       listRemoteTeamProjects: async () => {
         throw new Error('vela unreachable');
       },
+      hasLocalProject: (id) => getProject(db, id) != null,
       listLocalTeamRows: (workspaceId): LocalTeamProjectBinding[] =>
         listWorkspaceProjects(db, workspaceId)
           .filter((row: any) => row.workspaceVisibility === 'team')

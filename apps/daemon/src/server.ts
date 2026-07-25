@@ -3204,6 +3204,10 @@ export async function startServer({
           projectId: project.projectId,
           ownerMemberId: project.ownerMemberId,
         })),
+      // Materialization gate for the bind direction — see the dep's doc
+      // comment in workspace-projects-reconciler.ts. `getProject` is the same
+      // `projects`-table read `workspace_projects`' FOREIGN KEY points at.
+      hasLocalProject: (projectId) => getProject(db, projectId) != null,
       listLocalTeamRows: (workspaceId): LocalTeamProjectBinding[] =>
         listWorkspaceProjects(db, workspaceId)
           .filter((row: any) => row.workspaceVisibility === 'team')
