@@ -94,6 +94,20 @@ export interface RegisterCollabSyncRoutesDeps {
    * instead of depending on chokidar surviving it.
    */
   notifyFilesChanged?: (projectId: string) => void;
+  /**
+   * Notify any live `/api/projects/:id/events` SSE subscribers that this
+   * project's LOCAL record (name / skill / design-system) changed as part of
+   * a pull. `registerPulledProject` is what replaces the "共享项目"
+   * placeholder record with the real project name — but that write is
+   * DB-only, and the only other post-pull signal (`notifyFilesChanged`)
+   * refreshes the file list, never the project record. Without this signal a
+   * member web that seeded its `projects` state from the placeholder keeps
+   * rendering "共享项目" in the sidebar/tab until a full page reload
+   * (recvqhwv6RPU1j). Wired to the existing `project-metadata-changed` thin
+   * event; fired only when the pull actually registered or updated the local
+   * record, so steady-state content pulls emit nothing.
+   */
+  notifyProjectMetadataChanged?: (projectId: string) => void;
 }
 
 const SYNC_INTENT_EVENTS: ReadonlySet<ProjectSyncIntentEvent> = new Set([
@@ -357,6 +371,7 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     markTeamProjectRevoked,
     resolveOwnerDisplayName,
     notifyFilesChanged,
+    notifyProjectMetadataChanged,
   } = deps;
   const readManifest = deps.readManifest ?? readProjectManifest;
 
@@ -431,11 +446,17 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     return (await workspaceContext.current({ authorization }))?.permissions.canShareProjects ?? false;
   }
 
-  async function registerPulledProject(projectId: string): Promise<void> {
-    if (!projectStore || !resolvePullDir) return;
+  /**
+   * Register/refresh the local project record for a just-pulled shared
+   * project. Returns true when it wrote the record (first registration or
+   * placeholder-name replacement) — i.e. when project metadata the web
+   * renders may have changed and `notifyProjectMetadataChanged` should fire.
+   */
+  async function registerPulledProject(projectId: string): Promise<boolean> {
+    if (!projectStore || !resolvePullDir) return false;
     const existing = projectStore.get?.(projectId);
-    if (!existing && projectStore.has(projectId)) return;
-    if (existing && cleanPulledProjectName(existing.name) !== PULLED_PROJECT_PLACEHOLDER_NAME) return;
+    if (!existing && projectStore.has(projectId)) return false;
+    if (existing && cleanPulledProjectName(existing.name) !== PULLED_PROJECT_PLACEHOLDER_NAME) return false;
     const projectDir = resolvePullDir(projectId);
     let manifest: PulledProjectManifest | null = null;
     try {
@@ -468,10 +489,12 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
           : now,
     };
     if (existing) {
-      projectStore.update?.(input);
-      return;
+      if (!projectStore.update) return false;
+      projectStore.update(input);
+      return true;
     }
     projectStore.register(input);
+    return true;
   }
 
   /**
@@ -764,8 +787,9 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
     const principal = await resourcePrincipalForSharedProject(projectId, req);
     const result = await pullLatest(projectId, principal);
     if (result.version !== null) {
+      let localRecordChanged = false;
       try {
-        await registerPulledProject(projectId);
+        localRecordChanged = await registerPulledProject(projectId);
       } catch (error) {
         console.warn('[od] failed to register pulled team project:', error);
         return res.status(502).json({ error: 'TEAM_PROJECT_PULL_REGISTER_UNAVAILABLE' });
@@ -777,6 +801,14 @@ export function registerCollabSyncRoutes(app: Express, deps: RegisterCollabSyncR
       // for this project refreshes on the same `file-changed` path a real
       // local edit would take.
       notifyFilesChanged?.(projectId);
+      if (localRecordChanged) {
+        // The register above swapped the "共享项目" placeholder record for
+        // the real name (or first-registered the record): push the existing
+        // `project-metadata-changed` thin signal so the open project view
+        // re-reads the record and the sidebar/tab title follows without a
+        // manual reload (recvqhwv6RPU1j).
+        notifyProjectMetadataChanged?.(projectId);
+      }
     }
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.

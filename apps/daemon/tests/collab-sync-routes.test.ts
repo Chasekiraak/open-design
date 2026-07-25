@@ -1380,6 +1380,79 @@ describe('collab sync routes', () => {
     expect(notifyFilesChanged).not.toHaveBeenCalled();
   });
 
+  // recvqhwv6RPU1j: replacing the "共享项目" placeholder record with the real
+  // project name happens only in the daemon DB (registerPulledProject). The
+  // only post-pull signal used to be `file-changed`, which makes the web
+  // refresh the FILE LIST but never re-read the project record — so a member's
+  // sidebar/tab title stayed on the placeholder until a manual page reload.
+  // A pull that registered or updated the local record must also emit the
+  // existing `project-metadata-changed` thin signal (notifyProjectMetadataChanged)
+  // so the open project view re-fetches the record and the title follows.
+  it('notifies notifyProjectMetadataChanged when a pull replaces the placeholder record with the real name (recvqhwv6RPU1j)', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'od-pull-'));
+    tempDirs.push(dir);
+    await writeProjectManifest(dir, {
+      schemaVersion: 1,
+      id: 'shared-title-notify',
+      name: 'Q3 Marketing Site',
+      createdAt: 111,
+      updatedAt: 222,
+    });
+
+    const store = fakeProjectStore();
+    store.register({
+      id: 'shared-title-notify',
+      name: '共享项目',
+      skillId: null,
+      designSystemId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const notifyProjectMetadataChanged = vi.fn();
+    const api = await startSyncServer(undefined, {
+      projectStore: store,
+      resolvePullDir: () => dir,
+      notifyProjectMetadataChanged,
+    });
+
+    await api.json('/api/projects/shared-title-notify/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/shared-title-notify/collab/status', null);
+    expect(notifyProjectMetadataChanged).not.toHaveBeenCalled();
+    const pull = await api.json('/api/projects/shared-title-notify/collab/pull', { method: 'POST' });
+    expect(pull.status).toBe(200);
+    expect(store.projects.get('shared-title-notify')?.name).toBe('Q3 Marketing Site');
+    expect(notifyProjectMetadataChanged).toHaveBeenCalledTimes(1);
+    expect(notifyProjectMetadataChanged).toHaveBeenCalledWith('shared-title-notify');
+  });
+
+  it('does not notify notifyProjectMetadataChanged when the pulled project already has its real name locally', async () => {
+    const store = fakeProjectStore();
+    store.register({
+      id: 'shared-title-steady',
+      name: 'Already Local',
+      skillId: null,
+      designSystemId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const notifyProjectMetadataChanged = vi.fn();
+    const api = await startSyncServer(undefined, {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      notifyProjectMetadataChanged,
+    });
+
+    await api.json('/api/projects/shared-title-steady/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/shared-title-steady/collab/status', null);
+    const pull = await api.json('/api/projects/shared-title-steady/collab/pull', { method: 'POST' });
+    expect(pull.status).toBe(200);
+    // A content-only pull of an already-named local project changes no
+    // metadata the web renders; no spurious refetch signal.
+    expect(notifyProjectMetadataChanged).not.toHaveBeenCalled();
+  });
+
   it('prefers the hub project name and metadata when registering a pulled project', async () => {
     const store = fakeProjectStore();
     const api = await startSyncServer(undefined, {
