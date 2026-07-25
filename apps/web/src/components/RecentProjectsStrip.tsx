@@ -25,7 +25,7 @@ import {
   useWorkspaceBilling,
   useWorkspaceContext,
 } from '../collab/useWorkspaceContext';
-import { workspaceUpgradeUrl } from './EntryNavRail';
+import { resolveWorkspaceInviteTarget, workspaceUpgradeUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
@@ -215,6 +215,7 @@ export function RecentProjectsStrip({
   // shared decision point — see `workspaceUpgradeUrl` in EntryNavRail.tsx
   // (recvpYEiH019cD).
   const inviteUpgradeUrl = workspaceUpgradeUrl(workspaceContext, workspaceBilling);
+  const inviteTarget = resolveWorkspaceInviteTarget(workspaceContext);
   const canManageCollection =
     canManageProjectCollection ??
     (workspaceContext?.permissions.canManageSharedResources === true ||
@@ -786,11 +787,20 @@ export function RecentProjectsStrip({
             ) : null}
           </div>
           <div className="recent-projects__controls">
-            {collaborationAvailable && space === 'team' && canInvite ? (
+            {collaborationAvailable &&
+            space === 'team' &&
+            canInvite &&
+            inviteTarget.kind !== 'unavailable' ? (
               <button
                 type="button"
                 className="recent-projects__invite"
-                onClick={() => setInviteOpen(true)}
+                onClick={() => {
+                  if (inviteTarget.kind === 'vela') {
+                    window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
+                  } else if (inviteTarget.kind === 'local') {
+                    setInviteOpen(true);
+                  }
+                }}
               >
                 <Icon name="share" size={15} /> {t('recentProjects.inviteTeammates')}
               </button>

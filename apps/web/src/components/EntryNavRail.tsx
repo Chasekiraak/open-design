@@ -137,7 +137,15 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
 // segment, falling back to the raw settings URL when the path can't be rewritten.
 export function teamConsoleUrl(
   base: string,
-  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team' | 'plans',
+  section:
+    | 'members'
+    | 'dashboard'
+    | 'settings'
+    | 'billing'
+    | 'upgrade'
+    | 'create-team'
+    | 'plans'
+    | 'invite',
   // Only consulted for `section: 'upgrade'` — see the comment below on why the
   // deep-link param depends on it.
   options?: { hasActivePlan?: boolean },
@@ -175,7 +183,7 @@ export function teamConsoleUrl(
     : section === 'billing' ? 'wallet'
     : section === 'plans' ? 'wallet'
     : section === 'upgrade' ? 'dashboard'
-    : section === 'create-team' ? 'dashboard'
+    : section === 'create-team' || section === 'invite' ? 'dashboard'
     : section;
   try {
     const url = new URL(base);
@@ -190,6 +198,11 @@ export function teamConsoleUrl(
       url.searchParams.set('billing', options?.hasActivePlan ? 'plan' : 'checkout');
     }
     if (section === 'plans') url.searchParams.set('view', 'plans');
+    // Vela owns the final invite action because only its dashboard has the
+    // authoritative subscription + seat state needed to choose between
+    // upgrading to Team, buying seats, and sending an invite. `invite=auto`
+    // is consumed one-shot by that dashboard and then removed from the URL.
+    if (section === 'invite') url.searchParams.set('invite', 'auto');
     // recvq725Kx0rM4 / recvqfXzHtY5wg: `create-team` opens B's create-workspace
     // dialog via `?workspace=create`. A prior fix (675878434) removed this,
     // reasoning that B's route source had no handler for it — true of the repo
@@ -252,6 +265,34 @@ export function workspaceUpgradeUrl(
       : teamConsoleUrl(settingsUrl, 'plans');
   }
   return options ? amrPlansUrlForProfile(options.fallbackProfile) : null;
+}
+
+export type WorkspaceInviteTarget =
+  | { kind: 'local' }
+  | { kind: 'vela'; url: string }
+  | { kind: 'unavailable' };
+
+/**
+ * Chooses the first safe invite surface. The local form is only valid when a
+ * team is positively known to have capacity. Personal, full-seat, and
+ * not-yet-known seat states go to Vela, whose dashboard owns the authoritative
+ * upgrade/seat/invite decision. Missing routing data fails closed.
+ */
+export function resolveWorkspaceInviteTarget(
+  context: WorkspaceCollabContext | null | undefined,
+): WorkspaceInviteTarget {
+  if (!context) return { kind: 'unavailable' };
+  if (context.workspaceType === 'team') {
+    const availableSeats = context.seatSummary?.availableSeats;
+    const hasCapacity =
+      availableSeats !== undefined
+        ? availableSeats > 0
+        : context.seatSummary?.isSeatFull === false;
+    if (hasCapacity) return { kind: 'local' };
+  }
+  const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
+  if (!settingsUrl) return { kind: 'unavailable' };
+  return { kind: 'vela', url: teamConsoleUrl(settingsUrl, 'invite') };
 }
 
 /**
@@ -430,6 +471,7 @@ export function EntryNavRail({
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const inviteTarget = resolveWorkspaceInviteTarget(context);
   // One decision for both of this rail's upgrade entries (credits chip and
   // the invite dialog's seat-gate): personal → the wallet pricing modal,
   // team → checkout vs change-plan by subscription state. See
@@ -874,14 +916,18 @@ export function EntryNavRail({
                       </div>
                     ) : null}
                     <div className="entry-nav-rail__menu-divider" />
-                    {canInviteMembers ? (
+                    {canInviteMembers && inviteTarget.kind !== 'unavailable' ? (
                       <button
                         type="button"
                         className="entry-nav-rail__menu-item"
                         role="menuitem"
                         onClick={() => {
                           setTeamOpen(false);
-                          setInviteOpen(true);
+                          if (inviteTarget.kind === 'vela') {
+                            window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
+                          } else if (inviteTarget.kind === 'local') {
+                            setInviteOpen(true);
+                          }
                         }}
                       >
                         <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
