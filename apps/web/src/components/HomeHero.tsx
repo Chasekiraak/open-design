@@ -1561,13 +1561,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     contextOnlyConnectors.length > 0 ||
     contextWorkspaceItems.length > 0;
   const visibleDesignSystemGuide = showFirstRunDesignSystemGuide || showReturningDesignSystemGuide;
-  const designSystemGuideCopy = showFirstRunDesignSystemGuide
+  const designSystemGuideCopy = visibleDesignSystemGuide
     ? t('homeHero.designSystemGuide.description')
-    : showReturningDesignSystemGuide && activeCreateChip
-      ? t('homeHero.designSystemGuide.taskHint', {
-        task: homeHeroChipLabel(activeCreateChip.id, t),
-      })
-      : null;
+    : null;
   let optionRenderIndex = 0;
 
   return (

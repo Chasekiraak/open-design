@@ -149,7 +149,7 @@ describe('HomeHero intent rail', () => {
 
       expect(screen.getByTestId('home-hero-design-system-trigger')).toHaveTextContent('Add design system');
       expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
-        'Add a design system here to keep your design work consistent.',
+        'Add a design system to keep layouts, colors, and components consistent.',
       );
       const icon = screen.getByTestId('home-hero-design-system-trigger-icon');
       expect(icon).not.toHaveClass('is-first-run-guide');
@@ -233,7 +233,7 @@ describe('HomeHero intent rail', () => {
 
       const guide = screen.getByTestId('home-hero-design-system-guide');
       expect(guide).toHaveTextContent(
-        'A design system keeps visual details and components consistent in this UI Mockup.',
+        'Add a design system to keep layouts, colors, and components consistent.',
       );
       expect(guide).toHaveAttribute('role', 'status');
       expect(guide).toHaveAttribute('data-placement', 'below');

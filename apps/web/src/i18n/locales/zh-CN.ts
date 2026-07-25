@@ -890,7 +890,7 @@ export const zhCN: Dict = {
   "homeHero.placeholderActive": "编辑示例请求，或写下你自己的需求…",
   "homeHero.carousel.hint": "上传文件、关联设计系统，或描述你想创作的内容",
   "homeHero.designSystemGuide.add": "添加设计体系",
-  "homeHero.designSystemGuide.description": "在这里添加设计体系，让设计工作保持一致",
+  "homeHero.designSystemGuide.description": "添加设计体系，让布局、色彩和组件保持一致。",
   "homeHero.designSystemGuide.taskHint": "为这个{task}添加设计体系，可让布局、色彩和组件保持一致。",
   "homeHero.carousel.examplePrefix": "示例 Prompt：",
   "homeHero.carousel.onePageBrief": "撰写一页项目简介",

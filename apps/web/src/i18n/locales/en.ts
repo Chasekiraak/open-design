@@ -879,7 +879,7 @@ export const en: Dict = {
   'homeHero.placeholderActive': 'Edit the example query or write your own…',
   'homeHero.carousel.hint': 'Attach a file, link your design system, or describe what you want to make',
   'homeHero.designSystemGuide.add': 'Add design system',
-  'homeHero.designSystemGuide.description': 'Add a design system here to keep your design work consistent.',
+  'homeHero.designSystemGuide.description': 'Add a design system to keep layouts, colors, and components consistent.',
   'homeHero.designSystemGuide.taskHint': 'A design system keeps visual details and components consistent in this {task}.',
   'homeHero.carousel.examplePrefix': 'Example prompt:',
   'homeHero.carousel.onePageBrief': 'Draft a one-page project brief',
