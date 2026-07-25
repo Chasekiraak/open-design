@@ -46,6 +46,89 @@ afterEach(() => {
 });
 
 describe('useProjectCollab member auto-pull retry', () => {
+  it('does not hide local files while the first status is still proving an equal durable cursor', async () => {
+    const firstStatus = deferred<Response>();
+    let pullCalls = 0;
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      if (pathname.endsWith('/workspace/context')) return response({ context: MEMBER_CONTEXT });
+      if (pathname.endsWith('/collab/status')) return firstStatus.promise;
+      if (pathname.endsWith('/presence/heartbeat')) {
+        return response({ present: [{ memberId: 'wm-member' }] });
+      }
+      if (pathname.endsWith('/collab/pull')) {
+        pullCalls += 1;
+        return response({ ok: true, version: 2 });
+      }
+      return response({ ok: true });
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useProjectCollab('p1', { fetch: fetchImpl, statusPollMs: 30_000 }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The daemon status can be a slow hub-backed round-trip. Unknown is not
+    // proof that local files are stale, so reopening must keep them visible
+    // instead of replacing every row with a download skeleton.
+    expect(result.current.syncState).toBeNull();
+    expect(result.current.downloadPending).toBe(false);
+    expect(pullCalls).toBe(0);
+
+    await act(async () => {
+      firstStatus.resolve(response({
+        publishedVersion: 2,
+        materializedVersion: 2,
+        syncState: 'synced',
+        ownerMemberId: 'wm-owner',
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.downloadPending).toBe(false);
+    expect(pullCalls).toBe(0);
+  });
+
+  it('does not report a download when shared status has no published head to compare', async () => {
+    let pullCalls = 0;
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      if (pathname.endsWith('/workspace/context')) return response({ context: MEMBER_CONTEXT });
+      if (pathname.endsWith('/collab/status')) {
+        return response({
+          publishedVersion: null,
+          materializedVersion: null,
+          syncState: 'synced',
+          ownerMemberId: 'wm-owner',
+        });
+      }
+      if (pathname.endsWith('/presence/heartbeat')) {
+        return response({ present: [{ memberId: 'wm-member' }] });
+      }
+      if (pathname.endsWith('/collab/pull')) {
+        pullCalls += 1;
+        return response({ ok: true, version: null });
+      }
+      return response({ ok: true });
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useProjectCollab('p1', { fetch: fetchImpl, statusPollMs: 30_000 }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.syncState).toBe('synced');
+    expect(result.current.publishedVersion).toBeNull();
+    expect(result.current.downloadPending).toBe(false);
+    expect(pullCalls).toBe(0);
+  });
+
   it('does not pull or show loading when the daemon says the published head is already materialized', async () => {
     let pullCalls = 0;
     const fetchImpl = (async (input: RequestInfo | URL) => {

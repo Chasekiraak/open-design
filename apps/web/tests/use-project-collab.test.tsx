@@ -123,14 +123,9 @@ describe('useProjectCollab', () => {
 
     expect(result.current.enabled).toBe(false);
     expect(result.current.viewerOnly).toBe(true);
-    // recvqghymxqQQq regression, second half: `decision.enabled` (and so
-    // `statusUnknown`) is false for as long as `/api/workspace/context`
-    // itself is in flight — a cold deep-linked open pays THIS round-trip
-    // before it even gets to pay `/collab/status`'s. `downloadPending` must
-    // fail closed through this earlier window too, or a genuinely-shared,
-    // not-yet-pulled project still shows the misleading empty-state CTA for
-    // its whole length.
-    expect(result.current.downloadPending).toBe(true);
+    // Permission controls still fail closed, but an unresolved context is not
+    // proof that the daemon's local mirror is behind. Keep local files visible.
+    expect(result.current.downloadPending).toBe(false);
   });
 
   it('fails closed: a non-owner admin is read-only on a shared project even before the owner id arrives', async () => {
@@ -176,16 +171,9 @@ describe('useProjectCollab', () => {
     expect(result.current.enabled).toBe(true);
     expect(result.current.syncState).toBeNull();
     expect(result.current.viewerOnly).toBe(true);
-    // recvqghymxqQQq regression: `/collab/status` is a real, uncached hub
-    // round-trip that can take seconds — while it is in flight `shared` is
-    // false by definition, so `downloadPending` must not be hard-wired to it
-    // alone or a genuinely-shared, not-yet-pulled project reads as "download
-    // complete" and the design-files empty state shows the misleading
-    // "new sketch" CTA for the whole round-trip instead of a syncing notice.
-    // This test has no team-catalog cache seeded (an injected `fetch` always
-    // gets `knownCatalog = null`), matching a member's cold first-ever open,
-    // so the fail-closed window must cover it same as `viewerOnly` above.
-    expect(result.current.downloadPending).toBe(true);
+    // Status remains permission-fail-closed through viewerOnly, but it is not
+    // a download until a response proves the published head is ahead.
+    expect(result.current.downloadPending).toBe(false);
   });
 
   it('lets the confirmed owner edit their own shared project', async () => {
