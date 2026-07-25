@@ -21,7 +21,9 @@ import {
   fetchPluginExampleHtml,
   fetchPluginPreviewHtml,
   fetchProjectDesignSystemPackageAudit,
+  fetchProjectFiles,
   fetchProjectFileText,
+  fetchLiveArtifacts,
   fetchSkillExample,
   isDeployProviderId,
   openFolderDialog,
@@ -151,6 +153,84 @@ describe('fetchAppVersionInfo', () => {
     );
 
     await expect(fetchAppVersionInfo()).resolves.toBeNull();
+  });
+});
+
+describe('fetchProjectFiles', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not make a foreground reopen join a cancellable background read', async () => {
+    const files = [{
+      name: 'index.html',
+      path: 'index.html',
+      kind: 'html',
+      mtime: 1,
+      size: 1,
+      mime: 'text/html',
+    }];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ files }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const background = fetchProjectFiles('project-reopen', {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    const foreground = fetchProjectFiles('project-reopen');
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await expect(background).resolves.toEqual([]);
+    await expect(foreground).resolves.toEqual(files);
+  });
+
+  it('keeps ordinary live-artifact reads independent from cancellable card scans', async () => {
+    const artifacts = [{
+      id: 'artifact-1',
+      projectId: 'project-reopen',
+      name: 'Dashboard',
+      createdAt: 1,
+      updatedAt: 2,
+    }];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ liveArtifacts: artifacts }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const background = fetchLiveArtifacts('project-reopen', {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    const foreground = fetchLiveArtifacts('project-reopen');
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await expect(background).resolves.toEqual([]);
+    await expect(foreground).resolves.toEqual(artifacts);
   });
 });
 
@@ -580,6 +660,27 @@ describe('fetchProjectFileText', () => {
         url: '/api/projects/project-1/raw/diagram.svg',
       }),
     );
+  });
+
+  it('silently returns null when a background source read is aborted', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('Aborted', 'AbortError')),
+        { once: true },
+      );
+    })));
+
+    const pending = fetchProjectFileText('project-1', 'brand.json', {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(pending).resolves.toBeNull();
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

@@ -1615,19 +1615,30 @@ export async function createSocialSharePayload(
 
 // Project files — all paths are scoped under .od/projects/<id>/ on disk.
 
-export async function fetchProjectFiles(projectId: string): Promise<ProjectFile[]> {
-  // Coalesced: the grid card, recents strip, and files panel all fetch the same
-  // project's files on a home-view mount burst — collapse the duplicates.
-  return coalescedGet(`project-files:${projectId}`, async () => {
+export async function fetchProjectFiles(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ProjectFile[]> {
+  const run = async (): Promise<ProjectFile[]> => {
     try {
-      const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/files`);
+      const url = `/api/projects/${encodeURIComponent(projectId)}/files`;
+      const resp = options?.signal
+        ? await fetch(url, { signal: options.signal })
+        : await fetch(url);
       if (!resp.ok) return [];
       const json = (await resp.json()) as { files: ProjectFile[] };
       return json.files ?? [];
     } catch {
       return [];
     }
-  });
+  };
+  // A cancellable caller owns its request lifetime (project-card cover scans
+  // are aborted when Home unmounts), so it must not share the foreground
+  // project's module-level single-flight entry. Otherwise reopening a project
+  // joins the abandoned card request and waits behind the entire Home burst.
+  if (options?.signal) return run();
+  // Non-cancellable display reads still collapse identical mount-burst calls.
+  return coalescedGet(`project-files:${projectId}`, run);
 }
 
 export type ProjectDesignTokenSuggestion = import('@open-design/contracts').ProjectDesignTokenSuggestion;
@@ -1706,12 +1717,16 @@ export async function deleteProjectFolder(
   }
 }
 
-export async function fetchLiveArtifacts(projectId: string): Promise<LiveArtifactSummary[]> {
-  // Coalesced: every project card fetches its live artifacts on the same
-  // navigation burst (twice per project in traces) — share one request.
-  return coalescedGet(`live-artifacts:${projectId}`, async () => {
+export async function fetchLiveArtifacts(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<LiveArtifactSummary[]> {
+  const run = async () => {
     try {
-      const resp = await fetch(`/api/live-artifacts?projectId=${encodeURIComponent(projectId)}`);
+      const url = `/api/live-artifacts?projectId=${encodeURIComponent(projectId)}`;
+      const resp = options?.signal
+        ? await fetch(url, { signal: options.signal })
+        : await fetch(url);
       if (!resp.ok) return [];
       const json = (await resp.json()) as {
         artifacts?: LiveArtifactSummary[];
@@ -1721,7 +1736,13 @@ export async function fetchLiveArtifacts(projectId: string): Promise<LiveArtifac
     } catch {
       return [];
     }
-  });
+  };
+  // Foreground consumers keep the existing coalescing contract. Cancellable
+  // card scans are background work: sharing their promise would let a hidden
+  // EntryShell pane pin or abort the ProjectView request that needs to win
+  // during a reopen.
+  if (options?.signal) return run();
+  return coalescedGet(`live-artifacts:${projectId}`, run);
 }
 
 export async function fetchLiveArtifact(
@@ -1921,7 +1942,11 @@ export async function fetchProjectFilePreview(
 export async function fetchProjectFileText(
   projectId: string,
   name: string,
-  options?: { cache?: RequestCache; cacheBustKey?: string | number },
+  options?: {
+    cache?: RequestCache;
+    cacheBustKey?: string | number;
+    signal?: AbortSignal;
+  },
 ): Promise<string | null> {
   const url = projectFileUrl(projectId, name);
   const cacheBustKey = options?.cacheBustKey;
@@ -1931,9 +1956,11 @@ export async function fetchProjectFileText(
       : `${url}${url.includes('?') ? '&' : '?'}cacheBust=${encodeURIComponent(String(cacheBustKey))}`;
   const init: RequestInit = {};
   if (options?.cache) init.cache = options.cache;
+  if (options?.signal) init.signal = options.signal;
 
   try {
     const resp = await fetch(requestUrl, init);
+    if (options?.signal?.aborted) return null;
     if (!resp.ok) {
       console.warn('[fetchProjectFileText] failed:', {
         name,
@@ -1946,6 +1973,12 @@ export async function fetchProjectFileText(
     }
     return await resp.text();
   } catch (err) {
+    if (
+      options?.signal?.aborted ||
+      (err instanceof DOMException && err.name === 'AbortError')
+    ) {
+      return null;
+    }
     console.warn('[fetchProjectFileText] failed:', {
       error: err,
       name,

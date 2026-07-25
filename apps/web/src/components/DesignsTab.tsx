@@ -159,7 +159,8 @@ export function DesignsTab({
 	});
 
 	useEffect(() => {
-		let cancelled = false;
+		if (!isActive) return;
+		const controller = new AbortController();
 		const projectIds = projects.map((project) => project.id);
 		if (projectIds.length === 0) {
 			setLiveArtifactsByProject({});
@@ -169,20 +170,22 @@ export function DesignsTab({
 		void Promise.all(
 			projectIds.map(
 				async (projectId) =>
-					[projectId, await fetchLiveArtifacts(projectId)] as const,
+					[
+						projectId,
+						await fetchLiveArtifacts(projectId, { signal: controller.signal }),
+					] as const,
 			),
 		).then((entries) => {
-			if (cancelled) return;
+			if (controller.signal.aborted) return;
 			setLiveArtifactsByProject(Object.fromEntries(entries));
 		});
 
-		return () => {
-			cancelled = true;
-		};
-	}, [projects]);
+		return () => controller.abort();
+	}, [isActive, projects]);
 
 	useEffect(() => {
-		let cancelled = false;
+		if (!isActive) return;
+		const controller = new AbortController();
 		if (projects.length === 0) {
 			setCoverByProject({});
 			return;
@@ -197,10 +200,13 @@ export function DesignsTab({
 				if (project.metadata?.entryFile && !designSystemProject) return [project.id, null] as const;
 				let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
 				try {
-					files = await fetchProjectFiles(project.id);
+					files = await fetchProjectFiles(project.id, {
+						signal: controller.signal,
+					});
 				} catch {
 					return [project.id, null] as const;
 				}
+				if (controller.signal.aborted) return [project.id, null] as const;
 				if (designSystemProject) {
 					const logo = findDesignSystemLogoFile(files);
 					if (logo) {
@@ -211,13 +217,11 @@ export function DesignsTab({
 				return [project.id, selectProjectFileCover(files)] as const;
 			}),
 		).then((entries) => {
-			if (cancelled) return;
+			if (controller.signal.aborted) return;
 			setCoverByProject(Object.fromEntries(entries));
 		});
-		return () => {
-			cancelled = true;
-		};
-	}, [projects]);
+		return () => controller.abort();
+	}, [isActive, projects]);
 
 	useEffect(() => {
 		if (!menuOpenId) return;

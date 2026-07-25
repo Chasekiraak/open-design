@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RecentProjectsStrip } from '../../src/components/RecentProjectsStrip';
-import { fetchProjectFiles } from '../../src/providers/registry';
+import { fetchProjectFiles, fetchProjectFileText } from '../../src/providers/registry';
 import type { Project } from '../../src/types';
 
 vi.mock('../../src/providers/registry', () => ({
@@ -277,6 +278,8 @@ describe('RecentProjectsStrip', () => {
       />,
     );
     await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+    const staleSignal = vi.mocked(fetchProjectFiles).mock.calls[0]?.[1]?.signal;
+    expect(staleSignal).toBeDefined();
 
     act(() => {
       MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
@@ -288,6 +291,7 @@ describe('RecentProjectsStrip', () => {
     await waitFor(() => {
       expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
     });
+    expect(staleSignal?.aborted).toBe(true);
 
     await act(async () => {
       resolveInitial([]);
@@ -316,6 +320,122 @@ describe('RecentProjectsStrip', () => {
       window.dispatchEvent(new Event('focus'));
     });
     expect(fetchProjectFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts an unresolved background cover read when Home unmounts for a reopen', async () => {
+    let coverSignal: AbortSignal | undefined;
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      coverSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve([]), { once: true });
+      });
+    });
+
+    const { unmount } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-reopen', name: 'Reopen project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    expect(coverSignal).toBeDefined();
+    expect(coverSignal?.aborted).toBe(true);
+  });
+
+  it('keeps the StrictMode replay request abortable after the first request settles late', async () => {
+    const requests: Array<{
+      resolve: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+      signal: AbortSignal;
+    }> = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) =>
+      new Promise((resolve) => {
+        if (!options?.signal) throw new Error('cover request must be cancellable');
+        requests.push({ resolve, signal: options.signal });
+      }),
+    );
+
+    const { unmount } = render(
+      <StrictMode>
+        <RecentProjectsStrip
+          projects={[project({ id: 'project-replay', name: 'Replay project' })]}
+          onOpen={() => {}}
+          heading="All projects"
+        />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]?.signal.aborted).toBe(true);
+    expect(requests[1]?.signal.aborted).toBe(false);
+
+    await act(async () => {
+      requests[0]?.resolve([]);
+      await Promise.resolve();
+    });
+    expect(requests[1]?.signal.aborted).toBe(false);
+
+    unmount();
+
+    expect(requests[1]?.signal.aborted).toBe(true);
+    await act(async () => {
+      requests[1]?.resolve([]);
+      await Promise.resolve();
+    });
+  });
+
+  it('aborts hidden Home scans and does not continue a design-system read into brand.json', async () => {
+    vi.mocked(fetchProjectFileText).mockClear();
+    let coverSignal: AbortSignal | undefined;
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      coverSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => resolve([
+            {
+              name: 'logo.svg',
+              path: 'assets/logo.svg',
+              kind: 'image',
+              mtime: 1,
+              size: 1,
+              mime: 'image/svg+xml',
+            },
+          ]),
+          { once: true },
+        );
+      });
+    });
+
+    const projectToReopen = project({
+      id: 'project-ds-reopen',
+      name: 'Design System',
+      metadata: { kind: 'other', importedFrom: 'design-system' },
+    });
+    const { rerender } = render(
+      <RecentProjectsStrip
+        isActive
+        projects={[projectToReopen]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <RecentProjectsStrip
+        isActive={false}
+        projects={[projectToReopen]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    expect(coverSignal?.aborted).toBe(true);
+    await act(async () => {});
+    expect(fetchProjectFileText).not.toHaveBeenCalled();
   });
 
   it('shows seven projects when the row has room for a seventh card', async () => {

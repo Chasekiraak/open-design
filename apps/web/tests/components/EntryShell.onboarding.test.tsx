@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntryShell } from '../../src/components/EntryShell';
 import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
+import { fetchProjectFiles } from '../../src/providers/registry';
 import type { AgentInfo, AppConfig } from '../../src/types';
 import { setHomeHeroPrompt } from '../helpers/home-hero-lexical';
 
@@ -380,6 +381,103 @@ describe('EntryShell route scroll isolation', () => {
       expect(screen.getByTestId('entry-view-home').getAttribute('data-active')).toBe('true');
     });
     expect(scrollContainer.scrollTop).toBe(0);
+  });
+});
+
+describe('EntryShell project reopen request priority', () => {
+  it('aborts Home cover work, keeps hidden Projects idle, and lets the foreground files read finish', async () => {
+    const files = [{
+      name: 'index.html',
+      path: 'index.html',
+      kind: 'html' as const,
+      mtime: 1,
+      size: 1,
+      mime: 'text/html',
+    }];
+    const fileRequests: Array<RequestInit | undefined> = [];
+    const fetchMock = vi.fn(
+      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input);
+        if (url === '/api/projects/project-reopen/files') {
+          fileRequests.push(init);
+          if (init?.signal) {
+            return new Promise<Response>((_resolve, reject) => {
+              init.signal?.addEventListener(
+                'abort',
+                () => reject(new DOMException('Aborted', 'AbortError')),
+                { once: true },
+              );
+            });
+          }
+          return jsonResponse({ files });
+        }
+        if (url.includes('/api/live-artifacts?projectId=project-reopen')) {
+          return jsonResponse({ liveArtifacts: [] });
+        }
+        if (url.endsWith('/api/community/discord')) {
+          return jsonResponse({
+            inviteCode: 'mHAjSMV6gz',
+            inviteUrl: 'https://discord.gg/mHAjSMV6gz',
+            onlineCount: 0,
+            memberCount: 0,
+            fetchedAt: Date.now(),
+            stale: false,
+          });
+        }
+        if (url.endsWith('/api/github/open-design')) {
+          return jsonResponse({
+            repo: 'nexu-io/open-design',
+            stargazers_count: 0,
+            fetchedAt: Date.now(),
+            stale: false,
+          });
+        }
+        return jsonResponse({});
+      },
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const onOpenProject = vi.fn((projectId: string) => {
+      expect(projectId).toBe('project-reopen');
+      // App leaves EntryShell when it opens ProjectView. Model that boundary
+      // directly so the mounted Home strip must cancel its background probe.
+      cleanup();
+    });
+
+    renderHome({
+      projects: [{
+        id: 'project-reopen',
+        name: 'Reopen project',
+        skillId: null,
+        designSystemId: null,
+        createdAt: 1,
+        updatedAt: 2,
+        status: { value: 'not_started' },
+      }],
+      onOpenProject,
+    });
+
+    await waitFor(() => expect(fileRequests).toHaveLength(1));
+    const homeSignal = fileRequests[0]?.signal;
+    expect(homeSignal).toBeDefined();
+    // DesignsTab is mounted under EntryShell's hidden Projects pane, but its
+    // own background files/live-artifact scans must remain dormant.
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes('/api/live-artifacts?projectId=project-reopen'),
+      ),
+    ).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Reopen project/ }));
+
+    expect(onOpenProject).toHaveBeenCalledTimes(1);
+    expect(homeSignal?.aborted).toBe(true);
+    await expect(fetchProjectFiles('project-reopen')).resolves.toEqual(files);
+    expect(fileRequests).toHaveLength(2);
+    expect(fileRequests[1]?.signal).toBeUndefined();
   });
 });
 

@@ -89,6 +89,10 @@ interface Props {
   collaborationEnabled?: boolean;
   canAssignInviteRoles?: boolean;
   canManageProjectCollection?: boolean;
+  /** Whether this mounted strip is visible. EntryShell keeps Home mounted while
+   * other views are active, so hidden strips must not occupy browser connection
+   * slots with background cover probes. */
+  isActive?: boolean;
 }
 
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
@@ -178,6 +182,7 @@ export function RecentProjectsStrip({
   collaborationEnabled,
   canAssignInviteRoles,
   canManageProjectCollection,
+  isActive = true,
 }: Props) {
   const t = useT();
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -419,20 +424,30 @@ export function RecentProjectsStrip({
     visibleProjects.map(({ project }) => [project.id, project]),
   );
   const coverGenerationRef = useRef(new Map<string, number>());
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
   const coverInFlightRef = useRef(
-    new Map<string, { generation: number; promise: Promise<void> }>(),
+    new Map<string, {
+      controller: AbortController;
+      generation: number;
+      promise: Promise<void>;
+    }>(),
   );
-  const loadProjectCover = useCallback(async (project: Project): Promise<ProjectCoverOverride | null> => {
+  const loadProjectCover = useCallback(async (
+    project: Project,
+    signal: AbortSignal,
+  ): Promise<ProjectCoverOverride | null> => {
     const designSystemProject = isDesignSystemProject(project);
     if (project.metadata?.entryFile && !designSystemProject) return null;
     let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
     try {
-      files = await fetchProjectFiles(project.id);
+      files = await fetchProjectFiles(project.id, { signal });
     } catch {
       return null;
     }
+    if (signal.aborted) return null;
     if (designSystemProject) {
-      return (await findDesignSystemCover(project.id, files)) ?? null;
+      return (await findDesignSystemCover(project.id, files, signal)) ?? null;
     }
     return selectProjectFileCover(files);
   }, []);
@@ -441,24 +456,45 @@ export function RecentProjectsStrip({
     project: Project,
     options: { force?: boolean } = {},
   ): Promise<void> => {
+    if (!activeRef.current) return Promise.resolve();
     const existing = coverInFlightRef.current.get(project.id);
     if (existing && !options.force) return existing.promise;
+    existing?.controller.abort();
     const generation = (coverGenerationRef.current.get(project.id) ?? 0) + 1;
     coverGenerationRef.current.set(project.id, generation);
-    const promise = loadProjectCover(project)
+    const controller = new AbortController();
+    const promise = loadProjectCover(project, controller.signal)
       .then((cover) => {
+        if (controller.signal.aborted) return;
         if (coverGenerationRef.current.get(project.id) !== generation) return;
         if (!visibleProjectsRef.current.has(project.id)) return;
         setCoverByProject((current) => ({ ...current, [project.id]: cover }));
       })
       .finally(() => {
-        if (coverInFlightRef.current.get(project.id)?.generation === generation) {
+        // Generation values can be reused after a StrictMode synthetic cleanup
+        // clears the maps. Only the exact request that installed this entry may
+        // remove it; otherwise late settlement from replay A can erase replay
+        // B, leaving the real unmount with no controller to abort.
+        if (coverInFlightRef.current.get(project.id)?.controller === controller) {
           coverInFlightRef.current.delete(project.id);
         }
       });
-    coverInFlightRef.current.set(project.id, { generation, promise });
+    coverInFlightRef.current.set(project.id, { controller, generation, promise });
     return promise;
   }, [loadProjectCover]);
+
+  useEffect(() => {
+    return () => {
+      // Cover probes are background-only. Do not let them survive navigation
+      // away from Home and occupy the connections needed by the reopened
+      // project's file list and preview source.
+      for (const request of coverInFlightRef.current.values()) {
+        request.controller.abort();
+      }
+      coverInFlightRef.current.clear();
+      coverGenerationRef.current.clear();
+    };
+  }, []);
 
   const refreshProjectCover = useCallback((projectId: string) => {
     const project = visibleProjectsRef.current.get(projectId);
@@ -471,6 +507,7 @@ export function RecentProjectsStrip({
   useWorkspaceInvalidation(
     {
       'team-project-content-ready': ({ projectId, workspaceId }) => {
+        if (!activeRef.current) return;
         if (workspaceContext?.workspaceId !== workspaceId) return;
         void refreshProjectCover(projectId);
       },
@@ -480,6 +517,7 @@ export function RecentProjectsStrip({
       // whose initial scan found no local cover, closing a missed-ready gap
       // without re-fetching every already-resolved card in the grid.
       onActive: () => {
+        if (!activeRef.current) return;
         for (const { project } of visibleProjects) {
           if (coverByProject[project.id] == null) {
             void requestProjectCover(project);
@@ -490,11 +528,24 @@ export function RecentProjectsStrip({
   );
 
   useEffect(() => {
+    const visibleIds = new Set(visibleProjects.map(({ project }) => project.id));
+    if (!isActive) {
+      for (const request of coverInFlightRef.current.values()) {
+        request.controller.abort();
+      }
+      coverInFlightRef.current.clear();
+      return;
+    }
+    for (const [projectId, request] of coverInFlightRef.current) {
+      if (visibleIds.has(projectId)) continue;
+      request.controller.abort();
+      coverInFlightRef.current.delete(projectId);
+      coverGenerationRef.current.delete(projectId);
+    }
     if (visibleProjects.length === 0) {
       setCoverByProject({});
       return;
     }
-    const visibleIds = new Set(visibleProjects.map(({ project }) => project.id));
     setCoverByProject((current) => {
       const entries = Object.entries(current).filter(([projectId]) => visibleIds.has(projectId));
       return entries.length === Object.keys(current).length
@@ -507,7 +558,7 @@ export function RecentProjectsStrip({
     // Intentionally keyed on the id set (coverFetchKey), not visibleProjects,
     // so re-renders that don't change which projects are shown don't re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverFetchKey, requestProjectCover]);
+  }, [coverFetchKey, isActive, requestProjectCover]);
 
   // First-run home shouldn't reserve space for an empty "Recent
   // projects" rail — the dashed empty box just adds visual noise
@@ -1770,9 +1821,11 @@ function findDesignSystemLogoFile(files: ProjectFile[]): ProjectFile | null {
 async function findDesignSystemCover(
   projectId: string,
   files: ProjectFile[],
+  signal?: AbortSignal,
 ): Promise<ProjectCoverOverride | null> {
   const knownFiles = new Map(files.map((file) => [file.path ?? file.name, file]));
-  const brandCover = await designSystemCoverFromBrandJson(projectId, knownFiles);
+  const brandCover = await designSystemCoverFromBrandJson(projectId, knownFiles, signal);
+  if (signal?.aborted) return null;
   if (brandCover) return brandCover;
 
   const logo = findDesignSystemLogoFile(files);
@@ -1783,8 +1836,13 @@ async function findDesignSystemCover(
 async function designSystemCoverFromBrandJson(
   projectId: string,
   knownFiles: ReadonlyMap<string, ProjectFile>,
+  signal?: AbortSignal,
 ): Promise<ProjectCoverOverride | null> {
-  const raw = await fetchProjectFileText(projectId, 'brand.json', { cache: 'no-store' });
+  const raw = await fetchProjectFileText(projectId, 'brand.json', {
+    cache: 'no-store',
+    signal,
+  });
+  if (signal?.aborted) return null;
   if (!raw) return null;
   let brand: unknown;
   try {

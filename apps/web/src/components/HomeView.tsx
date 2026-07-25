@@ -2368,6 +2368,7 @@ export function HomeView({
 
       {recentProjectsEmpty ? null : (
       <RecentProjectsStrip
+        isActive={isActive}
         projects={projects}
         designSystems={designSystems}
         heading={t('recentProjects.title')}
