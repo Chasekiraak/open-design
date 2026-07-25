@@ -160,6 +160,7 @@ import {
   deleteConversation as deleteConversationApi,
   duplicatePluginAsProject,
   fetchAppliedPluginSnapshot,
+  getProject,
   installGeneratedPluginFolder,
   listConversations,
   listMessages,
@@ -1940,6 +1941,14 @@ export function ProjectView({
   useEffect(() => {
     projectIdRef.current = project.id;
   }, [project.id]);
+  // Live mirror of the full project prop, for async handlers whose useCallback
+  // deps only track `project.id` (e.g. the project-events handler below):
+  // comparing a re-fetched record against a stale closure copy would
+  // mis-detect changes after a rename.
+  const projectRef = useRef(project);
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -2784,7 +2793,33 @@ export function ProjectView({
       // Hub push channel: rename or a fresh content publish landed. Run one
       // status check now (drives the member auto-pull) instead of waiting for
       // the next 5s status tick.
-      if (evt.projectId === project.id) collabCheckStatusNow();
+      if (evt.projectId === project.id) {
+        collabCheckStatusNow();
+        // The daemon also pushes this signal when a pull just swapped the
+        // shared-project placeholder record for the real name
+        // (registerPulledProject → notifyProjectMetadataChanged). App.tsx's
+        // `projects` state never re-reads a project record on its own, so
+        // without this refetch a member's sidebar/tab title stays on the
+        // "共享项目" placeholder until a full page reload (recvqhwv6RPU1j).
+        // Thin-event model: re-fetch the record, propagate up only when a
+        // rendered field actually changed — an unconditional apply would
+        // re-render the whole App on every content-publish nudge.
+        const capturedProjectId = project.id;
+        void getProject(capturedProjectId).then((fresh) => {
+          if (!fresh) return;
+          // User switched projects while the fetch was in flight.
+          if (projectIdRef.current !== capturedProjectId) return;
+          const current = projectRef.current;
+          if (
+            fresh.name === current.name
+            && fresh.skillId === current.skillId
+            && fresh.designSystemId === current.designSystemId
+          ) {
+            return;
+          }
+          onProjectChange(fresh);
+        });
+      }
       return;
     }
     if (evt.type === 'conversation-created') {
@@ -2832,7 +2867,7 @@ export function ProjectView({
     // Live artifact events come from chat-turn-emitted artifacts; they
     // also imply the conversation transcript changed.
     setDesignMdRefreshKey((n) => n + 1);
-  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectsRefresh, refreshLiveArtifacts, project.id]);
+  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectChange, onProjectsRefresh, refreshLiveArtifacts, project.id]);
   useProjectFileEvents(project.id, daemonLive, handleProjectEvent, {
     onConnectedChange: setProjectEventsSseConnected,
   });

@@ -3376,6 +3376,17 @@ export async function startServer({
     // instead of depending on the watcher having survived the swap.
     notifyFilesChanged: (projectId: string) =>
       emitProjectEvent(projectId, { type: 'file-changed', path: '', kind: 'change' }),
+    // A pull that replaces the "共享项目" placeholder record with the real
+    // project name (registerPulledProject) changed metadata the web renders
+    // from its `projects` state; push the existing `project-metadata-changed`
+    // thin signal so the open view re-fetches the record instead of keeping
+    // the placeholder title until a page reload (recvqhwv6RPU1j).
+    notifyProjectMetadataChanged: (projectId: string) =>
+      emitProjectEvent(projectId, {
+        type: 'project-metadata-changed',
+        projectId,
+        at: Date.now(),
+      }),
     // Resolve the owner's display name + role from the collab-cloud directory so
     // /collab/status can hand the client a named "shared project" banner.
     ...(collabCloud
