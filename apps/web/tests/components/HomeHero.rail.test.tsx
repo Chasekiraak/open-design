@@ -231,9 +231,12 @@ describe('HomeHero intent rail', () => {
         onDesignSystemChange: vi.fn(),
       });
 
-      expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
+      const guide = screen.getByTestId('home-hero-design-system-guide');
+      expect(guide).toHaveTextContent(
         'A design system keeps visual details and components consistent in this UI Mockup.',
       );
+      expect(guide).toHaveAttribute('role', 'status');
+      expect(guide).toHaveAttribute('data-placement', 'below');
       const icon = screen.getByTestId('home-hero-design-system-trigger-icon');
       act(() => {
         vi.advanceTimersByTime(700);

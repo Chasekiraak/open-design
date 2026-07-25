@@ -493,7 +493,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [showFirstRunDesignSystemGuide, setShowFirstRunDesignSystemGuide] = useState(false);
   const [showReturningDesignSystemGuide, setShowReturningDesignSystemGuide] = useState(false);
   const [showFirstRunDesignSystemAttention, setShowFirstRunDesignSystemAttention] = useState(false);
+  const [designSystemGuidePlacement, setDesignSystemGuidePlacement] = useState<'above' | 'below'>('below');
   const homeHeroRef = useRef<HTMLElement | null>(null);
+  const designSystemEntryRef = useRef<HTMLDivElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
   // imperative `pulseSend()` handle, cleared when the animation ends.
   const [sendAttention, setSendAttention] = useState(false);
@@ -647,6 +649,25 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       window.clearTimeout(startTimer);
       window.clearTimeout(finishTimer);
     };
+  }, [showFirstRunDesignSystemGuide, showReturningDesignSystemGuide]);
+
+  useLayoutEffect(() => {
+    if (!showFirstRunDesignSystemGuide && !showReturningDesignSystemGuide) return undefined;
+
+    const updatePlacement = () => {
+      const rect = designSystemEntryRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      // The hint normally sits below its trigger. Flip it above in a shorter
+      // viewport so it remains an immediately visible popover rather than
+      // becoming part of the scrollable Home layout.
+      setDesignSystemGuidePlacement(
+        window.innerHeight - rect.bottom < 72 && rect.top > 72 ? 'above' : 'below',
+      );
+    };
+
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    return () => window.removeEventListener('resize', updatePlacement);
   }, [showFirstRunDesignSystemGuide, showReturningDesignSystemGuide]);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
@@ -2417,9 +2438,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ) : null}
 
       {onDesignSystemChange || onPickWorkingDir ? (
-        <div className={`home-hero__workdir-row${visibleDesignSystemGuide ? ' is-design-system-guided' : ''}`}>
+        <div className="home-hero__workdir-row">
           {onDesignSystemChange ? (
-            <div className="home-hero__design-system-entry">
+            <div className="home-hero__design-system-entry" ref={designSystemEntryRef}>
               <DesignSystemPicker
                 variant="home"
                 designSystems={designSystems}
@@ -2437,12 +2458,14 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 }}
               />
               {designSystemGuideCopy ? (
-                <p
+                <div
                   className="home-hero__design-system-guide"
                   data-testid="home-hero-design-system-guide"
+                  data-placement={designSystemGuidePlacement}
+                  role="status"
                 >
                   {designSystemGuideCopy}
-                </p>
+                </div>
               ) : null}
             </div>
           ) : null}
