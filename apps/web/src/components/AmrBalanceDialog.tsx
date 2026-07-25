@@ -10,7 +10,8 @@ import {
   recordAmrEntry,
 } from '../analytics/amr-attribution';
 import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { hasTeamPlan } from '../collab/team-plan';
 import { teamConsoleUrl } from './EntryNavRail';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
@@ -98,17 +99,25 @@ export function AmrBalanceDialog({
   const [watchingWallet, setWatchingWallet] = useState(false);
   // Where 「升级套餐」 goes. `teamConsoleUrl(_, 'upgrade')` is the one place that
   // knows B's deep link: it targets the team DASHBOARD (not the settings page)
-  // and appends `billing=checkout`, which B's `team-dashboard` route reads to
-  // auto-open its checkout dialog. Falls back to `amrPlansUrlForProfile` (the
-  // same `view=plans` deep link every other Upgrade affordance uses — ChatPane,
-  // SettingsDialog, AvatarMenu, InlineModelSwitcher) when the console URL is
-  // unavailable (personal workspace, or the context read has not landed), so
-  // the CTA still auto-opens AMR's own pricing modal instead of landing the
-  // user on the bare wallet page with no popup (acceptance regression).
+  // and appends `billing=checkout` OR `billing=plan` — WHICH one depends on
+  // whether this team has ever completed a first checkout (`hasActivePlan`,
+  // see the `teamConsoleUrl` docblock). Getting this wrong silently opens no
+  // dialog at all: `billing=checkout` only auto-opens for a team that has
+  // never subscribed, confirmed live against a "Team Pro" (already-paying)
+  // workspace (recvpSQKna0LwR) landing on the bare Overview page. Falls back
+  // to `amrPlansUrlForProfile` (the same `view=plans` deep link every other
+  // Upgrade affordance uses — ChatPane, SettingsDialog, AvatarMenu,
+  // InlineModelSwitcher) when the console URL is unavailable (personal
+  // workspace, or the context read has not landed), so the CTA still
+  // auto-opens AMR's own pricing modal instead of landing the user on the
+  // bare wallet page with no popup (acceptance regression).
   const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
   const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
   const upgradeUrl = workspaceSettingsUrl
-    ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade')
+    ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade', {
+        hasActivePlan: hasTeamPlan(workspaceContext, workspaceBilling),
+      })
     : amrPlansUrlForProfile(profile);
   const resolvedRef = useRef(false);
   const resolveOnce = () => {

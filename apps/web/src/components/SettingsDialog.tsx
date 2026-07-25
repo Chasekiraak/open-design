@@ -159,8 +159,9 @@ import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
 import { SettingsWorkspaceSection } from './SettingsWorkspaceSection';
 import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { resolvePlanTier } from '../collab/team-plan';
+import { hasTeamPlan, resolvePlanTier } from '../collab/team-plan';
 import { planBadgeTierForLabel } from './PlanWordmark';
+import { teamConsoleUrl } from './EntryNavRail';
 import { canShowWorkspaceSettings } from '../collab/settings-access';
 import { ConnectorsBrowser } from './ConnectorsBrowser';
 import { MemoryModelInline } from './MemoryModelInline';
@@ -1626,6 +1627,24 @@ export function SettingsDialog({
   // source of truth (same one EntryNavRail's credits chip reads).
   const workspaceBilling = useWorkspaceBilling();
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
+  // The 「升级」 buttons on the AMR model card used to call
+  // `amrPlansUrlForProfile` unconditionally, which always lands on B's
+  // personal-wallet deep link (`/wallet?view=plans`). For a TEAM workspace, B
+  // itself redirects that into `/dashboard?billing=checkout` — but that param
+  // only auto-opens a dialog for a team that has never subscribed (see the
+  // `teamConsoleUrl` docblock in `EntryNavRail.tsx`); an already-subscribed
+  // team silently gets no dialog at all (recvpSQKna0LwR). Prefer the
+  // workspace-aware `teamConsoleUrl` (same helper AmrBalanceDialog uses) with
+  // the correct checkout/plan param when a team console URL is available, and
+  // fall back to the personal deep link only when it is not (genuinely
+  // personal workspace, or the context read has not landed yet).
+  const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
+  const amrUpgradeUrl = (profile: string | null | undefined): string =>
+    workspaceSettingsUrl
+      ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade', {
+          hasActivePlan: hasTeamPlan(workspaceContext, workspaceBilling),
+        })
+      : amrPlansUrlForProfile(profile);
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(true);
   // Scroll the right-hand content pane back to the top whenever the user
@@ -3971,7 +3990,7 @@ export function SettingsDialog({
                       ? () =>
                           void openExternalUrl(
                             attributedAmrSettingsUrl(
-                              amrPlansUrlForProfile(amrCardStatus?.profile),
+                              amrUpgradeUrl(amrCardStatus?.profile),
                               'settings_amr_upgrade',
                             ),
                           )
@@ -4748,7 +4767,7 @@ export function SettingsDialog({
                                           onClick={() =>
                                             void openExternalUrl(
                                               attributedAmrSettingsUrl(
-                                                amrPlansUrlForProfile(
+                                                amrUpgradeUrl(
                                                   amrCardStatus?.profile,
                                                 ),
                                                 'settings_amr_upgrade',

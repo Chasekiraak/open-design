@@ -20,7 +20,12 @@ import { STATUS_LABEL_KEYS } from './DesignsTab';
 import { isDesignSystemProject, isPublishedDesignSystemProject } from './design-system-project';
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { useTeamMembers } from '../collab/useTeamMembers';
-import { notifyTeamProjectsChanged, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  notifyTeamProjectsChanged,
+  useWorkspaceBilling,
+  useWorkspaceContext,
+} from '../collab/useWorkspaceContext';
+import { hasTeamPlan } from '../collab/team-plan';
 import { teamConsoleUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
@@ -183,6 +188,7 @@ export function RecentProjectsStrip({
   // empty/null off-team, so every card safely falls back to "我创建".
   const { resolve: resolveMember } = useTeamMembers();
   const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
   // `canShareProjects` alone is a ROLE permission ("could this member share IF
   // a team existed"), not a "does a team exist" signal — a purely personal
@@ -1362,7 +1368,9 @@ export function RecentProjectsStrip({
           workspaceContext?.workspaceSettingsUrl
             ? () => {
                 window.open(
-                  teamConsoleUrl(workspaceContext.workspaceSettingsUrl!, 'upgrade'),
+                  teamConsoleUrl(workspaceContext.workspaceSettingsUrl!, 'upgrade', {
+                    hasActivePlan: hasTeamPlan(workspaceContext, workspaceBilling),
+                  }),
                   '_blank',
                   'noopener,noreferrer',
                 );

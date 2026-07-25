@@ -47,7 +47,7 @@ import {
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
-import { resolvePlanLabelTier } from '../collab/team-plan';
+import { hasTeamPlan, resolvePlanLabelTier } from '../collab/team-plan';
 import type { EntryHomeView } from '../router';
 
 const REPO_URL = 'https://github.com/nexu-io/open-design';
@@ -136,6 +136,9 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
 export function teamConsoleUrl(
   base: string,
   section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team',
+  // Only consulted for `section: 'upgrade'` — see the comment below on why the
+  // deep-link param depends on it.
+  options?: { hasActivePlan?: boolean },
 ): string {
   // B's console routes: members live at /team, the (global) wallet backs the
   // billing entry. The settings URL the context carries includes the
@@ -143,11 +146,22 @@ export function teamConsoleUrl(
   // opens on the SAME workspace this client is pinned to (B asks the user to
   // confirm if their account-level selection differs).
   //
-  // `upgrade` lands on the team dashboard AND opens the plan-change dialog,
-  // because sending someone to a billing page to hunt for the upgrade control
-  // is a worse answer to "I want to upgrade". B already honors the deep link:
-  // both `routes/workspace-settings.tsx` and `routes/team-dashboard.tsx` open
-  // their checkout dialog when `billing=checkout` is present.
+  // `upgrade` lands on the team dashboard AND opens a subscription dialog, but
+  // WHICH dialog depends on whether the team has ever checked out before — B's
+  // `team-dashboard.tsx` gates them on mutually exclusive conditions:
+  //   - `billing=checkout` opens the first-subscription dialog, gated by
+  //     `canUpgradeTeam`, which requires the team's `subscriptionSummary
+  //     .billingState` to be one of free/inactive/locked (never subscribed, or
+  //     lapsed). For a team that already has an active plan this gate is
+  //     false, so `billing=checkout` silently opens nothing — confirmed via a
+  //     real recording (recvpSQKna0LwR) landing on the bare Overview page for
+  //     an already-subscribed "Team Pro" workspace.
+  //   - `billing=plan` opens the CHANGE-plan dialog, gated by
+  //     `ownerBillingActionsAvailable`, which requires `billingState ===
+  //     'active'` — the mirror-image condition, for a team that already pays.
+  // `options.hasActivePlan` (callers pass `hasTeamPlan(context, billing)` from
+  // `collab/team-plan.ts`) picks the branch that actually matches the team's
+  // current subscription state instead of hardcoding the never-subscribed one.
   const path =
     section === 'members' ? 'team'
     : section === 'billing' ? 'wallet'
@@ -163,19 +177,18 @@ export function teamConsoleUrl(
       segments.push(path);
     }
     url.pathname = `/${segments.join('/')}`;
-    if (section === 'upgrade') url.searchParams.set('billing', 'checkout');
-    // recvq725Kx0rM4: `create-team` used to set `?workspace=create` on the
-    // premise that B's dashboard honors it as a deep link into the
-    // create-workspace dialog, the same way `billing=checkout` opens the
-    // upgrade dialog. Checked against B's actual route source
-    // (routes/team-dashboard.tsx, routes/workspace-settings.tsx): neither
-    // reads a `workspace` search param at all — the dialog is opened by
-    // clicking a sidebar button (`sidebar-actions.tsx`'s `openCreateWorkspace`),
-    // pure client state with no URL hook. The stale param made this entry
-    // look like "nothing happened" (dashboard loads, no dialog) rather than a
-    // broken link, which is why it read as "路径丢失" instead of "先跳个页面
-    // 自己找按钮". Land on the plain dashboard — no dead deep-link param —
-    // until B exposes a real one to replace this comment and the omission.
+    if (section === 'upgrade') {
+      url.searchParams.set('billing', options?.hasActivePlan ? 'plan' : 'checkout');
+    }
+    // recvq725Kx0rM4 / recvqfXzHtY5wg: `create-team` opens B's create-workspace
+    // dialog via `?workspace=create`. A prior fix (675878434) removed this,
+    // reasoning that B's route source had no handler for it — true of the repo
+    // checkout that fix read at the time, but B's `sidebar-actions.tsx` (PR
+    // #905, commit 501c0069, authored 2026-07-21) added exactly this handler,
+    // and it is live on `origin/feat/workspace-team` (the branch the
+    // feature-test deployment serves) as of this fix. Re-verified directly
+    // against that branch's current source before restoring the param.
+    if (section === 'create-team') url.searchParams.set('workspace', 'create');
     return url.toString();
   } catch {
     return base;
@@ -355,9 +368,15 @@ export function EntryNavRail({
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  // Picks `billing=checkout` vs `billing=plan` on the deep link — see the
+  // `teamConsoleUrl` docblock for why the choice depends on whether this
+  // workspace has ever completed a first checkout.
+  const upgradeHasActivePlan = hasTeamPlan(context, billing);
   const billingUpgradeUrl =
     context?.billingRecovery?.recoveryUrl?.trim() ||
-    (workspaceSettingsUrl ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade') : null);
+    (workspaceSettingsUrl
+      ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade', { hasActivePlan: upgradeHasActivePlan })
+      : null);
   // #62: the 积分 row links straight OUT to B's wallet page (usage detail lives
   // there) — no intermediate credits popover in the client, matching #5517.
   const billingWalletUrl = workspaceSettingsUrl
@@ -938,7 +957,9 @@ export function EntryNavRail({
           workspaceSettingsUrl
             ? () => {
                 window.open(
-                  teamConsoleUrl(workspaceSettingsUrl, 'upgrade'),
+                  teamConsoleUrl(workspaceSettingsUrl, 'upgrade', {
+                    hasActivePlan: upgradeHasActivePlan,
+                  }),
                   '_blank',
                   'noopener,noreferrer',
                 );
