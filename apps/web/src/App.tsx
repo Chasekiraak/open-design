@@ -41,6 +41,7 @@ import { ProjectView } from './components/ProjectView';
 import { AmrArtifactUpgradeGate } from './components/AmrArtifactUpgradeGate';
 import { AmrArtifactUpgradeHomeCard } from './components/AmrArtifactUpgradeHomeCard';
 import { TooltipLayer } from './components/TooltipLayer';
+import { UpdateDialog } from './components/UpdateDialog';
 import { openWorkspaceTab, WorkspaceTabsBar } from './components/WorkspaceTabsBar';
 import {
   DesignSystemCreationFlow,
@@ -3041,6 +3042,7 @@ function AppInner() {
         />
       )}
       <TooltipLayer />
+      <UpdateDialog />
       <AmrArtifactUpgradeGate
         homeVisible={route.kind === 'home' && route.view === 'home'}
         activeProjectId={route.kind === 'project' ? route.projectId : null}
