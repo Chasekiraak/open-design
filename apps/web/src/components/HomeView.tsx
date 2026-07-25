@@ -456,7 +456,7 @@ export function HomeView({
     if (!autoDesignTransition) return undefined;
     // Also clear in reduced-motion mode, where CSS deliberately suppresses the
     // animation and therefore emits no animationend event.
-    const timer = window.setTimeout(() => setAutoDesignTransition(false), 360);
+    const timer = window.setTimeout(() => setAutoDesignTransition(false), 500);
     return () => window.clearTimeout(timer);
   }, [autoDesignTransition]);
   // Token paired with `workingDir` when picked through the desktop host's
