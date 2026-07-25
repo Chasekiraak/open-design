@@ -12,7 +12,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 29780,
+    "totalChars": 30456,
   },
   "ask-mode-full-context": {
     "sections": [
@@ -30,7 +30,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 10498,
+    "totalChars": 10666,
   },
   "classic-design-full-stack": {
     "sections": [
@@ -60,7 +60,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 71959,
+    "totalChars": 72127,
   },
   "classic-design-minimal": {
     "sections": [
@@ -73,7 +73,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 60214,
+    "totalChars": 60382,
   },
   "codex-imagegen": {
     "sections": [
@@ -84,7 +84,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 13448,
+    "totalChars": 13616,
   },
   "critique-enabled": {
     "sections": [
@@ -102,7 +102,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 32399,
+    "totalChars": 33075,
   },
   "deck-kind-no-skill": {
     "sections": [
@@ -114,7 +114,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 31679,
+    "totalChars": 35586,
   },
   "deck-kind-with-skill-seed": {
     "sections": [
@@ -126,7 +126,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26527,
+    "totalChars": 27203,
   },
   "design-ds-fixture-fallback": {
     "sections": [
@@ -142,7 +142,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26766,
+    "totalChars": 27442,
   },
   "design-full-stack": {
     "sections": [
@@ -170,7 +170,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 35262,
+    "totalChars": 35938,
   },
   "design-minimal": {
     "sections": [
@@ -180,7 +180,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 25639,
+    "totalChars": 26315,
   },
   "design-no-ds-multitarget": {
     "sections": [
@@ -193,7 +193,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 28828,
+    "totalChars": 29504,
   },
   "example-prompt": {
     "sections": [
@@ -205,7 +205,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26683,
+    "totalChars": 27359,
   },
   "freeform-other": {
     "sections": [
@@ -213,12 +213,11 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "slim-core-charter",
       "project-metadata",
       "deck-directive",
-      "maybe-deck-framework",
       "media-dispatch-hint",
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 32039,
+    "totalChars": 35555,
   },
   "freeform-other-no-deck-signal": {
     "sections": [
@@ -229,7 +228,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 25966,
+    "totalChars": 26642,
   },
   "media-image": {
     "sections": [
@@ -239,7 +238,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 11943,
+    "totalChars": 12111,
   },
   "memory-hooks-off": {
     "sections": [
@@ -251,7 +250,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26802,
+    "totalChars": 27478,
   },
   "plan-mode": {
     "sections": [
@@ -264,7 +263,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 10156,
+    "totalChars": 10324,
   },
   "plugin-stages": {
     "sections": [
@@ -276,7 +275,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 25735,
+    "totalChars": 26411,
   },
   "skip-discovery-brief": {
     "sections": [
@@ -288,7 +287,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26462,
+    "totalChars": 27138,
   },
 }
 `;

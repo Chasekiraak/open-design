@@ -43,4 +43,12 @@ describe('craft precedence', () => {
     );
     expect(color).not.toContain('overuse. Hard caps:');
   });
+
+  it('scopes the generic typography scale away from fixed-canvas decks', () => {
+    const typography = readFileSync(path.join(repoRoot, 'craft/typography.md'), 'utf8');
+
+    expect(typography).toContain('The ranges below are web and UI defaults');
+    expect(typography).toContain('fixed 1920×1080 presentation canvas');
+    expect(typography).toContain('body text\nat least 24 px');
+  });
 });

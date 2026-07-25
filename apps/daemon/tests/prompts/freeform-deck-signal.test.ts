@@ -39,12 +39,12 @@ describe('detectDeckIntentSignal', () => {
   });
 });
 
-describe('composeSystemPrompt — freeform maybe-deck gating', () => {
+describe('composeSystemPrompt — freeform deck promotion', () => {
   const freeform = { metadata: { kind: 'other' as const }, executionProfile: 'filesystem' as const };
 
-  it('includes the maybe-deck directive only when the signal is true', () => {
+  it('promotes a positive freeform signal to the deck contract without conditional wording', () => {
     const out = composeSystemPrompt({ ...freeform, freeformDeckSignal: true });
-    expect(out).toContain(MAYBE_DECK_HEADING);
+    expect(out).not.toContain(MAYBE_DECK_HEADING);
     expect(out).toContain(DECK_DELIVERY_HEADING);
     expect(out).toContain(DECK_OUTCOME_HEADING);
   });
@@ -86,6 +86,7 @@ describe('composeSystemPrompt — freeform maybe-deck gating', () => {
       expect(out).toContain(DECK_DELIVERY_HEADING);
       expect(out).toContain(DECK_OUTCOME_HEADING);
       expect(out).not.toContain(DECK_FRAMEWORK_HEADING);
+      expect(out).not.toContain(MAYBE_DECK_HEADING);
     }
   });
 });

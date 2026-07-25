@@ -63,7 +63,6 @@ const SECTION_MARKERS = [
   ['active-stage-blocks', '## Active stage:'],
   ['project-metadata', '## Project metadata'],
   ['deck-directive', '# Deck delivery contract'],
-  ['maybe-deck-framework', '## If this brief is a slide deck / keynote / presentation'],
   ['media-generation-contract', '## Media generation contract'],
   ['media-dispatch-hint', '## Media generation (if asked)'],
   ['codex-imagegen-override', '## Codex built-in imagegen override'],
@@ -172,7 +171,7 @@ const SCENARIOS: ReadonlyArray<[name: string, input: ComposeInput]> = [
       executionProfile: 'filesystem',
     },
   ],
-  // Freeform (kind=other) with a deck-ish brief keeps the maybe-deck variant.
+  // Freeform (kind=other) with a deck-ish brief is promoted to the deck surface.
   ['freeform-other', {
     metadata: { kind: 'other' },
     executionProfile: 'filesystem',

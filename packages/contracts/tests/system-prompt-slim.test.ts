@@ -639,6 +639,19 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(defaultDirective).not.toContain('## Canonical skeleton');
   });
 
+  it('requires one real stitched render for filesystem decks without leaking tools into text-artifact runs', () => {
+    const filesystem = renderDeckPromptDirective('outcome_only', 'filesystem');
+    const textArtifact = renderDeckPromptDirective('outcome_only', 'text_artifact');
+
+    expect(filesystem).toContain('## Rendered verification — filesystem decks');
+    expect(filesystem).toContain('export <deck-file>');
+    expect(filesystem).toContain('--format image --deck');
+    expect(filesystem).toContain('stitches every slide into one review image');
+    expect(filesystem).toContain('does not satisfy this check');
+    expect(textArtifact).not.toContain('## Rendered verification — filesystem decks');
+    expect(textArtifact).not.toContain('export <deck-file>');
+  });
+
   it('requires a purposeful closing while preserving meaningful thank-you endings', () => {
     const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
     const legacy = renderDeckPromptDirective('current', 'filesystem');
@@ -761,7 +774,9 @@ describe('composeSystemPrompt — shared slim default', () => {
     });
 
     expect(quiet).not.toContain('## If this brief is a slide deck');
-    expect(deck).toContain('## If this brief is a slide deck');
+    expect(quiet).not.toContain('# Deck delivery contract');
+    expect(deck).not.toContain('## If this brief is a slide deck');
+    expect(deck).toContain('# Deck delivery contract');
   });
 
   it('treats missing metadata as inferable context rather than mandatory questions', () => {

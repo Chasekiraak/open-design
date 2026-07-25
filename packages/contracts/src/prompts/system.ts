@@ -240,8 +240,8 @@ export interface ComposeInput {
   // Injected after user-level instructions and before the design system.
   projectInstructions?: string | undefined;
   // True only when the visible request actually reads as a deck brief.
-  // Deck-kind projects remain unconditional; freeform projects do not carry
-  // the large conditional framework without this positive signal.
+  // Deck-kind projects remain unconditional; a positive signal promotes an
+  // otherwise untyped freeform run to the deck surface.
   freeformDeckSignal?: boolean | undefined;
   // Shared Design-doctrine variant. Slim is the default for BYOK/API too;
   // classic is retained only as an explicit Design-mode rollback path.
@@ -590,32 +590,19 @@ export function composeSystemPrompt({
   // skeleton would conflict. The skill-seed path takes over via
   // `derivePreflight` above, so we only fire the generic directive when no
   // skill seed is on offer.
-  const isDeckProject = skillMode === 'deck' || metadata?.kind === 'deck';
-  const isFreeformProject = !skillMode && (!metadata || metadata.kind === 'other');
+  const isDeckProject =
+    skillMode === 'deck'
+    || metadata?.kind === 'deck'
+    || (
+      freeformDeckSignal === true
+      && !skillMode
+      && (!metadata || metadata.kind === 'other')
+    );
   const hasSkillSeed =
     !!skillBody && /assets\/template\.html/.test(skillBody);
   if (!isAskMode && sessionMode !== 'plan' && isDeckProject && !hasSkillSeed) {
     parts.push(
       `\n\n---\n\n${renderDeckPromptDirective(deckPromptVariant, resolvedExecutionProfile)}`,
-    );
-  } else if (
-    !isAskMode
-    && sessionMode !== 'plan'
-    && isFreeformProject
-    && !hasSkillSeed
-    && freeformDeckSignal === true
-  ) {
-    // Freeform / kind=other projects skip the kind picker entirely and
-    // land here. If the user's brief is a deck/keynote/slides ("讲解",
-    // "presentation", "make a deck"), the agent used to invent its own
-    // scale-to-fit + slide visibility + nav script from scratch and
-    // shipped subtle CSS specificity bugs (per-slide layout classes
-    // overriding `.slide { display:none }`). Inject the same framework
-    // here, prefixed with a one-line conditional so the agent only
-    // adopts it when the brief actually is a deck — otherwise the
-    // directive is read as background reference and ignored.
-    parts.push(
-      `\n\n---\n\n## If this brief is a slide deck / keynote / presentation\n\nThe user did not pre-select a "Slide deck" surface, but their request may still call for one. **If — and only if — the brief reads as slides, keynote, presentation, deck, PPT, or 讲解, follow the deck directive below.** Otherwise ignore everything in this section and continue with the freeform output you would have written anyway.\n\n${renderDeckPromptDirective(deckPromptVariant, resolvedExecutionProfile)}`,
     );
   }
 

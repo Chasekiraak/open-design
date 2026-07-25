@@ -217,6 +217,7 @@ export function resolveExclusiveSurface(args: {
   metadata?: ProjectMetadata | undefined;
   skillMode?: ComposeInput['skillMode'] | undefined;
   skillModes?: ComposeInput['skillModes'] | undefined;
+  freeformDeckSignal?: boolean | undefined;
 }): ExclusiveSurfaceMode | null {
   const activeSkillModes = new Set(
     Array.isArray(args.skillModes)
@@ -234,30 +235,35 @@ export function resolveExclusiveSurface(args: {
   const composedSurfaceModes = Array.from(activeSkillModes).filter((mode): mode is ExclusiveSurfaceMode =>
     EXCLUSIVE_SURFACE_MODES.has(mode as ExclusiveSurfaceMode),
   );
+  const inferredFreeformDeckSurface: ExclusiveSurfaceMode | null =
+    args.freeformDeckSignal === true
+    && activeSkillModes.size === 0
+    && (!args.metadata || args.metadata.kind === 'other')
+      ? 'deck'
+      : null;
 
   return metadataSurface
     ?? primarySkillSurface
-    ?? (composedSurfaceModes.length === 1 ? composedSurfaceModes[0] ?? null : null);
+    ?? (composedSurfaceModes.length === 1 ? composedSurfaceModes[0] ?? null : null)
+    ?? inferredFreeformDeckSurface;
 }
 
 // Deck-ish vocabulary across English and Chinese briefs. Kept deliberately
-// generous: a false positive only re-injects the deck framework a freeform
-// run would previously have received unconditionally, while a false negative
-// means the agent hand-rolls deck scaffolding — so every borderline term
-// stays in.
+// generous: a positive signal promotes an otherwise untyped freeform run to
+// the deck surface and its contract; a false negative leaves the agent to
+// hand-roll deck scaffolding, so every borderline term stays in.
 const DECK_INTENT_SIGNAL =
   /\b(slides?|deck|keynote|presentation|pitch\s?deck|ppt(x)?|slideshow|carousel)\b|幻灯|简报|讲稿|演示|路演|汇报|宣讲|课件|讲解|演讲|提案/i;
 
 /**
- * Whether the outgoing user request reads as a slide-deck brief. Gates the
- * ~20K maybe-deck framework injection for freeform (kind=other / no
- * metadata) projects: those runs previously carried the full framework on
- * every turn "just in case". Feed it USER-AUTHORED text only (see
+ * Whether the outgoing user request reads as a slide-deck brief. Promotes
+ * freeform (kind=other / no metadata) runs to the deck surface before prompt
+ * resources are composed. Feed it USER-AUTHORED text only (see
  * `extractUserAuthoredSignalText`) — assistant turns in a packed transcript
  * offer deck vocabulary the user never chose; conversation persistence is
  * the latch's job (`latchConversationIntentSignals`), not the scanner's.
- * Callers that cannot supply the request text should pass undefined to
- * `freeformDeckSignal`, which preserves the legacy always-inject behavior.
+ * Callers that cannot supply the request text should leave
+ * `freeformDeckSignal` undefined, which keeps the run untyped.
  */
 export function detectDeckIntentSignal(
   ...texts: Array<string | null | undefined>
@@ -681,10 +687,9 @@ export interface ComposeInput {
   // assistant-text <artifact> blocks.
   executionProfile?: ExecutionProfile | undefined;
   // Whether the outgoing request text reads as a slide-deck brief (see
-  // `detectDeckIntentSignal`). Only consulted for the freeform maybe-deck
-  // branch: `false` skips the ~20K conditional framework injection,
-  // `true` keeps it. Missing/false skips it. Deck-kind projects ignore this — their
-  // framework is unconditional.
+  // `detectDeckIntentSignal`). A positive signal promotes an otherwise
+  // untyped freeform run to the deck surface before prompt resources are
+  // composed. Explicit metadata and active skill surfaces still win.
   freeformDeckSignal?: boolean | undefined;
   // Which always-on Design doctrine core to compose. `slim` is the default.
   // Explicit `classic` keeps the legacy DISCOVERY_AND_PHILOSOPHY +
@@ -769,6 +774,7 @@ export function composeSystemPrompt({
     metadata,
     skillMode,
     skillModes,
+    freeformDeckSignal,
   });
   const resolvedMediaSurfaceEarly: MediaSurface | null =
     resolvedExclusiveSurfaceEarly === 'image'
@@ -1202,31 +1208,11 @@ export function composeSystemPrompt({
   // `derivePreflight` above, so we only fire the generic directive when no
   // skill seed is on offer.
   const isDeckProject = resolvedExclusiveSurface === 'deck';
-  const isFreeformProject = activeSkillModes.size === 0 && (!metadata || metadata.kind === 'other');
   const hasSkillSeed =
     !!skillBody && /assets\/template\.html/.test(skillBody);
   if (!isAskMode && sessionMode !== 'plan' && isDeckProject && !hasSkillSeed) {
     parts.push(
       `\n\n---\n\n${renderDeckPromptDirective(deckPromptVariant, resolvedExecutionProfile)}`,
-    );
-  } else if (
-    !isAskMode &&
-    sessionMode !== 'plan' &&
-    isFreeformProject &&
-    !hasSkillSeed &&
-    freeformDeckSignal === true
-  ) {
-    // Freeform / kind=other projects skip the kind picker entirely and
-    // land here. If the user's brief is a deck/keynote/slides ("讲解",
-    // "presentation", "make a deck"), the agent used to invent its own
-    // scale-to-fit + slide visibility + nav script from scratch and
-    // shipped subtle CSS specificity bugs (per-slide layout classes
-    // overriding `.slide { display:none }`). Inject the same framework
-    // here, prefixed with a one-line conditional so the agent only
-    // adopts it when the brief actually is a deck — otherwise the
-    // directive is read as background reference and ignored.
-    (isSlimCore ? slimTurnVariableParts : parts).push(
-      `\n\n---\n\n## If this brief is a slide deck / keynote / presentation\n\nThe user did not pre-select a "Slide deck" surface, but their request may still call for one. **If — and only if — the brief reads as slides, keynote, presentation, deck, PPT, or 讲解, follow the deck directive below.** Otherwise ignore everything in this section and continue with the freeform output you would have written anyway.\n\n${renderDeckPromptDirective(deckPromptVariant, resolvedExecutionProfile)}`,
     );
   }
 

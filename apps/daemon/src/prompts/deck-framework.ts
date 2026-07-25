@@ -9,5 +9,6 @@ export {
   DEFAULT_DECK_PROMPT_VARIANT,
   renderDeckFrameworkDirective,
   renderDeckPromptDirective,
+  renderDeckVNextDirective,
   type DeckPromptVariant,
 } from '@open-design/contracts';

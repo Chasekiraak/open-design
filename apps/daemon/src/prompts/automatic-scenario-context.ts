@@ -48,11 +48,13 @@ export function shouldIncludeDefaultRouterSkill({
 
 /**
  * Ask stays light by excluding craft attached only by an automatic scenario.
- * Explicit skills and future design-system craft are tracked separately and
- * remain available as requested context.
+ * Once the hidden default router leaves the prompt, its craft leaves with it;
+ * explicit skills and design-system craft are tracked separately and remain
+ * available as requested context.
  */
 export function shouldIncludeAutomaticScenarioCraft(
   sessionMode: ChatSessionMode,
+  includeDefaultRouterSkill = true,
 ): boolean {
-  return sessionMode !== 'chat';
+  return includeDefaultRouterSkill && sessionMode !== 'chat';
 }

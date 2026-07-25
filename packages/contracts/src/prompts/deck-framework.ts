@@ -612,17 +612,35 @@ Only when relevant:
 
 Before handoff, review the deck once at thumbnail scale and once slide by slide. Rewrite any slide whose claim is unclear, whose evidence does not support it, whose layout hides the reading order, whose content does not advance the narrative, or whose content clips, overflows, or requires scrolling.`;
 
-export const DECK_VNEXT_DIRECTIVE = `${DECK_DELIVERY_CONTRACT_DIRECTIVE}
+const FILESYSTEM_DECK_RENDERED_VERIFICATION = `
+
+## Rendered verification — filesystem decks
+
+A newly generated deck has unresolved visual risk until you inspect a real host render. After writing the deck and before final handoff, use the core workflow's single permitted preview:
+
+\`"$OD_NODE_BIN" "$OD_BIN" export <deck-file> --project "$OD_PROJECT_ID" --format image --deck --out <review-image>\`
+
+The image export stitches every slide into one review image. Inspect that image at overview scale and zoom into any suspicious slide; source inspection or a claim that you "mentally rendered" the HTML does not satisfy this check. Fix accidental one-column collapse, clipping, overflow, undersized text, broken hierarchy, or unintended empty space, then hand off without starting a screenshot loop. If the host renderer remains unavailable after the core workflow's allowed diagnostic and retry, do not invent a visual result; complete the static checks and state that rendered verification was unavailable.`;
+
+export function renderDeckVNextDirective(
+  executionProfile: ExecutionProfile = 'filesystem',
+): string {
+  const renderedVerification =
+    executionProfile === 'filesystem' ? FILESYSTEM_DECK_RENDERED_VERIFICATION : '';
+  return `${DECK_DELIVERY_CONTRACT_DIRECTIVE}${renderedVerification}
 
 ---
 
 ${DECK_OUTCOME_RULES_DIRECTIVE}`;
+}
+
+export const DECK_VNEXT_DIRECTIVE = renderDeckVNextDirective('filesystem');
 
 export function renderDeckPromptDirective(
   variant: DeckPromptVariant = DEFAULT_DECK_PROMPT_VARIANT,
   executionProfile: ExecutionProfile = 'filesystem',
 ): string {
-  if (variant === 'outcome_only') return DECK_VNEXT_DIRECTIVE;
+  if (variant === 'outcome_only') return renderDeckVNextDirective(executionProfile);
   const current = renderDeckFrameworkDirective(executionProfile);
   if (variant === 'current_outcome') {
     return `${current}\n\n---\n\n${DECK_OUTCOME_RULES_DIRECTIVE}`;

@@ -11,6 +11,9 @@ Objective legibility, fit, and overflow checks still apply.
 ## Type scale
 
 Use a multiplicative scale (1.2 or 1.25). Cap at 6–8 sizes per artifact.
+The ranges below are web and UI defaults. Artifact-specific contracts override
+them: on a fixed 1920×1080 presentation canvas, use the deck scale (body text
+at least 24 px) rather than shrinking slide copy to the web ranges below.
 
 | Role | Range |
 |---|---|

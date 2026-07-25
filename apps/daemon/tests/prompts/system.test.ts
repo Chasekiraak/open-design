@@ -766,6 +766,22 @@ describe('composeSystemPrompt', () => {
     })).toBe('deck');
   });
 
+  it('promotes only untyped freeform deck signals and preserves explicit surfaces', () => {
+    expect(resolveExclusiveSurface({
+      metadata: { kind: 'other' },
+      freeformDeckSignal: true,
+    })).toBe('deck');
+    expect(resolveExclusiveSurface({
+      metadata: { kind: 'image' },
+      freeformDeckSignal: true,
+    })).toBe('image');
+    expect(resolveExclusiveSurface({
+      metadata: { kind: 'other' },
+      skillMode: 'prototype',
+      freeformDeckSignal: true,
+    })).toBeNull();
+  });
+
   describe('artifact handoff no-emit clauses (#1143)', () => {
     it('drops the absolute "non-negotiable" framing in favor of conditional language', () => {
       const prompt = composeSystemPrompt({});

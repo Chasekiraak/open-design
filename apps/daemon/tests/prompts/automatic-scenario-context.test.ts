@@ -74,9 +74,11 @@ describe('automatic scenario prompt context', () => {
     expect(submittedFormIdFromPrompt(undefined)).toBeNull();
   });
 
-  it('keeps general automatic craft in Design and Plan, but not Ask', () => {
+  it('keeps automatic craft only while its hidden router is present', () => {
     expect(shouldIncludeAutomaticScenarioCraft('chat')).toBe(false);
     expect(shouldIncludeAutomaticScenarioCraft('design')).toBe(true);
     expect(shouldIncludeAutomaticScenarioCraft('plan')).toBe(true);
+    expect(shouldIncludeAutomaticScenarioCraft('design', false)).toBe(false);
+    expect(shouldIncludeAutomaticScenarioCraft('plan', false)).toBe(false);
   });
 });

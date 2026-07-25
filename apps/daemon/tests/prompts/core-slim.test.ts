@@ -843,7 +843,7 @@ describe('composeSystemPrompt — slim layered ordering (cache-stable prefix)', 
     // server.ts re-sends it in the per-turn slice so live OAuth token state
     // stays out of the cached stable prefix.
     // Turn-variable blocks last, before the recency-pinned guard.
-    const maybeDeck = at('## If this brief is a slide deck');
+    const deck = at('# Deck delivery contract');
     const mediaHint = at('## Media generation (if asked)');
     const guard = at('## CRITICAL: Never fabricate conversation turns');
     expect(security).toBeLessThan(conduct);
@@ -851,8 +851,8 @@ describe('composeSystemPrompt — slim layered ordering (cache-stable prefix)', 
     expect(localeAt).toBeLessThan(memory);
     expect(memory).toBeLessThan(ds);
     expect(ds).toBeLessThan(metadataAt);
-    expect(metadataAt).toBeLessThan(maybeDeck);
-    expect(maybeDeck).toBeLessThan(mediaHint);
+    expect(metadataAt).toBeLessThan(deck);
+    expect(deck).toBeLessThan(mediaHint);
     expect(mediaHint).toBeLessThan(guard);
   });
 
