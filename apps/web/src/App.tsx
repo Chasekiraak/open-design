@@ -1759,20 +1759,22 @@ function AppInner() {
   // and the daemon so the choice survives reloads.
   const handleThemeChange = useCallback(
     (theme: AppConfig['theme']) => {
-      const next = { ...config, theme };
+      const current = latestPersistedConfigRef.current;
+      const next = { ...current, theme };
+      latestPersistedConfigRef.current = next;
       // Apply to the DOM synchronously inside the click handler so the theme
       // flips instantly. Otherwise the visible switch waits on the (heavier)
       // React re-render of the whole tree before the layout effect re-applies
       // it — which reads as a perceptible lag after the click.
       applyAppearanceToDocument({
         theme: theme ?? 'system',
-        accentColor: config.accentColor,
+        accentColor: current.accentColor,
       });
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const handleAgentChange = useCallback(
@@ -1810,12 +1812,16 @@ function AppInner() {
   // user had previously configured for the target protocol.
   const handleApiProtocolChange = useCallback(
     (protocol: ApiProtocol) => {
-      const next = switchApiProtocolConfig(config, protocol);
+      const next = switchApiProtocolConfig(
+        latestPersistedConfigRef.current,
+        protocol,
+      );
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   // BYOK model picker — patches `model` (and the per-protocol shadow
@@ -1823,35 +1829,45 @@ function AppInner() {
   // mid-session without retyping their key.
   const handleApiModelChange = useCallback(
     (model: string) => {
-      const next = updateCurrentApiProtocolConfig(config, { model });
+      const next = updateCurrentApiProtocolConfig(
+        latestPersistedConfigRef.current,
+        { model },
+      );
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const handleChangeDefaultDesignSystem = useCallback(
     (designSystemId: string | null) => {
-      const next = { ...config, designSystemId };
+      const next = {
+        ...latestPersistedConfigRef.current,
+        designSystemId,
+      };
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const refreshAgents = useCallback(
     async (options?: { throwOnError?: boolean; agentCliEnv?: AppConfig['agentCliEnv'] }) => {
       if (options && Object.prototype.hasOwnProperty.call(options, 'agentCliEnv')) {
-        const nextConfig = clearStaleAmrModelChoiceOnProfileChange(config, {
-          ...config,
+        const current = latestPersistedConfigRef.current;
+        const nextConfig = clearStaleAmrModelChoiceOnProfileChange(current, {
+          ...current,
           agentCliEnv: options.agentCliEnv ?? {},
         });
+        latestPersistedConfigRef.current = nextConfig;
         amrModelsRef.current = null;
         saveConfig(nextConfig);
-        await syncConfigToDaemon(nextConfig);
         setConfig(nextConfig);
+        await syncConfigToDaemon(nextConfig);
       }
       const agentRequestId = beginAgentStreamRequest();
       setAgentsLoading(true);
@@ -1882,7 +1898,7 @@ function AppInner() {
         return [];
       }
     },
-    [beginAgentStreamRequest, config, isCurrentAgentStreamRequest],
+    [beginAgentStreamRequest, isCurrentAgentStreamRequest],
   );
 
   useEffect(() => {
@@ -2872,6 +2888,17 @@ function AppInner() {
     }
   };
 
+  const handleResetOnboarding = useCallback((next: AppConfig) => {
+    latestPersistedConfigRef.current = next;
+    saveConfig(next);
+    void syncConfigToDaemon(next, { allowOnboardingReset: true });
+    setConfig(next);
+    setSettingsOpen(false);
+    settingsDraftConfigRef.current = null;
+    setSettingsHighlight(null);
+    navigate({ kind: 'home', view: 'onboarding' });
+  }, []);
+
   const renderSettingsSurface = (presentation: 'modal' | 'page') => (
     <SettingsDialog
       presentation={presentation}
@@ -2888,6 +2915,7 @@ function AppInner() {
       onDraftChange={handleSettingsDraftChange}
       onPersistComposioKey={handleConfigPersistComposioKey}
       onClose={handleCloseSettings}
+      onResetOnboarding={handleResetOnboarding}
       onRefreshAgents={refreshAgents}
       onAmrLoginStatusChange={handleAmrLoginStatusChange}
       daemonMediaProviders={daemonMediaProviders}

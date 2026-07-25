@@ -347,6 +347,7 @@ function renderSettingsDialog(
     providerModelsCache?: Record<string, ProviderModelOption[]>;
     welcome?: boolean;
     onSilentUpdatePreferenceChange?: (allowSilentUpdates: boolean) => Promise<void>;
+    onResetOnboarding?: (next: AppConfig) => void;
   } = {},
 ) {
   const onPersist = vi.fn();
@@ -370,6 +371,7 @@ function renderSettingsDialog(
       onSilentUpdatePreferenceChange={onSilentUpdatePreferenceChange}
       onPersistComposioKey={onPersistComposioKey}
       onClose={onClose}
+      onResetOnboarding={options.onResetOnboarding}
       onRefreshAgents={onRefreshAgents}
     />,
   );
@@ -5588,6 +5590,43 @@ describe('SettingsDialog design systems section', () => {
 describe('SettingsDialog about interactions', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
+  });
+
+  it('drops a pending autosave when explicit onboarding reset unmounts Settings', () => {
+    vi.useFakeTimers();
+    const onResetOnboarding = vi.fn();
+    const view = renderSettingsDialog(
+      {
+        mode: 'daemon',
+        agentId: 'codex',
+        onboardingCompleted: true,
+        theme: 'system',
+      },
+      {
+        initialSection: 'appearance',
+        onResetOnboarding,
+      },
+    );
+
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Appearance' })).getByRole('button', {
+        name: 'Dark',
+      }),
+    );
+    expect(screen.getByText('Saving…')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /About/i }));
+    fireEvent.click(screen.getByRole('button', { name: en['settings.resetOnboardingButton'] }));
+    view.unmount();
+
+    expect(view.onPersist).not.toHaveBeenCalled();
+    expect(onResetOnboarding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onboardingCompleted: false,
+        theme: 'dark',
+      }),
+    );
   });
 
   it('renders app version and runtime details when version info is available', () => {

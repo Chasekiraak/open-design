@@ -74,7 +74,6 @@ import {
   KNOWN_PROVIDERS,
   hasAnyConfiguredProvider,
   mergeDaemonMediaProviders,
-  saveConfig,
   syncComposioConfigToDaemon,
   syncConfigToDaemon,
   syncMediaProvidersToDaemon,
@@ -470,6 +469,8 @@ interface Props {
    */
   composioConfigLoading?: boolean;
   onClose: () => void;
+  /** Hand the explicit onboarding reset back to App, the config state owner. */
+  onResetOnboarding?: (next: AppConfig) => void;
   onRefreshAgents: (
     options?: AgentRefreshOptions,
   ) => AgentInfo[] | Promise<AgentInfo[] | void> | void;
@@ -1482,6 +1483,7 @@ export function SettingsDialog({
   onPersistComposioKey,
   composioConfigLoading = false,
   onClose,
+  onResetOnboarding,
   onRefreshAgents,
   onAmrLoginStatusChange,
   daemonMediaProviders,
@@ -1975,19 +1977,6 @@ export function SettingsDialog({
   const handleOpenReleaseNotes = useCallback(() => {
     void openExternalUrl(OPEN_DESIGN_RELEASES_URL);
   }, []);
-
-  // Precise inverse of App.handleCompleteOnboarding: flip
-  // onboardingCompleted back to false, mirror it to localStorage and the
-  // daemon through the same config-persist path, then route the user into
-  // the first-run flow so they can replay setup (including brand extraction).
-  const handleResetOnboarding = useCallback(() => {
-    const next: AppConfig = { ...cfg, onboardingCompleted: false };
-    setCfg(next);
-    saveConfig(next);
-    void syncConfigToDaemon(next);
-    onClose();
-    navigateRoute({ kind: 'home', view: 'onboarding' });
-  }, [cfg, onClose]);
 
   // Imperative handle for the External MCP section. The dialog footer Save
   // routes through this when the MCP tab is active so the user can press the
@@ -3103,6 +3092,7 @@ export function SettingsDialog({
   const autosaveSavedTimerRef = useRef<number | null>(null);
   const autosaveRetryTimerRef = useRef<number | null>(null);
   const autosavePendingFlushRef = useRef(false);
+  const explicitOnboardingResetRef = useRef(false);
   const byokPreflightTrackingRef = useRef<string | null>(null);
   const committedClearedByokProviderKeyRef = useRef<string | null>(null);
   const autosaveLatestRef = useRef<AppConfig>(cfg);
@@ -3118,6 +3108,27 @@ export function SettingsDialog({
   const [autosaveCommitTick, setAutosaveCommitTick] = useState(0);
   const [autosaveRetryTick, setAutosaveRetryTick] = useState(0);
   autosaveLatestRef.current = cfg;
+
+  // App owns the config transition and persistence. Settings only supplies
+  // its latest draft with the explicit reset intent. Cancel a queued autosave
+  // before handing off: the dialog unmounts immediately, and its normal
+  // pending-draft flush must not replay the pre-reset `true` snapshot.
+  const handleResetOnboarding = useCallback(() => {
+    if (!onResetOnboarding) return;
+    explicitOnboardingResetRef.current = true;
+    autosavePendingFlushRef.current = false;
+    if (autosaveTimerRef.current != null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (autosaveRetryTimerRef.current != null) {
+      window.clearTimeout(autosaveRetryTimerRef.current);
+      autosaveRetryTimerRef.current = null;
+    }
+    setAutosaveStatus('idle');
+    onResetOnboarding({ ...cfg, onboardingCompleted: false });
+  }, [cfg, onResetOnboarding]);
+
   useEffect(() => {
     if (autosaveSkipFirstRef.current) {
       autosaveSkipFirstRef.current = false;
@@ -3266,7 +3277,10 @@ export function SettingsDialog({
   // timer to avoid setState after unmount.
   useEffect(() => {
     return () => {
-      if (autosavePendingFlushRef.current) {
+      if (
+        autosavePendingFlushRef.current
+        && !explicitOnboardingResetRef.current
+      ) {
         const mediaProvidersVersion = mediaProvidersChangeVersionRef.current;
         // Best-effort flush; if it rejects, localStorage already has
         // the latest copy from the synchronous saveConfig call inside

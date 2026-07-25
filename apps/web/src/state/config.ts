@@ -1234,10 +1234,17 @@ export async function fetchDaemonConfig(): Promise<AppConfigPrefs | null> {
 
 export async function syncConfigToDaemon(
   config: AppConfig,
-  options?: { throwOnError?: boolean },
+  options?: {
+    throwOnError?: boolean;
+    allowOnboardingReset?: boolean;
+  },
 ): Promise<void> {
   const prefs: AppConfigPrefs = {
-    onboardingCompleted: config.onboardingCompleted,
+    ...(config.onboardingCompleted === true
+      ? { onboardingCompleted: true }
+      : options?.allowOnboardingReset
+        ? { onboardingCompleted: false }
+        : {}),
     agentId: config.agentId,
     agentModels: config.agentModels,
     agentCliEnv: config.agentCliEnv,
