@@ -1660,8 +1660,7 @@
   background: transparent;
   pointer-events: none;
 }
-.app .task-activity-current-row .op-card-head,
-.app .task-activity-current-thinking {
+.app .task-activity-current-row .op-card-head {
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -1678,8 +1677,11 @@
 .app .task-activity-current-row .op-meta {
   color: var(--text-muted);
 }
+/* Strip tool-card disclosures from the compact current row, but keep the
+   thinking block's accordion: streamed reasoning must stay expandable while
+   the run is in progress (incident recvqgLmAkUM6G). */
 .app .task-activity-current-row .op-expand-chev,
-.app .task-activity-current-row .accordion-collapsible,
+.app .task-activity-current-row .op-card .accordion-collapsible,
 .app .task-activity-current-row .live-code-pre,
 .app .task-activity-current-row .op-output {
   display: none;
