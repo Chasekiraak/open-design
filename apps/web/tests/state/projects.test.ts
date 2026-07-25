@@ -168,6 +168,39 @@ describe('listProjects', () => {
     );
   });
 
+  it('returns one card model when workspace summaries repeat a logical project', async () => {
+    const localProject = {
+      id: 'shared-project',
+      name: 'Local project',
+      createdAt: 1,
+      updatedAt: 3,
+    };
+    const remoteProject = {
+      id: 'shared-project',
+      name: 'Remote catalog copy',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({
+        projects: [
+          { id: 'local-summary', project: localProject },
+          { id: 'remote-resource-summary', project: remoteProject },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(listProjects({
+      workspaceContext: teamWorkspaceContext(),
+      workspaceView: 'recent',
+      throwOnError: true,
+    })).resolves.toEqual([localProject]);
+  });
+
   it('does not coalesce workspace snapshots across different members', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {

@@ -99,7 +99,18 @@ export async function listProjects(options?: {
       workspaceView: options?.workspaceView,
       throwOnError: options?.throwOnError,
     });
-    return summaries.map((summary) => summary.project as Project);
+    const seenProjectIds = new Set<string>();
+    return summaries.flatMap((summary) => {
+      const project = summary.project as Project;
+      // Workspace summaries have resource-level identities, so the same
+      // logical project can legitimately appear more than once when local and
+      // remote catalog records overlap. Project cards are opened by project.id;
+      // keep the first (the daemon orders local summaries before remote ones)
+      // instead of rendering duplicate cards with duplicate React keys.
+      if (seenProjectIds.has(project.id)) return [];
+      seenProjectIds.add(project.id);
+      return [project];
+    });
   }
   // Coalesce identical in-flight reads: a burst of tab switches or several
   // separately-mounted grids asking for the same workspace+view collapses to a
