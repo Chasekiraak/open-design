@@ -1611,6 +1611,11 @@ function AppInner() {
   const refreshDesignSystems = useCallback(async () => {
     const list = await fetchDesignSystems();
     setDesignSystems(list);
+    // Bootstrap and this workspace-scoped refresh can overlap on launch.
+    // Either response is a complete catalog for the active daemon identity,
+    // so do not leave a successful refresh hidden behind bootstrap's loader
+    // when that duplicate request is cancelled or stalls.
+    setDsLoading(false);
   }, []);
 
   // The design-system catalog is workspace-scoped on the daemon (#145), so it
