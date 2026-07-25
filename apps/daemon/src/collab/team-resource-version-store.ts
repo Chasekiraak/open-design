@@ -42,16 +42,22 @@ export function createTeamResourceVersionStore(
       return versions[versionKey(workspaceId, kind, resourceId)] ?? null;
     },
     async set(workspaceId, kind, resourceId, versionId) {
-      versions[versionKey(workspaceId, kind, resourceId)] = versionId;
+      const key = versionKey(workspaceId, kind, resourceId);
       writeQueue = writeQueue.catch(() => undefined).then(async () => {
+        // Build from the last successfully COMMITTED snapshot inside the
+        // serialized queue. Concurrent callers therefore merge different keys,
+        // while a failed predecessor contributes no uncommitted in-memory data.
+        const next = { ...versions, [key]: versionId };
         await fs.promises.mkdir(runtimeDataDir, { recursive: true });
         const tempPath = `${filePath}.${process.pid}.tmp`;
         await fs.promises.writeFile(
           tempPath,
-          `${JSON.stringify(versions, null, 2)}\n`,
+          `${JSON.stringify(next, null, 2)}\n`,
           { encoding: 'utf8', mode: 0o600 },
         );
         await fs.promises.rename(tempPath, filePath);
+        // Publish to readers only after the atomic rename committed.
+        versions = next;
       });
       await writeQueue;
     },

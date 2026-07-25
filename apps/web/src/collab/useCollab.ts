@@ -36,6 +36,8 @@ export interface UseCollabOptions {
 export interface UseCollabResult {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
+  materializedVersion: number | null;
+  statusPollGeneration: number;
   syncState: CollabSnapshot['syncState'];
   ownerMemberId: CollabSnapshot['ownerMemberId'];
   ownerDisplayName: CollabSnapshot['ownerDisplayName'];
@@ -43,7 +45,7 @@ export interface UseCollabResult {
   reportChange: () => void;
   requestPublish: () => void;
   /** Member side — pull the published head into the local project directory. */
-  pull: () => Promise<void>;
+  pull: () => Promise<number | null>;
   /** Refresh the presence roster now (hub push-channel consumer). */
   refreshPresence: () => void;
   /** Run one status check now (hub push-channel consumer). */
@@ -53,10 +55,22 @@ export interface UseCollabResult {
 const EMPTY: CollabSnapshot = {
   present: [],
   publishedVersion: null,
+  materializedVersion: null,
+  statusPollGeneration: 0,
   syncState: null,
   ownerMemberId: null,
   ownerDisplayName: null,
   ownerRole: null,
+};
+
+interface ProjectScopedSnapshot {
+  sourceProjectId: string | null;
+  snapshot: CollabSnapshot;
+}
+
+const EMPTY_SCOPED_SNAPSHOT: ProjectScopedSnapshot = {
+  sourceProjectId: null,
+  snapshot: EMPTY,
 };
 
 /**
@@ -67,7 +81,18 @@ const EMPTY: CollabSnapshot = {
  */
 export function useCollab(options: UseCollabOptions): UseCollabResult {
   const { projectId, member, enabled = true } = options;
-  const [snapshot, setSnapshot] = useState<CollabSnapshot>(EMPTY);
+  const statusEnabled = options.statusEnabled ?? enabled;
+  const active = Boolean(statusEnabled && projectId);
+  const [scopedSnapshot, setScopedSnapshot] =
+    useState<ProjectScopedSnapshot>(EMPTY_SCOPED_SNAPSHOT);
+  // Effects clean up only after render commits. When projectId changes, the
+  // state still contains the prior client's last snapshot during that render;
+  // synchronously mask it so no consumer can seed a new-project cursor or
+  // start a pull from old-project published/sync state.
+  const snapshot =
+    active && scopedSnapshot.sourceProjectId === (projectId ?? null)
+      ? scopedSnapshot.snapshot
+      : EMPTY;
   const clientRef = useRef<CollabClient | null>(null);
 
   // The client's lifecycle (create/destroy) is gated on status-poll
@@ -76,8 +101,6 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   // below via CollabClient.setMember, not by delaying client creation, so a
   // late-resolving identity announces itself without restarting a status poll
   // that's already progressed.
-  const statusEnabled = options.statusEnabled ?? enabled;
-  const active = Boolean(statusEnabled && projectId);
   // Restart only on identity changes, not on every render of a fresh member object.
   const memberKey = member
     ? JSON.stringify([
@@ -91,15 +114,27 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
 
   useEffect(() => {
     if (!active || !projectId) {
-      setSnapshot(EMPTY);
+      setScopedSnapshot(EMPTY_SCOPED_SNAPSHOT);
       return;
     }
+    let disposed = false;
     // Always start with no identity — see the member-sync effect below,
     // which runs after this one on every render (including this mount) and
     // is the single place that calls setMember. This keeps "does presence
     // have an identity yet" logic in one spot instead of duplicating the
     // enabled+member check at both construction time and in setMember.
-    const clientOptions: CollabClientOptions = { projectId, member: null, onUpdate: setSnapshot };
+    const clientOptions: CollabClientOptions = {
+      projectId,
+      member: null,
+      onUpdate: (nextSnapshot) => {
+        // stop() cannot cancel a status request already in flight. Ignore that
+        // old client's late response instead of letting it overwrite the new
+        // project's scoped snapshot.
+        if (!disposed) {
+          setScopedSnapshot({ sourceProjectId: projectId, snapshot: nextSnapshot });
+        }
+      },
+    };
     if (options.baseUrl !== undefined) clientOptions.baseUrl = options.baseUrl;
     if (options.heartbeatMs !== undefined) clientOptions.heartbeatMs = options.heartbeatMs;
     if (options.statusPollMs !== undefined) clientOptions.statusPollMs = options.statusPollMs;
@@ -114,10 +149,11 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
     const onPageHide = () => client.leaveBeacon();
     window.addEventListener('pagehide', onPageHide);
     return () => {
+      disposed = true;
       window.removeEventListener('pagehide', onPageHide);
       client.stop();
       clientRef.current = null;
-      setSnapshot(EMPTY);
+      setScopedSnapshot(EMPTY_SCOPED_SNAPSHOT);
     };
     // fetch is intentionally not a restart trigger (a fresh reference every
     // render must not tear down a running client).
@@ -152,7 +188,7 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   // Returns the promise (unlike reportChange/requestPublish) so the member
   // auto-pull can await a successful pull before advancing its version cursor.
   const pull = useCallback(async () => {
-    await clientRef.current?.pull();
+    return (await clientRef.current?.pull()) ?? null;
   }, []);
   // Hub push-channel consumers: `presence-changed` / `project-metadata-changed`
   // thin events trigger these instead of waiting for the next 10s heartbeat /
@@ -168,6 +204,8 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   return {
     present: snapshot.present,
     publishedVersion: snapshot.publishedVersion,
+    materializedVersion: snapshot.materializedVersion,
+    statusPollGeneration: snapshot.statusPollGeneration,
     syncState: snapshot.syncState,
     ownerMemberId: snapshot.ownerMemberId,
     ownerDisplayName: snapshot.ownerDisplayName,

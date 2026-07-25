@@ -351,6 +351,36 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(onPulled).toHaveBeenCalledTimes(1);
   });
 
+  it('does not emit ready or advance the cursor when durable registration fails', async () => {
+    const onPulled = vi.fn();
+    const retry = makeRetryScheduler();
+    let registerFailed = true;
+    const deps = makeDeps({
+      onPulled,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        return registerFailed
+          ? { status: 'register_failed' }
+          : { status: 'pulled', version: 3 };
+      },
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    expect(onPulled).not.toHaveBeenCalled();
+    expect(retry.tasks.size).toBe(1);
+
+    registerFailed = false;
+    await retry.runNext();
+    expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
+    expect(onPulled).toHaveBeenCalledTimes(1);
+    expect(retry.tasks.size).toBe(0);
+  });
+
   it('never rejects, even when an identity read throws', async () => {
     const onError = vi.fn();
     const deps = makeDeps({

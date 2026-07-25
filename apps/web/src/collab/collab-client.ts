@@ -14,6 +14,9 @@ export type { CollabPresenceMember };
 export interface CollabSnapshot {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
+  materializedVersion: number | null;
+  /** Monotonic trigger incremented after every successful status response. */
+  statusPollGeneration: number;
   /**  project sync state; null until the first status poll lands. */
   syncState: ProjectSyncState | null;
   /** The member who shared this project (its single writer); null if unshared. */
@@ -65,6 +68,8 @@ export class CollabClient {
   private snapshot: CollabSnapshot = {
     present: [],
     publishedVersion: null,
+    materializedVersion: null,
+    statusPollGeneration: 0,
     syncState: null,
     ownerMemberId: null,
     ownerDisplayName: null,
@@ -161,8 +166,9 @@ export class CollabClient {
    * The daemon materializes the new content and its file watcher then fires the
    * existing live-reload SSE, so the FileViewer refreshes on its own.
    */
-  async pull(): Promise<void> {
-    await this.post('/collab/pull');
+  async pull(): Promise<number | null> {
+    const body = await this.post('/collab/pull');
+    return typeof body?.version === 'number' ? body.version : null;
   }
 
   async heartbeat(): Promise<void> {
@@ -186,11 +192,21 @@ export class CollabClient {
       const wasShared = this.isSharedProject();
       const body = await this.get('/collab/status');
       const version = typeof body?.publishedVersion === 'number' ? body.publishedVersion : null;
+      const materializedVersion =
+        typeof body?.materializedVersion === 'number' ? body.materializedVersion : null;
       const syncState = (body?.syncState as ProjectSyncState | undefined) ?? null;
       const ownerMemberId = typeof body?.ownerMemberId === 'string' ? body.ownerMemberId : null;
       const ownerDisplayName = typeof body?.ownerDisplayName === 'string' ? body.ownerDisplayName : null;
       const ownerRole = isCollabMemberRole(body?.ownerRole) ? body.ownerRole : null;
-      this.update({ publishedVersion: version, syncState, ownerMemberId, ownerDisplayName, ownerRole });
+      this.update({
+        publishedVersion: version,
+        materializedVersion,
+        statusPollGeneration: this.snapshot.statusPollGeneration + 1,
+        syncState,
+        ownerMemberId,
+        ownerDisplayName,
+        ownerRole,
+      });
       if (!wasShared && this.isSharedProject()) void this.heartbeat();
     } catch (error) {
       this.onError?.(error);

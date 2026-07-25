@@ -644,6 +644,61 @@ describe('collab sync routes', () => {
     expect(projectStore.registerCalls).toBe(1);
   });
 
+  it('reports the durable owner-scoped materialized version for a shared project', async () => {
+    const readMaterializedVersion = vi.fn(() => 6);
+    const api = await startSyncServer(
+      fixedShareContextProvider(true),
+      {
+        resolveSharedProjectOwner: async () => 'wm-owner',
+        readMaterializedVersion,
+      },
+      {
+        adapter: {
+          publish: async () => ({ version: 7 }),
+          syncLatest: async () => ({ version: 7 }),
+        },
+      },
+    );
+
+    const res = await api.json('/api/projects/shared-p/collab/status');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      publishedVersion: 7,
+      materializedVersion: 6,
+      ownerMemberId: 'wm-owner',
+    });
+    expect(readMaterializedVersion).toHaveBeenCalledWith('shared-p', {
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-1',
+      ownerMemberId: 'wm-owner',
+    });
+  });
+
+  it('fails closed to a null materialized version when the durable cursor cannot be read', async () => {
+    const api = await startSyncServer(
+      fixedShareContextProvider(true),
+      {
+        resolveSharedProjectOwner: async () => 'wm-owner',
+        readMaterializedVersion: () => {
+          throw new Error('cursor unavailable');
+        },
+      },
+      {
+        adapter: {
+          publish: async () => ({ version: 7 }),
+          syncLatest: async () => ({ version: 7 }),
+        },
+      },
+    );
+
+    const res = await api.json('/api/projects/shared-p/collab/status');
+
+    expect(res.status).toBe(200);
+    expect(res.body.materializedVersion).toBeNull();
+  });
+
   it('registers a local placeholder when the OWNER opens their own shared project not materialized on this machine', async () => {
     const projectStore = fakeProjectStore();
     const api = await startSyncServer(undefined, {
@@ -1673,6 +1728,54 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(notifyFilesChanged).toHaveBeenCalledWith('handle-pull');
   });
 
+  it('fails both pull surfaces before notifications when the durable cursor cannot commit', async () => {
+    const materializedVersion = 4;
+    const notifyFilesChanged = vi.fn();
+    const notifyProjectMetadataChanged = vi.fn();
+    const writeMaterializedVersion = vi.fn(async () => {
+      throw new Error('cursor disk unavailable');
+    });
+    const store = fakeProjectStore();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      readMaterializedVersion: () => materializedVersion,
+      writeMaterializedVersion,
+      notifyFilesChanged,
+      notifyProjectMetadataChanged,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => ({ version: 5 })),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const before = await api.json('/api/projects/cursor-fail/collab/status');
+    expect(before.body.materializedVersion).toBe(4);
+
+    const viaHandle = await api.handle.pullSharedProject('cursor-fail', pullScope);
+    expect(viaHandle).toEqual({ status: 'register_failed' });
+    const viaRoute = await api.json('/api/projects/cursor-fail/collab/pull', {
+      method: 'POST',
+      headers: {
+        'x-od-workspace-id': pullScope.workspaceId,
+        'x-od-workspace-member-id': pullScope.viewerMemberId,
+        'x-od-workspace-role': 'member',
+      },
+    });
+    expect(viaRoute.status).toBe(502);
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
+    expect(notifyProjectMetadataChanged).not.toHaveBeenCalled();
+
+    // A failed disk commit never advances the value status exposes, so both
+    // proactive events and the web floor remain free to retry version 5.
+    const after = await api.json('/api/projects/cursor-fail/collab/status');
+    expect(after.body.materializedVersion).toBe(4);
+  });
+
   it('fails closed when a scoped pull cannot prove the team mirror binding', async () => {
     const notifyFilesChanged = vi.fn();
     const api = await startSyncServer(fixedShareContextProvider(true), {
@@ -1872,11 +1975,13 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     const syncLatest = vi.fn(async () => ({ version: 5 }));
     const publish = vi.fn(async () => ({ version: 5 }));
     const store = fakeProjectStore();
+    const writeMaterializedVersion = vi.fn(async () => undefined);
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
       resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
       resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
       resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion,
     }, {
       adapter: { publish, pull: adapterPull, syncLatest },
     });
@@ -1900,5 +2005,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(routeResponse.status).toBe(200);
     expect(routeResponse.body.version).toBe(5);
     expect(adapterPull).toHaveBeenCalledTimes(1);
+    expect(writeMaterializedVersion).toHaveBeenCalledTimes(1);
+    expect(writeMaterializedVersion).toHaveBeenCalledWith('race-pull', pullScope, 5);
   });
 });

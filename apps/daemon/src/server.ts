@@ -2687,6 +2687,17 @@ export async function startServer({
     return items;
   };
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
+  const teamProjectContentResourceId = (
+    projectId: string,
+    scope: { resourceTeamId: string; ownerMemberId: string },
+  ) =>
+    projectResourceIdFor(projectId, {
+      teamId: scope.resourceTeamId,
+      memberId: scope.ownerMemberId,
+      role: 'member',
+      lifecycleState: 'active',
+      workspaceType: 'team',
+    });
   const getActiveWorkspaceId = () => activeWorkspace.get();
 
   /**
@@ -3365,6 +3376,23 @@ export async function startServer({
       return resolveProjectShareDir(PROJECTS_DIR, projectId, project, resolveProjectDir);
     },
     resolvePullDir: (projectId) => resolveProjectDir(PROJECTS_DIR, projectId),
+    readMaterializedVersion: (projectId, scope) => {
+      const stored = teamResourceVersions.get(
+        scope.workspaceId,
+        'project-content',
+        teamProjectContentResourceId(projectId, scope),
+      );
+      if (stored == null) return null;
+      const parsed = Number(stored);
+      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+    },
+    writeMaterializedVersion: (projectId, scope, version) =>
+      teamResourceVersions.set(
+        scope.workspaceId,
+        'project-content',
+        teamProjectContentResourceId(projectId, scope),
+        String(version),
+      ),
     resolveSharedProject,
     resolveSharedProjectOwner,
     // Non-destructive revocation flag for a pulled team mirror: the pull gate
@@ -3475,13 +3503,7 @@ export async function startServer({
       teamResourceVersions.get(
         target.workspaceId,
         'project-content',
-        projectResourceIdFor(target.projectId, {
-          teamId: target.resourceTeamId,
-          memberId: target.ownerMemberId,
-          role: 'member',
-          lifecycleState: 'active',
-          workspaceType: 'team',
-        }),
+        teamProjectContentResourceId(target.projectId, target),
       ),
     // The resource is owner-scoped; the same captured team/owner principal is
     // used by the shared pull below. The member session remains the transport
@@ -3506,18 +3528,6 @@ export async function startServer({
     // tree, nudge that surface so its failed pre-pull cover scan runs again
     // immediately instead of waiting for the 15s refresh floor.
     onPulled: async (target, version) => {
-      await teamResourceVersions.set(
-        target.workspaceId,
-        'project-content',
-        projectResourceIdFor(target.projectId, {
-          teamId: target.resourceTeamId,
-          memberId: target.ownerMemberId,
-          role: 'member',
-          lifecycleState: 'active',
-          workspaceType: 'team',
-        }),
-        String(version),
-      );
       emitWorkspaceEvent({
         type: 'team-project-content-ready',
         projectId: target.projectId,

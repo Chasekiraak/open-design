@@ -977,6 +977,7 @@ async function runCollab(args) {
       const body = await request('GET', '/collab/status');
       return emit(body, () => {
         console.log(`publishedVersion\t${body?.publishedVersion ?? '-'}`);
+        console.log(`materializedVersion\t${body?.materializedVersion ?? '-'}`);
         console.log(`syncState\t${body?.syncState ?? '-'}`);
       });
     }

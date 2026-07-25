@@ -53,7 +53,11 @@ async function startCollabStubServer(): Promise<StubServer> {
         return;
       }
       if (method === 'GET' && url === '/api/projects/p1/collab/status') {
-        res.end(JSON.stringify({ publishedVersion: 7, syncState: 'synced' }));
+        res.end(JSON.stringify({
+          publishedVersion: 7,
+          materializedVersion: 6,
+          syncState: 'synced',
+        }));
         return;
       }
       if (method === 'POST' && url === '/api/projects/p1/collab/publish') {
@@ -135,7 +139,8 @@ describe('od collab CLI', () => {
 
     const status = await runCli(['collab', 'status', 'p1', '--daemon-url', stub.baseUrl]);
     expect(status.code).toBe(0);
-    expect(status.stdout).toContain('7');
+    expect(status.stdout).toContain('publishedVersion\t7');
+    expect(status.stdout).toContain('materializedVersion\t6');
     expect(stub.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
       'POST /api/projects/p1/collab/publish',
       'GET /api/projects/p1/collab/status',

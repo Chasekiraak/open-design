@@ -60,6 +60,13 @@ export interface CollabPresenceLeaveResponse extends OkResponse {
  */
 export interface CollabSyncStatusResponse {
   publishedVersion: number | null;
+  /**
+   * The latest published version this daemon has durably materialized into the
+   * local project tree for the current workspace + project owner scope. Null
+   * means the local cursor is unavailable, so clients must fail closed and
+   * treat a non-null published head as potentially pending.
+   */
+  materializedVersion: number | null;
   syncState: ProjectSyncState;
   /**
    * The member who shared this project (its single writer), resolved
@@ -79,6 +86,12 @@ export interface CollabSyncStatusResponse {
   ownerDisplayName?: string;
   /** The owner's team role (owner/admin/member), from the same directory entry. */
   ownerRole?: CollabMemberRole;
+}
+
+/** POST /api/projects/:id/collab/pull response. */
+export interface CollabPullResponse extends OkResponse {
+  /** The actual hub version materialized by this pull, or null when unpublished. */
+  version: number | null;
 }
 
 /** POST /api/projects/:id/collab/sync-intent response. */

@@ -86,6 +86,17 @@ export interface RegisterCollabSyncRoutesDeps {
   projectStore?: PulledProjectStore;
   resolveProjectDir?: (projectId: string) => string | Promise<string>;
   resolvePullDir?: (projectId: string) => string;
+  /** Read the durable local materialization cursor for this exact team mirror. */
+  readMaterializedVersion?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+  ) => number | null;
+  /** Persist the actual version after either HTTP or proactive pull lands. */
+  writeMaterializedVersion?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    version: number,
+  ) => void | Promise<void>;
   readManifest?: (projectDir: string) => Promise<PulledProjectManifest | null>;
   onTeamShareStateChanged?: (input: {
     projectId: string;
@@ -444,40 +455,6 @@ export function registerCollabSyncRoutes(
       ? req.headers.authorization[0]
       : req.headers.authorization;
     return headerPrincipalForRequest(req) ?? publicFilePrincipal(await workspaceContext.current({ authorization }));
-  }
-
-  async function resourcePrincipalForSharedProject(
-    projectId: string,
-    // Null for daemon-internal callers (the proactive content pull) — there is
-    // no request to read identity headers from, so the viewer principal comes
-    // straight from the workspace context.
-    req: {
-      get(name: string): string | undefined;
-      headers: { authorization?: string | string[] | undefined };
-    } | null,
-  ): Promise<ResourceHubPrincipal | null> {
-    const viewerPrincipal = req
-      ? await principalForRequest(req)
-      : contextToResourceHubPrincipal(await workspaceContext.current({}));
-    // Only the owner id is needed to route the pull/head at the resource hub, so
-    // read it through the cached owner resolver rather than the uncached
-    // resolveSharedProject — this keeps /collab/status and the pull principal off
-    // a fresh catalog round-trip. Revocation still uses the uncached
-    // resolveSharedProject in the pull gate.
-    let ownerMemberId: string | null = null;
-    try {
-      ownerMemberId = (await resolveSharedProjectOwner?.(projectId)) ?? null;
-    } catch {
-      ownerMemberId = null;
-    }
-    if (!ownerMemberId || !viewerPrincipal?.teamId) {
-      return viewerPrincipal;
-    }
-    return {
-      ...viewerPrincipal,
-      memberId: ownerMemberId,
-      role: ownerMemberId === viewerPrincipal.memberId ? viewerPrincipal.role : 'member',
-    };
   }
 
   async function pullAccessForRequest(
@@ -1013,6 +990,17 @@ export function registerCollabSyncRoutes(
         console.warn('[od] failed to register pulled team project:', error);
         return { status: 'register_failed' };
       }
+      // Persist the exact version before notifying readers. A file-change
+      // subscriber may immediately re-check /collab/status; it must never
+      // observe the new bytes paired with the previous durable cursor.
+      if (scope && deps.writeMaterializedVersion) {
+        try {
+          await deps.writeMaterializedVersion(projectId, scope, result.version);
+        } catch (error) {
+          console.warn('[od] failed to persist pulled team project version:', error);
+          return { status: 'register_failed' };
+        }
+      }
       // The pull already materialized new bytes on disk at this point —
       // notify now rather than relying on the project's chokidar watcher,
       // which the pull's directory-replace can silently orphan (see
@@ -1142,27 +1130,40 @@ export function registerCollabSyncRoutes(
     // drives their auto-pull cursor. The owner reads their (newest) version from
     // local state, and a local-only project has no hub head at all.
     const needsHubHead = (syncState !== 'local_only' || ownerMemberId != null) && !callerIsOwner;
-    const [ownerNameEntry, head] = await Promise.all([
+    const [ownerNameEntry, headResult] = await Promise.all([
       ownerMemberId && !callerIsOwner && resolveOwnerDisplayName
         ? resolveOwnerDisplayName(ownerMemberId).catch(() => null)
         : Promise.resolve(null),
       needsHubHead
         ? (async () => {
-            const resourcePrincipal = await resourcePrincipalForSharedProject(projectId, req);
+            const { principal: resourcePrincipal, scope } =
+              await pullAccessForRequest(projectId, req);
+            let head: number | null;
             try {
-              return await publishedHead(projectId, resourcePrincipal);
+              head = await publishedHead(projectId, resourcePrincipal);
             } catch {
-              return publishedVersion(projectId, principal);
+              head = publishedVersion(projectId, principal);
             }
+            return { head, scope };
           })()
-        : Promise.resolve(publishedVersion(projectId, principal)),
+        : Promise.resolve({ head: publishedVersion(projectId, principal), scope: null }),
     ]);
     if (ownerNameEntry) {
       ownerDisplayName = ownerNameEntry.displayName;
       ownerRole = ownerNameEntry.role;
     }
+    let materializedVersion: number | null = null;
+    if (headResult.scope && deps.readMaterializedVersion) {
+      try {
+        materializedVersion =
+          deps.readMaterializedVersion(projectId, headResult.scope) ?? null;
+      } catch {
+        materializedVersion = null;
+      }
+    }
     res.json({
-      publishedVersion: head,
+      publishedVersion: headResult.head,
+      materializedVersion,
       syncState,
       ownerMemberId,
       ...(ownerDisplayName ? { ownerDisplayName } : {}),
