@@ -1,5 +1,5 @@
 import { Icon } from './Icon';
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { InstalledPluginRecord } from '@open-design/contracts';
 import { useI18n, useT } from '../i18n';
 import type { Dict, Locale } from '../i18n/types';
@@ -207,14 +207,30 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
   // when it settles. Without a guard, N rapid clicks before the resulting
   // navigation actually leaves this view fired N separate creates,
   // duplicating the project N times ("Community 的模板 remix 点击多次会复制
-  // 多次"). Track the in-flight template id and ignore repeat clicks on the
-  // SAME card until either the navigation away unmounts this view (the
-  // success path) or the timeout below fires (the failure/never-settles
-  // fallback, so a card can never get stuck disabled forever).
+  // 多次").
+  //
+  // `remixingId` (state) drives the visible disabled/loading affordance, but
+  // state writes are NOT synchronous — `handleTemplateAction` closes over
+  // whatever `remixingId` was at the last render, and a burst of clicks that
+  // lands before React re-renders (real rapid clicking, or several native
+  // click events dispatched inside one tick) all read the same stale
+  // (pre-update) value and all pass the `if (remixingId) return` check. A
+  // second confirmed-live PR (0b8e31a3e) shipped exactly that state-only
+  // guard and rapid-click verification still produced 5 POST /api/projects
+  // from 5 clicks. `remixingIdRef` is the actual gate: a plain mutable ref
+  // is written synchronously the instant the first click is accepted, so
+  // every click in the same burst — including ones whose handler closure
+  // predates the next render — sees the lock immediately. Cleared on the
+  // success path (navigation away unmounts this view) or by the timeout
+  // fallback below, so a card can never get stuck disabled forever.
+  const remixingIdRef = useRef<string | null>(null);
   const [remixingId, setRemixingId] = useState<string | null>(null);
   useEffect(() => {
     if (!remixingId) return;
-    const timer = window.setTimeout(() => setRemixingId(null), 8000);
+    const timer = window.setTimeout(() => {
+      remixingIdRef.current = null;
+      setRemixingId(null);
+    }, 8000);
     return () => window.clearTimeout(timer);
   }, [remixingId]);
   useEffect(() => {
@@ -250,7 +266,11 @@ export function CommunityView({ onRemixTemplate, onUsePrompt }: CommunityViewPro
       void copyTemplatePrompt(template);
       return;
     }
-    if (remixingId) return;
+    // Synchronous check-and-set on the ref: this is what actually decides
+    // whether a request goes out. See the remixingIdRef comment above for
+    // why the state flag alone cannot gate this.
+    if (remixingIdRef.current) return;
+    remixingIdRef.current = template.id;
     setRemixingId(template.id);
     onRemixTemplate?.({ templateId: template.id, prompt: template.prompt });
   };
