@@ -4060,6 +4060,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    // recvqgMWpJZqhL: sign-out is gated behind an explicit confirmation
+    // dialog; the real logout only runs after confirming.
+    fireEvent.click(screen.getByTestId('sign-out-confirm-accept'));
 
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
     expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();

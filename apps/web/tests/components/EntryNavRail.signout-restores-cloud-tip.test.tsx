@@ -81,6 +81,10 @@ describe('EntryNavRail sign-out (recvqbkcLqIFH7)', () => {
 
     fireEvent.click(screen.getByTestId('entry-nav-account'));
     fireEvent.click(screen.getByText('退出登录'));
+    // recvqgMWpJZqhL: sign-out now goes through an explicit confirmation
+    // dialog; the real logout chain (including the dismissal reset) only
+    // runs after confirming.
+    fireEvent.click(screen.getByTestId('sign-out-confirm-accept'));
 
     // The sign-out handler's `resetCloudSignInTipDismissal()` call runs
     // inside `velaLogout().then(...)`, so it lands after a microtask tick.

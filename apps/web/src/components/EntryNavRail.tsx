@@ -34,6 +34,7 @@ import type {
 } from '@open-design/contracts';
 import { fetchVelaLoginStatus, velaLogout } from '../providers/daemon';
 import { resetCloudSignInTipDismissal } from './CloudSignInTip';
+import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
@@ -295,6 +296,9 @@ export function EntryNavRail({
   const planTier = planBadgeTierForLabel(rawTier || tierLabel);
 
   const [accountOpen, setAccountOpen] = useState(false);
+  // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
+  // confirmation dialog; the real logout chain runs on explicit confirm.
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const githubStars = useGithubStars();
   // Signed-in account email for the menu head (#5517 shows it under the
   // display name). The workspace context carries no email, so lazily read the
@@ -670,27 +674,38 @@ export function EntryNavRail({
                     role="menuitem"
                     onClick={() => {
                       setAccountOpen(false);
-                      // Real sign-out: clear the vela profile auth on the
-                      // daemon, then nudge every workspace surface to re-read
-                      // (the context read now resolves to null → the shell
-                      // falls back to the signed-out local form).
-                      void velaLogout().then(() => {
-                        // recvqbkcLqIFH7: a stale "dismissed" flag on the
-                        // footer's CloudSignInTip must not survive a real
-                        // sign-out, or the rail's only sign-in entry point
-                        // silently disappears with nothing left in its place.
-                        resetCloudSignInTipDismissal();
-                        notifyAmrLoginStatusChanged();
-                        notifyWorkspaceContextRefresh();
-                        notifyWorkspaceBillingRefresh();
-                        notifyTeamProjectsChanged();
-                      });
+                      // recvqgMWpJZqhL: never sign out on this click alone —
+                      // arm the confirmation dialog and let it run the logout.
+                      setConfirmSignOut(true);
                     }}
                   >
                     <Icon name="log-out" size={15} /> {t('entry.accountSignOut')}
                   </button>
                 </div>
               </>
+            ) : null}
+            {confirmSignOut ? (
+              <SignOutConfirmDialog
+                onCancel={() => setConfirmSignOut(false)}
+                onConfirm={() => {
+                  setConfirmSignOut(false);
+                  // Real sign-out: clear the vela profile auth on the
+                  // daemon, then nudge every workspace surface to re-read
+                  // (the context read now resolves to null → the shell
+                  // falls back to the signed-out local form).
+                  void velaLogout().then(() => {
+                    // recvqbkcLqIFH7: a stale "dismissed" flag on the
+                    // footer's CloudSignInTip must not survive a real
+                    // sign-out, or the rail's only sign-in entry point
+                    // silently disappears with nothing left in its place.
+                    resetCloudSignInTipDismissal();
+                    notifyAmrLoginStatusChanged();
+                    notifyWorkspaceContextRefresh();
+                    notifyWorkspaceBillingRefresh();
+                    notifyTeamProjectsChanged();
+                  });
+                }}
+              />
             ) : null}
           </div>
         ) : (

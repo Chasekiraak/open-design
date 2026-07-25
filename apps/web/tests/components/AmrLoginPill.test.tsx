@@ -860,7 +860,52 @@ describe('AmrLoginPill', () => {
     expect(screen.queryByText('Signing in…')).toBeNull();
   });
 
-  it('logout POSTs /logout and flips the pill back to Sign-in', async () => {
+  // recvqgMWpJZqhL: clicking Sign out must never log the user out directly —
+  // it arms a confirmation dialog, and only the dialog's confirm action POSTs
+  // /logout. Cancel (or Escape) leaves the session untouched.
+  it('sign-out click opens the confirm dialog without POSTing /logout; cancel keeps the session', async () => {
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({
+          body: {
+            loggedIn: true,
+            profile: 'local',
+            configPath: '/x',
+            user: { id: 'u', email: 'leaf@example.com', plan: 'free' },
+          },
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/logout')) {
+        throw new Error('logout must not fire before the confirm step');
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderPill();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    // The dialog is armed, and no logout request has been issued.
+    expect(screen.getByTestId('sign-out-confirm-dialog')).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/api/integrations/vela/logout'),
+      ),
+    ).toBe(false);
+
+    // Cancel: the dialog closes, still signed in, still no logout POST.
+    fireEvent.click(screen.getByTestId('sign-out-confirm-cancel'));
+    expect(screen.queryByTestId('sign-out-confirm-dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/api/integrations/vela/logout'),
+      ),
+    ).toBe(false);
+  });
+
+  it('logout POSTs /logout only after confirming, then flips the pill back to Sign-in', async () => {
     let loggedIn = true;
     const fetchMock = vi.fn(async (input, init) => {
       const url = typeof input === 'string' ? input : (input as URL).toString();
@@ -890,10 +935,12 @@ describe('AmrLoginPill', () => {
     renderPill();
     const logoutBtn = await screen.findByRole('button', { name: 'Sign out' });
     fireEvent.click(logoutBtn);
+    fireEvent.click(screen.getByTestId('sign-out-confirm-accept'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
     });
+    expect(screen.queryByTestId('sign-out-confirm-dialog')).toBeNull();
   });
 
   it('converges a stale signed-in snapshot back to Sign-in when a later status read reports loggedOut', async () => {
@@ -958,6 +1005,7 @@ describe('AmrLoginPill', () => {
     renderPill();
     const logoutBtn = await screen.findByRole('button', { name: 'Sign out' });
     fireEvent.click(logoutBtn);
+    fireEvent.click(screen.getByTestId('sign-out-confirm-accept'));
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();

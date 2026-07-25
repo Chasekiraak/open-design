@@ -34,6 +34,7 @@ import {
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
 import { Icon } from './Icon';
+import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { amrConsoleUrlForProfile, amrProfileBadgeLabel } from '../runtime/amr-guidance';
 
 interface AmrLoginPillProps {
@@ -569,25 +570,31 @@ export function AmrLoginPill({
     [analytics.track, stopPolling, t],
   );
 
-  const handleLogout = useCallback(
-    async (event: MouseEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      setErrorMessage(null);
-      setPending('logout');
-      const result = await velaLogout();
-      loginStartedAtRef.current = null;
-      loginPendingRef.current = false;
-      setPending(null);
-      if (!result.ok) {
-        console.error('[amr-login] velaLogout failed', result);
-        setErrorMessage(t('settings.amrLoginErrorCompact'));
-        return;
-      }
-      await refresh();
-      notifyAmrLoginStatusChanged('status-changed');
-    },
-    [refresh, t],
-  );
+  // recvqgMWpJZqhL: the pill's sign-out button only ARMS the confirmation
+  // dialog; `performLogout` (the real daemon logout) runs on explicit confirm.
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+
+  const handleLogout = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setConfirmingLogout(true);
+  }, []);
+
+  const performLogout = useCallback(async () => {
+    setErrorMessage(null);
+    setPending('logout');
+    const result = await velaLogout();
+    loginStartedAtRef.current = null;
+    loginPendingRef.current = false;
+    setPending(null);
+    setConfirmingLogout(false);
+    if (!result.ok) {
+      console.error('[amr-login] velaLogout failed', result);
+      setErrorMessage(t('settings.amrLoginErrorCompact'));
+      return;
+    }
+    await refresh();
+    notifyAmrLoginStatusChanged('status-changed');
+  }, [refresh, t]);
 
   const handleConsoleClick = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {
@@ -665,6 +672,13 @@ export function AmrLoginPill({
         onConsoleClick={showConsoleAction ? handleConsoleClick : undefined}
         className={loggedIn ? 'amr-login-pill-status' : undefined}
       />
+      {confirmingLogout ? (
+        <SignOutConfirmDialog
+          busy={logoutInFlight}
+          onCancel={() => setConfirmingLogout(false)}
+          onConfirm={() => void performLogout()}
+        />
+      ) : null}
     </div>
   );
 }
