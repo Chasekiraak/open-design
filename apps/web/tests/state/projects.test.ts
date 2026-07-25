@@ -11,6 +11,7 @@ import {
   importFolderProject,
   installGeneratedPluginFolder,
   listProjects,
+  listWorkspaceProjectSummaries,
   listPlugins,
   patchProject,
   pickLocalFolderPath,
@@ -35,6 +36,19 @@ function personalWorkspaceContext(): WorkspaceCollabContext {
     providerMode: 'platform_credits',
     seatSummary: buildWorkspaceSeatSummary({ seatLimit: 1, usedSeats: 1 }),
     permissions: buildWorkspacePermissions({ role: 'owner', lifecycleState: 'active' }),
+  };
+}
+
+function teamWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    ...overrides,
   };
 }
 
@@ -124,6 +138,61 @@ describe('listProjects', () => {
     expect(a).toEqual([{ id: 'p1' }]);
     expect(b).toBe(a);
     expect(c).toBe(a);
+  });
+
+  it('returns raw workspace summaries with the captured member scope', async () => {
+    const summary = { id: 'p1', project: { id: 'p1' } };
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ projects: [summary] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const context = teamWorkspaceContext();
+
+    await expect(listWorkspaceProjectSummaries({
+      context,
+      workspaceView: 'team',
+      throwOnError: true,
+    })).resolves.toEqual([summary]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws-team/projects?view=team',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-team',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('does not coalesce workspace snapshots across different members', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      await gate;
+      return new Response(JSON.stringify({ projects: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = listWorkspaceProjectSummaries({
+      context: teamWorkspaceContext({ workspaceMemberId: 'wm-1' }),
+      workspaceView: 'team',
+    });
+    const second = listWorkspaceProjectSummaries({
+      context: teamWorkspaceContext({ workspaceMemberId: 'wm-2' }),
+      workspaceView: 'team',
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    release();
+    await Promise.all([first, second]);
   });
 });
 

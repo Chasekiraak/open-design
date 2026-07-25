@@ -7,7 +7,7 @@
 // surfaces (e.g. an in-project quick-switcher pane).
 
 import type { CSSProperties } from 'react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogDescription, DialogFooter, DialogTitle } from '@open-design/components';
 
 const MOVE_CONFIRM_SKIP_KEY = 'od.projects.moveConfirmSkip';
@@ -28,6 +28,7 @@ import {
 import { workspaceUpgradeUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
+import { useWorkspaceInvalidation } from '../collab/workspace-events';
 
 /** Which project space this strip renders. Drives the per-card 共享 badge
  *  (hidden in the all-shared team space) and the "{creator}创建" line: 'recent'
@@ -413,47 +414,100 @@ export function RecentProjectsStrip({
   // shell), and depending on it re-ran this effect — and re-fetched every
   // project's files — on every render (observed ~23× per project in a trace).
   const coverFetchKey = visibleProjects.map(({ project }) => project.id).join('|');
+  const visibleProjectsRef = useRef(new Map<string, Project>());
+  visibleProjectsRef.current = new Map(
+    visibleProjects.map(({ project }) => [project.id, project]),
+  );
+  const coverGenerationRef = useRef(new Map<string, number>());
+  const coverInFlightRef = useRef(
+    new Map<string, { generation: number; promise: Promise<void> }>(),
+  );
+  const loadProjectCover = useCallback(async (project: Project): Promise<ProjectCoverOverride | null> => {
+    const designSystemProject = isDesignSystemProject(project);
+    if (project.metadata?.entryFile && !designSystemProject) return null;
+    let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
+    try {
+      files = await fetchProjectFiles(project.id);
+    } catch {
+      return null;
+    }
+    if (designSystemProject) {
+      return (await findDesignSystemCover(project.id, files)) ?? null;
+    }
+    return selectProjectFileCover(files);
+  }, []);
+
+  const requestProjectCover = useCallback((
+    project: Project,
+    options: { force?: boolean } = {},
+  ): Promise<void> => {
+    const existing = coverInFlightRef.current.get(project.id);
+    if (existing && !options.force) return existing.promise;
+    const generation = (coverGenerationRef.current.get(project.id) ?? 0) + 1;
+    coverGenerationRef.current.set(project.id, generation);
+    const promise = loadProjectCover(project)
+      .then((cover) => {
+        if (coverGenerationRef.current.get(project.id) !== generation) return;
+        if (!visibleProjectsRef.current.has(project.id)) return;
+        setCoverByProject((current) => ({ ...current, [project.id]: cover }));
+      })
+      .finally(() => {
+        if (coverInFlightRef.current.get(project.id)?.generation === generation) {
+          coverInFlightRef.current.delete(project.id);
+        }
+      });
+    coverInFlightRef.current.set(project.id, { generation, promise });
+    return promise;
+  }, [loadProjectCover]);
+
+  const refreshProjectCover = useCallback((projectId: string) => {
+    const project = visibleProjectsRef.current.get(projectId);
+    if (!project) return;
+    // A content-ready event is authoritative and supersedes an older initial
+    // scan that may still be resolving against the pre-pull filesystem.
+    void requestProjectCover(project, { force: true });
+  }, [requestProjectCover]);
+
+  useWorkspaceInvalidation(
+    {
+      'team-project-content-ready': ({ projectId, workspaceId }) => {
+        if (workspaceContext?.workspaceId !== workspaceId) return;
+        void refreshProjectCover(projectId);
+      },
+    },
+    {
+      // Thin SSE events are not replayed. On reconnect/focus, retry only cards
+      // whose initial scan found no local cover, closing a missed-ready gap
+      // without re-fetching every already-resolved card in the grid.
+      onActive: () => {
+        for (const { project } of visibleProjects) {
+          if (coverByProject[project.id] == null) {
+            void requestProjectCover(project);
+          }
+        }
+      },
+    },
+  );
+
   useEffect(() => {
-    let cancelled = false;
     if (visibleProjects.length === 0) {
       setCoverByProject({});
       return;
     }
-
-    void Promise.all(
-      visibleProjects.map(async ({ project }) => {
-        const designSystemProject = isDesignSystemProject(project);
-        if (project.metadata?.entryFile && !designSystemProject) return [project.id, null] as const;
-        let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
-        try {
-          files = await fetchProjectFiles(project.id);
-        } catch {
-          return [project.id, null] as const;
-        }
-        if (designSystemProject) {
-          const cover = await findDesignSystemCover(project.id, files);
-          if (cover) {
-            return [
-              project.id,
-              cover,
-            ] as const;
-          }
-          return [project.id, null] as const;
-        }
-        return [project.id, selectProjectFileCover(files)] as const;
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setCoverByProject(Object.fromEntries(entries));
+    const visibleIds = new Set(visibleProjects.map(({ project }) => project.id));
+    setCoverByProject((current) => {
+      const entries = Object.entries(current).filter(([projectId]) => visibleIds.has(projectId));
+      return entries.length === Object.keys(current).length
+        ? current
+        : Object.fromEntries(entries);
     });
-
-    return () => {
-      cancelled = true;
-    };
+    for (const { project } of visibleProjects) {
+      void requestProjectCover(project);
+    }
     // Intentionally keyed on the id set (coverFetchKey), not visibleProjects,
     // so re-renders that don't change which projects are shown don't re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverFetchKey]);
+  }, [coverFetchKey, requestProjectCover]);
 
   // First-run home shouldn't reserve space for an empty "Recent
   // projects" rail — the dashed empty box just adds visual noise

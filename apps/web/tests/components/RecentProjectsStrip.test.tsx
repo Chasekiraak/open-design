@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RecentProjectsStrip } from '../../src/components/RecentProjectsStrip';
+import { fetchProjectFiles } from '../../src/providers/registry';
 import type { Project } from '../../src/types';
 
 vi.mock('../../src/providers/registry', () => ({
@@ -27,21 +28,21 @@ vi.mock('../../src/providers/registry', () => ({
   fetchProjectFiles: vi.fn(async (projectId: string) => {
     if (projectId === 'project-ds') {
       return [
-        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4 },
-        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3 },
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3, size: 0, mime: 'image/png' },
       ];
     }
     if (projectId === 'project-ds-fallback') {
       return [
-        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4 },
-        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3 },
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3, size: 0, mime: 'image/svg+xml' },
       ];
     }
     if (projectId === 'project-html') {
-      return [{ name: 'index.html', kind: 'html', mtime: 200 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 200, size: 0, mime: 'text/html' }];
     }
     if (projectId === 'project-deck') {
-      return [{ name: 'index.html', kind: 'html', mtime: 400 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 400, size: 0, mime: 'text/html' }];
     }
     return [];
   }),
@@ -53,6 +54,27 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.mocked(fetchProjectFiles).mockReset().mockImplementation(async (projectId: string) => {
+    if (projectId === 'project-ds') {
+      return [
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3, size: 0, mime: 'image/png' },
+      ];
+    }
+    if (projectId === 'project-ds-fallback') {
+      return [
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3, size: 0, mime: 'image/svg+xml' },
+      ];
+    }
+    if (projectId === 'project-html') {
+      return [{ name: 'index.html', kind: 'html', mtime: 200, size: 0, mime: 'text/html' }];
+    }
+    if (projectId === 'project-deck') {
+      return [{ name: 'index.html', kind: 'html', mtime: 400, size: 0, mime: 'text/html' }];
+    }
+    return [];
+  });
 });
 
 function project(overrides: Partial<Project>): Project {
@@ -79,19 +101,223 @@ function projects(count: number): Project[] {
 }
 
 function stubCoverProbe(status = 200, statusText = 'OK', body = '<html><body>slide</body></html>') {
-  const fetchMock = vi.fn(async () => ({
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes('/api/workspace/context')) {
+      return new Response(JSON.stringify({
+        context: {
+          workspaceId: 'ws-1',
+          workspaceType: 'team',
+          workspaceMemberId: 'wm-1',
+          role: 'member',
+          memberStatus: 'active',
+          lifecycleState: 'active',
+          billingState: 'active',
+          planId: null,
+          providerMode: 'platform_credits',
+          seatSummary: { seatLimit: 5, usedSeats: 2, availableSeats: 3 },
+          permissions: {},
+          teamId: 'team-1',
+        },
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return {
     ok: status >= 200 && status < 300,
     status,
     statusText,
     // Deck cards read the cover document (GET) to build their first-slide
     // srcDoc; plain HTML cards only HEAD-probe it.
     text: async () => body,
-  }) as Response);
+    } as Response;
+  });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
+type EventSourceListener = (event: unknown) => void;
+class MockWorkspaceEventSource {
+  static instances: MockWorkspaceEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<EventSourceListener>>();
+
+  constructor(readonly url: string) {
+    MockWorkspaceEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventSourceListener): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+
+  removeEventListener(name: string, listener: EventSourceListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string, data: unknown): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close(): void {}
+}
+
 describe('RecentProjectsStrip', () => {
+  it('refreshes only the card named by team-project-content-ready', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    vi.mocked(fetchProjectFiles).mockImplementation(async (projectId: string) => {
+      if (
+        projectId === 'project-ready' &&
+        vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === projectId).length > 1
+      ) {
+        return [{
+          name: 'index.html',
+          path: 'index.html',
+          kind: 'html',
+          mtime: 700,
+          size: 0,
+          mime: 'text/html',
+        }];
+      }
+      return [];
+    });
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[
+          project({ id: 'project-ready', name: 'Ready project' }),
+          project({ id: 'project-other', name: 'Other project' }),
+        ]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+    expect(container.querySelector('.recent-projects__card-thumb-html')).toBeNull();
+    expect(MockWorkspaceEventSource.instances).toHaveLength(1);
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+
+    await waitFor(() => expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull());
+    expect(vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === 'project-ready')).toHaveLength(2);
+    expect(vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === 'project-other')).toHaveLength(1);
+  });
+
+  it('rechecks unresolved visible covers when the workspace stream reconnects', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    vi.mocked(fetchProjectFiles)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        name: 'index.html',
+        path: 'index.html',
+        kind: 'html',
+        mtime: 701,
+        size: 0,
+        mime: 'text/html',
+      }]);
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-catch-up', name: 'Catch-up project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.recent-projects__card-thumb-html')).toBeNull();
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.onopen?.();
+    });
+
+    await waitFor(() => {
+      expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+      expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+    });
+  });
+
+  it('does not let a stale initial cover scan overwrite a newer content-ready result', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    let resolveInitial!: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+    const initial = new Promise<Awaited<ReturnType<typeof fetchProjectFiles>>>((resolve) => {
+      resolveInitial = resolve;
+    });
+    vi.mocked(fetchProjectFiles)
+      .mockReturnValueOnce(initial)
+      .mockResolvedValueOnce([{
+        name: 'index.html',
+        path: 'index.html',
+        kind: 'html',
+        mtime: 702,
+        size: 0,
+        mime: 'text/html',
+      }]);
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-race', name: 'Race project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-race',
+        workspaceId: 'ws-1',
+      });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+    });
+
+    await act(async () => {
+      resolveInitial([]);
+      await initial;
+    });
+    expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+  });
+
+  it('coalesces repeated active catch-up while an unresolved cover scan is already in flight', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    const pending = new Promise<Awaited<ReturnType<typeof fetchProjectFiles>>>(() => {});
+    vi.mocked(fetchProjectFiles).mockReturnValue(pending);
+
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-inflight', name: 'In-flight project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.onopen?.();
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(1);
+  });
+
   it('shows seven projects when the row has room for a seventh card', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getRect(this: HTMLElement) {
       return {

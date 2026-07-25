@@ -9,9 +9,10 @@ import {
 // daemon pulls the content proactively — no open tab required — instead of
 // leaving freshness to the member web's ~5s status polling. These tests pin
 // the guard boundary: the pull must NEVER touch a project this daemon owns
-// (the owner's local copy is the single writer), must skip projects never
-// materialized locally, must dedupe repeated/racing events, and must degrade
-// silently on failure so the web polling fallback stays authoritative.
+// (the owner's local copy is the single writer), may bootstrap a teammate's
+// newly-shared project from a workspace-scoped event before a local binding
+// exists, must dedupe repeated/racing events, and must degrade silently on
+// failure so the web polling fallback stays authoritative.
 
 type Deps = ProactiveContentPullDeps;
 
@@ -24,11 +25,12 @@ function makeDeps(overrides: Partial<Deps> = {}): Deps & {
     getLocalBinding: () => ({ workspaceId: 'ws-1', visibility: 'team' }),
     getWorkspaceIdentity: async () => ({
       workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
       workspaceMemberId: 'wm-member',
     }),
     resolveSharedProjectOwner: async () => 'wm-owner',
-    pullSharedProject: async (projectId: string) => {
-      pullCalls.push(projectId);
+    pullSharedProject: async (target) => {
+      pullCalls.push(target.projectId);
       return { status: 'pulled', version: 3 };
     },
     ...overrides,
@@ -53,10 +55,32 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual([]);
   });
 
-  it('skips a project this daemon never bound locally (no workspace_projects row)', async () => {
-    const deps = makeDeps({ getLocalBinding: () => null });
+  it('pulls a newly-shared teammate project before this daemon has a local binding', async () => {
+    const onPulled = vi.fn();
+    const deps = makeDeps({ getLocalBinding: () => null, onPulled });
     const pull = createProactiveContentPull(deps);
     await pull.handleContentChanged(baseEvent);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+    expect(onPulled).toHaveBeenCalledWith({
+      projectId: 'proj-1',
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-member',
+      ownerMemberId: 'wm-owner',
+    }, 3);
+  });
+
+  it('skips an unbound project when the event carries no workspace scope', async () => {
+    const deps = makeDeps({ getLocalBinding: () => null });
+    const pull = createProactiveContentPull(deps);
+    await pull.handleContentChanged({ projectId: 'proj-1', version: 3 });
+    expect(deps.pullCalls).toEqual([]);
+  });
+
+  it('skips an unbound project whose event workspace is not the active team', async () => {
+    const deps = makeDeps({ getLocalBinding: () => null });
+    const pull = createProactiveContentPull(deps);
+    await pull.handleContentChanged({ ...baseEvent, workspaceId: 'ws-other' });
     expect(deps.pullCalls).toEqual([]);
   });
 
@@ -80,6 +104,7 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     const deps = makeDeps({
       getWorkspaceIdentity: async () => ({
         workspaceId: 'ws-other',
+        resourceTeamId: 'team-other',
         workspaceMemberId: 'wm-member',
       }),
     });
@@ -135,8 +160,8 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1']);
 
     // A genuinely newer head pulls again.
-    deps.pullSharedProject = async (projectId: string) => {
-      deps.pullCalls.push(projectId);
+    deps.pullSharedProject = async (target) => {
+      deps.pullCalls.push(target.projectId);
       return { status: 'pulled', version: 4 };
     };
     await pull.handleContentChanged({ ...baseEvent, version: 4 });
@@ -157,8 +182,8 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
       release = resolve;
     });
     const deps = makeDeps({
-      pullSharedProject: async (projectId: string) => {
-        deps.pullCalls.push(projectId);
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
         await gate;
         return { status: 'pulled', version: 3 };
       },
@@ -180,8 +205,8 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     });
     let call = 0;
     const deps = makeDeps({
-      pullSharedProject: async (projectId: string) => {
-        deps.pullCalls.push(projectId);
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
         call += 1;
         if (call === 1) {
           await gate;
@@ -207,8 +232,8 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     let fail = true;
     const deps = makeDeps({
       onError,
-      pullSharedProject: async (projectId: string) => {
-        deps.pullCalls.push(projectId);
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
         if (fail) throw new Error('vela transport down');
         return { status: 'pulled', version: 3 };
       },
@@ -225,10 +250,12 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
   });
 
   it('does not advance the cursor on a revoked outcome', async () => {
+    const onPulled = vi.fn();
     let revoked = true;
     const deps = makeDeps({
-      pullSharedProject: async (projectId: string) => {
-        deps.pullCalls.push(projectId);
+      onPulled,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
         return revoked ? { status: 'revoked' } : { status: 'pulled', version: 3 };
       },
     });
@@ -239,6 +266,7 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     revoked = false;
     await pull.handleContentChanged(baseEvent);
     expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
+    expect(onPulled).toHaveBeenCalledTimes(1);
   });
 
   it('never rejects, even when an identity read throws', async () => {

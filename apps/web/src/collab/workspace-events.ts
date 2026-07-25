@@ -1,4 +1,7 @@
-import type { WorkspaceInvalidationEventName } from '@open-design/contracts';
+import type {
+  WorkspaceInvalidationEventName,
+  WorkspaceInvalidationSsePayload,
+} from '@open-design/contracts';
 import { useEventStream, type UseEventStreamResult } from '../hooks/useEventStream';
 
 // Collab realtime hop-2 — the workspace-scoped invalidation SSE
@@ -12,9 +15,11 @@ export const WORKSPACE_EVENTS_URL = '/api/workspace/events';
 
 /** Thin-event handlers keyed by SSE event name; the payload carries no body, so
  *  each handler is a plain re-fetch trigger. */
-export type WorkspaceInvalidationHandlers = Partial<
-  Record<WorkspaceInvalidationEventName, () => void>
->;
+export type WorkspaceInvalidationHandlers = {
+  [Name in WorkspaceInvalidationEventName]?: (
+    payload: Extract<WorkspaceInvalidationSsePayload, { type: Name }>,
+  ) => void;
+};
 
 export interface UseWorkspaceInvalidationOptions {
   /** Re-fetch the subscribed resource's snapshot on (re)connect + tab-visible. */

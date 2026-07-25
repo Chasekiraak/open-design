@@ -6,6 +6,20 @@ import {
 } from '../src/collab/vela-cli-team-projects.js';
 
 describe('Vela CLI team-project catalog adapter', () => {
+  it('uses an explicitly captured workspace for an authoritative list', async () => {
+    const catalog = createVelaCliTeamProjectCatalog({
+      supportsTeamProjects: () => true,
+      getWorkspaceId: () => 'team-current',
+      run: async (args, workspaceId) => {
+        expect(args).toEqual(['list']);
+        expect(workspaceId).toBe('team-captured');
+        return JSON.stringify({ projects: [] });
+      },
+    });
+
+    await expect(catalog.list('team-captured')).resolves.toEqual([]);
+  });
+
   it('maps list output into team-project DTOs', async () => {
     const catalog = createVelaCliTeamProjectCatalog({
       supportsTeamProjects: () => true,

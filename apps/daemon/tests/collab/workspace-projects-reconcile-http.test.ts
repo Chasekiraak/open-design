@@ -35,6 +35,7 @@ import {
   type LocalTeamProjectBinding,
   type RemoteTeamProjectRef,
 } from '../../src/collab/workspace-projects-reconciler.js';
+import { materializePulledTeamMirror } from '../../src/collab/team-mirror-materializer.js';
 
 const TEAM_WORKSPACE_ID = 'ws-team-1';
 const OWNER_MEMBER_ID = 'member-owner';
@@ -180,6 +181,113 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
       updatedAt: Date.now(),
     });
   }
+
+  function pulledProjectInput(id: string) {
+    return {
+      id,
+      name: 'Pulled team project',
+      skillId: null,
+      designSystemId: null,
+      createdAt: 10,
+      updatedAt: 20,
+    };
+  }
+
+  it('atomically materializes a read-only team mirror that rejects headerless PATCH and DELETE', async () => {
+    const projectId = 'fresh-pulled-mirror';
+    materializePulledTeamMirror(db, pulledProjectInput(projectId), {
+      workspaceId: TEAM_WORKSPACE_ID,
+      resourceTeamId: TEAM_WORKSPACE_ID,
+      viewerMemberId: READER_MEMBER_ID,
+      ownerMemberId: OWNER_MEMBER_ID,
+    });
+
+    expect(getProject(db, projectId)).toMatchObject({ id: projectId, name: 'Pulled team project' });
+    expect(getWorkspaceProject(db, TEAM_WORKSPACE_ID, projectId)).toMatchObject({
+      workspaceId: TEAM_WORKSPACE_ID,
+      visibility: 'team',
+      resourceState: 'active',
+      createdByWorkspaceMemberId: null,
+      updatedByWorkspaceMemberId: READER_MEMBER_ID,
+      cloudTombstonedAt: null,
+      syncState: 'synced',
+    });
+
+    const app = express();
+    app.use(express.json());
+    registerProjectRoutes(app, buildProjectRoutesDeps({ list: async () => [] }));
+    const routeServer = await listen(app);
+    try {
+      const patch = await fetch(`${routeServer.url}/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Illicit rename' }),
+      });
+      expect(patch.status).toBe(401);
+      const deletion = await fetch(`${routeServer.url}/api/projects/${projectId}`, {
+        method: 'DELETE',
+      });
+      expect(deletion.status).toBe(401);
+      expect(getProject(db, projectId)).toMatchObject({ name: 'Pulled team project' });
+    } finally {
+      await close(routeServer.server);
+    }
+  });
+
+  it.each([
+    {
+      label: 'personal binding',
+      patch: { workspaceId: TEAM_WORKSPACE_ID, visibility: 'personal', resourceState: 'active' },
+    },
+    {
+      label: 'other workspace',
+      patch: { workspaceId: 'ws-other', visibility: 'team', resourceState: 'active' },
+    },
+    {
+      label: 'tombstoned mirror',
+      patch: {
+        workspaceId: TEAM_WORKSPACE_ID,
+        visibility: 'team',
+        resourceState: 'active',
+        cloudTombstonedAt: 123,
+      },
+    },
+    {
+      label: 'deleted mirror',
+      patch: { workspaceId: TEAM_WORKSPACE_ID, visibility: 'team', resourceState: 'deleted' },
+    },
+    {
+      label: 'owner conflict',
+      patch: {
+        workspaceId: TEAM_WORKSPACE_ID,
+        visibility: 'team',
+        resourceState: 'active',
+        createdByWorkspaceMemberId: 'someone-else',
+      },
+    },
+  ])('fails closed without rewriting an existing $label', ({ patch }) => {
+    const projectId = `conflict-${String(patch.visibility)}-${String(patch.workspaceId)}-${String(patch.resourceState)}-${String(patch.cloudTombstonedAt ?? 'none')}-${String(patch.createdByWorkspaceMemberId ?? 'none')}`;
+    seedProject(projectId, 'Original local project');
+    ensureWorkspaceProject(db, {
+      projectId,
+      updatedByWorkspaceMemberId: READER_MEMBER_ID,
+      resourceHubResourceId: null,
+      syncState: 'local_only',
+      cloudTombstonedAt: null,
+      createdByWorkspaceMemberId: null,
+      ...patch,
+    });
+    const before = getWorkspaceProjectByProjectId(db, projectId);
+
+    expect(() => materializePulledTeamMirror(db, pulledProjectInput(projectId), {
+      workspaceId: TEAM_WORKSPACE_ID,
+      resourceTeamId: TEAM_WORKSPACE_ID,
+      viewerMemberId: READER_MEMBER_ID,
+      ownerMemberId: OWNER_MEMBER_ID,
+    })).toThrow(/binding conflict/);
+    expect(getProject(db, projectId)).toMatchObject({ name: 'Original local project' });
+    expect(getWorkspaceProjectByProjectId(db, projectId)).toEqual(before);
+  });
 
   // Real db.ts wiring for the reconciler under test — the same functions
   // `server.ts` itself calls, not a re-implementation. `getWorkspaceIdentity`

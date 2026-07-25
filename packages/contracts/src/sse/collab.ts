@@ -65,6 +65,14 @@ export interface TeamProjectsChangedSsePayload {
   at?: number;
 }
 
+/** One team project's pulled content and local read-only binding are ready. */
+export interface TeamProjectContentReadySsePayload {
+  type: 'team-project-content-ready';
+  projectId: string;
+  workspaceId: string;
+  at?: number;
+}
+
 /** A member joined / left / changed role in the team. */
 export interface WorkspaceMembersChangedSsePayload {
   type: 'members-changed';
@@ -85,11 +93,13 @@ export interface WorkspaceBillingChangedSsePayload {
 
 /**
  * Workspace-scoped invalidation events carried on `/api/workspace/events`.
- * Workspace scope is singular per daemon (one signed-in identity), so these
- * carry no id.
+ * Workspace scope is singular per daemon (one signed-in identity). Broad
+ * invalidations carry no id; project-content readiness names the one card
+ * whose local files just became readable.
  */
 export type WorkspaceInvalidationSsePayload =
   | TeamProjectsChangedSsePayload
+  | TeamProjectContentReadySsePayload
   | WorkspaceMembersChangedSsePayload
   | WorkspaceContextChangedSsePayload
   | WorkspaceBillingChangedSsePayload;
@@ -97,6 +107,7 @@ export type WorkspaceInvalidationSsePayload =
 /** The SSE `event:` names for the workspace-scoped invalidations. */
 export const WORKSPACE_INVALIDATION_EVENTS = [
   'team-projects-changed',
+  'team-project-content-ready',
   'members-changed',
   'workspace-context-changed',
   'billing-changed',

@@ -24,6 +24,7 @@ import {
   type PulledProjectStore,
   type RegisterCollabSyncRoutesDeps,
   type RegisterPulledProjectInput,
+  type TeamMirrorPullScope,
 } from '../src/routes/collab-sync.js';
 import { writeProjectManifest } from '../src/project-locations.js';
 
@@ -43,11 +44,14 @@ vi.mock('../src/integrations/vela.js', () => ({
  *  a route test can assert register-on-pull without a real database. */
 function fakeProjectStore(): PulledProjectStore & {
   projects: Map<string, RegisterPulledProjectInput>;
+  bindings: Map<string, TeamMirrorPullScope>;
   registerCalls: number;
 } {
   const projects = new Map<string, RegisterPulledProjectInput>();
+  const bindings = new Map<string, TeamMirrorPullScope>();
   const store = {
     projects,
+    bindings,
     registerCalls: 0,
     get: (projectId: string) => projects.get(projectId) ?? null,
     has: (projectId: string) => projects.has(projectId),
@@ -57,6 +61,13 @@ function fakeProjectStore(): PulledProjectStore & {
     },
     update(input: RegisterPulledProjectInput) {
       projects.set(input.id, input);
+    },
+    materializeTeamMirror(input: RegisterPulledProjectInput, scope: TeamMirrorPullScope) {
+      const existing = projects.get(input.id);
+      const localRecordChanged = !existing || existing.name === '共享项目';
+      if (localRecordChanged) projects.set(input.id, input);
+      bindings.set(input.id, scope);
+      return { localRecordChanged };
     },
   };
   return store;
@@ -1629,23 +1640,211 @@ describe('collab sync routes', () => {
 // project (proactive pull vs the member web's poll-triggered POST) must
 // coalesce onto one materialization instead of two full-tree pulls.
 describe('collab sync pull handle (daemon-internal proactive pull)', () => {
+  const pullScope: TeamMirrorPullScope = {
+    workspaceId: 'ws-1',
+    resourceTeamId: 'team-1',
+    viewerMemberId: 'wm-1',
+    ownerMemberId: 'wm-owner',
+  };
+  const resolvePulledSharedProject = async (projectId: string) => ({
+    projectId,
+    ownerMemberId: pullScope.ownerMemberId,
+    sharedAt: '2026-07-25T00:00:00.000Z',
+  });
+
   it('materializes content and fires the same post-pull signals as POST /collab/pull', async () => {
     const store = fakeProjectStore();
     const notifyFilesChanged = vi.fn();
-    const api = await startSyncServer(undefined, {
+    const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
       resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
       notifyFilesChanged,
     });
 
     await api.json('/api/projects/handle-pull/collab/publish', { method: 'POST' });
     await api.awaitPublishedVersion('/api/projects/handle-pull/collab/status', null);
 
-    const outcome = await api.handle.pullSharedProject('handle-pull');
+    const outcome = await api.handle.pullSharedProject('handle-pull', pullScope);
     expect(outcome).toEqual({ status: 'pulled', version: 1 });
     expect(store.has('handle-pull')).toBe(true);
+    expect(store.bindings.get('handle-pull')).toEqual(pullScope);
     expect(notifyFilesChanged).toHaveBeenCalledTimes(1);
     expect(notifyFilesChanged).toHaveBeenCalledWith('handle-pull');
+  });
+
+  it('fails closed when a scoped pull cannot prove the team mirror binding', async () => {
+    const notifyFilesChanged = vi.fn();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: {
+        get: () => null,
+        has: () => false,
+        register: () => undefined,
+      },
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      notifyFilesChanged,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => undefined),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcome = await api.handle.pullSharedProject('handle-unbound', pullScope);
+    expect(outcome).toEqual({ status: 'register_failed' });
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the authoritative shared-project lookup throws for a scoped pull', async () => {
+    const adapterPull = vi.fn(async () => undefined);
+    const store = fakeProjectStore();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: async () => {
+        throw new Error('catalog unavailable');
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcome = await api.handle.pullSharedProject('handle-catalog-error', pullScope);
+    expect(outcome).toEqual({ status: 'register_failed' });
+    expect(adapterPull).not.toHaveBeenCalled();
+    expect(store.has('handle-catalog-error')).toBe(false);
+  });
+
+  it('fails closed when active workspace identity drifts after the authoritative lookup', async () => {
+    const activeContext = await fixedShareContextProvider(true).current({});
+    const current = vi.fn()
+      .mockResolvedValueOnce(activeContext)
+      .mockResolvedValue({
+        ...activeContext,
+        workspaceId: 'ws-other',
+        teamId: 'ws-other',
+      });
+    const adapterPull = vi.fn(async () => undefined);
+    const store = fakeProjectStore();
+    const api = await startSyncServer({ current }, {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: async (projectId) => ({
+        projectId,
+        ownerMemberId: pullScope.ownerMemberId,
+        sharedAt: '2026-07-25T00:00:00.000Z',
+      }),
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcome = await api.handle.pullSharedProject('handle-scope-drift', pullScope);
+    expect(outcome).toEqual({ status: 'register_failed' });
+    expect(adapterPull).not.toHaveBeenCalled();
+    expect(store.has('handle-scope-drift')).toBe(false);
+  });
+
+  it('fails closed when the project is unshared while the scoped pull is in flight', async () => {
+    let releasePull!: () => void;
+    const pullGate = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    let shared = true;
+    const resolveSharedProject = vi.fn(async (projectId: string) => shared
+      ? {
+          projectId,
+          ownerMemberId: pullScope.ownerMemberId,
+          sharedAt: '2026-07-25T00:00:00.000Z',
+        }
+      : null);
+    const store = fakeProjectStore();
+    const notifyFilesChanged = vi.fn();
+    const revoked = vi.fn();
+    const adapterPull = vi.fn(async () => {
+      await pullGate;
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject,
+      markTeamProjectRevoked: revoked,
+      notifyFilesChanged,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcomePromise = api.handle.pullSharedProject('handle-unshared-during-pull', pullScope);
+    await vi.waitFor(() => expect(adapterPull).toHaveBeenCalledTimes(1));
+    shared = false;
+    releasePull();
+
+    await expect(outcomePromise).resolves.toEqual({ status: 'revoked' });
+    expect(resolveSharedProject).toHaveBeenCalledTimes(2);
+    expect(store.has('handle-unshared-during-pull')).toBe(false);
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
+    expect(revoked).toHaveBeenCalledWith('handle-unshared-during-pull', true);
+  });
+
+  it('rechecks workspace identity after the post-pull authoritative lookup before materializing', async () => {
+    const activeContext = (await fixedShareContextProvider(true).current({}))!;
+    let drifted = false;
+    const current = vi.fn(async () => drifted
+      ? {
+          ...activeContext,
+          workspaceId: 'ws-other',
+          teamId: 'team-other',
+        }
+      : activeContext);
+    let releaseSecondCatalog!: () => void;
+    const secondCatalogGate = new Promise<void>((resolve) => {
+      releaseSecondCatalog = resolve;
+    });
+    let catalogCalls = 0;
+    const resolveSharedProject = vi.fn(async (projectId: string) => {
+      catalogCalls += 1;
+      if (catalogCalls === 2) await secondCatalogGate;
+      return {
+        projectId,
+        ownerMemberId: pullScope.ownerMemberId,
+        sharedAt: '2026-07-25T00:00:00.000Z',
+      };
+    });
+    const store = fakeProjectStore();
+    const notifyFilesChanged = vi.fn();
+    const api = await startSyncServer({ current }, {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject,
+      notifyFilesChanged,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => undefined),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcomePromise = api.handle.pullSharedProject('handle-second-catalog-drift', pullScope);
+    await vi.waitFor(() => expect(resolveSharedProject).toHaveBeenCalledTimes(2));
+    drifted = true;
+    releaseSecondCatalog();
+
+    await expect(outcomePromise).resolves.toEqual({ status: 'register_failed' });
+    expect(store.has('handle-second-catalog-drift')).toBe(false);
+    expect(notifyFilesChanged).not.toHaveBeenCalled();
   });
 
   it('reports revoked (and flags the mirror) when the project is no longer team-shared', async () => {
@@ -1655,7 +1854,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       markTeamProjectRevoked: (projectId, value) => revoked.push({ projectId, revoked: value }),
     });
 
-    const outcome = await api.handle.pullSharedProject('handle-revoked');
+    const outcome = await api.handle.pullSharedProject('handle-revoked', pullScope);
     expect(outcome).toEqual({ status: 'revoked' });
     expect(revoked).toContainEqual({ projectId: 'handle-revoked', revoked: true });
   });
@@ -1670,12 +1869,25 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     });
     const syncLatest = vi.fn(async () => ({ version: 5 }));
     const publish = vi.fn(async () => ({ version: 5 }));
-    const api = await startSyncServer(undefined, undefined, {
+    const store = fakeProjectStore();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+    }, {
       adapter: { publish, pull: adapterPull, syncLatest },
     });
 
-    const viaHandle = api.handle.pullSharedProject('race-pull');
-    const viaRoute = api.json('/api/projects/race-pull/collab/pull', { method: 'POST' });
+    const viaHandle = api.handle.pullSharedProject('race-pull', pullScope);
+    const viaRoute = api.json('/api/projects/race-pull/collab/pull', {
+      method: 'POST',
+      headers: {
+        'x-od-workspace-id': pullScope.workspaceId,
+        'x-od-workspace-member-id': pullScope.viewerMemberId,
+        'x-od-workspace-role': 'member',
+      },
+    });
     // Let the POST reach the route (and the shared in-flight map) before the
     // gate opens; the coalescing must hold with both callers waiting.
     await new Promise((resolve) => setTimeout(resolve, 50));

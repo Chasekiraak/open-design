@@ -37,11 +37,26 @@ export interface RegisterPulledProjectInput {
   updatedAt: number;
 }
 
+export interface TeamMirrorPullScope {
+  workspaceId: string;
+  resourceTeamId: string;
+  viewerMemberId: string;
+  ownerMemberId: string;
+}
+
 export interface PulledProjectStore {
   get?: (projectId: string) => { name?: string | null } | null;
   has(projectId: string): boolean;
   register(input: RegisterPulledProjectInput): void;
   update?: (input: RegisterPulledProjectInput) => void;
+  /**
+   * Atomically materialize the project row and its active team binding, then
+   * return only after a strict readback proves the mirror is mutation-gated.
+   */
+  materializeTeamMirror?: (
+    input: RegisterPulledProjectInput,
+    scope: TeamMirrorPullScope,
+  ) => { localRecordChanged: boolean };
 }
 
 export interface RegisterCollabSyncRoutesDeps {
@@ -58,7 +73,10 @@ export interface RegisterCollabSyncRoutesDeps {
     | 'workspaceContext'
   >;
   resolveSharedProjectOwner?: (projectId: string) => Promise<string | null>;
-  resolveSharedProject?: (projectId: string) => Promise<TeamProject | null>;
+  resolveSharedProject?: (
+    projectId: string,
+    scope?: TeamMirrorPullScope | null,
+  ) => Promise<TeamProject | null>;
   /** Set/clear the non-destructive "team mirror revoked" flag on a local
    *  project so read routes stop serving a project that has left the team. */
   markTeamProjectRevoked?: (projectId: string, revoked: boolean) => void;
@@ -131,7 +149,7 @@ export interface CollabSyncRoutesHandle {
    * from). Concurrent pulls for the same project+scope — including a member
    * web's racing POST — coalesce onto one in-flight materialization.
    */
-  pullSharedProject(projectId: string): Promise<CollabSyncPullOutcome>;
+  pullSharedProject(projectId: string, scope: TeamMirrorPullScope): Promise<CollabSyncPullOutcome>;
 }
 
 const SYNC_INTENT_EVENTS: ReadonlySet<ProjectSyncIntentEvent> = new Set([
@@ -462,6 +480,61 @@ export function registerCollabSyncRoutes(
     };
   }
 
+  async function pullAccessForRequest(
+    projectId: string,
+    req: {
+      get(name: string): string | undefined;
+      headers: { authorization?: string | string[] | undefined };
+    },
+  ): Promise<{ principal: ResourceHubPrincipal | null; scope: TeamMirrorPullScope | null }> {
+    const headerPrincipal = headerPrincipalForRequest(req);
+    const authorization = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    const context = await workspaceContext.current({ authorization });
+    const viewerPrincipal = headerPrincipal ?? contextToResourceHubPrincipal(context);
+    let ownerMemberId: string | null = null;
+    try {
+      ownerMemberId = (await resolveSharedProjectOwner?.(projectId)) ?? null;
+    } catch {
+      ownerMemberId = null;
+    }
+    const workspaceId = headerPrincipal
+      ? req.get('x-od-workspace-id') ?? headerPrincipal.teamId
+      : context?.workspaceId;
+    const contextMatchesViewer =
+      context?.workspaceType === 'team' &&
+      context.memberStatus === 'active' &&
+      context.lifecycleState === 'active' &&
+      context.workspaceId === workspaceId &&
+      context.workspaceMemberId === viewerPrincipal?.memberId;
+    const resourceTeamId = contextMatchesViewer
+      ? context.teamId ?? context.workspaceId
+      : viewerPrincipal?.teamId;
+    const scope =
+      ownerMemberId &&
+      viewerPrincipal &&
+      workspaceId &&
+      resourceTeamId &&
+      (headerPrincipal != null || context?.workspaceType === 'team')
+        ? {
+            workspaceId,
+            resourceTeamId,
+            viewerMemberId: viewerPrincipal.memberId,
+            ownerMemberId,
+          }
+        : null;
+    const principal = ownerMemberId && viewerPrincipal?.teamId
+      ? {
+          ...viewerPrincipal,
+          ...(scope ? { teamId: scope.resourceTeamId } : {}),
+          memberId: ownerMemberId,
+          role: ownerMemberId === viewerPrincipal.memberId ? viewerPrincipal.role : 'member' as const,
+        }
+      : viewerPrincipal;
+    return { principal, scope };
+  }
+
   async function canShareProjectsForRequest(req: {
     get(name: string): string | undefined;
     headers: { authorization?: string | string[] | undefined };
@@ -478,17 +551,44 @@ export function registerCollabSyncRoutes(
     return (await workspaceContext.current({ authorization }))?.permissions.canShareProjects ?? false;
   }
 
-  /**
-   * Register/refresh the local project record for a just-pulled shared
-   * project. Returns true when it wrote the record (first registration or
-   * placeholder-name replacement) — i.e. when project metadata the web
-   * renders may have changed and `notifyProjectMetadataChanged` should fire.
-   */
-  async function registerPulledProject(projectId: string): Promise<boolean> {
-    if (!projectStore || !resolvePullDir) return false;
+  async function capturedScopeIsStillActive(scope: TeamMirrorPullScope): Promise<boolean> {
+    try {
+      const context = await workspaceContext.current({});
+      return Boolean(
+        context &&
+        context.workspaceType === 'team' &&
+        context.memberStatus === 'active' &&
+        context.lifecycleState === 'active' &&
+        context.workspaceId === scope.workspaceId &&
+        (context.teamId ?? context.workspaceId) === scope.resourceTeamId &&
+        context.workspaceMemberId === scope.viewerMemberId
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  interface PreparedPulledProjectRegistration {
+    existing: { name?: string | null } | null;
+    fallbackName: string;
+    manifest: PulledProjectManifest | null;
+    now: number;
+    projectId: string;
+  }
+
+  async function preparePulledProjectRegistration(
+    projectId: string,
+    scope: TeamMirrorPullScope | null,
+  ): Promise<PreparedPulledProjectRegistration | null> {
+    if (!projectStore || !resolvePullDir) {
+      if (scope) throw new Error('team mirror project store unavailable');
+      return null;
+    }
     const existing = projectStore.get?.(projectId);
-    if (!existing && projectStore.has(projectId)) return false;
-    if (existing && cleanPulledProjectName(existing.name) !== PULLED_PROJECT_PLACEHOLDER_NAME) return false;
+    if (!scope) {
+      if (!existing && projectStore.has(projectId)) return null;
+      if (existing && cleanPulledProjectName(existing.name) !== PULLED_PROJECT_PLACEHOLDER_NAME) return null;
+    }
     const projectDir = resolvePullDir(projectId);
     let manifest: PulledProjectManifest | null = null;
     try {
@@ -496,16 +596,32 @@ export function registerCollabSyncRoutes(
     } catch {
       manifest = null;
     }
-    let teamProject: TeamProject | null = null;
-    try {
-      teamProject = await resolveSharedProject?.(projectId) ?? null;
-    } catch {
-      teamProject = null;
-    }
-    const now = Date.now();
+    return {
+      existing: existing ?? null,
+      fallbackName: await resolvePulledProjectName(projectDir, manifest),
+      manifest,
+      now: Date.now(),
+      projectId,
+    };
+  }
+
+  /**
+   * Register/refresh the local project record for a just-pulled shared
+   * project. This function is deliberately synchronous: a scoped caller does
+   * its final authoritative catalog read and workspace-identity check
+   * immediately before entering the SQLite transaction, with no ambient
+   * metadata await able to reopen a workspace/unshare race in between.
+   */
+  function registerPreparedPulledProject(
+    prepared: PreparedPulledProjectRegistration | null,
+    scope: TeamMirrorPullScope | null,
+    teamProject: TeamProject | null,
+  ): boolean {
+    if (!prepared || !projectStore) return false;
+    const { existing, fallbackName, manifest, now, projectId } = prepared;
     const input = {
       id: projectId,
-      name: cleanPulledProjectName(teamProject?.name) ?? await resolvePulledProjectName(projectDir, manifest),
+      name: cleanPulledProjectName(teamProject?.name) ?? fallbackName,
       skillId: teamProject?.skillId ?? manifest?.skillId ?? null,
       designSystemId: teamProject?.designSystemId ?? manifest?.designSystemId ?? null,
       ...(teamProject?.metadata ? { metadata: teamProject.metadata } : {}),
@@ -520,6 +636,12 @@ export function registerCollabSyncRoutes(
           ? manifest.updatedAt
           : now,
     };
+    if (scope) {
+      if (!projectStore.materializeTeamMirror) {
+        throw new Error('team mirror materializer unavailable');
+      }
+      return projectStore.materializeTeamMirror(input, scope).localRecordChanged;
+    }
     if (existing) {
       if (!projectStore.update) return false;
       projectStore.update(input);
@@ -806,18 +928,29 @@ export function registerCollabSyncRoutes(
   async function pullSharedProjectOnce(
     projectId: string,
     principal: ResourceHubPrincipal | null,
+    scope: TeamMirrorPullScope | null,
   ): Promise<CollabSyncPullOutcome> {
+    if (scope && !(await capturedScopeIsStillActive(scope))) {
+      return { status: 'register_failed' };
+    }
     // Revocation gate: a project may only be pulled while it is still shared to
     // the caller's team. Once the owner moves it out of the team its catalog
     // entry disappears, and a stale local copy must stop syncing new content.
     // A transient catalog/hub lookup error falls through to the existing pull
     // path rather than hard-denying a legitimate pull.
+    let authoritativeSharedProject: TeamProject | null = null;
     if (resolveSharedProject) {
       let stillShared = true;
       try {
-        stillShared = (await resolveSharedProject(projectId)) != null;
+        authoritativeSharedProject = await resolveSharedProject(projectId, scope);
+        stillShared = authoritativeSharedProject != null &&
+          (!scope || authoritativeSharedProject.ownerMemberId === scope.ownerMemberId);
       } catch {
+        if (scope) return { status: 'register_failed' };
         stillShared = true;
+      }
+      if (scope && !(await capturedScopeIsStillActive(scope))) {
+        return { status: 'register_failed' };
       }
       if (!stillShared) {
         // The project has left the team: mark the stale local mirror revoked so
@@ -825,12 +958,57 @@ export function registerCollabSyncRoutes(
         markTeamProjectRevoked?.(projectId, true);
         return { status: 'revoked' };
       }
+    } else if (scope) {
+      return { status: 'register_failed' };
     }
     const result = await pullLatest(projectId, principal);
     if (result.version !== null) {
+      let prepared: PreparedPulledProjectRegistration | null = null;
+      try {
+        prepared = await preparePulledProjectRegistration(projectId, scope);
+      } catch (error) {
+        console.warn('[od] failed to prepare pulled team project:', error);
+        return { status: 'register_failed' };
+      }
+
+      // The initial catalog result only authorized starting the transfer. The
+      // owner may unshare while bytes are in flight, so scoped materialization
+      // requires a second uncached authoritative read after every other async
+      // metadata operation has completed.
+      if (scope) {
+        try {
+          authoritativeSharedProject = await resolveSharedProject!(projectId, scope);
+        } catch {
+          return { status: 'register_failed' };
+        }
+        if (!authoritativeSharedProject) {
+          markTeamProjectRevoked?.(projectId, true);
+          return { status: 'revoked' };
+        }
+        if (authoritativeSharedProject.ownerMemberId !== scope.ownerMemberId) {
+          return { status: 'register_failed' };
+        }
+        // Keep this check adjacent to the synchronous SQLite transaction.
+        // Nothing below may await before materializeTeamMirror revalidates the
+        // binding and commits it.
+        if (!(await capturedScopeIsStillActive(scope))) {
+          return { status: 'register_failed' };
+        }
+      } else if (resolveSharedProject) {
+        try {
+          authoritativeSharedProject = await resolveSharedProject(projectId, null);
+        } catch {
+          authoritativeSharedProject = null;
+        }
+      }
+
       let localRecordChanged = false;
       try {
-        localRecordChanged = await registerPulledProject(projectId);
+        localRecordChanged = registerPreparedPulledProject(
+          prepared,
+          scope,
+          authoritativeSharedProject,
+        );
       } catch (error) {
         console.warn('[od] failed to register pulled team project:', error);
         return { status: 'register_failed' };
@@ -870,13 +1048,19 @@ export function registerCollabSyncRoutes(
   function pullSharedProjectCoalesced(
     projectId: string,
     principal: ResourceHubPrincipal | null,
+    scope: TeamMirrorPullScope | null,
   ): Promise<CollabSyncPullOutcome> {
-    const key = JSON.stringify([projectId, principal?.teamId ?? null, principal?.memberId ?? null]);
+    const key = JSON.stringify([
+      projectId,
+      principal?.teamId ?? null,
+      principal?.memberId ?? null,
+      scope?.viewerMemberId ?? null,
+    ]);
     const existing = pullsInFlight.get(key);
     if (existing) return existing;
     const run = (async () => {
       try {
-        return await pullSharedProjectOnce(projectId, principal);
+        return await pullSharedProjectOnce(projectId, principal, scope);
       } finally {
         pullsInFlight.delete(key);
       }
@@ -887,8 +1071,8 @@ export function registerCollabSyncRoutes(
 
   app.post('/api/projects/:id/collab/pull', async (req, res) => {
     const projectId = req.params.id;
-    const principal = await resourcePrincipalForSharedProject(projectId, req);
-    const outcome = await pullSharedProjectCoalesced(projectId, principal);
+    const { principal, scope } = await pullAccessForRequest(projectId, req);
+    const outcome = await pullSharedProjectCoalesced(projectId, principal, scope);
     if (outcome.status === 'revoked') {
       return res.status(403).json({ error: 'WORKSPACE_PROJECT_PULL_DENIED' });
     }
@@ -987,9 +1171,18 @@ export function registerCollabSyncRoutes(
   });
 
   return {
-    async pullSharedProject(projectId: string): Promise<CollabSyncPullOutcome> {
-      const principal = await resourcePrincipalForSharedProject(projectId, null);
-      return pullSharedProjectCoalesced(projectId, principal);
+    async pullSharedProject(
+      projectId: string,
+      scope: TeamMirrorPullScope,
+    ): Promise<CollabSyncPullOutcome> {
+      const principal: ResourceHubPrincipal = {
+        teamId: scope.resourceTeamId,
+        memberId: scope.ownerMemberId,
+        role: 'member',
+        lifecycleState: 'active',
+        workspaceType: 'team',
+      };
+      return pullSharedProjectCoalesced(projectId, principal, scope);
     },
   };
 }

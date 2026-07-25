@@ -24,6 +24,7 @@ import type {
   RunContextSelection,
   WorkspaceTeamProjectsResponse,
   WorkspaceCollabContext,
+  WorkspaceProjectSummary,
 } from '@open-design/contracts';
 import { DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID } from '@open-design/contracts';
 import { EntryView } from './components/EntryView';
@@ -119,6 +120,7 @@ import {
   getProject,
   importClaudeDesignZip,
   importFolderProject,
+  listWorkspaceProjectSummaries,
   listProjects,
   listTemplates,
   deleteTemplate,
@@ -269,7 +271,14 @@ function clearStaleAmrModelChoiceOnProfileChange(
 type ProjectListRequest = {
   generation: number;
   mutationVersion: number;
+  scopeKey: string;
 };
+
+function projectListScopeKey(context: WorkspaceCollabContext | null): string {
+  return context
+    ? `${context.workspaceId}:${context.workspaceMemberId}`
+    : 'local';
+}
 
 export async function persistComposioConfigChange(
   current: AppConfig,
@@ -532,6 +541,63 @@ export async function resolveDeepLinkedTeamSharedProject(
   return everConfirmedTeamShared ? { kind: 'still-materializing' } : { kind: 'not-found' };
 }
 
+export async function hydrateReadyTeamProject(
+  projectId: string,
+  workspaceId: string,
+  deps: {
+    getWorkspaceContext: () => WorkspaceCollabContext | null;
+    listWorkspaceProjects: (
+      context: WorkspaceCollabContext,
+    ) => Promise<WorkspaceProjectSummary[]>;
+    applyProject: (project: Project) => void;
+  },
+): Promise<Project | null> {
+  const initialContext = deps.getWorkspaceContext();
+  if (
+    !initialContext ||
+    initialContext.workspaceType !== 'team' ||
+    initialContext.workspaceId !== workspaceId ||
+    initialContext.memberStatus !== 'active' ||
+    initialContext.lifecycleState !== 'active'
+  ) {
+    return null;
+  }
+  const contextMatches = () => {
+    const context = deps.getWorkspaceContext();
+    return Boolean(
+      context &&
+      context.workspaceType === 'team' &&
+      context.workspaceId === initialContext.workspaceId &&
+      context.workspaceMemberId === initialContext.workspaceMemberId &&
+      context.memberStatus === 'active' &&
+      context.lifecycleState === 'active' &&
+      (context.teamId ?? context.workspaceId) ===
+        (initialContext.teamId ?? initialContext.workspaceId)
+    );
+  };
+  const summaries = await deps.listWorkspaceProjects(initialContext).catch(() => []);
+  if (!contextMatches()) return null;
+  const summary = summaries.find((candidate) =>
+    candidate.id === projectId &&
+    candidate.project.id === projectId
+  );
+  const hasMaterializedTeamBinding = Boolean(
+    summary &&
+    summary.workspaceId === workspaceId &&
+    summary.project.workspaceId === workspaceId &&
+    summary.visibility === 'team' &&
+    summary.resourceState === 'active' &&
+    summary.cloudTombstonedAt == null &&
+    summary.currentUserAccess.canOpen === true &&
+    typeof summary.resourceHubResourceId === 'string' &&
+    summary.resourceHubResourceId.trim() &&
+    summary.syncState === 'synced'
+  );
+  if (!summary || !hasMaterializedTeamBinding) return null;
+  deps.applyProject(summary.project);
+  return summary.project;
+}
+
 export function App() {
   // `reducedMotion="user"` makes every motion/react component honor the OS
   // `prefers-reduced-motion` setting: transform/layout animations are zeroed
@@ -667,6 +733,12 @@ function AppInner() {
     recent: [],
   });
   const pendingLocalProjectIdsRef = useRef<Set<string>>(new Set());
+  const pendingLocalProjectScopeRef = useRef(projectListScopeKey(workspaceContext));
+  const currentProjectListScope = projectListScopeKey(workspaceContext);
+  if (pendingLocalProjectScopeRef.current !== currentProjectListScope) {
+    pendingLocalProjectScopeRef.current = currentProjectListScope;
+    pendingLocalProjectIdsRef.current.clear();
+  }
   const locallyDeletedProjectIdsRef = useRef<Map<string, number>>(new Map());
   const projectListMutationVersionRef = useRef(0);
   const projectListRequestGenerationRef = useRef(0);
@@ -767,6 +839,33 @@ function AppInner() {
     projectListMutationVersionRef.current += 1;
   }, []);
 
+  const handleTeamProjectContentReady = useCallback(async (
+    projectId: string,
+    workspaceId: string,
+    workspaceMemberId: string,
+  ): Promise<boolean> => {
+    if (workspaceContextRef.current?.workspaceMemberId !== workspaceMemberId) {
+      return false;
+    }
+    const project = await hydrateReadyTeamProject(projectId, workspaceId, {
+      getWorkspaceContext: () => workspaceContextRef.current,
+      listWorkspaceProjects: (context) =>
+        listWorkspaceProjectSummaries({
+          context,
+          workspaceView: 'team',
+          throwOnError: true,
+        }),
+      applyProject: (project) => {
+        rememberLocalProject(projectId);
+        setProjects((current) => [
+          project,
+          ...current.filter((candidate) => candidate.id !== projectId),
+        ]);
+      },
+    });
+    return project != null;
+  }, [rememberLocalProject]);
+
   const clearLocalProject = useCallback((projectId: string, options?: { deleted?: boolean }) => {
     pendingLocalProjectIdsRef.current.delete(projectId);
     projectListMutationVersionRef.current += 1;
@@ -783,10 +882,14 @@ function AppInner() {
     return {
       generation: projectListRequestGenerationRef.current,
       mutationVersion: projectListMutationVersionRef.current,
+      scopeKey: projectListScopeKey(workspaceContextRef.current),
     };
   }, []);
 
   const reconcileFetchedProjects = useCallback((list: Project[], request: ProjectListRequest) => {
+    if (request.scopeKey !== projectListScopeKey(workspaceContextRef.current)) {
+      return false;
+    }
     const pendingLocalProjectIds = pendingLocalProjectIdsRef.current;
     const locallyDeletedProjectIds = locallyDeletedProjectIdsRef.current;
     const fetchedIds = new Set(list.map((project) => project.id));
@@ -2971,6 +3074,7 @@ function AppInner() {
         onDuplicateProject={handleDuplicateProject}
         onRenameProject={handleRenameProject}
         onProjectsRefresh={refreshProjectsStrict}
+        onTeamProjectContentReady={handleTeamProjectContentReady}
         onChangeDefaultDesignSystem={handleChangeDefaultDesignSystem}
         onCreateDesignSystem={() => {
           setPendingDesignSystemCreateEntry('design_systems_page');

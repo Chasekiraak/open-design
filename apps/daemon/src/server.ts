@@ -216,6 +216,7 @@ import {
   resolveAmrProfile,
 } from './integrations/vela.js';
 import { projectResourceIdFor } from './integrations/vela-team-projects.js';
+import { materializePulledTeamMirror } from './collab/team-mirror-materializer.js';
 import {
   amrAccountFailureDetails,
   classifyAmrAccountFailureSignal,
@@ -653,7 +654,10 @@ import { registerOpenDesignPublicMetadataRoutes } from './routes/open-design-pub
 import { registerWhatsNewRoutes } from './routes/whats-new.js';
 import { registerMemoryRoutes } from './routes/memory.js';
 import { registerCollabPresenceRoutes } from './routes/collab-presence.js';
-import { registerCollabSyncRoutes } from './routes/collab-sync.js';
+import {
+  registerCollabSyncRoutes,
+  type TeamMirrorPullScope,
+} from './routes/collab-sync.js';
 import { registerCollabContextRoutes } from './routes/collab-context.js';
 import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
@@ -3242,8 +3246,13 @@ export async function startServer({
       applyDemote: (workspaceId, projectId, patch) => updateWorkspaceProject(db, workspaceId, projectId, patch),
       onError: (error) => console.warn('[od] workspace-projects reconciliation error:', error),
     });
-  const resolveSharedProject = async (projectId: string) => {
-    const list = await withoutLocallyUnsharedProjects(await teamProjectsLister());
+  const resolveSharedProject = async (
+    projectId: string,
+    scope?: TeamMirrorPullScope | null,
+  ) => {
+    const list = await withoutLocallyUnsharedProjects(
+      await teamProjectsLister(scope?.workspaceId),
+    );
     return list.find((entry) => entry.projectId === projectId) ?? null;
   };
   // Owner lookup is a display concern (the "shared project" banner, comment
@@ -3347,6 +3356,7 @@ export async function startServer({
           updatedAt: input.updatedAt,
         });
       },
+      materializeTeamMirror: (input, scope) => materializePulledTeamMirror(db, input, scope),
     },
     resolveProjectDir: async (projectId) => {
       const project = getProject(db, projectId);
@@ -3411,8 +3421,8 @@ export async function startServer({
   // every failure degrades silently to the web's ~5s status polling, which
   // stays running untouched as the fallback; see
   // collab/proactive-content-pull.ts for the guard boundary (never pull a
-  // project this member owns, never pull an unbound project, dedupe by hub
-  // version).
+  // project this member owns; an unbound first share requires an exact
+  // event-workspace/active-workspace match; dedupe by hub version).
   const proactiveContentPull = createProactiveContentPull({
     getLocalBinding: (projectId) => {
       const row = getWorkspaceProjectByProjectId(db, projectId) as
@@ -3426,10 +3436,31 @@ export async function startServer({
     getWorkspaceIdentity: async () => {
       const context = await collab.workspaceContext.current({});
       if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
-      return { workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+      return {
+        workspaceId: context.workspaceId,
+        resourceTeamId: context.teamId ?? context.workspaceId,
+        workspaceMemberId: context.workspaceMemberId,
+      };
     },
     resolveSharedProjectOwner,
-    pullSharedProject: (projectId) => collabSyncRoutes.pullSharedProject(projectId),
+    pullSharedProject: (target) =>
+      collabSyncRoutes.pullSharedProject(target.projectId, {
+        workspaceId: target.workspaceId,
+        resourceTeamId: target.resourceTeamId,
+        viewerMemberId: target.viewerMemberId,
+        ownerMemberId: target.ownerMemberId,
+      }),
+    // All Projects is a list-level surface and does not subscribe to every
+    // project-scoped SSE. Once an inbound pull has actually materialized the
+    // tree, nudge that surface so its failed pre-pull cover scan runs again
+    // immediately instead of waiting for the 15s refresh floor.
+    onPulled: ({ projectId, workspaceId }) =>
+      emitWorkspaceEvent({
+        type: 'team-project-content-ready',
+        projectId,
+        workspaceId,
+        at: Date.now(),
+      }),
     onError: (error) =>
       console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
   });
