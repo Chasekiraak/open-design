@@ -671,6 +671,7 @@ import {
   impossibleTeamShareRows,
   projectCollabScope,
 } from './collab/team-share-scope.js';
+import { resolveWorkspaceScope } from './collab/workspace-scope.js';
 import {
   createWorkspaceContextProviderFromEnv,
   listVelaWorkspaceDirectory,
@@ -8201,6 +8202,20 @@ export async function startServer({
           runId: run.id,
           conversationId: run.conversationId,
           runAttempt: run.retryAttemptCount ?? 0,
+          // Vela's workspace-credit isolation reads this env purely to
+          // decide which workspace's wallet an AMR spend attributes to — the
+          // project's own pinned TEAM workspace, never the account's ambient
+          // "current selection" (a workspace switched elsewhere must not
+          // re-aim a run that is already in flight for a different project).
+          // No team pin (personal project) means no header at all, so vela's
+          // NULL-sponsor fallback attributes the spend to the caller's own
+          // personal wallet.
+          workspaceId: resolveWorkspaceScope({
+            projectWorkspaceId:
+              typeof projectId === 'string' && projectId
+                ? findTeamWorkspaceIdForProject(db, projectId)
+                : null,
+          }).workspaceId,
         }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the
