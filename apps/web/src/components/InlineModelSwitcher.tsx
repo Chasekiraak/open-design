@@ -39,6 +39,7 @@ import {
   beginAmrAuthTracking,
   resolveAmrAuthTracking,
 } from '../analytics/amr-auth';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 import { KNOWN_PROVIDERS } from '../state/config';
 import { fetchProviderModels } from '../providers/provider-models';
 import { SUGGESTED_MODELS_BY_PROTOCOL } from '../state/apiProtocols';
@@ -172,6 +173,10 @@ export function InlineModelSwitcher({
 }: Props) {
   const t = useT();
   const analytics = useAnalytics();
+  // recvqfYKutwWlQ: gate the AMR upgrade entry on billing permission below,
+  // not just plan tier — a team member without `canManageBilling` (owner-only)
+  // can't act on an upgrade even when the tier itself is upgradeable.
+  const { context: workspaceContext } = useWorkspaceContext();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -594,8 +599,13 @@ export function InlineModelSwitcher({
     ? amrBalanceLabel ??
       (amrWalletReady ? t('settings.amrWalletUnavailable') : t('common.loading'))
     : null;
+  // Personal workspaces always resolve `canManageBilling` true (the user is
+  // their own owner), so this does not affect the personal-workspace upgrade
+  // path.
   const amrCanUpgrade =
-    amrLoggedIn && canUpgradeVelaPlan(amrStatus?.account?.plan);
+    amrLoggedIn &&
+    canUpgradeVelaPlan(amrStatus?.account?.plan) &&
+    Boolean(workspaceContext?.permissions?.canManageBilling);
   const amrActionLabel = amrLoginPending
     ? t('settings.amrSigningIn')
     : amrLoggedIn

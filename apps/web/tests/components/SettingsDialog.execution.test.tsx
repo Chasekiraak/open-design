@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenDesignHostUpdaterStatusSnapshot } from '@open-design/host';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { en } from '../../src/i18n/locales/en';
 
 function optionNames(container: HTMLElement): string[] {
@@ -157,6 +158,74 @@ const amrAgent: AgentInfo = {
   models: [{ id: 'default', label: 'Default' }],
   supportsCustomModel: false,
 };
+
+// recvqfYKutwWlQ: the AMR upgrade entry point must only render for a caller
+// who can actually act on it (`permissions.canManageBilling`), never just a
+// caller whose plan tier happens to be upgradeable. Personal workspaces
+// resolve `canManageBilling` true because the user is always their own owner
+// there (`buildWorkspacePermissions`: `canManageBilling: readable && isOwner`),
+// so this fixture doubles as the "personal identity keeps the upgrade entry"
+// control case.
+function personalWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'personal_byok',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: false },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+// A team MEMBER (not owner/admin) — `canManageBilling` folds in role, so this
+// is the "cannot act on billing" case the upgrade entry must hide for.
+function teamMemberWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    teamName: 'OD Feature Team',
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+function workspaceContextResponse(context: WorkspaceCollabContext | null) {
+  return new Response(JSON.stringify({ context }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 type OnRefreshAgents = (
   options?: AgentRefreshOptions,
@@ -3185,6 +3254,102 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.click(screen.getByTestId('settings-agent-select-amr'));
 
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
+  });
+
+  // recvqfYKutwWlQ: a personal workspace always resolves `canManageBilling`
+  // true (the user is their own owner), so the upgrade entry stays visible
+  // for a signed-in, upgrade-eligible AMR account with no team involved.
+  it('shows the AMR upgrade action for a personal identity with an upgradeable plan', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext());
+      }
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'default',
+            user: { id: 'u1', email: 'solo@example.com' },
+            account: { plan: 'plus', balanceUsd: '10.0000' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    expect(
+      await screen.findByTestId('settings-agent-card-amr-upgrade'),
+    ).toBeTruthy();
+  });
+
+  // recvqfYKutwWlQ: a team member's plan tier can be upgradeable while the
+  // member itself cannot act on billing (owner-only) — the AMR card's
+  // upgrade entry must stay hidden for them even with a fully signed-in,
+  // upgrade-eligible account, matching the fix for
+  // "团队的成员没有升级权限，是不是可以在客户端隐藏升级入口".
+  it('hides the AMR upgrade action for a team member without billing permission', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'default',
+            user: { id: 'u2', email: 'member@example.com' },
+            account: { plan: 'plus', balanceUsd: '10.0000' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    // Let the plan/balance render (proving the card resolved a fully
+    // signed-in, upgrade-eligible status) before asserting the upgrade
+    // action specifically stays absent.
+    expect(await screen.findByText('$10.00')).toBeTruthy();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([i]) =>
+      i.toString() === '/api/workspace/context')).toBe(true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('settings-agent-card-amr-upgrade')).toBeNull();
   });
 
   it('reveals AMR cancel only while hovering the active card during sign-in', async () => {

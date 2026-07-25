@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { InlineModelSwitcher } from '../../src/components/InlineModelSwitcher';
 import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { fetchProviderModels } from '../../src/providers/provider-models';
@@ -86,6 +87,74 @@ function renderSwitcher(
     />,
   );
   return { ...view, onAgentModelChange };
+}
+
+// recvqfYKutwWlQ: the AMR upgrade entry point must only render for a caller who
+// can actually act on it (`permissions.canManageBilling`), never just a
+// caller whose plan tier happens to be upgradeable. Personal workspaces
+// resolve `canManageBilling` true because the user is always their own owner
+// there (`buildWorkspacePermissions`: `canManageBilling: readable && isOwner`),
+// so this fixture doubles as the "personal identity keeps the upgrade entry"
+// control case.
+function personalWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'personal_byok',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: false },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+// A team MEMBER (not owner/admin) — `canManageBilling` folds in role, so this
+// is the "cannot act on billing" case the upgrade entry must hide for.
+function teamMemberWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    teamName: 'OD Feature Team',
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+function workspaceContextResponse(context: WorkspaceCollabContext | null) {
+  return new Response(JSON.stringify({ context }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 function expectVelaLoginWithAttribution(
@@ -480,6 +549,12 @@ describe('InlineModelSwitcher AMR row', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      // Personal workspace: `canManageBilling` is always true there, so this
+      // is the control case proving the permission gate below does not
+      // suppress the upgrade entry for non-team identities.
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext());
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -492,7 +567,7 @@ describe('InlineModelSwitcher AMR row', () => {
     fireEvent.click(screen.getByTestId('inline-model-switcher-chip'));
     const popover = screen.getByTestId('inline-model-switcher-popover');
     await within(popover).findByText('$42.00');
-    fireEvent.click(screen.getByTestId('inline-model-switcher-account-upgrade'));
+    fireEvent.click(await screen.findByTestId('inline-model-switcher-account-upgrade'));
 
     const [url, target, features] = openSpy.mock.calls[0] ?? [];
     const parsed = new URL(String(url));
@@ -502,6 +577,51 @@ describe('InlineModelSwitcher AMR row', () => {
     expect(parsed.searchParams.get('od_device_id')).toBe('od-install-abc');
     expect(target).toBe('_blank');
     expect(features).toBe('noopener,noreferrer');
+  });
+
+  // recvqfYKutwWlQ: a team member's plan tier can be upgradeable while the
+  // member itself cannot act on billing (owner-only) — the upgrade entry must
+  // stay hidden for them even with a fully signed-in, upgrade-eligible AMR
+  // account.
+  it('hides the inline upgrade action for a team member without billing permission', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'test',
+            user: { id: 'user-1', email: 'manual-amr@example.local' },
+            account: { plan: 'plus', balanceUsd: '42.0000' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSwitcher({
+      telemetry: { metrics: true },
+      installationId: 'od-install-abc',
+    });
+
+    fireEvent.click(screen.getByTestId('inline-model-switcher-chip'));
+    const popover = screen.getByTestId('inline-model-switcher-popover');
+    await within(popover).findByText('$42.00');
+    // Give the workspace-context fetch a beat to settle so a late render
+    // cannot sneak the button back in.
+    await waitFor(() => expect(fetchMock.mock.calls.some(([i]) =>
+      i.toString() === '/api/workspace/context')).toBe(true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('inline-model-switcher-account-upgrade')).toBeNull();
   });
 
   it('filters fetched BYOK provider models in the Home switcher search box', async () => {

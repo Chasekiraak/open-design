@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import { AvatarMenu } from '../../src/components/AvatarMenu';
 import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
@@ -9,6 +10,74 @@ import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
 vi.mock('../../src/i18n', () => ({
   useT: () => (key: string) => key,
 }));
+
+// recvqfYKutwWlQ: the AMR upgrade entry point must only render for a caller who
+// can actually act on it (`permissions.canManageBilling`), never just a
+// caller whose plan tier happens to be upgradeable. Personal workspaces
+// resolve `canManageBilling` true because the user is always their own owner
+// there (`buildWorkspacePermissions`: `canManageBilling: readable && isOwner`),
+// so this fixture doubles as the "personal identity keeps the upgrade entry"
+// control case.
+function personalWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'personal_byok',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: false },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+// A team MEMBER (not owner/admin) — `canManageBilling` folds in role, so this
+// is the "cannot act on billing" case the upgrade entry must hide for.
+function teamMemberWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    teamName: 'OD Feature Team',
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+function workspaceContextResponse(context: WorkspaceCollabContext | null) {
+  return new Response(JSON.stringify({ context }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 const codexAgent: AgentInfo = {
   id: 'codex',
@@ -363,6 +432,12 @@ describe('AvatarMenu', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      // Personal workspace: `canManageBilling` is always true there, so this
+      // is the control case proving the permission gate below does not
+      // suppress the upgrade entry for non-team identities.
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext());
+      }
       return new Response('{}', { status: 202 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -399,9 +474,11 @@ describe('AvatarMenu', () => {
     );
 
     expect(screen.queryByRole('link', { name: 'avatar.amrConsole' })).toBeNull();
-    const upgrade = screen.getByRole('link', {
+    // The upgrade link additionally waits on the workspace-context read
+    // (`canManageBilling`), a separate fetch from the AMR status above.
+    const upgrade = (await screen.findByRole('link', {
       name: 'settings.amrUpgrade',
-    }) as HTMLAnchorElement;
+    })) as HTMLAnchorElement;
     fireEvent.click(upgrade);
     const url = new URL(upgrade.href);
     expect(url.searchParams.get('view')).toBe('plans');
@@ -528,6 +605,9 @@ describe('AvatarMenu', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext());
+      }
       return new Response('{}', { status: 202 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -554,13 +634,66 @@ describe('AvatarMenu', () => {
     expect(await screen.findByText('Plus')).toBeTruthy();
 
     expect(screen.queryByRole('link', { name: 'avatar.amrConsole' })).toBeNull();
-    const upgrade = screen.getByRole('link', {
+    const upgrade = (await screen.findByRole('link', {
       name: 'settings.amrUpgrade',
-    }) as HTMLAnchorElement;
+    })) as HTMLAnchorElement;
     fireEvent.click(upgrade);
     const upgradeUrl = new URL(upgrade.href);
     expect(upgradeUrl.origin).toBe('https://vela.powerformer.net');
     expect(upgradeUrl.searchParams.get('view')).toBe('plans');
+  });
+
+  // recvqfYKutwWlQ: a team member's plan tier can be upgradeable while the
+  // member itself cannot act on billing (owner-only) — the upgrade entry must
+  // stay hidden for them even with a fully signed-in, upgrade-eligible AMR
+  // account.
+  it('hides the AMR upgrade link for a team member without billing permission', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            loginInFlight: false,
+            profile: 'test',
+            user: { id: 'u1', email: 'a@b.c' },
+            account: { plan: 'plus', balanceUsd: '247.5087' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      return new Response('{}', { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      agents: [
+        {
+          id: 'amr',
+          name: 'Open Design AMR',
+          bin: 'vela',
+          available: true,
+          models: [{ id: 'default', label: 'Default (CLI config)' }],
+        },
+      ],
+    });
+
+    openMenu();
+    expect(await screen.findByText('Plus')).toBeTruthy();
+    // Give the workspace-context fetch a beat to settle so a late render
+    // cannot sneak the link back in.
+    await waitFor(() => expect(fetchMock.mock.calls.some(([i]) =>
+      i.toString() === '/api/workspace/context')).toBe(true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('link', { name: 'settings.amrUpgrade' })).toBeNull();
   });
 
   it('clears stale AMR account data before refreshing on reopen', async () => {
@@ -613,7 +746,11 @@ describe('AvatarMenu', () => {
     fireEvent.click(trigger);
     fireEvent.click(trigger);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // Count only the AMR status re-fetch this test is about — `fetchMock`
+    // also now answers the unrelated `/api/workspace/context` read the
+    // billing-permission gate added, so a raw total-call assertion would
+    // couple this test to that unrelated fetch.
+    await waitFor(() => expect(statusCalls).toBe(2));
     const dialog = screen.getByRole('dialog', { name: 'avatar.title' });
     expect(within(dialog).queryByText('Plus')).toBeNull();
     expect(dialog.textContent).not.toContain('$247.51');

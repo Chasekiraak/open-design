@@ -4568,9 +4568,17 @@ export function SettingsDialog({
                           const amrCardPlanLabel = amrCardResolvedPlan
                             ? planBadgeTierForLabel(amrCardResolvedPlan) ?? amrCardResolvedPlan
                             : null;
+                          // recvqfYKutwWlQ: a team member without billing
+                          // permission (owner-only) can't act on an upgrade
+                          // even when the plan tier itself is upgradeable, so
+                          // the entry point must not render for them. Personal
+                          // workspaces always resolve `canManageBilling` true
+                          // (the user is their own owner), so this does not
+                          // affect the personal-workspace upgrade path.
                           const amrCardCanUpgrade =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? canUpgradeVelaPlan(amrCardStatus.account?.plan)
+                              ? canUpgradeVelaPlan(amrCardStatus.account?.plan) &&
+                                Boolean(workspaceContext?.permissions?.canManageBilling)
                               : false;
                           const amrRevealPendingCancelAction =
                             isAmrAgent &&

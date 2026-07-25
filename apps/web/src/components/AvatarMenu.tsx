@@ -21,6 +21,7 @@ import {
 } from '../providers/daemon';
 import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import { isMacPlatform } from '../utils/platform';
+import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 
 interface Props {
   config: AppConfig;
@@ -65,6 +66,10 @@ export function AvatarMenu({
 }: Props) {
   const t = useT();
   const analytics = useAnalytics();
+  // recvqfYKutwWlQ: gate the AMR upgrade entry on billing permission below,
+  // not just plan tier — a team member without `canManageBilling` (owner-only)
+  // can't act on an upgrade even when the tier itself is upgradeable.
+  const { context: workspaceContext } = useWorkspaceContext();
   const [open, setOpen] = useState(false);
   // Toggle that reports the closed→open transition (for analytics) without
   // firing on close.
@@ -231,8 +236,13 @@ export function AvatarMenu({
         : null)
     : null;
   const amrResolvedProfile = amrAccount?.profile ?? amrProfile;
+  // Personal workspaces always resolve `canManageBilling` true (the user is
+  // their own owner), so this does not affect the personal-workspace upgrade
+  // path.
   const amrCanUpgrade =
-    !!amrAccount?.loggedIn && canUpgradeVelaPlan(amrAccount.account?.plan);
+    !!amrAccount?.loggedIn &&
+    canUpgradeVelaPlan(amrAccount.account?.plan) &&
+    Boolean(workspaceContext?.permissions?.canManageBilling);
   const amrPlansUrl = amrPlansUrlForProfile(amrResolvedProfile);
   const handleAmrUpgradeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
     const attribution = recordAmrEntry(analytics.track, 'avatar_amr_upgrade', new Date(), {
