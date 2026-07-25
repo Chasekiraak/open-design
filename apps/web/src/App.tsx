@@ -450,9 +450,26 @@ async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<Team
 // local materialization (POST /collab/pull's registerPulledProject, or
 // ProjectView's own /collab/status poll firing ensureSharedProjectPlaceholder
 // — see collab-sync.ts) against the deep-link bootstrap effect below. Give
-// that materialization a short bounded window instead of trusting a single
+// that materialization a bounded window instead of trusting a single
 // immediate miss.
-const DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS = 4;
+//
+// 21 attempts * 600ms = ~12s total. The original budget here was 4 * 600ms =
+// ~2.4s, sized well under the real /collab/pull latency observed against a
+// live vela-backed hub (up to ~10s for a fresh project's first pull) —
+// exhausting the window and falling through to "not found" while the pull
+// was still genuinely in flight is a false negative, not a correctness
+// backstop. ~12s matches the budget ProjectView's own
+// CONVERSATION_LOAD_RETRY_DELAYS_MS already established for the identical
+// "team-shared project not yet materialized locally" race on the
+// conversations-list read, so both retry loops now cover the same worst
+// case instead of one giving up 5x sooner than the other. This is still a
+// BOUNDED retry, not an unconditional hang: `everConfirmedTeamShared`
+// already keeps the caller from navigating home the moment the hub confirms
+// team membership even once (see `still-materializing` below), so widening
+// this window only helps the case where the hub itself is slow to reflect a
+// share, not a genuinely-missing/no-access project — that path still falls
+// through to the not-found/navigate-home handling unchanged.
+const DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS = 21;
 const DEEP_LINK_TEAM_SHARE_RETRY_DELAY_MS = 600;
 
 function delay(ms: number): Promise<void> {
@@ -535,7 +552,7 @@ function AppInner() {
   const iframeKeepAlivePool = useIframeKeepAlivePool();
   const clientType = useMemo(() => detectClientType(), []);
   useModalWindowDragGuard();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const { context: workspaceContext, loading: workspaceContextLoading } = useWorkspaceContext();
   const workspaceBilling = useWorkspaceBilling();
   const workspaceContextRef = useRef<WorkspaceCollabContext | null>(null);
   workspaceContextRef.current = workspaceContext;
@@ -907,7 +924,14 @@ function AppInner() {
   // a project/section the next identity has no standing to see (see
   // WorkspaceTabsBar's own doc, and deriveTabIdentityScope's, for the full
   // design rationale — notably why the workspace half of the key LATCHES
-  // across a null `workspaceContext` instead of reacting to it directly).
+  // across a null `workspaceContext` instead of reacting to it directly, and
+  // why `workspaceContextLoading` must ride along: on every fresh boot
+  // (first load OR a plain refresh) `amrLoginStatus` and `workspaceContext`
+  // resolve on independent timers, and without the loading flag the
+  // in-between "logged in, workspace context not landed yet" tick reads as a
+  // confirmed no-workspace baseline — so the real workspace context landing a
+  // beat later looks exactly like a workspace switch and bounces a team
+  // member's own deep-linked/refreshed project back to Home).
   const tabScopeWorkspaceIdRef = useRef<string>('none');
   const tabScopeAccountIdRef = useRef<string>(UNSET_ACCOUNT_BUCKET);
   const {
@@ -917,6 +941,7 @@ function AppInner() {
   } = deriveTabIdentityScope({
     amrLoginStatus,
     workspaceContext,
+    workspaceContextLoading,
     previousWorkspaceBucket: tabScopeWorkspaceIdRef.current,
     previousAccountBucket: tabScopeAccountIdRef.current,
   });

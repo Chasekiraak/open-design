@@ -1072,4 +1072,47 @@ describe('WorkspaceTabsBar identity-scope tab reset', () => {
       expect(screen.getAllByRole('tab')).toHaveLength(2);
     });
   });
+
+  // Regression for the "team member's deep-linked/refreshed project bounces
+  // to Home" bug: amrLoginStatus and workspaceContext resolve on independent
+  // timers on every fresh boot, and a logged-in account's workspaceContext
+  // routinely lands after amrLoginStatus does. `deriveTabIdentityScope`'s
+  // `workspaceContextLoading` gate (see tab-scope.test.ts) keeps App.tsx from
+  // ever handing this component an intermediate "workspace: none" scopeKey
+  // while workspaceContext is still loading — so from THIS component's point
+  // of view, a fresh boot for an already-team-scoped member must go straight
+  // from unresolved (no identityScopeKey prop) to the real team scope key in
+  // one hop, never passing through a fabricated no-workspace key in between.
+  // This test locks in that the component does not treat that direct hop as
+  // a reset, closing the loop on the upstream fix.
+  it('adopts a team scope key silently when it resolves directly, with no intermediate no-workspace tick', async () => {
+    const { rerender } = render(
+      <WorkspaceTabsBar route={{ ...projectRoute }} projects={[project]} />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+
+    // workspaceContextLoading having gated the derivation, App.tsx never
+    // produces an intermediate "user-1::none" tick — the very first resolved
+    // key IS the real team workspace.
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute }}
+        projects={[project]}
+        identityScopeKey="user-1::ws-team-a"
+      />,
+    );
+
+    // Silently adopted as the baseline: the project tab survives, nothing
+    // resets, and no navigation away from the deep-linked/refreshed project
+    // fires.
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+      expect(
+        screen.getAllByRole('tab').some((tab) => (tab.textContent ?? '').includes('Project Alpha')),
+      ).toBe(true);
+    });
+    expect(navigate).not.toHaveBeenCalledWith(homeRoute);
+  });
 });

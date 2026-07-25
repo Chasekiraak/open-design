@@ -15,15 +15,21 @@ function loggedIn(userId: string, profile = 'default'): TabScopeLoginStatus {
   return { loggedIn: true, profile, user: { id: userId, email: `${userId}@example.com` } };
 }
 
-/** Thin wrapper defaulting the two "previous" ref fields for tests that don't
- *  care about latch behavior across calls. */
+/** Thin wrapper defaulting the two "previous" ref fields, and
+ *  `workspaceContextLoading`, for tests that don't care about latch behavior
+ *  across calls or about the loading-gate this module covers separately
+ *  below. Defaulting `workspaceContextLoading` to `false` matches every
+ *  existing call site's original assumption: workspaceContext has already
+ *  had its first settle (success or null), so a `null` reading here means
+ *  "confirmed no workspace", not "still finding out". */
 function derive(
-  partial: Omit<TabIdentityScopeInputs, 'previousWorkspaceBucket' | 'previousAccountBucket'>
-    & Partial<Pick<TabIdentityScopeInputs, 'previousWorkspaceBucket' | 'previousAccountBucket'>>,
+  partial: Omit<TabIdentityScopeInputs, 'previousWorkspaceBucket' | 'previousAccountBucket' | 'workspaceContextLoading'>
+    & Partial<Pick<TabIdentityScopeInputs, 'previousWorkspaceBucket' | 'previousAccountBucket' | 'workspaceContextLoading'>>,
 ) {
   return deriveTabIdentityScope({
     previousWorkspaceBucket: 'none',
     previousAccountBucket: UNSET_ACCOUNT_BUCKET,
+    workspaceContextLoading: false,
     ...partial,
   });
 }
@@ -155,5 +161,74 @@ describe('deriveTabIdentityScope', () => {
       previousAccountBucket: userThreeSettled.nextAccountBucket,
     });
     expect(userThreeHiccup.scopeKey).toBe('user-3::ws-personal-user-3');
+  });
+
+  // Root cause of the "team member's deep-linked/refreshed project bounces to
+  // Home" bug: on every fresh boot (first load OR a plain page refresh),
+  // amrLoginStatus and workspaceContext resolve on independent timers, and a
+  // logged-in account's (B/vela-backed) workspaceContext routinely lands
+  // AFTER amrLoginStatus does. Without workspaceContextLoading, that
+  // in-between tick reads as a confirmed no-workspace baseline; the real
+  // context landing a beat later then looks exactly like a workspace switch
+  // to WorkspaceTabsBar's tab-scope reset effect.
+  describe('workspaceContextLoading (fresh-boot amrLoginStatus/workspaceContext race)', () => {
+    it('defers (scopeKey null) for a logged-in account while workspaceContext is still loading', () => {
+      const result = derive({
+        amrLoginStatus: loggedIn('user-1'),
+        workspaceContext: null,
+        workspaceContextLoading: true,
+      });
+      expect(result.scopeKey).toBeNull();
+      // The "previous" refs pass straight through unchanged — nothing is
+      // adopted as a baseline while we are still finding out.
+      expect(result.nextWorkspaceBucket).toBe('none');
+      expect(result.nextAccountBucket).toBe(UNSET_ACCOUNT_BUCKET);
+    });
+
+    it('does not defer a signed-out read on workspaceContextLoading — signed out never has a workspace to wait for', () => {
+      const result = derive({
+        amrLoginStatus: loggedOut(),
+        workspaceContext: null,
+        workspaceContextLoading: true,
+      });
+      expect(result.scopeKey).toBe('anon::none');
+    });
+
+    it('does not defer once workspaceContext has genuinely settled to null (loading false = confirmed no workspace)', () => {
+      const result = derive({
+        amrLoginStatus: loggedIn('user-1'),
+        workspaceContext: null,
+        workspaceContextLoading: false,
+      });
+      expect(result.scopeKey).toBe('user-1::none');
+    });
+
+    it('full fresh-boot sequence: never surfaces an intermediate none-workspace scopeKey before the real workspace context lands', () => {
+      // Tick 1: amrLoginStatus resolves first; workspaceContext has not even
+      // started resolving (still loading). Old behavior committed
+      // 'user-1::none' here — the exact provisional baseline the bug report
+      // traced back to WorkspaceTabsBar silently adopting on its very first
+      // non-null scopeKey.
+      const tick1 = derive({
+        amrLoginStatus: loggedIn('user-1'),
+        workspaceContext: null,
+        workspaceContextLoading: true,
+      });
+      expect(tick1.scopeKey).toBeNull();
+
+      // Tick 2: the real, hub-backed workspace context lands moments later.
+      // Because tick1 deferred instead of committing a bucket, the "previous"
+      // refs a real caller would carry are still the pristine seed values —
+      // so this read is treated as the account's true FIRST resolution, not
+      // a change away from a fabricated 'none' baseline.
+      const tick2 = derive({
+        amrLoginStatus: loggedIn('user-1'),
+        workspaceContext: { workspaceId: 'ws-team-a' },
+        workspaceContextLoading: false,
+        previousWorkspaceBucket: tick1.nextWorkspaceBucket,
+        previousAccountBucket: tick1.nextAccountBucket,
+      });
+      expect(tick2.scopeKey).toBe('user-1::ws-team-a');
+    });
   });
 });

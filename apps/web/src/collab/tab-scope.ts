@@ -28,6 +28,14 @@ export interface TabIdentityScopeInputs {
    *  offline / B unavailable (the three are indistinguishable at this read —
    *  see `nextWorkspaceBucket` below for how that ambiguity is handled). */
   workspaceContext: Pick<WorkspaceCollabContext, 'workspaceId'> | null;
+  /** `useWorkspaceContext()`'s own `loading` flag: true until the FIRST
+   *  `/api/workspace/context` read (success or failure) has completed for
+   *  this browser session. `amrLoginStatus` and `workspaceContext` resolve on
+   *  independent timers — a logged-in account can have its login status land
+   *  before its (often B/vela-backed, slower) workspace context does. See
+   *  `nextWorkspaceBucket`'s doc for why this must gate the derivation
+   *  instead of letting a still-loading context read as "confirmed none". */
+  workspaceContextLoading: boolean;
   /** Whatever `nextWorkspaceBucket` a PRIOR call to this function returned —
    *  the caller is expected to hold it in a ref and feed it back in, turn by
    *  turn, so the "latch across a null read" behavior below works. Seed with
@@ -86,13 +94,53 @@ export interface TabIdentityScopeResult {
  * smell in the one string whose entire job is to be a legible identity
  * fingerprint. Caught live while exercising an account-swap scenario in
  * manual verification, not from a design walkthrough alone.
+ *
+ * A second race lives at the same seam, on every fresh boot (first load OR a
+ * plain page refresh) rather than only on an account swap: `amrLoginStatus`
+ * and `workspaceContext` are two independently-timed reads, and a logged-in
+ * account's `workspaceContext` (routed through B/vela) routinely resolves
+ * AFTER `amrLoginStatus` does. Without `workspaceContextLoading`, the first
+ * `amrLoginStatus` resolution for a fresh boot would fall into the
+ * `accountChanged` branch below (comparing against the `UNSET_ACCOUNT_BUCKET`
+ * seed) and commit a provisional `'none'` workspace bucket purely because
+ * `workspaceContext` had not loaded YET — indistinguishable, at that
+ * instant, from a confirmed personal/no-workspace account. The caller
+ * (WorkspaceTabsBar) treats the very first `scopeKey` it ever sees as the
+ * silently-adopted baseline, so that provisional `'none'` became the
+ * baseline — and the moment the real `workspaceContext` landed a beat later,
+ * the bucket flipping from `'none'` to the real workspace id looked exactly
+ * like a genuine workspace switch, closing every open tab and bouncing a
+ * team member off a project they had just deep-linked to (or simply
+ * refreshed). `workspaceContextLoading` closes that gap: while it is true, a
+ * logged-in account's derivation defers ("don't judge yet") exactly like the
+ * `amrLoginStatus === null` case below, instead of computing a scope key
+ * against a workspace read that has not had its first confident settle.
  */
 export function deriveTabIdentityScope(
   inputs: TabIdentityScopeInputs,
 ): TabIdentityScopeResult {
-  const { amrLoginStatus, workspaceContext, previousWorkspaceBucket, previousAccountBucket } = inputs;
+  const {
+    amrLoginStatus,
+    workspaceContext,
+    workspaceContextLoading,
+    previousWorkspaceBucket,
+    previousAccountBucket,
+  } = inputs;
 
   if (amrLoginStatus === null) {
+    return {
+      scopeKey: null,
+      nextWorkspaceBucket: previousWorkspaceBucket,
+      nextAccountBucket: previousAccountBucket,
+    };
+  }
+
+  // Logged-in accounts have a workspace context to wait for; a signed-out
+  // read never does (`nextWorkspaceBucket` below is unconditionally `'none'`
+  // for it), so this deferral is scoped to `loggedIn` only — it must not
+  // stall the signed-out scope key on a `workspaceContextLoading` flag that
+  // has nothing to do with it.
+  if (amrLoginStatus.loggedIn && workspaceContext === null && workspaceContextLoading) {
     return {
       scopeKey: null,
       nextWorkspaceBucket: previousWorkspaceBucket,
