@@ -170,6 +170,8 @@ interface Props {
   /** Visible Home mode selection; null keeps a first visit neutral. */
   selectedSessionMode?: ChatSessionMode | null;
   onClearSessionModeSelection?: () => void;
+  autoDesignTransition?: boolean;
+  onAutoDesignTransitionEnd?: () => void;
   activePluginTitle: string | null;
   // True when the active plugin chip shows a user-picked plugin (Community card
   // or example-prompt preset) rather than a task-type chip's default plugin —
@@ -319,13 +321,11 @@ const EMPTY_CONNECTOR_OPTIONS: ConnectorDetail[] = [];
 const EMPTY_WORKSPACE_ITEMS: WorkspaceContextItem[] = [];
 const HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY = 'open-design:home-template-recommendation:v1';
 const HOME_DESIGN_SYSTEM_GUIDE_SEEN_KEY = 'open-design:home-design-system-guide:v1';
+const HOME_RETURNING_DESIGN_SYSTEM_GUIDE_SEEN_KEY = 'open-design:home-returning-design-system-guide:v1';
 const DESIGN_SYSTEM_RELEVANT_TASK_IDS = new Set([
   'prototype',
-  'web-clone',
   'landing-page',
-  'wireframe',
   'mobile',
-  'deck',
 ]);
 
 function hasSeenHomeTemplateRecommendation(): boolean {
@@ -366,6 +366,24 @@ function markHomeDesignSystemGuideSeen(): void {
   }
 }
 
+function hasSeenHomeReturningDesignSystemGuide(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(HOME_RETURNING_DESIGN_SYSTEM_GUIDE_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markHomeReturningDesignSystemGuideSeen(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HOME_RETURNING_DESIGN_SYSTEM_GUIDE_SEEN_KEY, '1');
+  } catch {
+    // Persistence is only used to make the contextual nudge one-time.
+  }
+}
+
 export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   {
     active = true,
@@ -377,6 +395,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onSessionModeChange,
     selectedSessionMode,
     onClearSessionModeSelection,
+    autoDesignTransition = false,
+    onAutoDesignTransitionEnd,
     firstRunGuide,
     activePluginTitle,
     activePluginIsExplicit = false,
@@ -471,6 +491,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     () => !hasSeenHomeTemplateRecommendation(),
   );
   const [showFirstRunDesignSystemGuide, setShowFirstRunDesignSystemGuide] = useState(false);
+  const [showReturningDesignSystemGuide, setShowReturningDesignSystemGuide] = useState(false);
   const [showFirstRunDesignSystemAttention, setShowFirstRunDesignSystemAttention] = useState(false);
   const homeHeroRef = useRef<HTMLElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
@@ -520,6 +541,10 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     [stagedFiles],
   );
   const hasContextForNewbie = Boolean(selectedDesignSystemId) || stagedFiles.length > 0;
+  const hasPersonalDesignSystem = useMemo(
+    () => designSystems.some((system) => system.source === 'user' || system.isEditable === true),
+    [designSystems],
+  );
   const templateRecommendation = useMemo(
     () => resolveHomeTemplateRecommendation({
       role: onboardingRole,
@@ -575,6 +600,22 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     setShowFirstRunDesignSystemGuide(false);
   }, []);
 
+  const dismissReturningDesignSystemGuide = useCallback(() => {
+    markHomeReturningDesignSystemGuideSeen();
+    setShowFirstRunDesignSystemAttention(false);
+    setShowReturningDesignSystemGuide(false);
+  }, []);
+
+  const dismissVisibleDesignSystemGuide = useCallback(() => {
+    if (showFirstRunDesignSystemGuide) dismissFirstRunDesignSystemGuide();
+    if (showReturningDesignSystemGuide) dismissReturningDesignSystemGuide();
+  }, [
+    dismissFirstRunDesignSystemGuide,
+    dismissReturningDesignSystemGuide,
+    showFirstRunDesignSystemGuide,
+    showReturningDesignSystemGuide,
+  ]);
+
   useEffect(() => {
     // A user's personal system always wins over first-run teaching. Once this
     // entry has been shown, retain that fact so a later Home visit never
@@ -593,7 +634,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
   useEffect(() => {
     setShowFirstRunDesignSystemAttention(false);
-    if (!showFirstRunDesignSystemGuide) return undefined;
+    if (!showFirstRunDesignSystemGuide && !showReturningDesignSystemGuide) return undefined;
 
     const startTimer = window.setTimeout(() => {
       setShowFirstRunDesignSystemAttention(true);
@@ -606,7 +647,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       window.clearTimeout(startTimer);
       window.clearTimeout(finishTimer);
     };
-  }, [showFirstRunDesignSystemGuide]);
+  }, [showFirstRunDesignSystemGuide, showReturningDesignSystemGuide]);
 
   function activateHeroCapability(id: NonNullable<typeof activeHeroCapability>['id']) {
     dismissTemplateRecommendation();
@@ -892,6 +933,30 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     && selectedDesignSystemId === null
     && DESIGN_SYSTEM_RELEVANT_TASK_IDS.has(activeCreateChip.id),
   );
+
+  useEffect(() => {
+    // Returning users only get a task-level nudge once they select a visual
+    // output that benefits from a system. A personal system or any uploaded
+    // reference / brand material is already stronger direction, so do not add
+    // a competing prompt.
+    if (
+      firstRunGuide !== false
+      || !activeTaskBenefitsFromDesignSystem
+      || stagedFiles.length > 0
+      || hasPersonalDesignSystem
+      || hasSeenHomeReturningDesignSystemGuide()
+    ) {
+      setShowReturningDesignSystemGuide(false);
+      return;
+    }
+    setShowReturningDesignSystemGuide(true);
+    markHomeReturningDesignSystemGuideSeen();
+  }, [
+    activeTaskBenefitsFromDesignSystem,
+    firstRunGuide,
+    hasPersonalDesignSystem,
+    stagedFiles.length,
+  ]);
   // The full create catalog stays intact. On an explicitly reported first-run
   // role, only the two most relevant types move to the front of the readable
   // card grid; all remaining types retain their normal catalog order.
@@ -1266,7 +1331,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   }
 
   function openDesignSystemPicker() {
-    dismissFirstRunDesignSystemGuide();
+    dismissVisibleDesignSystemGuide();
     const trigger = homeHeroRef.current?.querySelector<HTMLButtonElement>(
       '[data-testid="home-hero-design-system-trigger"]',
     );
@@ -1421,7 +1486,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   // The task-type rail (原型 / 幻灯片 / HyperFrames / 视频 / …). Records which
   // task type the user picked before delegating to the host's chip handler.
   function handlePickTaskChip(chip: HomeHeroChip) {
-    dismissFirstRunDesignSystemGuide();
+    dismissVisibleDesignSystemGuide();
     // The cards are the only visible type control now. Clicking the active
     // card again returns Home to its neutral, no-type state.
     if (chip.id === activeChipId) {
@@ -1474,6 +1539,14 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     contextOnlyMcpServers.length > 0 ||
     contextOnlyConnectors.length > 0 ||
     contextWorkspaceItems.length > 0;
+  const visibleDesignSystemGuide = showFirstRunDesignSystemGuide || showReturningDesignSystemGuide;
+  const designSystemGuideCopy = showFirstRunDesignSystemGuide
+    ? t('homeHero.designSystemGuide.description')
+    : showReturningDesignSystemGuide && activeCreateChip
+      ? t('homeHero.designSystemGuide.taskHint', {
+        task: homeHeroChipLabel(activeCreateChip.id, t),
+      })
+      : null;
   let optionRenderIndex = 0;
 
   return (
@@ -1487,7 +1560,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           target instanceof Element
           && target.closest('button, input, textarea, select, [role="button"], [contenteditable="true"]')
         ) {
-          dismissFirstRunDesignSystemGuide();
+          dismissVisibleDesignSystemGuide();
         }
       }}
     >
@@ -1869,7 +1942,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 // inputs from the seeded text. Real user edits always differ
                 // from the current prompt.
                 if (plainText === prompt) return;
-                dismissFirstRunDesignSystemGuide();
+                dismissVisibleDesignSystemGuide();
                 dismissTemplateRecommendation();
                 onPromptChange(plainText);
                 if (selectedPromptExample && plainText !== selectedPromptExample.promptText) {
@@ -2219,7 +2292,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                       area: 'chat_composer',
                       element: 'design_system_clear',
                     });
-                    dismissFirstRunDesignSystemGuide();
+                    dismissVisibleDesignSystemGuide();
                     dismissTemplateRecommendation();
                     onDesignSystemChange(null);
                   }}
@@ -2279,6 +2352,8 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
               mode={sessionMode}
               selectedMode={selectedSessionMode}
               onClearSelection={onClearSessionModeSelection}
+              autoDesignTransition={autoDesignTransition}
+              onAutoDesignTransitionEnd={onAutoDesignTransitionEnd}
               onModeChange={(next) => {
                 if (next !== sessionMode) {
                   trackComposerSessionModeClick(analytics.track, {
@@ -2342,7 +2417,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
       ) : null}
 
       {onDesignSystemChange || onPickWorkingDir ? (
-        <div className={`home-hero__workdir-row${showFirstRunDesignSystemGuide ? ' is-design-system-guided' : ''}`}>
+        <div className={`home-hero__workdir-row${visibleDesignSystemGuide ? ' is-design-system-guided' : ''}`}>
           {onDesignSystemChange ? (
             <div className="home-hero__design-system-entry">
               <DesignSystemPicker
@@ -2350,21 +2425,23 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 designSystems={designSystems}
                 selectedId={selectedDesignSystemId}
                 showSelectedLabel={false}
-                homeEmptyLabel={showFirstRunDesignSystemGuide ? t('homeHero.designSystemGuide.add') : undefined}
+                homeEmptyLabel={visibleDesignSystemGuide
+                  ? t('homeHero.designSystemGuide.add')
+                  : undefined}
                 homeIconAttention={showFirstRunDesignSystemAttention}
-                onHomeOpen={dismissFirstRunDesignSystemGuide}
+                onHomeOpen={dismissVisibleDesignSystemGuide}
                 onChange={(id) => {
-                  dismissFirstRunDesignSystemGuide();
+                  dismissVisibleDesignSystemGuide();
                   dismissTemplateRecommendation();
                   onDesignSystemChange(id);
                 }}
               />
-              {showFirstRunDesignSystemGuide ? (
+              {designSystemGuideCopy ? (
                 <p
                   className="home-hero__design-system-guide"
                   data-testid="home-hero-design-system-guide"
                 >
-                  {t('homeHero.designSystemGuide.description')}
+                  {designSystemGuideCopy}
                 </p>
               ) : null}
             </div>

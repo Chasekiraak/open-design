@@ -27,6 +27,7 @@ afterEach(() => {
   cleanup();
   window.localStorage.removeItem('open-design:home-template-recommendation:v1');
   window.localStorage.removeItem('open-design:home-design-system-guide:v1');
+  window.localStorage.removeItem('open-design:home-returning-design-system-guide:v1');
 });
 
 function makePlugin(
@@ -218,6 +219,72 @@ describe('HomeHero intent rail', () => {
       onDesignSystemChange: vi.fn(),
     });
 
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+  });
+
+  it('shows the returning-user design-system nudge once for eligible visual tasks', () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderHero({
+        firstRunGuide: false,
+        activeChipId: 'prototype',
+        onDesignSystemChange: vi.fn(),
+      });
+
+      expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
+        'A design system keeps visual details and components consistent in this UI Mockup.',
+      );
+      const icon = screen.getByTestId('home-hero-design-system-trigger-icon');
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
+      expect(icon).toHaveClass('is-first-run-guide');
+      expect(window.localStorage.getItem('open-design:home-returning-design-system-guide:v1')).toBe('1');
+
+      unmount();
+      renderHero({
+        firstRunGuide: false,
+        activeChipId: 'prototype',
+        onDesignSystemChange: vi.fn(),
+      });
+      expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show a returning-user DS nudge when references, a personal DS, or an ineligible task exists', () => {
+    const reference = new File(['reference'], 'reference.png', { type: 'image/png' });
+    const { unmount } = renderHero({
+      firstRunGuide: false,
+      activeChipId: 'prototype',
+      stagedFiles: [reference],
+      onDesignSystemChange: vi.fn(),
+    });
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+
+    unmount();
+    renderHero({
+      firstRunGuide: false,
+      activeChipId: 'prototype',
+      designSystems: [{
+        id: 'user:acme',
+        title: 'Acme System',
+        category: 'Product',
+        summary: 'The team system.',
+        source: 'user',
+        status: 'published',
+      }],
+      onDesignSystemChange: vi.fn(),
+    });
+    expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
+
+    cleanup();
+    renderHero({
+      firstRunGuide: false,
+      activeChipId: 'wireframe',
+      onDesignSystemChange: vi.fn(),
+    });
     expect(screen.queryByTestId('home-hero-design-system-guide')).toBeNull();
   });
 

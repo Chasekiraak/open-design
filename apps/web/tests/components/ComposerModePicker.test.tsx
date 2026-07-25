@@ -150,6 +150,19 @@ describe('ComposerModePicker', () => {
     expect(onClearSelection).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes a one-time auto-selected Design transition for Home', () => {
+    render(
+      <ComposerModePicker
+        mode="design"
+        selectedMode="design"
+        autoDesignTransition
+      />,
+    );
+
+    const trigger = screen.getByTestId('composer-mode-trigger');
+    expect(trigger).toHaveClass('is-auto-selected');
+  });
+
   it('keeps every mode description visible inside the open menu', () => {
     render(<ComposerModePicker mode="design" onModeChange={vi.fn()} />);
 

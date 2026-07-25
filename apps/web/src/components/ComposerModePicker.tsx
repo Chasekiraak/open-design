@@ -124,6 +124,10 @@ export interface ComposerModePickerProps {
    *  used when the composer row is space-constrained, e.g. while a run streams
    *  and the wide "思考中" button is showing. */
   labelHidden?: boolean;
+  /** One-time cue used by Home when a create-type card picks Design for the user. */
+  autoDesignTransition?: boolean;
+  /** Clears Home's one-time cue once the visual transition completes. */
+  onAutoDesignTransitionEnd?: () => void;
 }
 
 export function ComposerModePicker({
@@ -132,6 +136,8 @@ export function ComposerModePicker({
   selectedMode,
   onClearSelection,
   labelHidden = false,
+  autoDesignTransition = false,
+  onAutoDesignTransitionEnd,
 }: ComposerModePickerProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -220,7 +226,9 @@ export function ComposerModePicker({
       <button
         ref={triggerRef}
         type="button"
-        className={`composer-mode__trigger od-tooltip${open ? ' is-open' : ''}${selected ? ' is-selected' : ''}`}
+        className={`composer-mode__trigger od-tooltip${open ? ' is-open' : ''}${selected ? ' is-selected' : ''}${
+          autoDesignTransition ? ' is-auto-selected' : ''
+        }`}
         data-testid="composer-mode-trigger"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -229,6 +237,11 @@ export function ComposerModePicker({
         title={modeTooltip}
         data-tooltip={modeTooltip}
         data-tooltip-placement="top"
+        onAnimationEnd={(event) => {
+          if (autoDesignTransition && event.target === event.currentTarget) {
+            onAutoDesignTransitionEnd?.();
+          }
+        }}
       >
         <span className="composer-mode__icon" data-testid="composer-mode-icon" aria-hidden>
           {triggerIcon}

@@ -441,6 +441,8 @@ export function HomeView({
     () => onboardingRole === 'designer',
   );
   const sessionModeManuallySelectedRef = useRef(false);
+  const autoDesignTransitionPlayedRef = useRef(false);
+  const [autoDesignTransition, setAutoDesignTransition] = useState(false);
   const [modeSuggestion, setModeSuggestion] = useState<ReturnType<typeof inferHomeModeSuggestion>>(null);
   const [activeSkill, setActiveSkill] = useState<SkillSummary | null>(null);
   const [selectedPluginContexts, setSelectedPluginContexts] = useState<SelectedPluginContext[]>([]);
@@ -449,6 +451,14 @@ export function HomeView({
   const [contextWorkspaceItems, setContextWorkspaceItems] = useState<WorkspaceContextItem[]>([]);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [workingDir, setWorkingDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!autoDesignTransition) return undefined;
+    // Also clear in reduced-motion mode, where CSS deliberately suppresses the
+    // animation and therefore emits no animationend event.
+    const timer = window.setTimeout(() => setAutoDesignTransition(false), 360);
+    return () => window.clearTimeout(timer);
+  }, [autoDesignTransition]);
   // Token paired with `workingDir` when picked through the desktop host's
   // native dialog. Spent on the post-creation working-dir POST so the
   // daemon's desktop-auth gate accepts the path. Null for web picks.
@@ -908,6 +918,7 @@ export function HomeView({
   // user has already made in this Home session.
   function setSessionModeFromUser(mode: ChatSessionMode) {
     sessionModeManuallySelectedRef.current = true;
+    setAutoDesignTransition(false);
     setSessionMode(mode);
     setHasVisibleModeSelection(true);
     setModeSuggestion(null);
@@ -915,15 +926,21 @@ export function HomeView({
 
   function useCreateModeForVisualIntent() {
     if (sessionModeManuallySelectedRef.current) return;
+    const shouldCueAutoSelection = sessionMode !== 'design' && !autoDesignTransitionPlayedRef.current;
     setSessionMode('design');
     setHasVisibleModeSelection(true);
     setModeSuggestion(null);
+    if (shouldCueAutoSelection) {
+      autoDesignTransitionPlayedRef.current = true;
+      setAutoDesignTransition(true);
+    }
   }
 
   function clearHomeModeSelection() {
     // Clearing restores Home's neutral, lightweight Ask route. It also gives
     // a later visual-output choice permission to select Create again.
     sessionModeManuallySelectedRef.current = false;
+    setAutoDesignTransition(false);
     setSessionMode('chat');
     setHasVisibleModeSelection(false);
     setModeSuggestion(null);
@@ -932,6 +949,8 @@ export function HomeView({
   function handleHomeDemoStateChange(next: HomeDemoState | null) {
     setHomeDemoStateValue(next);
     sessionModeManuallySelectedRef.current = false;
+    autoDesignTransitionPlayedRef.current = false;
+    setAutoDesignTransition(false);
     const role = resolveHomeDemoRole(next, storedOnboardingRole);
     setSessionMode(role === 'designer' ? 'design' : 'chat');
     setHasVisibleModeSelection(role === 'designer');
@@ -2269,6 +2288,8 @@ export function HomeView({
         onSessionModeChange={setSessionModeFromUser}
         selectedSessionMode={hasVisibleModeSelection ? sessionMode : null}
         onClearSessionModeSelection={clearHomeModeSelection}
+        autoDesignTransition={autoDesignTransition}
+        onAutoDesignTransitionEnd={() => setAutoDesignTransition(false)}
         onboardingRole={onboardingRole}
         recentChipId={homeRecentChipId}
         demoStateKey={homeDemoState ? `${homeDemoState.journey}:${homeDemoState.role ?? 'neutral'}` : null}
