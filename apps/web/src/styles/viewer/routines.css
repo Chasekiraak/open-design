@@ -1263,12 +1263,6 @@
      wash / window vibrancy shows through (veil tokens in app-wash.css). */
   background: var(--veil-page, transparent);
 }
-.app .split:not(.split-focus) {
-  grid-template-columns: minmax(320px, var(--chat-panel-width, 460px)) 8px minmax(400px, 1fr);
-}
-.app .split.split-focus {
-  grid-template-columns: minmax(0, 1fr);
-}
 .app .split-chat-slot {
   /* Inset the pane so it reads as a floating card (same treatment as the home
      sidebar's .entry-nav-rail__panel). Top inset is 0 so the card sits 8px
@@ -3899,4 +3893,3 @@ body.od-quick-switcher-open .chat-composer-fixed-layer .composer-send:disabled {
    360px track plus the row-density overrides that came with it — was
    removed. Leaving the grid rule behind reserved an empty 360px column and
    the panel content stopped short of the panel edge. */
-
