@@ -42,6 +42,15 @@ collide.
 | Display / H1 (≥32 px) | `1.0`–`1.2` | **`1.3`–`1.4`** |
 | Body (15–18 px) | `1.5`–`1.6` | `1.7`–`1.8` |
 
+The CJK floor has **no upper size tier**. It applies to every heading
+level, including the **cover / hero main title** — the single biggest
+headline on a deck's first slide. A Chinese cover title at 72 px,
+96 px, or larger, especially one split into multiple lines with
+`<br>`, is still CJK display text: set `line-height: 1.3`–`1.4` on
+it, never the Latin `1.0`–`1.2`. At 96 px a `1.05` leading makes the
+two lines of a Chinese cover headline visibly collide. This is the
+single most common violation, so check the cover main title first.
+
 Negative tracking is Latin-only for the same reason: CJK is already
 set on a fixed em grid, so `-0.02em` on a Chinese headline crowds the
 glyphs instead of tightening the word. Use `0` for CJK display text.
@@ -106,6 +115,7 @@ emphasis," it likely lacks weight discipline elsewhere.
 - ALL CAPS without `letter-spacing` ≥ `0.06em`.
 - Display text (≥32 px) without negative tracking (Latin only — see the CJK overrides).
 - CJK display text at Latin leading (`≤1.2`), which makes the lines overlap.
+- Multi-line CJK cover / hero titles (72–96 px+, e.g. split with `<br>`) below `1.3` line-height.
 - Negative tracking applied to CJK text.
 - More than 3 type sizes visible above the fold.
 - Mixed serif and slab on the same screen without a clear role split.
