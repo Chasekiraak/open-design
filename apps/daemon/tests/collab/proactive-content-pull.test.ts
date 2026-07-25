@@ -282,4 +282,269 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual([]);
     expect(onError).toHaveBeenCalledTimes(1);
   });
+
+  it('catches up a published head that already existed before the first hub connection', async () => {
+    const deps = makeDeps({ getLocalBinding: () => null });
+    const listSharedProjects = vi.fn(async () => [
+      { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+    ]);
+    const publishedHead = vi.fn(async () => 3);
+    Object.assign(deps, { listSharedProjects, publishedHead });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(listSharedProjects).toHaveBeenCalledTimes(1);
+    expect(publishedHead).toHaveBeenCalledTimes(1);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('dedupes an unchanged reconnect sweep, then pulls once when the missed head advanced', async () => {
+    let head = 3;
+    const deps = makeDeps();
+    const listSharedProjects = vi.fn(async () => [
+      { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+    ]);
+    const publishedHead = vi.fn(async () => head);
+    Object.assign(deps, { listSharedProjects, publishedHead });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+    await pull.catchUpPublishedHeads('ws-1');
+    expect(deps.pullCalls).toEqual(['proj-1']);
+
+    // The v4 signal was missed while disconnected. The reconnect sweep sees
+    // the authoritative head and routes it through the same version cursor.
+    head = 4;
+    deps.pullSharedProject = async (target) => {
+      deps.pullCalls.push(target.projectId);
+      return { status: 'pulled', version: 4 };
+    };
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
+    expect(listSharedProjects).toHaveBeenCalledTimes(3);
+  });
+
+  it('materializes a placeholder row whose project content is still missing when the healthy-stream floor observes it', async () => {
+    let materialized = false;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        materialized = true;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const listSharedProjects = vi.fn(async () => [
+      { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+    ]);
+    const publishedHead = vi.fn(async () => 3);
+    Object.assign(deps, {
+      listSharedProjects,
+      publishedHead,
+      // getLocalBinding above proves the placeholder DB row/team binding
+      // exists; the materialization probe must look through that shell.
+      hasMaterializedProject: () => materialized,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+    await pull.materializeMissingProjects('ws-1');
+
+    expect(listSharedProjects).toHaveBeenCalledTimes(2);
+    expect(publishedHead).toHaveBeenCalledTimes(1);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('does not read a head for a project owned by this daemon member', async () => {
+    const deps = makeDeps();
+    const publishedHead = vi.fn(async () => 3);
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'mine', ownerMemberId: 'wm-member' },
+      ],
+      publishedHead,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(publishedHead).not.toHaveBeenCalled();
+    expect(deps.pullCalls).toEqual([]);
+  });
+
+  it('retries a catch-up after the active team identity was temporarily unavailable', async () => {
+    let identityAvailable = false;
+    const deps = makeDeps({
+      getWorkspaceIdentity: async () => identityAvailable
+        ? {
+            workspaceId: 'ws-1',
+            resourceTeamId: 'team-1',
+            workspaceMemberId: 'wm-member',
+          }
+        : null,
+    });
+    const listSharedProjects = vi.fn(async () => [
+      { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+    ]);
+    Object.assign(deps, {
+      listSharedProjects,
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+    identityAvailable = true;
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(listSharedProjects).toHaveBeenCalledTimes(1);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('isolates one published-head failure and continues the sequential sweep', async () => {
+    const onError = vi.fn();
+    let active = 0;
+    let maxActive = 0;
+    const deps = makeDeps({ onError });
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'broken', ownerMemberId: 'wm-owner' },
+        { projectId: 'healthy', ownerMemberId: 'wm-owner' },
+        { projectId: 'healthy-2', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async (target: { projectId: string }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await Promise.resolve();
+        active -= 1;
+        if (target.projectId === 'broken') throw new Error('head unavailable');
+        return 3;
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(maxActive).toBe(1);
+    expect(deps.pullCalls).toEqual(['healthy', 'healthy-2']);
+  });
+
+  it('coalesces a live event with the same catch-up head onto one pull', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const deps = makeDeps({
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        await gate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const catchUp = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['proj-1']));
+    const liveEvent = pull.handleContentChanged(baseEvent);
+    release();
+    await Promise.all([catchUp, liveEvent]);
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('does not drop a third sweep requested while the trailing sweep is running', async () => {
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let lists = 0;
+    const deps = makeDeps();
+    Object.assign(deps, {
+      listSharedProjects: async () => {
+        lists += 1;
+        if (lists === 1) await firstGate;
+        if (lists === 2) await secondGate;
+        return [];
+      },
+      publishedHead: async () => null,
+      hasMaterializedProject: () => false,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const first = pull.catchUpPublishedHeads('ws-1');
+    const second = pull.materializeMissingProjects('ws-1');
+    releaseFirst();
+    await vi.waitFor(() => expect(lists).toBe(2));
+    const third = pull.catchUpPublishedHeads('ws-1');
+    releaseSecond();
+    await Promise.all([first, second, third]);
+
+    expect(lists).toBe(3);
+  });
+
+  it('seeds the event cursor from the durable materialized version on cold start', async () => {
+    const deps = makeDeps();
+    const publishedHead = vi.fn(async () => 3);
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead,
+      materializedVersion: () => '3',
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+    await pull.handleContentChanged(baseEvent);
+
+    expect(publishedHead).toHaveBeenCalledTimes(1);
+    expect(deps.pullCalls).toEqual([]);
+  });
+
+  it('does not reuse a durable cursor after the shared project owner changes', async () => {
+    const deps = makeDeps();
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-new-owner' },
+      ],
+      publishedHead: async () => 1,
+      // Version 10 belonged to the previous owner's resource scope.
+      materializedVersion: (target: { ownerMemberId: string }) =>
+        target.ownerMemberId === 'wm-old-owner' ? '10' : null,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.catchUpPublishedHeads('ws-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('forces a missing-only pull when the manifest is absent even if the durable cursor equals head', async () => {
+    const deps = makeDeps({ getLocalBinding: () => null });
+    Object.assign(deps, {
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: async () => false,
+      publishedHead: async () => 3,
+      materializedVersion: () => '3',
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
 });

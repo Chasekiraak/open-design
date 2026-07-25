@@ -92,6 +92,9 @@ export interface HubEventsEndpoint {
   url: string;
   /** Auth headers (Bearer control key + x-vela-workspace-id). */
   headers: Record<string, string>;
+  /** Expected workspace carried by the server's `ready` frame. Catch-up and
+   *  events stay gated until the stream proves this exact scope. */
+  workspaceId?: string;
 }
 
 export interface HubEventsSubscriberOptions {
@@ -104,6 +107,16 @@ export interface HubEventsSubscriberOptions {
   onEvent: (event: HubWorkspaceEvent) => void;
   /** Channel health transitions — drives poll-cadence switching. */
   onStateChange?: (state: 'connected' | 'disconnected') => void;
+  /** Fired after a `ready` frame verifies the stream workspace. Unlike
+   *  `onReconnect`, this includes the first successful connection. */
+  onConnect?: (connection: { reconnect: boolean; workspaceId?: string }) => void;
+  /** Secret-free parser/scope diagnostics. Raw payloads are never exposed. */
+  onDrop?: (drop: {
+    reason: 'invalid-ready' | 'workspace-mismatch' | 'unverified-scope' | 'invalid-payload';
+    eventName: string;
+    expectedWorkspaceId?: string;
+    actualWorkspaceId?: string;
+  }) => void;
   /**
    * Fired on every successful (re)connect AFTER the first, i.e. whenever
    * events may have been missed. The caller should run one catch-up cycle
@@ -173,24 +186,37 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
       if (!response.ok || !response.body) {
         throw new Error(`hub events stream ${response.status}`);
       }
-      // Connected: the server sends `ready` immediately; treat a successful
-      // 200-with-body as connected so catch-up runs even if `ready` is lost
-      // in a proxy buffer.
-      const isReconnect = everConnected;
-      everConnected = true;
+      // Transport-connected. Content catch-up remains gated on the server's
+      // `ready` frame proving the expected workspace below.
       backoffMs = backoffMinMs;
       setConnected(true);
-      if (isReconnect) options.onReconnect?.();
       armWatchdog();
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let scopeVerified = false;
+      let connectionNotified = false;
+      const notifyVerifiedConnection = (workspaceId?: string) => {
+        if (connectionNotified) return;
+        connectionNotified = true;
+        const reconnect = everConnected;
+        everConnected = true;
+        try {
+          options.onConnect?.({ reconnect, ...(workspaceId ? { workspaceId } : {}) });
+          if (reconnect) options.onReconnect?.();
+        } catch (error) {
+          options.onError?.(error);
+        }
+      };
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
         armWatchdog();
         buffer += decoder.decode(value, { stream: true });
+        // SSE permits CRLF as well as LF. Normalize only after appending so a
+        // CR/LF pair split across transport chunks is still handled.
+        buffer = buffer.replace(/\r\n/g, '\n');
         let sep: number;
         while ((sep = buffer.indexOf('\n\n')) !== -1) {
           const rawEvent = buffer.slice(0, sep);
@@ -201,9 +227,72 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
             if (line.startsWith('event:')) eventName = line.slice(6).trim();
             else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
           }
-          if (eventName !== 'workspace-event') continue; // ready/heartbeat feed the watchdog only
-          const event = parseHubWorkspaceEvent(dataLines.join('\n'));
-          if (event) options.onEvent(event);
+          const data = dataLines.join('\n');
+          if (eventName === 'ready') {
+            let actualWorkspaceId: string | undefined;
+            try {
+              const parsed = JSON.parse(data) as { workspaceId?: unknown };
+              if (typeof parsed.workspaceId === 'string' && parsed.workspaceId.trim()) {
+                actualWorkspaceId = parsed.workspaceId.trim();
+              }
+            } catch {
+              // Reported through the common invalid-ready path below.
+            }
+            if (!actualWorkspaceId) {
+              options.onDrop?.({
+                reason: 'invalid-ready',
+                eventName,
+                ...(endpoint.workspaceId
+                  ? { expectedWorkspaceId: endpoint.workspaceId }
+                  : {}),
+              });
+              abortController?.abort();
+              return;
+            }
+            if (endpoint.workspaceId && actualWorkspaceId !== endpoint.workspaceId) {
+              options.onDrop?.({
+                reason: 'workspace-mismatch',
+                eventName,
+                expectedWorkspaceId: endpoint.workspaceId,
+                actualWorkspaceId,
+              });
+              abortController?.abort();
+              return;
+            }
+            scopeVerified = true;
+            notifyVerifiedConnection(actualWorkspaceId);
+            continue;
+          }
+          if (eventName !== 'workspace-event') continue; // heartbeat feeds the watchdog only
+          if (!scopeVerified) {
+            options.onDrop?.({
+              reason: 'unverified-scope',
+              eventName,
+              ...(endpoint.workspaceId
+                ? { expectedWorkspaceId: endpoint.workspaceId }
+                : {}),
+            });
+            continue;
+          }
+          const event = parseHubWorkspaceEvent(data);
+          if (!event) {
+            options.onDrop?.({ reason: 'invalid-payload', eventName });
+            continue;
+          }
+          if (
+            endpoint.workspaceId &&
+            event.workspaceId &&
+            event.workspaceId !== endpoint.workspaceId
+          ) {
+            options.onDrop?.({
+              reason: 'workspace-mismatch',
+              eventName,
+              expectedWorkspaceId: endpoint.workspaceId,
+              actualWorkspaceId: event.workspaceId,
+            });
+            continue;
+          }
+          options.onEvent(event);
         }
       }
     } finally {

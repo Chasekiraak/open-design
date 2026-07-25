@@ -694,6 +694,7 @@ import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { createShouldPublish } from './collab/should-publish.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
+import { readProjectManifest } from './project-locations.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
   createTeamResourceShareService,
@@ -3443,6 +3444,56 @@ export async function startServer({
       };
     },
     resolveSharedProjectOwner,
+    // Catch-up reads the rich catalog exactly once per verified connection
+    // (or missing-project floor). Re-check the active scope after the CLI
+    // await so a concurrent workspace switch cannot feed another team's rows
+    // into this daemon's pull loop.
+    listSharedProjects: async (workspaceId) => {
+      if (!velaCliWorkspaceTeamProjectCatalog) return [];
+      if (activeWorkspace.get()?.trim() !== workspaceId) return [];
+      const projects = await velaCliWorkspaceTeamProjectCatalog.list();
+      if (activeWorkspace.get()?.trim() !== workspaceId) return [];
+      return projects
+        .filter((project) => project.workspaceId === workspaceId && project.access.canView)
+        .map((project) => ({
+          projectId: project.projectId,
+          ownerMemberId: project.ownerMemberId,
+        }));
+    },
+    hasMaterializedProject: async (projectId) => {
+      const project = getProject(db, projectId);
+      if (!project) return false;
+      const projectDir = resolveProjectShareDir(
+        PROJECTS_DIR,
+        projectId,
+        project,
+        resolveProjectDir,
+      );
+      return (await readProjectManifest(projectDir)) != null;
+    },
+    materializedVersion: (target) =>
+      teamResourceVersions.get(
+        target.workspaceId,
+        'project-content',
+        projectResourceIdFor(target.projectId, {
+          teamId: target.resourceTeamId,
+          memberId: target.ownerMemberId,
+          role: 'member',
+          lifecycleState: 'active',
+          workspaceType: 'team',
+        }),
+      ),
+    // The resource is owner-scoped; the same captured team/owner principal is
+    // used by the shared pull below. The member session remains the transport
+    // credential, while Vela validates the active workspace server-side.
+    publishedHead: (target) =>
+      collab.publishedHead(target.projectId, {
+        teamId: target.resourceTeamId,
+        memberId: target.ownerMemberId,
+        role: 'member',
+        lifecycleState: 'active',
+        workspaceType: 'team',
+      }),
     pullSharedProject: (target) =>
       collabSyncRoutes.pullSharedProject(target.projectId, {
         workspaceId: target.workspaceId,
@@ -3454,15 +3505,47 @@ export async function startServer({
     // project-scoped SSE. Once an inbound pull has actually materialized the
     // tree, nudge that surface so its failed pre-pull cover scan runs again
     // immediately instead of waiting for the 15s refresh floor.
-    onPulled: ({ projectId, workspaceId }) =>
+    onPulled: async (target, version) => {
+      await teamResourceVersions.set(
+        target.workspaceId,
+        'project-content',
+        projectResourceIdFor(target.projectId, {
+          teamId: target.resourceTeamId,
+          memberId: target.ownerMemberId,
+          role: 'member',
+          lifecycleState: 'active',
+          workspaceType: 'team',
+        }),
+        String(version),
+      );
       emitWorkspaceEvent({
         type: 'team-project-content-ready',
-        projectId,
-        workspaceId,
+        projectId: target.projectId,
+        workspaceId: target.workspaceId,
         at: Date.now(),
-      }),
+      });
+    },
     onError: (error) =>
       console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
+    onCatchUp: (event) => {
+      if (event.phase === 'skipped') {
+        console.info(
+          `[od] shared-project content catch-up skipped mode=${event.mode} reason=${event.reason ?? 'unknown'}`,
+        );
+        return;
+      }
+      if (event.phase === 'started') {
+        console.info(
+          `[od] shared-project content catch-up started mode=${event.mode} workspaceId=${event.workspaceId ?? 'unknown'}`,
+        );
+        return;
+      }
+      console.info(
+        `[od] shared-project content catch-up completed mode=${event.mode} ` +
+          `workspaceId=${event.workspaceId ?? 'unknown'} scanned=${event.scanned ?? 0} ` +
+          `candidates=${event.candidates ?? 0} heads=${event.heads ?? 0} complete=${event.complete === true}`,
+      );
+    },
   });
   // Stale-while-revalidate the member directory keyed on the active workspace.
   // The web shell re-reads members on every navigation (and several mounted
@@ -3530,7 +3613,15 @@ export async function startServer({
     // the poller's own ~15s-cadence path to the same fix the hub push gets
     // below via `handleHubTeamProjectsChanged`. See
     // `collab/workspace-projects-reconciler.ts`.
-    emit: (payload) => handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote),
+    emit: (payload) => {
+      handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote);
+      if (payload.type === 'team-projects-changed') {
+        const workspaceId = activeWorkspace.get()?.trim();
+        if (workspaceId) {
+          void proactiveContentPull.materializeMissingProjects(workspaceId);
+        }
+      }
+    },
     onError: (error) => console.warn('[od] workspace invalidation poll error:', error),
   });
   workspaceInvalidationPoller.start();
@@ -3565,21 +3656,49 @@ export async function startServer({
       const session = readVelaControlApiContext(process.env);
       if (!session?.controlKey || !session.apiUrl) return null;
       const workspaceId = activeWorkspace.get()?.trim();
+      if (!workspaceId) return null;
       return {
         url: new URL('/api/v1/collab/events', session.apiUrl).toString(),
+        workspaceId,
         headers: {
           authorization: `Bearer ${session.controlKey}`,
-          ...(workspaceId ? { 'x-vela-workspace-id': workspaceId } : {}),
+          'x-vela-workspace-id': workspaceId,
         },
       };
     },
+    onStateChange: (state) => {
+      console.info(`[od] hub events channel ${state}`);
+    },
+    onConnect: ({ reconnect, workspaceId }) => {
+      console.info(
+        `[od] hub events workspace verified workspaceId=${workspaceId ?? 'unknown'} reconnect=${reconnect}`,
+      );
+      if (workspaceId) {
+        void proactiveContentPull.catchUpPublishedHeads(workspaceId);
+      }
+    },
+    onDrop: ({ reason, eventName, expectedWorkspaceId, actualWorkspaceId }) => {
+      console.warn(
+        `[od] hub event dropped reason=${reason} event=${eventName} ` +
+          `expectedWorkspaceId=${expectedWorkspaceId ?? 'unknown'} ` +
+          `actualWorkspaceId=${actualWorkspaceId ?? 'unknown'}`,
+      );
+    },
     onEvent: (event) => {
+      console.info(
+        `[od] hub workspace event received type=${event.type} ` +
+          `workspaceId=${event.workspaceId ?? 'unknown'} ` +
+          `projectId=${event.projectId ?? 'unknown'} version=${event.version ?? 'unknown'}`,
+      );
       switch (event.type) {
         case 'team-projects-changed': {
           // Catalog changed (share/unshare). Refresh the display cache and
           // signal the web, AND run a real `workspace_projects`
           // reconciliation pass — see `collab/workspace-projects-reconciler.ts`.
           handleHubTeamProjectsChanged(emitTeamProjectsChangedDeduped, reconcileWorkspaceProjectsFromRemote);
+          if (event.workspaceId) {
+            void proactiveContentPull.materializeMissingProjects(event.workspaceId);
+          }
           break;
         }
         case 'project-metadata-changed': {

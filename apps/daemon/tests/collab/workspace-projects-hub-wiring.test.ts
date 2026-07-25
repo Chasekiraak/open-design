@@ -69,9 +69,15 @@ describe('handleHubTeamProjectsChanged', () => {
       resolveDone = resolve;
     });
 
-    const frame = 'event: workspace-event\ndata: {"type":"team-projects-changed","at":123}\n\n';
+    const readyFrame = 'event: ready\ndata: {"workspaceId":"w1"}\n\n';
+    const frame =
+      'event: workspace-event\ndata: {"type":"team-projects-changed","workspaceId":"w1","at":123}\n\n';
     const subscriber = startHubEventsSubscriber({
-      resolveEndpoint: async () => ({ url: 'https://hub/api/v1/collab/events', headers: {} }),
+      resolveEndpoint: async () => ({
+        url: 'https://hub/api/v1/collab/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
       onEvent: (event) => {
         expect(parseHubWorkspaceEvent(JSON.stringify(event))).toEqual(event);
         if (event.type === 'team-projects-changed') {
@@ -79,7 +85,7 @@ describe('handleHubTeamProjectsChanged', () => {
           resolveDone();
         }
       },
-      fetchImpl: async () => sseResponse([frame]),
+      fetchImpl: async () => sseResponse([readyFrame, frame]),
     });
 
     try {
@@ -171,7 +177,7 @@ describe('server.ts wiring (source boundary)', () => {
     expect(caseNames).toEqual(['team-projects-changed']);
   });
 
-  it('wires the workspace-invalidation poller emit through handlePolledWorkspaceInvalidation', () => {
+  it('wires poller invalidations through reconciliation and missing-project materialization', () => {
     const anchor = 'createWorkspaceInvalidationPoller({';
     const start = source.indexOf(anchor);
     expect(start, 'expected to find createWorkspaceInvalidationPoller(...) in server.ts').toBeGreaterThan(-1);
@@ -189,6 +195,11 @@ describe('server.ts wiring (source boundary)', () => {
     }
     expect(depth, 'expected createWorkspaceInvalidationPoller({...}) braces to balance').toBe(0);
     const configBody = source.slice(start, i + 1);
-    expect(configBody).toMatch(/emit:\s*\(payload\)\s*=>\s*handlePolledWorkspaceInvalidation\(/);
+    expect(configBody).toContain(
+      'handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote);',
+    );
+    expect(configBody).toMatch(
+      /if \(payload\.type === 'team-projects-changed'\) \{[\s\S]*?proactiveContentPull\.materializeMissingProjects\(workspaceId\)/,
+    );
   });
 });
