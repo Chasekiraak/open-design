@@ -1594,11 +1594,11 @@ button.home-hero__capability-word:focus-visible {
   border-radius: 8px;
   /* Mix the green tint into the app's regular glass material instead of a
      transparent wash. The surface stays visibly frosted over cards below it. */
-  background: color-mix(in srgb, var(--green) 16%, var(--glass-regular));
+  background: color-mix(in srgb, var(--green) 16%, var(--material-thick));
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
   box-shadow: 0 10px 28px color-mix(in srgb, var(--green) 18%, transparent);
-  color: color-mix(in srgb, var(--text) 82%, var(--green));
+  color: color-mix(in srgb, var(--text-strong) 88%, var(--green));
   font-size: 11.5px;
   line-height: 1.4;
   pointer-events: none;
@@ -1613,7 +1613,7 @@ button.home-hero__capability-word:focus-visible {
   border-top: 1px solid color-mix(in srgb, var(--green) 48%, var(--green-border));
   border-left: 1px solid color-mix(in srgb, var(--green) 48%, var(--green-border));
   z-index: 2;
-  background: color-mix(in srgb, var(--green) 16%, var(--glass-regular));
+  background: color-mix(in srgb, var(--green) 16%, var(--material-thick));
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
   content: '';
@@ -1626,7 +1626,7 @@ button.home-hero__capability-word:focus-visible {
   left: 17px;
   width: 18px;
   height: 2px;
-  background: color-mix(in srgb, var(--green) 16%, var(--glass-regular));
+  background: color-mix(in srgb, var(--green) 16%, var(--material-thick));
   content: '';
 }
 .home-hero__design-system-guide[data-placement='above'] {
