@@ -5350,5 +5350,16 @@ export interface Dict {
   'dsFlow.workspaceUpdatedSynced': string;
   'dsFlow.workspaceUpdatedWithAudit': string;
   'dsFlow.yes': string;
+  'pluginDetail.backToList': string;
+  'pluginDetail.quickCommands': string;
+  'pluginDetail.noQuickCommands': string;
+  'pluginDetail.dataConnections': string;
+  'pluginDetail.noDataConnections': string;
+  'pluginDetail.knowledgeSkills': string;
+  'pluginDetail.noKnowledgeSkills': string;
+  'pluginDetail.officialBadge': string;
+  'pluginDetail.loadFailed': string;
+  'pluginDetail.applyFailed': string;
+  'pluginDetail.examples': string;
   'common.dismiss': string;
 }
