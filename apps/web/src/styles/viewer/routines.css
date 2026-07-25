@@ -2253,6 +2253,18 @@
   box-shadow: none;
   outline: none;
 }
+/* recvqg3CzK8GcT: the model mark floats between two solid capsules whose ink
+   sits inset from their boxes — to the LEFT the mode pill's × glyph is ~17px
+   of whitespace away (× button slack + pill trailing padding), while to the
+   RIGHT only the 4px row gap + 4px trigger padding (~9px) separated the mark
+   from the run/send capsule's edge, so the icon read as glued to the button.
+   The trigger never paints its hitbox (hover stays transparent above), so ink
+   distance is the only spacing the eye can see; this margin makes the right
+   ink gap match the left one (17px ↔ 17px). */
+.app .composer-row .avatar-agent-trigger,
+.chat-composer-fixed-layer .composer-row .avatar-agent-trigger {
+  margin-inline-end: 8px;
+}
 /* Hide the dropdown chevron so only the agent mark / model name shows. The
    chevron is RemixIcon's trailing glyph — this app renders Remix glyphs as
    inline `<svg>` rather than the icon font (packaged `od://` documents can't
