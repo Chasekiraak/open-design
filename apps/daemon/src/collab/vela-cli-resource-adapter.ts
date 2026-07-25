@@ -78,6 +78,7 @@ export interface VelaCliResourceAdapterOptions {
 interface VelaVersionRecord {
   id?: string;
   version?: number;
+  versionId?: string;
 }
 
 export interface VelaResourceSnapshotRecord {
@@ -147,17 +148,23 @@ export function createVelaCliResourceAdapter(
     },
 
     async pull({ projectId, principal }) {
-      await gated(async () => {
+      return gated(async () => {
         const dir = await resolvePullDir(projectId);
         let lastError: unknown;
         const resourceIds = resourceIdsFor(projectId, principal);
         for (const [index, resourceId] of resourceIds.entries()) {
           try {
-            await run(
+            const out = await run(
               ['pull', kind, resourceId, dir, '--ref', PUBLISHED_REF, '--json'],
               principal?.teamId,
             );
-            return;
+            const materialized = parseVersion(out);
+            if (!materialized) {
+              throw new Error(
+                'vela resource pull response is missing the materialized version',
+              );
+            }
+            return materialized;
           } catch (error) {
             lastError = error;
             if (
@@ -167,7 +174,7 @@ export function createVelaCliResourceAdapter(
           }
         }
         throw lastError;
-      }, undefined);
+      }, null);
     },
 
     async unpublish({ projectId, principal }) {
@@ -199,11 +206,14 @@ function parseVersion(
   if (typeof parsed.version !== 'number') {
     throw new Error('vela resource response has an invalid version');
   }
+  const versionId = typeof parsed.versionId === 'string' && parsed.versionId.trim()
+    ? parsed.versionId.trim()
+    : typeof parsed.id === 'string' && parsed.id.trim()
+      ? parsed.id.trim()
+      : null;
   return {
     version: parsed.version,
-    ...(typeof parsed.id === 'string' && parsed.id.trim()
-      ? { versionId: parsed.id.trim() }
-      : {}),
+    ...(versionId ? { versionId } : {}),
   };
 }
 

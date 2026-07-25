@@ -781,7 +781,7 @@ describe('collab sync routes', () => {
             throw new Error('resource hub should not be called');
           },
           syncLatest: async () => null,
-          pull: async () => {},
+          pull: async () => null,
           unpublish: async () => {},
         },
       },
@@ -1227,7 +1227,7 @@ describe('collab sync routes', () => {
             throw new Error('resource hub unavailable');
           },
           syncLatest: async () => null,
-          pull: async () => {},
+          pull: async () => null,
           unpublish: async () => {},
         },
       },
@@ -1687,7 +1687,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     }, {
       adapter: {
         publish: vi.fn(async () => ({ version: 5 })),
-        pull: vi.fn(async () => undefined),
+        pull: vi.fn(async () => ({ version: 5 })),
         syncLatest: vi.fn(async () => ({ version: 5 })),
       },
     });
@@ -1698,7 +1698,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
   });
 
   it('fails closed when the authoritative shared-project lookup throws for a scoped pull', async () => {
-    const adapterPull = vi.fn(async () => undefined);
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
     const store = fakeProjectStore();
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
@@ -1729,7 +1729,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
         workspaceId: 'ws-other',
         teamId: 'ws-other',
       });
-    const adapterPull = vi.fn(async () => undefined);
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
     const store = fakeProjectStore();
     const api = await startSyncServer({ current }, {
       projectStore: store,
@@ -1771,6 +1771,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     const revoked = vi.fn();
     const adapterPull = vi.fn(async () => {
       await pullGate;
+      return { version: 5 };
     });
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
@@ -1832,7 +1833,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     }, {
       adapter: {
         publish: vi.fn(async () => ({ version: 5 })),
-        pull: vi.fn(async () => undefined),
+        pull: vi.fn(async () => ({ version: 5 })),
         syncLatest: vi.fn(async () => ({ version: 5 })),
       },
     });
@@ -1866,6 +1867,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     });
     const adapterPull = vi.fn(async () => {
       await pullGate;
+      return { version: 5 };
     });
     const syncLatest = vi.fn(async () => ({ version: 5 }));
     const publish = vi.fn(async () => ({ version: 5 }));

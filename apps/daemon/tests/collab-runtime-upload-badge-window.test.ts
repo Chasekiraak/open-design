@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCollabRuntime, type CollabRuntime } from '../src/collab/runtime.js';
 
 // recvqghymxqQQq follow-up: characterizes how long `syncState` actually stays
@@ -36,6 +36,26 @@ describe('collab runtime — owner upload-badge transient window', () => {
       // — comfortably under CollabClient's 5_000ms DEFAULT_STATUS_POLL_MS.
       await new Promise((resolve) => setTimeout(resolve, 600));
       expect(runtime.projectSyncState(projectId, principal)).toBe('synced');
+    } finally {
+      runtime.dispose();
+    }
+  });
+});
+
+describe('collab runtime — member pull materialized version', () => {
+  it('returns the version reported by the pull instead of a newer post-pull head', async () => {
+    const syncLatest = vi.fn(async () => ({ version: 2 }));
+    const runtime = createCollabRuntime({
+      adapter: {
+        publish: async () => null,
+        pull: async () => ({ version: 1, versionId: 'v1' }),
+        syncLatest,
+      },
+    });
+
+    try {
+      await expect(runtime.pullLatest('shared-project')).resolves.toEqual({ version: 1 });
+      expect(syncLatest).not.toHaveBeenCalled();
     } finally {
       runtime.dispose();
     }

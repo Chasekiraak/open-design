@@ -41,9 +41,12 @@ export interface ResourcePublishAdapter {
   /**
    * Materialize the published tree into the member's local copy. Optional: the
    * local stub has no bytes to fetch; the real hub adapter fetches the missing
-   * blobs and writes the files. The scheduler decides *when* to pull.
+   * blobs and writes the files. The scheduler decides *when* to pull. A real
+   * materializer must return the exact version it landed on disk; a later head
+   * read is not equivalent because the ref may advance while bytes are in
+   * flight.
    */
-  pull?(input: ResourcePublishInput): Promise<void>;
+  pull?(input: ResourcePublishInput): Promise<PublishedResourceVersion | null>;
   /**
    * Remove the project from the shared team index. Existing immutable versions may
    * remain in the hub, but team members should no longer discover/pull it from the

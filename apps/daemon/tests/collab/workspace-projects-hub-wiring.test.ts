@@ -202,4 +202,14 @@ describe('server.ts wiring (source boundary)', () => {
       /if \(payload\.type === 'team-projects-changed'\) \{[\s\S]*?proactiveContentPull\.materializeMissingProjects\(workspaceId\)/,
     );
   });
+
+  it('disposes proactive pull retry timers during daemon shutdown', () => {
+    const anchor = 'const cleanupDaemonBackgroundWork = () => {';
+    const start = source.indexOf(anchor);
+    expect(start, 'expected daemon background cleanup in server.ts').toBeGreaterThan(-1);
+    const end = source.indexOf('};', start);
+    expect(end, 'expected daemon background cleanup to close').toBeGreaterThan(start);
+    const cleanupBody = source.slice(start, end + 2);
+    expect(cleanupBody).toContain('proactiveContentPull.dispose();');
+  });
 });

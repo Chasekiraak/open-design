@@ -10785,6 +10785,7 @@ export async function startServer({
       routineService?.stop();
       workspaceInvalidationPoller.stop();
       hubEventsSubscriber.stop();
+      proactiveContentPull.dispose();
     };
     const shutdownDaemonRuns = async () => {
       if (daemonShutdownStarted) return;
