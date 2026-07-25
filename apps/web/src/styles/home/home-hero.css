@@ -1585,7 +1585,9 @@ button.home-hero__capability-word:focus-visible {
 .home-hero__design-system-guide {
   position: absolute;
   z-index: 4;
-  top: calc(100% + 9px);
+  --home-hero-guide-enter-y: -6px;
+  --home-hero-guide-recoil-y: 1px;
+  top: calc(100% + 4px);
   left: 0;
   width: max-content;
   max-width: min(320px, calc(100vw - 48px));
@@ -1603,6 +1605,24 @@ button.home-hero__capability-word:focus-visible {
   line-height: 1.4;
   pointer-events: none;
   isolation: isolate;
+  transform-origin: 22px 0;
+  animation: home-hero-guidance-enter 360ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+/* Shared entrance for contextual Home guidance: it travels out from its
+   anchor, lands with a small overshoot, then settles. */
+@keyframes home-hero-guidance-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(var(--home-hero-guide-enter-y)) scale(0.97);
+  }
+  68% {
+    opacity: 1;
+    transform: translateY(var(--home-hero-guide-recoil-y)) scale(1.012);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .home-hero__design-system-guide::before {
   position: absolute;
@@ -1630,8 +1650,11 @@ button.home-hero__capability-word:focus-visible {
   content: '';
 }
 .home-hero__design-system-guide[data-placement='above'] {
+  --home-hero-guide-enter-y: 6px;
+  --home-hero-guide-recoil-y: -1px;
   top: auto;
-  bottom: calc(100% + 9px);
+  bottom: calc(100% + 4px);
+  transform-origin: 22px 100%;
 }
 .home-hero__design-system-guide[data-placement='above']::before {
   top: auto;
@@ -4319,6 +4342,9 @@ button.home-hero__capability-word:focus-visible {
 }
 @media (prefers-reduced-motion: reduce) {
   .home-hero__ds-row-trigger-icon.is-first-run-guide {
+    animation: none;
+  }
+  .home-hero__design-system-guide {
     animation: none;
   }
   .home-hero__template-card .home-hero__scenario-art-svg {
