@@ -1341,6 +1341,7 @@ test('attachAcpSession does not fail a tool-only AMR turn that emits no assistan
 test('attachAcpSession still fails an AMR turn that produces no text and no tool calls', () => {
   const child = new FakeAcpChild();
   const events: Array<{ event: string; payload: unknown }> = [];
+  const onPromptComplete = vi.fn();
 
   attachAcpSession({
     child: child as never,
@@ -1349,6 +1350,7 @@ test('attachAcpSession still fails an AMR turn that produces no text and no tool
     model: null,
     mcpServers: [],
     modelUnavailableErrorCode: 'AMR_MODEL_UNAVAILABLE',
+    onPromptComplete,
     send: (event, payload) => events.push({ event, payload }),
   });
 
@@ -1362,6 +1364,38 @@ test('attachAcpSession still fails an AMR turn that produces no text and no tool
     (errorEvents[0]?.payload as { message?: string }).message ?? '',
     /without producing any assistant text/,
   );
+  assert.equal(onPromptComplete.mock.calls.length, 0);
+});
+
+test('attachAcpSession reports clean empty completion exactly once without usage', () => {
+  const child = new FakeAcpChild();
+  const events: Array<{ event: string; payload: unknown }> = [];
+  const onPromptComplete = vi.fn();
+
+  attachAcpSession({
+    child: child as never,
+    prompt: 'hello',
+    cwd: '/tmp/od-project',
+    model: null,
+    mcpServers: [],
+    onPromptComplete,
+    send: (event, payload) => events.push({ event, payload }),
+  });
+
+  writeAcpResult(child, 1, {});
+  writeAcpResult(child, 2, { sessionId: 'session-1' });
+  writeAcpResult(child, 3, {});
+  writeAcpResult(child, 3, {});
+
+  assert.equal(onPromptComplete.mock.calls.length, 1);
+  assert.equal(
+    events.filter((entry) =>
+      entry.event === 'agent' &&
+      (entry.payload as { type?: string }).type === 'usage'
+    ).length,
+    0,
+  );
+  assert.deepEqual(events.filter((entry) => entry.event === 'error'), []);
 });
 
 test('attachAcpSession promotes allowlisted OpenCode role-marker ACP errors', () => {

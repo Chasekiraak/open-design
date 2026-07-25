@@ -97,6 +97,7 @@ import {
 import {
   writePromptAndEndStdin,
   applyClaudeStreamJsonRunBookkeeping,
+  assertValidRuntimeDefFirstOutputTimeoutMs,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
   classifyChatRunCloseStatus,
@@ -104,6 +105,7 @@ import {
   resolveAcpStageTimeoutMs,
   resolveActiveInactivityTimeoutMs,
   resolveChatRunArtifactQuietPeriodMs,
+  resolveChatRunFirstOutputTimeoutMs,
   resolveChatRunInactivityTimeoutMs,
   resolveChatRunShutdownGraceMs,
 } from './runtimes/chat-run-lifecycle.js';
@@ -150,6 +152,7 @@ export {
 } from './runtimes/chat-prompt-inputs.js';
 export {
   applyClaudeStreamJsonRunBookkeeping,
+  assertValidRuntimeDefFirstOutputTimeoutMs,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
   classifyChatRunCloseStatus,
@@ -157,6 +160,7 @@ export {
   resolveAcpStageTimeoutMs,
   resolveActiveInactivityTimeoutMs,
   resolveChatRunArtifactQuietPeriodMs,
+  resolveChatRunFirstOutputTimeoutMs,
   resolveChatRunInactivityTimeoutMs,
 } from './runtimes/chat-run-lifecycle.js';
 export {
@@ -6285,7 +6289,7 @@ export async function startServer({
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
-    // Validate the checked-in `inactivityTimeoutMs` hint immediately
+    // Validate the checked-in runtime timeout hints immediately
     // after the runtime def is selected and before any side-effectful
     // setup (auto-memory extract, `.mcp.json` write/unlink,
     // composeSystemPrompt, prompt persistence). A bad def value would
@@ -6294,7 +6298,7 @@ export async function startServer({
     // residue behind (issue #2467 review on PR #2579).
     //
     // Catch is intentionally narrowed to `RangeError`, the only kind
-    // `assertValidRuntimeDefInactivityTimeoutMs` is allowed to throw
+    // the runtime timeout validators are allowed to throw
     // for invalid checked-in values. Anything else (a regression that
     // makes the helper throw on a valid value, an unrelated bug
     // introduced while touching this path) should bubble up to the
@@ -6303,6 +6307,7 @@ export async function startServer({
     // "the runtime def is bad" and burying the real failure.
     try {
       assertValidRuntimeDefInactivityTimeoutMs(def.inactivityTimeoutMs);
+      assertValidRuntimeDefFirstOutputTimeoutMs(def.firstOutputTimeoutMs);
     } catch (err) {
       if (err instanceof RangeError) {
         return design.runs.fail(run, 'AGENT_RUNTIME_DEF_INVALID', err.message);
@@ -8095,6 +8100,8 @@ export async function startServer({
     // earlier, so we keep only the new `runStartTimeMs` declaration.
     const runStartTimeMs = Date.now();
     const inactivityTimeoutMs = resolveChatRunInactivityTimeoutMs(def.inactivityTimeoutMs);
+    const firstOutputTimeoutMs =
+      resolveChatRunFirstOutputTimeoutMs(def.firstOutputTimeoutMs);
     const artifactQuietPeriodMs = resolveChatRunArtifactQuietPeriodMs();
     // Grace before the inactivity watchdog escalates a stalled child from
     // SIGTERM to SIGKILL. Env-tunable like its OD_CHAT_RUN_* cancel-grace
@@ -8104,6 +8111,8 @@ export async function startServer({
       return Number.isFinite(raw) && raw > 0 ? raw : 3_000;
     })();
     let inactivityTimer = null;
+    let firstOutputTimer = null;
+    let firstOutputSeen = false;
     let childStdoutSeen = false;
     let lastAgentEventPhase = 'spawn pending';
     let lastToolResultChars = 0;
@@ -8160,6 +8169,12 @@ export async function startServer({
         inactivityTimer = null;
       }
     };
+    const clearFirstOutputWatchdog = () => {
+      if (firstOutputTimer) {
+        clearTimeout(firstOutputTimer);
+        firstOutputTimer = null;
+      }
+    };
     let forcedChildShutdownTimers = [];
     const clearForcedChildShutdown = () => {
       for (const timer of forcedChildShutdownTimers) clearTimeout(timer);
@@ -8185,9 +8200,10 @@ export async function startServer({
         }, inactivityKillGraceMs * 2),
       ];
     };
-    const failForInactivity = () => {
+    const failForInactivity = (reason: 'inactivity' | 'first_output' = 'inactivity') => {
       if (run.cancelRequested || design.runs.isTerminal(run.status)) return;
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       if (artifactRegistered) {
         // The deliverable already exists. The agent process is either
         // genuinely idle (claude-code's stream-json child sitting on an
@@ -8231,8 +8247,14 @@ export async function startServer({
         }
       }
       if (!stallPayload) {
+        const timeoutMs =
+          reason === 'first_output' ? firstOutputTimeoutMs : inactivityTimeoutMs;
+        const timeoutDescription =
+          reason === 'first_output'
+            ? 'without emitting a first output'
+            : 'without emitting any new output';
         const message =
-          `Agent stalled without emitting any new output for ${Math.round(inactivityTimeoutMs / 1000)}s. ` +
+          `Agent stalled ${timeoutDescription} for ${Math.round(timeoutMs / 1000)}s. ` +
           'The model or CLI likely hung while generating. ' +
           `Phase details: spawned agent ${userFacingAgentLabel(agentId, resolvedBin)}; stdout arrived: ${childStdoutSeen ? 'yes' : 'no'}; ` +
           `last agent event: ${lastAgentEventPhase}; largest tool result observed: ${lastToolResultChars} chars. ` +
@@ -8257,6 +8279,33 @@ export async function startServer({
       if (child && !child.killed) design.runs.signalChild(run, 'SIGTERM');
       scheduleForcedChildShutdown();
     };
+    const armFirstOutputWatchdog = () => {
+      if (firstOutputSeen || firstOutputTimer || firstOutputTimeoutMs <= 0) return;
+      firstOutputTimer = setTimeout(
+        () => failForInactivity('first_output'),
+        firstOutputTimeoutMs,
+      );
+      firstOutputTimer.unref?.();
+    };
+    const noteFirstOutputEvent = (payload) => {
+      const type = payload?.type ? String(payload.type) : '';
+      const statusLabel =
+        type === 'status' && payload?.label ? String(payload.label) : '';
+      const isAcpToolActivity =
+        statusLabel === 'tool_call' || statusLabel === 'tool_call_update';
+      if (
+        type !== 'text_delta' &&
+        type !== 'thinking_delta' &&
+        type !== 'tool_use' &&
+        type !== 'tool_result' &&
+        type !== 'artifact' &&
+        !isAcpToolActivity
+      ) {
+        return;
+      }
+      firstOutputSeen = true;
+      clearFirstOutputWatchdog();
+    };
     const activeInactivityTimeoutMs = () =>
       resolveActiveInactivityTimeoutMs({
         inactivityTimeoutMs,
@@ -8276,6 +8325,8 @@ export async function startServer({
     const noteArtifactRegistered = () => {
       if (artifactRegistered) return;
       artifactRegistered = true;
+      firstOutputSeen = true;
+      clearFirstOutputWatchdog();
       // Switch the watchdog to the shorter quiet-period window
       // immediately so we don't have to wait for the next agent event
       // before the new ceiling takes effect. Call unconditionally:
@@ -8300,6 +8351,7 @@ export async function startServer({
       activeChatAgentEventSinks.set(toolTokenGrant.runId, (payload) => {
         lastAgentEventPhase = summarizeAgentEventForInactivity(payload);
         noteAgentActivity();
+        noteFirstOutputEvent(payload);
         send('agent', payload);
       });
       activeChatRunHandles.set(toolTokenGrant.runId, { noteArtifactRegistered });
@@ -8934,6 +8986,7 @@ export async function startServer({
     function emitGuardedTextDelta(delta: string) {
       const safe = guardTextDelta(delta);
       if (safe.length > 0) {
+        noteFirstOutputEvent({ type: 'text_delta' });
         send('agent', { type: 'text_delta', delta: safe });
       }
       if (runGuard.contaminated && !runWarned) {
@@ -9077,6 +9130,7 @@ export async function startServer({
       // stream BEFORE the send, so run.lastTodoSnapshot / run.truncatedMidTurn are
       // set by the time finish() derives run.endedWithUnfinishedWork (#1247/#1060).
       captureRunWorkCompletenessSignals(run, ev);
+      noteFirstOutputEvent(ev);
       send('agent', ev);
       observeToolEventForLoop(ev);
     }
@@ -9390,14 +9444,27 @@ export async function startServer({
           : {}),
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
+        onPromptComplete: () => clearFirstOutputWatchdog(),
         send: (event, data) => {
           if (event === 'error') {
+            clearFirstOutputWatchdog();
             if (run.cancelRequested) return;
             acpFatalErrorObservedBeforeCancellation = true;
             run.runtimeFailureObservedBeforeCancellation = true;
           }
           if (event === 'agent') {
             lastAgentEventPhase = summarizeAgentEventForInactivity(data);
+            if (
+              data?.type === 'status' &&
+              data.label === 'waiting_for_first_output'
+            ) {
+              armFirstOutputWatchdog();
+            } else if (data?.type !== 'text_delta') {
+              // Raw ACP text may be entirely consumed by title-marker or role
+              // filtering. Only the guarded non-empty emission below counts
+              // as substantive first output.
+              noteFirstOutputEvent(data);
+            }
           }
           noteAgentActivity();
           if (event === 'error') flushVisibleAgentStderr();
@@ -9535,6 +9602,7 @@ export async function startServer({
 
     child.on('error', (err) => {
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       cleanupPromptFile();
       flushVisibleAgentStderr();
       revokeToolToken('child_exit');
@@ -9546,6 +9614,7 @@ export async function startServer({
     child.on('close', async (code, signal) => {
       try {
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       clearForcedChildShutdown();
       flushVisibleAgentStderr();
       if (watchdogRetryRestarted) {
