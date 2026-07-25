@@ -139,11 +139,69 @@ describe('AmrBalanceDialog', () => {
     });
   });
 
-  // No workspace console URL (personal workspace, or the context read has not
-  // landed): the CTA must still go somewhere, not become a dead end — and it
-  // must land on the pricing modal (`view=plans`), not the bare wallet page,
-  // otherwise the user has to hunt for the upgrade dialog themselves (dogfood
-  // acceptance regression: recvpYEiH019cD).
+  // recvpYEiH019cD (failed acceptance round, third account, $0 personal
+  // workspace): B returns a `workspaceSettingsUrl` for a PERSONAL workspace
+  // too, so "console URL present" stopped implying "team" — the CTA routed a
+  // personal account onto the team dashboard's `billing=checkout` deep link,
+  // which opens the Upgrade-Personal-workspace-to-Team dialog in an error
+  // state ("Team plan unavailable" / 3-seat minimum). The axis is the
+  // workspace TYPE: personal lands on B's wallet pricing modal (`view=plans`,
+  // verified live to auto-open for the same session), never a team billing
+  // deep link.
+  it('lands the upgrade CTA on the personal pricing modal for a personal workspace', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/api/workspace/context')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          context: {
+            workspaceId: 'ws-p',
+            workspaceType: 'personal',
+            planId: null,
+            billingState: 'free',
+            workspaceSettingsUrl: 'https://open-design.ai/console/settings?workspaceId=ws-p',
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      if (url.includes('/api/workspace/billing')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          summary: { workspaceId: 'ws-p', membershipTier: '' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+
+    render(
+      <AmrBalanceDialog
+        reason="insufficient"
+        balanceUsd="0.00"
+        profile="feature-test"
+        entrySource="chat_balance_gate_upgrade"
+        metricsConsent={false}
+        installationId={null}
+        onClose={vi.fn()}
+        onResolved={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      fireEvent.click(screen.getByTestId('amr-balance-dialog-plans'));
+      expect(open).toHaveBeenCalled();
+      const target = new URL(String(open.mock.calls.at(-1)?.[0]));
+      expect(target.pathname).toBe('/console/wallet');
+      expect(target.searchParams.get('view')).toBe('plans');
+      // Never a team billing deep link for a personal workspace.
+      expect(target.searchParams.get('billing')).toBeNull();
+      // The deep link keeps the workspace this client is pinned to.
+      expect(target.searchParams.get('workspaceId')).toBe('ws-p');
+    });
+  });
+
+  // No workspace console URL (context read has not landed / signed out): the
+  // CTA must still go somewhere, not become a dead end — and it must land on
+  // the pricing modal (`view=plans`), not the bare wallet page, otherwise the
+  // user has to hunt for the upgrade dialog themselves (dogfood acceptance
+  // regression: recvpYEiH019cD).
   it('falls back to the profile plans deep link when no console URL is known', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));

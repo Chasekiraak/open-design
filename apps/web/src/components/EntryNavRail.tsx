@@ -49,6 +49,7 @@ import {
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
 import { hasTeamPlan, resolvePlanLabelTier } from '../collab/team-plan';
+import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import type { EntryHomeView } from '../router';
 
 const REPO_URL = 'https://github.com/nexu-io/open-design';
@@ -136,7 +137,7 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
 // segment, falling back to the raw settings URL when the path can't be rewritten.
 export function teamConsoleUrl(
   base: string,
-  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team',
+  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team' | 'plans',
   // Only consulted for `section: 'upgrade'` — see the comment below on why the
   // deep-link param depends on it.
   options?: { hasActivePlan?: boolean },
@@ -163,9 +164,16 @@ export function teamConsoleUrl(
   // `options.hasActivePlan` (callers pass `hasTeamPlan(context, billing)` from
   // `collab/team-plan.ts`) picks the branch that actually matches the team's
   // current subscription state instead of hardcoding the never-subscribed one.
+  // `plans` is the PERSONAL upgrade deep link: the wallet page with B's
+  // pricing modal auto-opened (`view=plans`) — verified live to auto-open for
+  // a personal-workspace session (recvpYEiH019cD). For a TEAM workspace B
+  // redirects this exact URL into `dashboard?billing=checkout` itself
+  // (vela wallet.tsx `teamWalletCheckoutRedirectPath`), so even a misrouted
+  // team session degrades to the first-checkout dialog, not a dead page.
   const path =
     section === 'members' ? 'team'
     : section === 'billing' ? 'wallet'
+    : section === 'plans' ? 'wallet'
     : section === 'upgrade' ? 'dashboard'
     : section === 'create-team' ? 'dashboard'
     : section;
@@ -181,6 +189,7 @@ export function teamConsoleUrl(
     if (section === 'upgrade') {
       url.searchParams.set('billing', options?.hasActivePlan ? 'plan' : 'checkout');
     }
+    if (section === 'plans') url.searchParams.set('view', 'plans');
     // recvq725Kx0rM4 / recvqfXzHtY5wg: `create-team` opens B's create-workspace
     // dialog via `?workspace=create`. A prior fix (675878434) removed this,
     // reasoning that B's route source had no handler for it — true of the repo
@@ -194,6 +203,55 @@ export function teamConsoleUrl(
   } catch {
     return base;
   }
+}
+
+/**
+ * Where an 「升级」/「升级套餐」 affordance sends THIS workspace — the one
+ * decision point shared by every upgrade entry (EntryNavRail's credits chip
+ * and invite dialog, AmrBalanceDialog's balance-gate CTA, RecentProjectsStrip's
+ * invite dialog, SettingsDialog's AMR-card upgrade buttons), so the three
+ * subscription states cannot drift apart per entry point.
+ *
+ * The axis is the WORKSPACE TYPE, never "does a console URL exist": B returns
+ * `workspaceSettingsUrl` for a personal workspace too (it has a settings page
+ * like any other), so URL-presence stopped implying "team" — that premise
+ * routed a $0-balance personal account onto the team dashboard's
+ * `billing=checkout` deep link, which opens the Upgrade-to-Team dialog in an
+ * error state ("Team plan unavailable" / 3-seat minimum). recvpYEiH019cD,
+ * verified live with a real personal-workspace session.
+ *
+ *   - personal (or type unknown) → `wallet?view=plans`, B's personal pricing
+ *     modal — verified live to auto-open for the same session.
+ *   - team, never subscribed → `dashboard?billing=checkout` (first-checkout
+ *     dialog); team, already subscribed → `dashboard?billing=plan`
+ *     (change-plan dialog). See `teamConsoleUrl` for why B needs the split.
+ *
+ * Callers that must ALWAYS produce a URL (dialog CTAs) pass `fallbackProfile`
+ * and receive the profile-keyed personal plans deep link when no console URL
+ * is known (signed out / context not landed); callers that instead hide the
+ * affordance get null.
+ */
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+  options: { fallbackProfile: string | null | undefined },
+): string;
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+): string | null;
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+  options?: { fallbackProfile: string | null | undefined },
+): string | null {
+  const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
+  if (settingsUrl) {
+    return context?.workspaceType === 'team'
+      ? teamConsoleUrl(settingsUrl, 'upgrade', { hasActivePlan: hasTeamPlan(context, billing) })
+      : teamConsoleUrl(settingsUrl, 'plans');
+  }
+  return options ? amrPlansUrlForProfile(options.fallbackProfile) : null;
 }
 
 /**
@@ -372,15 +430,13 @@ export function EntryNavRail({
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  // Picks `billing=checkout` vs `billing=plan` on the deep link — see the
-  // `teamConsoleUrl` docblock for why the choice depends on whether this
-  // workspace has ever completed a first checkout.
-  const upgradeHasActivePlan = hasTeamPlan(context, billing);
+  // One decision for both of this rail's upgrade entries (credits chip and
+  // the invite dialog's seat-gate): personal → the wallet pricing modal,
+  // team → checkout vs change-plan by subscription state. See
+  // `workspaceUpgradeUrl` for why the axis is the workspace TYPE.
+  const upgradeUrl = workspaceUpgradeUrl(context, billing);
   const billingUpgradeUrl =
-    context?.billingRecovery?.recoveryUrl?.trim() ||
-    (workspaceSettingsUrl
-      ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade', { hasActivePlan: upgradeHasActivePlan })
-      : null);
+    context?.billingRecovery?.recoveryUrl?.trim() || upgradeUrl;
   // #62: the 积分 row links straight OUT to B's wallet page (usage detail lives
   // there) — no intermediate credits popover in the client, matching #5517.
   const billingWalletUrl = workspaceSettingsUrl
@@ -969,15 +1025,9 @@ export function EntryNavRail({
         canAssignRoles={canInviteMembers}
         availableSeats={context?.seatSummary?.availableSeats}
         onUpgrade={
-          workspaceSettingsUrl
+          upgradeUrl
             ? () => {
-                window.open(
-                  teamConsoleUrl(workspaceSettingsUrl, 'upgrade', {
-                    hasActivePlan: upgradeHasActivePlan,
-                  }),
-                  '_blank',
-                  'noopener,noreferrer',
-                );
+                window.open(upgradeUrl, '_blank', 'noopener,noreferrer');
               }
             : undefined
         }

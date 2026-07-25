@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { teamConsoleUrl } from '../../src/components/EntryNavRail';
+import { teamConsoleUrl, workspaceUpgradeUrl } from '../../src/components/EntryNavRail';
+import type { WorkspaceBillingSummary, WorkspaceCollabContext } from '@open-design/contracts';
 
 // The context's settings URL carries B's ?workspaceId deep-link param; section
 // derivation must land on B's REAL console routes (members live at /team, the
@@ -59,7 +60,101 @@ describe('teamConsoleUrl', () => {
     );
   });
 
+  // recvpYEiH019cD: the personal upgrade path is the wallet page with B's
+  // pricing modal auto-opened. (For a TEAM workspace B redirects this exact
+  // URL into `dashboard?billing=checkout` itself, so even a misrouted team
+  // session degrades to the first-checkout dialog rather than a dead page.)
+  it('deep-links plans into the wallet pricing modal', () => {
+    expect(teamConsoleUrl(base, 'plans')).toBe(
+      'https://web.example/wallet?workspaceId=ws-1&view=plans',
+    );
+  });
+
   it('falls back to the raw URL when it cannot be parsed', () => {
     expect(teamConsoleUrl('not-a-url', 'members')).toBe('not-a-url');
+  });
+});
+
+// recvpYEiH019cD (failed acceptance round): B returns `workspaceSettingsUrl`
+// for a PERSONAL workspace too, so "console URL present" must never be the
+// team/personal axis — `workspaceType` is. One helper decides for all five
+// upgrade entry points (EntryNavRail credits chip + invite dialog,
+// AmrBalanceDialog, RecentProjectsStrip invite dialog, SettingsDialog AMR
+// cards), so the three states cannot drift apart per entry point.
+describe('workspaceUpgradeUrl', () => {
+  const settingsUrl = 'https://web.example/settings?workspaceId=ws-1';
+  const baseContext: WorkspaceCollabContext = {
+    workspaceId: 'ws-1',
+    workspaceType: 'team',
+    workspaceMemberId: 'member-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'free',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: true },
+    permissions: {
+      canManageBilling: true,
+      canManageMembers: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    workspaceSettingsUrl: settingsUrl,
+  };
+  const billingSummary = (membershipTier: string): WorkspaceBillingSummary => ({
+    workspaceId: 'ws-1',
+    membershipTier,
+    totalAvailableCredits: 0,
+    subscriptionCredits: 0,
+    rechargeCredits: 0,
+    balanceUsd: '0.00',
+    subscriptionStatus: membershipTier ? 'active' : 'none',
+    availableActions: [],
+  });
+
+  it('sends a personal workspace to the wallet pricing modal, never a team billing deep link', () => {
+    const context: WorkspaceCollabContext = {
+      ...baseContext,
+      workspaceType: 'personal',
+    };
+    expect(workspaceUpgradeUrl(context, null)).toBe(
+      'https://web.example/wallet?workspaceId=ws-1&view=plans',
+    );
+  });
+
+  it('sends a never-subscribed team to the first-checkout dialog', () => {
+    expect(workspaceUpgradeUrl(baseContext, null)).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
+    );
+    expect(workspaceUpgradeUrl(baseContext, billingSummary(''))).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
+    );
+  });
+
+  it('sends an already-subscribed team to the change-plan dialog', () => {
+    expect(
+      workspaceUpgradeUrl({ ...baseContext, planId: 'team_pro', billingState: 'active' }, null),
+    ).toBe('https://web.example/dashboard?workspaceId=ws-1&billing=plan');
+    expect(workspaceUpgradeUrl(baseContext, billingSummary('team_pro'))).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=plan',
+    );
+  });
+
+  it('returns null without a console URL so entry points hide the affordance', () => {
+    const context: WorkspaceCollabContext = { ...baseContext };
+    delete context.workspaceSettingsUrl;
+    expect(workspaceUpgradeUrl(context, null)).toBeNull();
+    expect(workspaceUpgradeUrl(null, null)).toBeNull();
+  });
+
+  it('falls back to the profile plans deep link for CTA callers that must always link somewhere', () => {
+    expect(workspaceUpgradeUrl(null, null, { fallbackProfile: 'feature-test' })).toBe(
+      'https://amr-feature.powerformer.net/wallet?source=open_design&view=plans',
+    );
   });
 });

@@ -91,13 +91,18 @@ describe('EntryNavRail workspace-switcher invite — seat gate (#115 / recvpZAfG
     const confirm = dialogScope.getByRole('button', { name: /确认并邀请/ });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
 
-    // The upgrade CTA opens B's console (teamConsoleUrl(..., 'upgrade')), not a
-    // dead end — the user cannot invite, but they always have a next step.
+    // The upgrade CTA opens B's console (workspaceUpgradeUrl), not a dead
+    // end — the user cannot invite, but they always have a next step. This
+    // fixture is a PERSONAL workspace, so the destination is the wallet's
+    // pricing modal (`view=plans`) — never the team dashboard's
+    // `billing=checkout` deep link, which opens the Upgrade-to-Team dialog in
+    // an error state for a personal workspace (recvpYEiH019cD).
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     fireEvent.click(dialogScope.getByRole('button', { name: /查看席位与套餐/ }));
     expect(openSpy).toHaveBeenCalledTimes(1);
     const [url] = openSpy.mock.calls[0]!;
-    expect(String(url)).toContain('/console/dashboard');
-    expect(String(url)).toContain('billing=checkout');
+    expect(String(url)).toContain('/console/wallet');
+    expect(String(url)).toContain('view=plans');
+    expect(String(url)).not.toContain('billing=checkout');
   });
 });

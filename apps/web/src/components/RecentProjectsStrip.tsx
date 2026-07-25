@@ -25,8 +25,7 @@ import {
   useWorkspaceBilling,
   useWorkspaceContext,
 } from '../collab/useWorkspaceContext';
-import { hasTeamPlan } from '../collab/team-plan';
-import { teamConsoleUrl } from './EntryNavRail';
+import { workspaceUpgradeUrl } from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 
@@ -205,6 +204,11 @@ export function RecentProjectsStrip({
       workspaceContext?.permissions.canShareProjects === true);
   const canInvite =
     canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true;
+  // The invite dialog's seat-gate upgrade CTA: personal workspace → B's wallet
+  // pricing modal, team → checkout vs change-plan by subscription state. One
+  // shared decision point — see `workspaceUpgradeUrl` in EntryNavRail.tsx
+  // (recvpYEiH019cD).
+  const inviteUpgradeUrl = workspaceUpgradeUrl(workspaceContext, workspaceBilling);
   const canManageCollection =
     canManageProjectCollection ??
     (workspaceContext?.permissions.canManageSharedResources === true ||
@@ -1365,15 +1369,9 @@ export function RecentProjectsStrip({
         canAssignRoles={canInvite}
         availableSeats={workspaceContext?.seatSummary?.availableSeats}
         onUpgrade={
-          workspaceContext?.workspaceSettingsUrl
+          inviteUpgradeUrl
             ? () => {
-                window.open(
-                  teamConsoleUrl(workspaceContext.workspaceSettingsUrl!, 'upgrade', {
-                    hasActivePlan: hasTeamPlan(workspaceContext, workspaceBilling),
-                  }),
-                  '_blank',
-                  'noopener,noreferrer',
-                );
+                window.open(inviteUpgradeUrl, '_blank', 'noopener,noreferrer');
               }
             : undefined
         }

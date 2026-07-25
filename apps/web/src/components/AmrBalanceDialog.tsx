@@ -9,10 +9,8 @@ import {
   attributedAmrUrl,
   recordAmrEntry,
 } from '../analytics/amr-attribution';
-import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { hasTeamPlan } from '../collab/team-plan';
-import { teamConsoleUrl } from './EntryNavRail';
+import { workspaceUpgradeUrl } from './EntryNavRail';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
   amrWalletBalanceUsd,
@@ -97,28 +95,22 @@ export function AmrBalanceDialog({
   // resume the parked task via onResolved. Bounded so an abandoned recharge
   // doesn't poll forever; guarded against double-fires.
   const [watchingWallet, setWatchingWallet] = useState(false);
-  // Where 「升级套餐」 goes. `teamConsoleUrl(_, 'upgrade')` is the one place that
-  // knows B's deep link: it targets the team DASHBOARD (not the settings page)
-  // and appends `billing=checkout` OR `billing=plan` — WHICH one depends on
-  // whether this team has ever completed a first checkout (`hasActivePlan`,
-  // see the `teamConsoleUrl` docblock). Getting this wrong silently opens no
-  // dialog at all: `billing=checkout` only auto-opens for a team that has
-  // never subscribed, confirmed live against a "Team Pro" (already-paying)
-  // workspace (recvpSQKna0LwR) landing on the bare Overview page. Falls back
-  // to `amrPlansUrlForProfile` (the same `view=plans` deep link every other
-  // Upgrade affordance uses — ChatPane, SettingsDialog, AvatarMenu,
-  // InlineModelSwitcher) when the console URL is unavailable (personal
-  // workspace, or the context read has not landed), so the CTA still
-  // auto-opens AMR's own pricing modal instead of landing the user on the
-  // bare wallet page with no popup (acceptance regression).
+  // Where 「升级套餐」 goes. `workspaceUpgradeUrl` is the one decision point for
+  // every upgrade affordance: personal workspace → B's wallet pricing modal
+  // (`view=plans`); team → `billing=checkout` vs `billing=plan` by whether the
+  // team ever completed a first checkout. Getting either branch wrong opens
+  // the wrong dialog — or an error-state one: routing a personal workspace
+  // onto the team `billing=checkout` deep link opened the Upgrade-to-Team
+  // dialog with "Team plan unavailable" / a 3-seat minimum (recvpYEiH019cD,
+  // failed acceptance round). The profile fallback keeps the CTA alive when
+  // no console URL is known (signed out / context not landed) — same
+  // `view=plans` deep link every other Upgrade affordance uses (ChatPane,
+  // AvatarMenu, InlineModelSwitcher).
   const { context: workspaceContext } = useWorkspaceContext();
   const workspaceBilling = useWorkspaceBilling();
-  const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
-  const upgradeUrl = workspaceSettingsUrl
-    ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade', {
-        hasActivePlan: hasTeamPlan(workspaceContext, workspaceBilling),
-      })
-    : amrPlansUrlForProfile(profile);
+  const upgradeUrl = workspaceUpgradeUrl(workspaceContext, workspaceBilling, {
+    fallbackProfile: profile,
+  });
   const resolvedRef = useRef(false);
   const resolveOnce = () => {
     if (resolvedRef.current) return;
