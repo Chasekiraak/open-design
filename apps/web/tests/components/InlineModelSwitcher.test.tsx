@@ -469,6 +469,55 @@ describe('InlineModelSwitcher AMR row', () => {
     });
   });
 
+  it('uses only the explicit team workspace balance, never the account fallback', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'test',
+            user: {
+              id: 'user-1',
+              email: 'manual-amr@example.local',
+            },
+            account: { plan: 'plus', balanceUsd: '247.5087' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=ws-team') {
+        return new Response(
+          JSON.stringify({
+            summary: null,
+            workspaceBalance: {
+              billingScopeVersion: 2,
+              workspaceId: 'ws-team',
+              workspaceMemberId: 'wm-1',
+              balanceUsd: '7.8912',
+              expiresAt: null,
+              updatedAt: '2026-07-26T00:00:00.000Z',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSwitcher();
+    fireEvent.click(screen.getByTestId('inline-model-switcher-chip'));
+
+    const popover = screen.getByTestId('inline-model-switcher-popover');
+    expect(await within(popover).findByText('$7.89')).toBeTruthy();
+    expect(within(popover).queryByText('$247.51')).toBeNull();
+  });
+
   it('prefers fresh signed-in status balance over an older wallet snapshot', async () => {
     let statusCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -601,6 +650,22 @@ describe('InlineModelSwitcher AMR row', () => {
       if (url === '/api/workspace/context') {
         return workspaceContextResponse(teamMemberWorkspaceContext());
       }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=ws-team') {
+        return new Response(
+          JSON.stringify({
+            summary: null,
+            workspaceBalance: {
+              billingScopeVersion: 2,
+              workspaceId: 'ws-team',
+              workspaceMemberId: 'wm-1',
+              balanceUsd: '7.8912',
+              expiresAt: null,
+              updatedAt: '2026-07-26T00:00:00.000Z',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -612,7 +677,7 @@ describe('InlineModelSwitcher AMR row', () => {
 
     fireEvent.click(screen.getByTestId('inline-model-switcher-chip'));
     const popover = screen.getByTestId('inline-model-switcher-popover');
-    await within(popover).findByText('$42.00');
+    await within(popover).findByText('$7.89');
     // Give the workspace-context fetch a beat to settle so a late render
     // cannot sneak the button back in.
     await waitFor(() => expect(fetchMock.mock.calls.some(([i]) =>

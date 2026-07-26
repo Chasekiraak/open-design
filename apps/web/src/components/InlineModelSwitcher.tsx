@@ -39,7 +39,11 @@ import {
   beginAmrAuthTracking,
   resolveAmrAuthTracking,
 } from '../analytics/amr-auth';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingBalanceUsd,
+} from '../collab/useWorkspaceContext';
 import { KNOWN_PROVIDERS } from '../state/config';
 import { fetchProviderModels } from '../providers/provider-models';
 import { SUGGESTED_MODELS_BY_PROTOCOL } from '../state/apiProtocols';
@@ -176,7 +180,11 @@ export function InlineModelSwitcher({
   // recvqfYKutwWlQ: gate the AMR upgrade entry on billing permission below,
   // not just plan tier — a team member without `canManageBilling` (owner-only)
   // can't act on an upgrade even when the tier itself is upgradeable.
-  const { context: workspaceContext } = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
+  const workspaceBillingResponse = useWorkspaceBillingResponse();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -559,9 +567,9 @@ export function InlineModelSwitcher({
   const amrLoggedIn = amrStatus?.loggedIn === true;
 
   useEffect(() => {
-    if (!amrLoggedIn) {
+    if (!amrLoggedIn || workspaceContext?.workspaceType === 'team') {
       setAmrWalletSnapshot(null);
-      setAmrWalletReady(false);
+      setAmrWalletReady(workspaceContext?.workspaceType === 'team');
       return;
     }
     let cancelled = false;
@@ -579,6 +587,7 @@ export function InlineModelSwitcher({
     amrStatus?.profile,
     amrStatus?.user?.id,
     amrStatus?.user?.email,
+    workspaceContext?.workspaceType,
   ]);
 
   // Signed-in rows show the current plan instead of a redundant "Signed in" +
@@ -589,15 +598,31 @@ export function InlineModelSwitcher({
   const amrPlanLabel = amrLoggedIn
     ? amrStatus?.account?.plan?.trim() || null
     : null;
-  const amrBalanceLabel = amrLoggedIn
-    ? formatVelaBalanceUsd(amrStatus?.account?.balanceUsd) ??
-      (amrWalletSnapshot?.status === 'available'
-        ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
-        : null)
+  const scopedWorkspaceBalance = formatVelaBalanceUsd(
+    workspaceBillingBalanceUsd(workspaceBillingResponse, workspaceContext),
+  );
+  const amrBalanceLabel = amrLoggedIn && !workspaceContextLoading
+    ? workspaceContext?.workspaceType === 'team'
+      ? scopedWorkspaceBalance
+      : scopedWorkspaceBalance ??
+        formatVelaBalanceUsd(amrStatus?.account?.balanceUsd) ??
+        (amrWalletSnapshot?.status === 'available'
+          ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
+          : null)
     : null;
   const amrBalanceDisplayLabel = amrLoggedIn
     ? amrBalanceLabel ??
-      (amrWalletReady ? t('settings.amrWalletUnavailable') : t('common.loading'))
+      (
+        workspaceContextLoading
+          ? t('common.loading')
+          : workspaceContext?.workspaceType === 'team'
+            ? workspaceBillingResponse
+              ? t('settings.amrWalletUnavailable')
+              : t('common.loading')
+            : amrWalletReady
+              ? t('settings.amrWalletUnavailable')
+              : t('common.loading')
+      )
     : null;
   // Personal workspaces always resolve `canManageBilling` true (the user is
   // their own owner), so this does not affect the personal-workspace upgrade

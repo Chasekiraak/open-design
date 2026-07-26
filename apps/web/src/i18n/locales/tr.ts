@@ -810,7 +810,7 @@ export const tr: Dict = {
   "entry.creditsUpgrade": "Upgrade",
   "entry.creditsOpening": "Opening...",
   "entry.creditsRemaining": "Credits remaining",
-  "entry.credits": "Credits",
+  "entry.credits": "Bakiye",
   "entry.creditsUsage": "View usage",
   "entry.creditsMemberNoticeTitle": "Need more credits?",
   "entry.creditsMemberNoticeBody": "You are currently a Member and cannot add credits yourself. Ask a team Admin to increase the allowance when you need more.",

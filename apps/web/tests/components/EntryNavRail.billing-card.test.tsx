@@ -57,6 +57,7 @@ function billing(overrides: Partial<WorkspaceBillingSummary> = {}): WorkspaceBil
 function renderRail(props: {
   context: WorkspaceCollabContext;
   billing: WorkspaceBillingSummary | null;
+  balanceUsd?: string | null;
 }) {
   return render(
     <I18nProvider initial="zh-CN">
@@ -68,6 +69,7 @@ function renderRail(props: {
         onClose={() => {}}
         context={props.context}
         billing={props.billing}
+        balanceUsd={props.balanceUsd}
       />
     </I18nProvider>,
   );
@@ -255,5 +257,30 @@ describe('account menu billing card — no 附加积分 row (#112 superseded)', 
     });
 
     expect(billingCard().queryByText('附加积分')).toBeNull();
+  });
+});
+
+describe('account menu billing card — scoped USD balance (recvqgaMLxEdZX)', () => {
+  it('shows the explicit workspace USD balance instead of raw credits', () => {
+    renderRail({
+      context: context(),
+      billing: billing({ totalAvailableCredits: 999_330 }),
+      balanceUsd: '9.9933',
+    });
+
+    const card = billingCard();
+    expect(card.getByText('余额')).toBeTruthy();
+    expect(card.getByText('$9.99')).toBeTruthy();
+    expect(card.queryByText('999,330')).toBeNull();
+  });
+
+  it('keeps a proven zero visible as $0.00', () => {
+    renderRail({
+      context: context(),
+      billing: billing({ totalAvailableCredits: 600_000 }),
+      balanceUsd: '0',
+    });
+
+    expect(billingCard().getByText('$0.00')).toBeTruthy();
   });
 });

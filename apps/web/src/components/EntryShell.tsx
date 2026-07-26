@@ -126,18 +126,21 @@ import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSele
 import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
-import { useWorkspaceContext, useWorkspaceBilling, useTeamProjects } from '../collab/useWorkspaceContext';
+import {
+  notifyTeamProjectsChanged,
+  notifyWorkspaceBillingRefresh,
+  notifyWorkspaceContextRefresh,
+  useTeamProjects,
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingBalanceUsd,
+} from '../collab/useWorkspaceContext';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
 import {
   buildAllProjectsList,
   buildDraftsList,
   createSharedProjectPredicate,
 } from '../collab/all-projects-list';
-import {
-  notifyTeamProjectsChanged,
-  notifyWorkspaceBillingRefresh,
-  notifyWorkspaceContextRefresh,
-} from '../collab/useWorkspaceContext';
 import {
   getModelCapabilityTag,
   getModelCostTier,
@@ -559,7 +562,12 @@ export function EntryShell({
   // (personal or team); workspace surfaces gate on B's permission bits, not on
   // workspaceType.
   const { context: workspaceContext, loading: workspaceLoading } = useWorkspaceContext();
-  const workspaceBilling = useWorkspaceBilling();
+  const workspaceBillingResponse = useWorkspaceBillingResponse();
+  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
+  const workspaceBalanceUsd = workspaceBillingBalanceUsd(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
   // Team-wide shared-project discovery for the "全部项目" view. The member's own
   // `projects` prop is only their LOCAL list; team-shared projects come from the
   // resource hub through the daemon. Empty off-team / when the hub is unconfigured.
@@ -1041,7 +1049,14 @@ export function EntryShell({
     // in ProjectView.handleSend.
     let amrGatePrechecked = false;
     if (config.mode === 'daemon' && config.agentId === 'amr') {
-      let gate = await checkAmrBalanceGate();
+      let gate = await checkAmrBalanceGate(
+        workspaceContext
+          ? {
+              workspaceType: workspaceContext.workspaceType,
+              workspaceId: workspaceContext.workspaceId,
+            }
+          : undefined,
+      );
       // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
       // its blocking condition clears (sign-in completed, recharge landed)
       // and the gate re-runs, so the task auto-continues through the normal
@@ -1058,7 +1073,14 @@ export function EntryShell({
         });
         setAmrBalanceGateBlock(null);
         if (decision === 'dismiss') return 'blocked' as const;
-        gate = await checkAmrBalanceGate();
+        gate = await checkAmrBalanceGate(
+          workspaceContext
+            ? {
+                workspaceType: workspaceContext.workspaceType,
+                workspaceId: workspaceContext.workspaceId,
+              }
+            : undefined,
+        );
       }
       if (gate.kind === 'soft') {
         // Hold THIS submit while the reminder waits for a decision; 'proceed'
@@ -1322,6 +1344,7 @@ export function EntryShell({
           onClose={() => setRailOpen(false)}
           context={workspaceContext}
           billing={workspaceBilling}
+          balanceUsd={workspaceBalanceUsd}
           onOpenSettings={onOpenSettings}
           onInvite={() => changeView('members')}
           onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}

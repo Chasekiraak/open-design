@@ -3341,12 +3341,16 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
-    // Let the plan/balance render (proving the card resolved a fully
-    // signed-in, upgrade-eligible status) before asserting the upgrade
-    // action specifically stays absent.
-    expect(await screen.findByText('$10.00')).toBeTruthy();
-    await waitFor(() => expect(fetchMock.mock.calls.some(([i]) =>
-      i.toString() === '/api/workspace/context')).toBe(true));
+    // Let both identity sources resolve before checking the action. The $10
+    // value is account-scoped and must NOT be shown as this team workspace's
+    // balance while its explicit wallet response is unavailable.
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([i]) =>
+        i.toString() === '/api/workspace/context')).toBe(true);
+      expect(fetchMock.mock.calls.some(([i]) =>
+        i.toString() === '/api/integrations/vela/status')).toBe(true);
+    });
+    expect(screen.queryByText('$10.00')).toBeNull();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -3815,8 +3819,8 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
   // card read ONLY vela's account-scoped balance (`account.balanceUsd`, then
   // the `/api/integrations/vela/wallet` snapshot) — the same account-scoped
   // projection `resolvePlanTier` already exists to override for the plan badge
-  // on this exact card. `useWorkspaceBilling` (the same source EntryNavRail's
-  // credits chip reads) must win once it has loaded.
+  // on this exact card. The explicit workspace balance from
+  // `useWorkspaceBillingResponse` must win once it has loaded.
   it('prefers the workspace billing balance over the account-scoped wallet snapshot', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -3853,14 +3857,15 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
               balanceUsd: '131.23',
               subscriptionStatus: 'active',
               availableActions: [],
-              workspaceBalance: {
-                workspaceId: 'ws-team',
-                workspaceMemberId: 'member-team',
-                balanceUsd: '9.9933',
-                billingScopeVersion: 2,
-                expiresAt: null,
-                updatedAt: '2026-07-26T12:00:00Z',
-              },
+              workspaceBalance: null,
+            },
+            workspaceBalance: {
+              workspaceId: 'ws-team',
+              workspaceMemberId: 'member-team',
+              balanceUsd: '9.9933',
+              billingScopeVersion: 2,
+              expiresAt: null,
+              updatedAt: '2026-07-26T12:00:00Z',
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },

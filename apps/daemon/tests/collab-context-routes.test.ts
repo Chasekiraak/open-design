@@ -126,15 +126,25 @@ describe('collab context routes', () => {
 });
 
 describe('workspace billing routes', () => {
-  // recvqgaMLxEdZX: a workspace request is selected explicitly by URL, then
-  // checked against the authorized local context. The account summary remains
-  // account-scoped; only B's v2 wallet response can identify a workspace
-  // balance, and the daemon must preserve that backend identity rather than
-  // stamping the caller's requested id onto an account response.
-  it('combines account summary with the explicit, backend-scoped workspace balance', async () => {
+  const teamDirectory = (workspaceId = 'wm-1') => [{
+    workspaceId,
+    workspaceName: 'Workspace',
+    workspaceType: 'team' as const,
+    workspaceMemberId: 'member-1',
+    role: 'member' as const,
+    memberStatus: 'active' as const,
+    lifecycleState: 'active' as const,
+  }];
+
+  // recvqgaMLxEdZX: the URL workspace id is the selection source. Membership
+  // authorization comes from the independently fetched directory, not from
+  // daemon-global active/current state: two clients may address different
+  // workspaces through the same daemon without switching each other.
+  it('returns the explicit backend-scoped balance even when current points elsewhere', async () => {
     const accountCalls: string[] = [];
     const workspaceCalls: string[] = [];
     const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
       fetchBilling: async () => {
         accountCalls.push('account');
         return {
@@ -161,7 +171,10 @@ describe('workspace billing routes', () => {
         };
       },
     });
-    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+    await api.req('/api/workspace/context', {
+      method: 'PUT',
+      body: { ...TEAM_CONTEXT, workspaceMemberId: 'wm-other' },
+    });
 
     const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
 
@@ -171,11 +184,12 @@ describe('workspace billing routes', () => {
     expect(res.body.summary).toMatchObject({
       workspaceId: null,
       membershipTier: 'team_plus',
-      workspaceBalance: {
-        workspaceId: 'wm-1',
-        balanceUsd: '7.89',
-        billingScopeVersion: 2,
-      },
+      workspaceBalance: null,
+    });
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      balanceUsd: '7.89',
+      billingScopeVersion: 2,
     });
   });
 
@@ -209,11 +223,13 @@ describe('workspace billing routes', () => {
     expect(accountCalls).toEqual(['account']);
     expect(workspaceCalls).toEqual([]);
     expect(res.body.summary).toMatchObject({ workspaceId: null, workspaceBalance: null });
+    expect(res.body.workspaceBalance).toBeNull();
   });
 
-  it('fails closed when the explicit workspace does not match the authorized context', async () => {
+  it('fails closed when the explicit workspace is absent from the membership directory', async () => {
     const calls: string[] = [];
     const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
       fetchBilling: async () => {
         calls.push('account');
         return null;
@@ -228,7 +244,7 @@ describe('workspace billing routes', () => {
     const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=other');
 
     expect(res.status).toBe(409);
-    expect(res.body).toEqual({ error: 'workspace_context_mismatch' });
+    expect(res.body).toEqual({ error: 'workspace_not_authorized' });
     expect(calls).toEqual([]);
   });
 
@@ -241,8 +257,9 @@ describe('workspace billing routes', () => {
     ).toBe(400);
   });
 
-  it('returns no team summary when the scoped balance is unavailable', async () => {
+  it('keeps account metadata separate when the scoped balance is unavailable', async () => {
     const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
       fetchBilling: async () => ({
         workspaceId: null,
         membershipTier: 'team_plus',
@@ -261,7 +278,57 @@ describe('workspace billing routes', () => {
     const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ summary: null });
+    expect(res.body.summary).toMatchObject({
+      membershipTier: 'team_plus',
+      balanceUsd: '999.00',
+      workspaceBalance: null,
+    });
+    expect(res.body.workspaceBalance).toBeNull();
+  });
+
+  it('preserves a proven workspace balance when the account summary is unavailable', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
+      fetchBilling: async () => null,
+      fetchWorkspaceBalance: async () => ({
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'member-1',
+        balanceUsd: '7.89',
+        billingScopeVersion: 2,
+        expiresAt: null,
+        updatedAt: null,
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBeNull();
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      balanceUsd: '7.89',
+      billingScopeVersion: 2,
+    });
+  });
+
+  it('rejects a workspace wallet issued to a different directory membership', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
+      fetchBilling: async () => null,
+      fetchWorkspaceBalance: async () => ({
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'different-member',
+        balanceUsd: '7.89',
+        billingScopeVersion: 2,
+        expiresAt: null,
+        updatedAt: null,
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ summary: null, workspaceBalance: null });
   });
 
   it('returns the real team billing catalog for the current workspace', async () => {

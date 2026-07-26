@@ -5180,7 +5180,14 @@ export function ProjectView({
         }
         amrGateInFlightConversationsRef.current.add(gateConversationId);
         try {
-          const gate = await checkAmrBalanceGate();
+          const gate = await checkAmrBalanceGate(
+            workspaceContext
+              ? {
+                  workspaceType: workspaceContext.workspaceType,
+                  workspaceId: workspaceContext.workspaceId,
+                }
+              : undefined,
+          );
           // A blocked send parks in the conversation queue with its FULL
           // payload (prompt, attachments, comment context) — the composer
           // already cleared itself, and a text-only draft restore would

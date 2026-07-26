@@ -335,13 +335,14 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
 
   // Billing reads are explicit at the HTTP boundary:
   // - scope=account is the personal/account summary;
-  // - scope=workspace requires a workspaceId that exactly matches the current
-  //   authorized team context, then joins that account metadata with Vela's
-  //   independently scoped v2 wallet response.
+  // - scope=workspace requires a workspaceId that resolves to an active team
+  //   membership in the directory, then reads Vela's independently scoped v2
+  //   wallet response.
   //
-  // The route never uses active context to SELECT the requested id and never
-  // copies a request id onto account data. If either half of a team read is
-  // unavailable, return no summary so the UI cannot fall back to account money.
+  // The URL is the selection source. Authorization is an independent
+  // membership lookup — never daemon-global active/current state — so two
+  // clients can address different workspaces without switching each other.
+  // Account metadata and workspace money remain independently nullable.
   app.get('/api/workspace/billing', async (req, res) => {
     const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
     const requestedWorkspaceId =
@@ -355,29 +356,34 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     }
     if (scope === 'account') {
       const summary = await fetchBilling();
-      const body: WorkspaceBillingResponse = { summary };
+      const body: WorkspaceBillingResponse = { summary, workspaceBalance: null };
       return res.json(body);
     }
 
-    const authorization = req.header('authorization') ?? undefined;
-    const context = await workspaceContext.current({ authorization });
-    const contextMatches =
-      context?.workspaceType === 'team' &&
-      context.workspaceId?.trim() === requestedWorkspaceId &&
-      context.memberStatus === 'active' &&
-      context.lifecycleState === 'active';
-    if (!contextMatches) {
-      return res.status(409).json({ error: 'workspace_context_mismatch' });
+    const directory = await listWorkspaceDirectory().catch(() => []);
+    const membership = directory.find(
+      (item) =>
+        item.workspaceId === requestedWorkspaceId &&
+        item.workspaceType === 'team' &&
+        item.memberStatus === 'active' &&
+        item.lifecycleState === 'active',
+    );
+    if (!membership) {
+      return res.status(409).json({ error: 'workspace_not_authorized' });
     }
     const [accountSummary, workspaceBalance] = await Promise.all([
       fetchBilling(),
       fetchWorkspaceBalance(requestedWorkspaceId),
     ]);
-    const summary =
-      accountSummary && workspaceBalance
-        ? { ...accountSummary, workspaceId: null, workspaceBalance }
+    const authorizedWorkspaceBalance =
+      workspaceBalance?.workspaceId === requestedWorkspaceId &&
+      workspaceBalance.workspaceMemberId === membership.workspaceMemberId
+        ? workspaceBalance
         : null;
-    const body: WorkspaceBillingResponse = { summary };
+    const body: WorkspaceBillingResponse = {
+      summary: accountSummary,
+      workspaceBalance: authorizedWorkspaceBalance,
+    };
     return res.json(body);
   });
 

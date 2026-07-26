@@ -6640,24 +6640,25 @@ Common options:
     const data = await workspaceContextRequest(billingPath);
     if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     const summary = data?.summary ?? null;
-    if (!summary) {
+    const workspaceBalance = data?.workspaceBalance ?? null;
+    if (!summary && !workspaceBalance) {
       console.log('No billing summary (no vela session or CLI unavailable).');
       return;
     }
-    const workspaceBalance = summary.workspaceBalance ?? null;
     if (workspaceBalance) {
       console.log(`Workspace:\t${workspaceBalance.workspaceId}`);
     }
-    console.log(`Account plan:\t${summary.membershipTier || 'free'}`);
-    console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
-    console.log(`Account credits:\t${summary.totalAvailableCredits}`);
-    console.log(`  Account plan credits:\t${summary.subscriptionCredits}`);
-    console.log(`  Account top-up credits:\t${summary.rechargeCredits}`);
-    console.log(
-      `${workspaceBalance ? 'Workspace' : 'Account'} balance (USD):\t${
-        workspaceBalance?.balanceUsd ?? summary.balanceUsd
-      }`,
-    );
+    if (summary) {
+      console.log(`Account plan:\t${summary.membershipTier || 'free'}`);
+      console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
+      console.log(`Account credits:\t${summary.totalAvailableCredits}`);
+      console.log(`  Account plan credits:\t${summary.subscriptionCredits}`);
+      console.log(`  Account top-up credits:\t${summary.rechargeCredits}`);
+    }
+    const balanceUsd = workspaceBalance?.balanceUsd ?? summary?.balanceUsd;
+    if (balanceUsd != null) {
+      console.log(`${workspaceBalance ? 'Workspace' : 'Account'} balance (USD):\t${balanceUsd}`);
+    }
     return;
   }
 

@@ -154,7 +154,11 @@ import { PrivacySection } from './PrivacySection';
 import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
 import { SettingsWorkspaceSection } from './SettingsWorkspaceSection';
-import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingBalanceUsd,
+} from '../collab/useWorkspaceContext';
 import { resolvePlanTier } from '../collab/team-plan';
 import { planBadgeTierForLabel } from './PlanWordmark';
 import { workspaceUpgradeUrl } from './EntryNavRail';
@@ -1625,9 +1629,10 @@ export function SettingsDialog({
   // right next to it, via the SAME card's `amrCardResolvedPlan` below. A team
   // member reads their PERSONAL wallet there even while the card's own badge
   // correctly names the team's paid plan, because nothing fed the workspace's
-  // real balance into the number. `useWorkspaceBilling` is the workspace-scoped
-  // source of truth (same one EntryNavRail's credits chip reads).
-  const workspaceBilling = useWorkspaceBilling();
+  // real balance into the number. `useWorkspaceBillingResponse` carries the
+  // explicit v2 workspace-wallet source independently from account metadata.
+  const workspaceBillingResponse = useWorkspaceBillingResponse();
+  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
   // The 「升级」 buttons on the AMR model card route through
   // `workspaceUpgradeUrl` — the one decision point every upgrade affordance
@@ -4561,10 +4566,10 @@ export function SettingsDialog({
                           // credits count as a dollar amount is what put
                           // "Balance $388307.00" on a workspace whose real
                           // balance was under $39.
-                          const workspaceBalanceUsd =
-                            workspaceContext?.workspaceType === 'team'
-                              ? workspaceBilling?.workspaceBalance?.balanceUsd
-                              : workspaceBilling?.balanceUsd;
+                          const workspaceBalanceUsd = workspaceBillingBalanceUsd(
+                            workspaceBillingResponse,
+                            workspaceContext,
+                          );
                           const amrWorkspaceBalance =
                             amrWalletVisible && workspaceBalanceUsd
                               ? formatVelaBalanceUsd(workspaceBalanceUsd)

@@ -388,14 +388,10 @@ export interface WorkspaceWalletBalance {
 }
 
 /**
- * The caller's Vela account billing summary plus, for an explicit team request,
- * one independently verified workspace wallet balance.
+ * The caller's Vela account billing summary.
  *
  * `vela billing summary` remains account-scoped. The daemon must never turn it
- * into workspace data by copying a requested id onto the response. A team
- * balance is trustworthy only when `workspaceBalance` came from Vela's
- * `/api/v1/workspaces/{workspaceId}/wallet/balance` contract and carries that
- * same backend-returned workspace identity.
+ * into workspace data by copying a requested id onto the response.
  */
 export interface WorkspaceBillingSummary {
   /**
@@ -427,12 +423,22 @@ export interface WorkspaceBillingSummary {
   subscriptionStatus: string;
   /** Actions the caller may take, e.g. `subscription_checkout` / `billing_portal`. */
   availableActions: string[];
-  /** Explicit workspace wallet data, or null for an account/personal read. */
+  /**
+   * Deprecated compatibility field. Workspace money now lives on
+   * `WorkspaceBillingResponse.workspaceBalance` so an account-summary outage
+   * cannot erase an independently proven workspace balance.
+   */
   workspaceBalance: WorkspaceWalletBalance | null;
 }
 
 export interface WorkspaceBillingResponse {
+  /** Account-scoped metadata; independently nullable from workspace money. */
   summary: WorkspaceBillingSummary | null;
+  /**
+   * One backend-proven explicit workspace wallet, or null for an account read /
+   * failed workspace-wallet read. Never inferred from `summary`.
+   */
+  workspaceBalance: WorkspaceWalletBalance | null;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

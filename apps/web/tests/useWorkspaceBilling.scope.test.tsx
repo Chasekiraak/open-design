@@ -7,6 +7,7 @@ import {
   notifyWorkspaceContextRefresh,
   resetWorkspaceContextCache,
   useWorkspaceBilling,
+  useWorkspaceBillingResponse,
 } from '../src/collab/useWorkspaceContext';
 
 function teamContext(workspaceId: string) {
@@ -31,14 +32,15 @@ function billingResponse(workspaceId: string, balanceUsd: string) {
       balanceUsd: '999.00',
       subscriptionStatus: 'active',
       availableActions: [],
-      workspaceBalance: {
-        workspaceId,
-        workspaceMemberId: `member-${workspaceId}`,
-        balanceUsd,
-        billingScopeVersion: 2,
-        expiresAt: null,
-        updatedAt: '2026-07-26T12:00:00Z',
-      },
+      workspaceBalance: null,
+    },
+    workspaceBalance: {
+      workspaceId,
+      workspaceMemberId: `member-${workspaceId}`,
+      balanceUsd,
+      billingScopeVersion: 2,
+      expiresAt: null,
+      updatedAt: '2026-07-26T12:00:00Z',
     },
   };
 }
@@ -91,7 +93,7 @@ describe('useWorkspaceBilling explicit scope', () => {
       }),
     );
 
-    const hook = renderHook(() => useWorkspaceBilling());
+    const hook = renderHook(() => useWorkspaceBillingResponse());
     await waitFor(() => {
       expect(hook.result.current?.workspaceBalance?.workspaceId).toBe('workspace-a');
     });
@@ -128,6 +130,37 @@ describe('useWorkspaceBilling explicit scope', () => {
     ]);
   });
 
+  it('keeps a proven workspace balance when account metadata is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            summary: null,
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => {
+      expect(hook.result.current?.summary).toBeNull();
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25');
+    });
+  });
+
   it('uses the explicit account route for a personal workspace', async () => {
     const billingCalls: string[] = [];
     vi.stubGlobal(
@@ -154,6 +187,7 @@ describe('useWorkspaceBilling explicit scope', () => {
                 ...billingResponse('unused', '0').summary,
                 workspaceBalance: null,
               },
+              workspaceBalance: null,
             }),
             { status: 200, headers: { 'content-type': 'application/json' } },
           );

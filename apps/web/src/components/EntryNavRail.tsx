@@ -10,8 +10,8 @@
 //     language live in 设置·通用 only, matching #5517).
 //     Falls back to the brand logo when there is no cloud identity
 //     (context === null).
-//   • Credits chip — real plan tier + balance when A's vela CLI billing summary
-//     is available, with upgrade linking out to Vela Web.
+//   • Billing chip — real plan tier + explicitly scoped USD balance when Vela
+//     billing is available, with upgrade linking out to Vela Web.
 //   • Search box (opens the ⌘K project search palette via `onOpenSearch`).
 //   • 最近 (Recents) → home, Community → community.
 //   • Team block (only when `context.workspaceType === 'team'`): an inline team
@@ -38,7 +38,11 @@ import type {
   WorkspaceDirectoryItem,
   WorkspaceDirectoryResponse,
 } from '@open-design/contracts';
-import { fetchVelaLoginStatus, velaLogout } from '../providers/daemon';
+import {
+  fetchVelaLoginStatus,
+  formatVelaBalanceUsd,
+  velaLogout,
+} from '../providers/daemon';
 import { resetCloudSignInTipDismissal } from './CloudSignInTip';
 import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
@@ -94,9 +98,12 @@ interface Props {
   onClose: () => void;
   /** The one shared workspace context; null → local (no cloud identity) state. */
   context: WorkspaceCollabContext | null;
-  /** Real billing summary (A-lane, via the vela CLI 收口). Null → the credits
-   *  chip falls back to the context plan-tier hint with no balance. */
+  /** Account billing metadata (via the vela CLI 收口). Null → the billing
+   *  chip falls back to the context plan-tier hint. */
   billing?: WorkspaceBillingSummary | null;
+  /** Explicitly scoped balance in USD for `context`. Team callers must pass
+   *  only a backend-proven v2 workspace wallet, never account credits. */
+  balanceUsd?: string | null;
   /** Open the app settings dialog. */
   onOpenSettings?: () => void;
   /** Open the members / invite slot (B's InviteDialog). */
@@ -425,6 +432,7 @@ export function EntryNavRail({
   onClose,
   context,
   billing,
+  balanceUsd,
   onOpenSettings,
   footerExtra,
   footerNotice,
@@ -453,9 +461,9 @@ export function EntryNavRail({
   const accountName = displayName || brandLabel;
   const accountInitial = accountName.charAt(0).toUpperCase() || '·';
 
-  // Credits chip: prefer the real billing summary (A-lane, via the vela CLI
-  // 收口); fall back to the context plan-tier hint with no balance when billing
-  // hasn't loaded / no session.
+  // Billing chip: prefer the real summary metadata; fall back to the context
+  // plan-tier hint when metadata has not loaded. Money is a separate,
+  // explicitly scoped `balanceUsd` input below.
   // The plan id from either source goes through the same formatter — the
   // context hint is a raw id too (`team_plus`), and it used to reach the card
   // unformatted whenever billing reported an empty tier (which it does today).
@@ -472,7 +480,7 @@ export function EntryNavRail({
     : isTeam
       ? t('entry.billingTierTeam')
       : t('entry.billingTierFree');
-  const creditsBalance = billing ? billing.totalAvailableCredits : null;
+  const balanceLabel = formatVelaBalanceUsd(balanceUsd);
   // #5517: wordmark badge on the account row (replaces the chevron) and a
   // small twin inside the menu's billing card. Derive from the raw tier id
   // first so "team_plus" maps to the plus badge regardless of display label.
@@ -720,12 +728,11 @@ export function EntryNavRail({
                       <span className="entry-nav-rail__account-head-email">{accountEmail}</span>
                     ) : null}
                   </div>
-                  {/* #5517 billing card: plan (+badge) + 升级 CTA + credits row.
-                      Credits are real billing data. The credits row links out
-                      to B's wallet page. Product ruling (2026-07-22): we do
-                      not have a separate "附加积分" (bonus/top-up credits)
-                      concept to show — 积分 is the one number that matters. */}
-                  {billing ? (
+                  {/* #5517 billing card: plan (+badge) + 升级 CTA + USD balance.
+                      The balance row links out to B's wallet page. It receives
+                      only an explicitly scoped money value; raw credits are
+                      never formatted as dollars here. */}
+                  {billing || balanceLabel ? (
                     <div className="entry-nav-rail__menu-credits">
                       <div className="entry-nav-rail__menu-credits-head">
                         <span className="entry-nav-rail__menu-credits-plan">
@@ -745,7 +752,7 @@ export function EntryNavRail({
                           </button>
                         ) : null}
                       </div>
-                      {/* #62 (product ruling): clicking 积分 jumps straight to
+                      {/* #62 (product ruling): clicking the balance jumps straight to
                           B's web wallet page for the usage detail — there is
                           NO intermediate credits popover in the client. */}
                       <button
@@ -763,7 +770,7 @@ export function EntryNavRail({
                           <RemixIcon name="battery-charge-line" size={14} /> {t('entry.credits')}
                         </span>
                         <span className="entry-nav-rail__menu-credits-value">
-                          {creditsBalance != null ? creditsBalance.toLocaleString('en-US') : '—'}
+                          {balanceLabel ?? '—'}
                           <Icon name="chevron-right" size={14} />
                         </span>
                       </button>

@@ -216,12 +216,11 @@ export function notifyWorkspaceContextRefresh(): void {
 }
 
 /**
- * One shared read of the caller's Vela billing summary for the nav shell
- * (`GET /api/workspace/billing`, A-lane data via the vela CLI 收口). Null until
- * it loads, or when the CLI / billing session is unavailable — the credits chip
- * then falls back to the plan-tier hint the workspace context already carries.
+ * One shared explicit-scope billing read. Account metadata and a backend-proven
+ * workspace wallet are independently nullable, so a summary outage cannot
+ * erase workspace money. Null means the scoped request itself has not resolved.
  */
-export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
+export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
   const { context, loading: contextLoading } = useWorkspaceContext();
   const workspaceId = context?.workspaceId?.trim() ?? '';
   const billingScopeKey =
@@ -240,7 +239,7 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
         : null;
   const [state, setState] = useState<{
     scopeKey: string;
-    summary: WorkspaceBillingSummary | null;
+    response: WorkspaceBillingResponse;
   } | null>(null);
   const mountedRef = useRef(true);
   const activeScopeKeyRef = useRef<string | null>(billingScopeKey);
@@ -271,13 +270,16 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
         const res = await fetch(billingUrl, { cache: 'no-store' });
         if (!res.ok) throw new Error(`billing ${res.status}`);
         const body = (await res.json()) as WorkspaceBillingResponse;
-        return body.summary ?? null;
+        return {
+          summary: body.summary ?? null,
+          workspaceBalance: body.workspaceBalance ?? null,
+        };
       };
-      const summary = force
+      const response = force
         ? await forceCoalescedGet(scopeKey, fetchBilling)
         : await coalescedGet(scopeKey, fetchBilling);
       if (mountedRef.current && activeScopeKeyRef.current === scopeKey) {
-        setState({ scopeKey, summary });
+        setState({ scopeKey, response });
       }
     } catch {
       if (
@@ -285,7 +287,10 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
         mountedRef.current &&
         activeScopeKeyRef.current === scopeKey
       ) {
-        setState({ scopeKey, summary: null });
+        setState({
+          scopeKey,
+          response: { summary: null, workspaceBalance: null },
+        });
       }
     }
   }, [billingScopeKey, billingUrl]);
@@ -344,7 +349,42 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
     };
   }, [loadBilling]);
 
-  return billingScopeKey && state?.scopeKey === billingScopeKey ? state.summary : null;
+  return billingScopeKey && state?.scopeKey === billingScopeKey ? state.response : null;
+}
+
+/** Account-scoped compatibility view used by plan/upgrade surfaces. */
+export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
+  return useWorkspaceBillingResponse()?.summary ?? null;
+}
+
+/**
+ * Return the money that belongs to the currently selected workspace.
+ *
+ * Team money is valid only when Vela's v2 response proves both the requested
+ * workspace and the acting member. It must never fall back to account money:
+ * one local daemon may serve multiple windows whose URL-selected workspaces
+ * differ. Personal workspaces keep the account-scoped summary by definition.
+ */
+export function workspaceBillingBalanceUsd(
+  response: WorkspaceBillingResponse | null | undefined,
+  context: WorkspaceCollabContext | null | undefined,
+): string | null {
+  if (!response || !context) return null;
+  if (context.workspaceType !== 'team') {
+    const accountBalance = response.summary?.balanceUsd?.trim();
+    return accountBalance || null;
+  }
+  const workspaceBalance = response.workspaceBalance;
+  if (
+    !workspaceBalance ||
+    workspaceBalance.billingScopeVersion !== 2 ||
+    workspaceBalance.workspaceId !== context.workspaceId ||
+    workspaceBalance.workspaceMemberId !== context.workspaceMemberId
+  ) {
+    return null;
+  }
+  const balance = workspaceBalance.balanceUsd.trim();
+  return balance || null;
 }
 
 const WORKSPACE_BILLING_POLL_MS = 30_000;

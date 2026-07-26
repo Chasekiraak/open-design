@@ -487,6 +487,66 @@ describe('AvatarMenu', () => {
     expect(url.searchParams.get('od_device_id')).toBe('od-install-abc');
   });
 
+  it('uses only the explicit team workspace balance, never the account fallback', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            loginInFlight: false,
+            profile: 'test',
+            user: { id: 'u1', email: 'a@b.c' },
+            account: { plan: 'plus', balanceUsd: '247.5087' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=ws-team') {
+        return new Response(
+          JSON.stringify({
+            summary: null,
+            workspaceBalance: {
+              billingScopeVersion: 2,
+              workspaceId: 'ws-team',
+              workspaceMemberId: 'wm-1',
+              balanceUsd: '7.8912',
+              expiresAt: null,
+              updatedAt: '2026-07-26T00:00:00.000Z',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('{}', { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderMenu({
+      config: {
+        ...baseConfig,
+        agentId: 'amr',
+      },
+      agents: [
+        {
+          id: 'amr',
+          name: 'Open Design AMR',
+          bin: 'vela',
+          available: true,
+          models: [{ id: 'default', label: 'Default (CLI config)' }],
+        },
+      ],
+    });
+
+    const dialog = openMenu();
+    expect(await within(dialog).findByText('$7.89')).toBeTruthy();
+    expect(within(dialog).queryByText('$247.51')).toBeNull();
+  });
+
   it('omits wallet and upgrade links for non-upgradeable plans', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
