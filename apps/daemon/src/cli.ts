@@ -365,6 +365,7 @@ const SUBCOMMAND_MAP = {
   deploy: runDeploy,
   daemon: runDaemon,
   atoms: runAtoms,
+  skill: runSkills,
   skills: runSkills,
   'design-systems': runDesignSystems,
   resource: runResource,
@@ -8542,8 +8543,61 @@ async function runLibraryList(name, args) {
 // "Capability exposure (UI/CLI dual-track)"). Bundled skills are refused by the
 // route, not here — the daemon owns that judgement.
 async function runSkills(args) {
+  if (!args[0] || args[0] === 'help' || args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  od skill install <github:owner/repo|https://…tar.gz|https://…tgz> [--json]
+  od skill list
+  od skill show <id>
+  od skill uninstall <id>
+
+\`od skills …\` remains an alias for compatibility.`);
+    process.exit(args[0] ? 0 : 2);
+  }
+  if (args[0] === 'install' || args[0] === 'add') return runSkillInstall(args.slice(1));
   if (args[0] === 'uninstall' || args[0] === 'remove') return runSkillUninstall(args.slice(1));
   return runLibraryList('skills', args);
+}
+
+async function runSkillInstall(rest) {
+  const flags = parseFlags(rest, {
+    string: LIBRARY_STRING_FLAGS,
+    boolean: LIBRARY_BOOLEAN_FLAGS,
+  });
+  const source = positionalArgs(rest, LIBRARY_STRING_FLAGS)[0];
+  if (!source) {
+    console.error(
+      'Usage: od skill install <github:owner/repo|https://…tar.gz|https://…tgz> [--json] [--daemon-url <url>]',
+    );
+    process.exit(2);
+  }
+  const base = (await libraryDaemonUrl(flags)).replace(/\/$/, '');
+  try {
+    const resp = await fetch(`${base}/api/skills/install`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const message = body?.error ?? `Skill install failed (${resp.status})`;
+      if (flags.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          status: resp.status,
+          code: body?.code ?? null,
+          error: message,
+        }));
+      } else {
+        console.error(`POST /api/skills/install failed: ${resp.status} ${message}`);
+      }
+      process.exit(1);
+    }
+    if (flags.json) return process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    console.log(`[install] ${body?.skill?.id ?? body?.skill?.name ?? source}`);
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
 }
 
 async function runSkillUninstall(rest) {

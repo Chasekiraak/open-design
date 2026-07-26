@@ -35,6 +35,7 @@ import type {
   CodexPetsResponse,
   InstallDesignSystemResponse,
   InstallInput,
+  InstallSkillRequest,
   InstallSkillResponse,
   SyncCommunityPetsRequest,
   SyncCommunityPetsResponse,
@@ -2765,12 +2766,16 @@ function encodePluginAssetPath(relpath: string): string {
 }
 
 export async function installSkill(
-  input: InstallInput,
+  input: InstallSkillRequest,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ skill: SkillSummary } | { error: string }> {
   try {
     const resp = await fetch('/api/skills/install', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     });
     const json = await resp.json();

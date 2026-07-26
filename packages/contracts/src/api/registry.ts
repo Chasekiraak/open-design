@@ -699,6 +699,12 @@ export type InstallInput =
   | { source: 'github'; url: string }
   | { source: 'local'; path: string };
 
+// Plugin-compatible remote source accepted by POST /api/skills/install:
+// `github:owner/repo` or a public HTTPS `.tar.gz` / `.tgz` archive.
+export interface InstallSkillRequest {
+  source: string;
+}
+
 export interface InstallSkillResponse {
   skill: SkillSummary;
 }

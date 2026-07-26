@@ -43,6 +43,10 @@ import { renderDesignSystemShowcase } from '../design-systems/showcase.js';
 import { listPromptTemplates, readPromptTemplate } from '../media/prompt-templates.js';
 import { readAppConfig } from '../app-config.js';
 import { installFromTarget, uninstallById } from '../library-install.js';
+import {
+  installSkillFromRemoteSource,
+  type SkillInstallErrorCode,
+} from '../services/skill-installation.js';
 import type { RouteDeps } from '../server-context.js';
 
 export interface RegisterAtomRoutesDeps {
@@ -713,8 +717,30 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
   app.post('/api/skills/install', async (req, res) => {
     if (!requireLocalOrigin(req, res)) return;
     try {
-      const result = await installFromTarget(req.body, USER_SKILLS_DIR, 'skill');
-      if (!result.ok) return res.status(400).json({ error: result.error });
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const isLegacyTarget =
+        (body.source === 'github' && typeof body.url === 'string') ||
+        (body.source === 'local' && typeof body.path === 'string');
+      const result = isLegacyTarget
+        ? await installFromTarget(body, USER_SKILLS_DIR, 'skill')
+        : await installSkillFromRemoteSource(
+            USER_SKILLS_DIR,
+            typeof body.source === 'string' ? body.source : '',
+          );
+      if (!result.ok) {
+        const statusByCode: Partial<Record<SkillInstallErrorCode, number>> = {
+          BAD_REQUEST: 400,
+          FETCH_FAILED: 502,
+          INVALID_ARCHIVE: 400,
+          INVALID_MANIFEST: 400,
+          CONFLICT: 409,
+          INTERNAL_ERROR: 500,
+        };
+        const code = 'code' in result ? result.code : undefined;
+        return res
+          .status((code && statusByCode[code]) || 400)
+          .json({ error: result.error, ...(code ? { code } : {}) });
+      }
       if (typeof result.dir !== 'string' || !result.dir) {
         return res.status(500).json({ error: 'skill install did not return an installation directory' });
       }

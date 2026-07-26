@@ -91,6 +91,17 @@ beforeEach(() => {
       skills = [...skills, imported];
       return jsonResponse({ skill: imported });
     }
+    if (url === '/api/skills/install') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { source?: string };
+      const imported = {
+        ...USER_SKILL,
+        id: 'remote-skill',
+        name: 'remote-skill',
+        upstream: body.source ?? null,
+      };
+      skills = [...skills, imported];
+      return jsonResponse({ skill: imported });
+    }
     if (url === '/api/skills') return jsonResponse({ skills });
     if (url.startsWith('/api/skills/')) {
       const id = decodeURIComponent(url.slice('/api/skills/'.length));
@@ -276,6 +287,39 @@ describe('ExtensionsMarketplace import', () => {
       expect(
         screen.getByTestId('plugins-tab-installed').classList.contains('is-active'),
       ).toBe(true);
+    });
+  });
+
+  it('imports a skill URL through the daemon instead of showing the unsupported placeholder', async () => {
+    const { container } = renderMarketplace();
+    await waitFor(() => {
+      expect(container.querySelectorAll('.plugin-marketplace__item').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(container.querySelector('.plugin-marketplace__create')!);
+    const kindTabs = [
+      ...container.querySelectorAll<HTMLButtonElement>('.plugin-marketplace__create-tabs button'),
+    ];
+    fireEvent.click(kindTabs[1]!);
+
+    const urlInput = await waitFor(() =>
+      container.querySelector<HTMLInputElement>(
+        'input[placeholder="github:owner/repo"]',
+      )!,
+    );
+    fireEvent.change(urlInput, { target: { value: 'github:owner/skill-repo' } });
+    fireEvent.click(screen.getByTestId('plugin-create-import-url'));
+
+    await waitFor(() => {
+      const installCall = vi.mocked(globalThis.fetch).mock.calls.find(
+        ([input]) => String(input) === '/api/skills/install',
+      );
+      expect(installCall).toBeTruthy();
+      expect(JSON.parse(String(installCall?.[1]?.body))).toEqual({
+        source: 'github:owner/skill-repo',
+      });
+      expect(container.querySelector('.plugin-marketplace__create-panel')).toBeNull();
+      expect(screen.getByTestId('plugins-tab-installed').classList.contains('is-active')).toBe(true);
     });
   });
 });

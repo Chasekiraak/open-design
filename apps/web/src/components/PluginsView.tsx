@@ -22,6 +22,7 @@ import {
 import {
   fetchSkills,
   importSkill,
+  installSkill,
   uninstallSkill,
   type SkillImportInput,
   type SkillImportError,
@@ -985,7 +986,7 @@ export function ExtensionsMarketplace({
   //   Plugin · 从链接导入   → installPluginSource(url)
   //   Plugin · 上传本地文件夹 → uploadPluginFolder(files)
   //   Skill  · 上传本地文件夹 → importSkill(<SKILL.md body>)  (reads the folder)
-  //   Skill  · 从链接导入   → NO backend yet → 待接后端 (see handleCreateImportUrl)
+  //   Skill  · 从链接导入   → installSkill(source)
   const [createOpen, setCreateOpen] = useState(false);
   const [createKind, setCreateKind] = useState<'plugin' | 'skill'>('plugin');
   const [createUrl, setCreateUrl] = useState('');
@@ -1031,14 +1032,26 @@ export function ExtensionsMarketplace({
   async function handleCreateImportUrl() {
     const url = createUrl.trim();
     if (!url || createBusy) return;
-    // Skills have no import-from-URL endpoint yet. Keep the UI shell but do not
-    // fabricate a flow — surface the gap plainly. TODO(backend): skill import
-    // from a public URL.
     if (createKind === 'skill') {
-      setToast({
-        message: t('pluginsView.skillUrlUnsupported'),
-        tone: 'error',
-      });
+      setCreateBusy('import');
+      try {
+        const result = await installSkill({ source: url }, workspaceContext);
+        if ('error' in result) {
+          setToast({ message: result.error || t('pluginsView.importFailed'), tone: 'error' });
+          return;
+        }
+        await refresh();
+        setCreateOpen(false);
+        revealImported('skill');
+        setToast({
+          message: t('pluginsView.importSkillSuccess', {
+            name: localizeSkillName(locale, result.skill),
+          }),
+          tone: 'success',
+        });
+      } finally {
+        setCreateBusy(null);
+      }
       return;
     }
     setCreateBusy('import');
@@ -1997,7 +2010,7 @@ export function ExtensionsMarketplace({
                       value={createUrl}
                       onChange={(event) => setCreateUrl(event.target.value)}
                       disabled={createBusy !== null}
-                      placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'https://example.com/skill'}
+                      placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'github:owner/repo'}
                     />
                     <button
                       type="button"
