@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   CollabCloudMemberDirectoryEntry,
   TeamProject,
@@ -14,8 +14,11 @@ function teamContext(overrides: Partial<WorkspaceCollabContext> = {}): Workspace
   return {
     workspaceId: 'ws-1',
     workspaceType: 'team',
+    teamId: 'team-1',
     workspaceMemberId: 'wm-1',
     role: 'member',
+    memberStatus: 'active',
+    lifecycleState: 'active',
     ...overrides,
   } as WorkspaceCollabContext;
 }
@@ -34,11 +37,15 @@ function member(id: string, extra: Partial<CollabCloudMemberDirectoryEntry> = {}
 
 interface Harness {
   emitted: WorkspaceInvalidationSsePayload[];
+  observed: Array<{ workspaceId: string; projectIds: string[] }>;
   types: () => string[];
   context: WorkspaceCollabContext | null;
   projects: TeamProject[] | null; // null simulates a transient read failure
   members: CollabCloudMemberDirectoryEntry[] | null;
+  contextCalls: number;
   teamListCalls: number;
+  memberListCalls: number;
+  errors: unknown[];
   poller: ReturnType<typeof createWorkspaceInvalidationPoller>;
 }
 
@@ -46,28 +53,59 @@ function harness(initial: {
   context?: WorkspaceCollabContext | null;
   projects?: TeamProject[] | null;
   members?: CollabCloudMemberDirectoryEntry[] | null;
+  pollIntervalMs?: number;
+  recoveryFloorIntervalMs?: number;
+  now?: () => number;
+  onTeamProjectsObserved?: (input: {
+    workspaceId: string;
+    projects: readonly TeamProject[];
+  }) => void | Promise<void>;
 }): Harness {
   const h: Harness = {
     emitted: [],
+    observed: [],
     types: () => h.emitted.map((e) => e.type),
-    context: initial.context ?? teamContext(),
-    projects: initial.projects ?? [],
-    members: initial.members ?? [],
+    context: initial.context === undefined ? teamContext() : initial.context,
+    projects: initial.projects === undefined ? [] : initial.projects,
+    members: initial.members === undefined ? [] : initial.members,
+    contextCalls: 0,
     teamListCalls: 0,
+    memberListCalls: 0,
+    errors: [],
     poller: null as unknown as ReturnType<typeof createWorkspaceInvalidationPoller>,
   };
   h.poller = createWorkspaceInvalidationPoller({
-    getWorkspaceContext: async () => h.context,
+    getWorkspaceContext: async () => {
+      h.contextCalls += 1;
+      return h.context;
+    },
     listTeamProjects: async () => {
       h.teamListCalls += 1;
       if (h.projects === null) throw new Error('team-projects read failed');
       return h.projects;
     },
     listMembers: async () => {
+      h.memberListCalls += 1;
       if (h.members === null) throw new Error('members read failed');
       return h.members;
     },
     emit: (payload) => h.emitted.push(payload),
+    onError: (error) => h.errors.push(error),
+    ...(initial.pollIntervalMs != null
+      ? { pollIntervalMs: initial.pollIntervalMs }
+      : {}),
+    ...(initial.recoveryFloorIntervalMs != null
+      ? { recoveryFloorIntervalMs: initial.recoveryFloorIntervalMs }
+      : {}),
+    ...(initial.now ? { now: initial.now } : {}),
+    onTeamProjectsObserved:
+      initial.onTeamProjectsObserved ??
+      ((input) => {
+        h.observed.push({
+          workspaceId: input.workspaceId,
+          projectIds: input.projects.map((candidate) => candidate.projectId),
+        });
+      }),
   });
   return h;
 }
@@ -139,5 +177,143 @@ describe('workspace invalidation poller', () => {
     h.projects = [project('p1')];
     await h.poller.pollOnce();
     expect(h.types()).toEqual([]);
+  });
+
+  it('runs the missing-project recovery floor immediately, then every 30s despite a stable catalog', async () => {
+    let now = 0;
+    const h = harness({
+      projects: [project('p1')],
+      recoveryFloorIntervalMs: 30_000,
+      now: () => now,
+    });
+
+    await h.poller.pollOnce();
+    await h.poller.pollOnce();
+    now = 29_999;
+    await h.poller.pollOnce();
+    now = 30_000;
+    await h.poller.pollOnce();
+
+    expect(h.emitted).toEqual([]);
+    expect(h.observed).toEqual([
+      { workspaceId: 'ws-1', projectIds: ['p1'] },
+      { workspaceId: 'ws-1', projectIds: ['p1'] },
+    ]);
+  });
+
+  it('does not run the recovery floor off-team or after a failed catalog read', async () => {
+    const personal = harness({
+      context: personalContext(),
+      projects: [project('p1')],
+    });
+    await personal.poller.pollOnce();
+    expect(personal.observed).toEqual([]);
+
+    const failed = harness({
+      context: teamContext(),
+      projects: null,
+    });
+    await failed.poller.pollOnce();
+    expect(failed.observed).toEqual([]);
+  });
+
+  it.each([
+    ['personal context with stale team id', { workspaceType: 'personal' }],
+    ['removed member', { memberStatus: 'removed' }],
+    ['past-due workspace', { lifecycleState: 'billing_past_due' }],
+    ['locked workspace', { lifecycleState: 'locked' }],
+    ['deleting workspace', { lifecycleState: 'deleting' }],
+    ['deleted workspace', { lifecycleState: 'deleted' }],
+    ['missing workspace id', { workspaceId: ' ' }],
+    ['missing resource team id', { teamId: ' ' }],
+    ['missing workspace member id', { workspaceMemberId: ' ' }],
+  ] satisfies Array<[string, Partial<WorkspaceCollabContext>]>)(
+    'does not run broad recovery for %s',
+    async (_label, overrides) => {
+      const h = harness({
+        context: teamContext(overrides),
+        projects: [project('p1')],
+      });
+
+      await h.poller.pollOnce();
+
+      expect(h.observed).toEqual([]);
+    },
+  );
+
+  it('schedules immediately after a workspace switch inside the same throttle window', async () => {
+    let now = 0;
+    const h = harness({
+      context: teamContext({ workspaceId: 'ws-1' }),
+      projects: [project('p1')],
+      recoveryFloorIntervalMs: 30_000,
+      now: () => now,
+    });
+    await h.poller.pollOnce();
+
+    now = 1_000;
+    h.context = teamContext({ workspaceId: 'ws-2' });
+    h.projects = [project('p2')];
+    await h.poller.pollOnce();
+
+    expect(h.observed).toEqual([
+      { workspaceId: 'ws-1', projectIds: ['p1'] },
+      { workspaceId: 'ws-2', projectIds: ['p2'] },
+    ]);
+  });
+
+  it('does not let a hanging recovery block polls, duplicate scheduling, or leak timers', async () => {
+    vi.useFakeTimers();
+    let releaseObservation!: () => void;
+    const observationGate = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    const onTeamProjectsObserved = vi.fn(async () => observationGate);
+    const h = harness({
+      projects: [project('p1')],
+      pollIntervalMs: 100,
+      recoveryFloorIntervalMs: 30_000,
+      onTeamProjectsObserved,
+    });
+
+    try {
+      h.poller.start();
+      h.poller.start();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(onTeamProjectsObserved).toHaveBeenCalledTimes(1);
+      expect(h.contextCalls).toBe(1);
+      expect(h.teamListCalls).toBe(1);
+      expect(h.memberListCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(300);
+      expect(onTeamProjectsObserved).toHaveBeenCalledTimes(1);
+      expect(h.contextCalls).toBe(4);
+      expect(h.teamListCalls).toBe(4);
+      expect(h.memberListCalls).toBe(4);
+
+      h.poller.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(onTeamProjectsObserved).toHaveBeenCalledTimes(1);
+      expect(h.contextCalls).toBe(4);
+    } finally {
+      h.poller.stop();
+      releaseObservation();
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports an asynchronous recovery rejection without rejecting the poll', async () => {
+    const failure = new Error('recovery failed');
+    const h = harness({
+      projects: [project('p1')],
+      onTeamProjectsObserved: async () => {
+        throw failure;
+      },
+    });
+
+    await expect(h.poller.pollOnce()).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(h.errors).toContain(failure));
   });
 });
