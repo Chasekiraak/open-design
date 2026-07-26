@@ -8013,15 +8013,13 @@ export function ProjectView({
 
   useEffect(() => () => finishChatPanelResize(false), [finishChatPanelResize]);
 
-  // `.split-chat-slot`'s `hidden` attribute used to track `workspaceFocused`
-  // 1:1 — the instant focus mode engaged, the chat pane vanished (`display:
-  // none`) while the grid column collapse played out underneath it. Now that
-  // the collapse animates (see shell.css), hiding the slot immediately reads
-  // as a second, JS-driven jump layered on top of the smooth width
-  // transition: the content disappears a beat before the column visually
-  // reaches zero. Expanding still unhides immediately — the content should
-  // be visible while the column grows back in — but collapsing waits for the
-  // width transition to actually finish.
+  // The chat slot stays in grid flow even after the collapse finishes. Using
+  // the native `hidden` attribute here removes the first grid item with
+  // `display: none`, which shifts FileWorkspace into the zero-width handle
+  // track and leaves the full-width workspace track empty. The settled class
+  // below only hides the collapsed chat visually, preserving all three grid
+  // item positions. Expanding removes it immediately so the content is
+  // visible while the chat column grows back in.
   useEffect(() => {
     if (!workspaceFocused) {
       setChatSlotHidden(false);
@@ -8948,7 +8946,13 @@ export function ProjectView({
         ].filter(Boolean).join(' ')}
         style={projectSplitStyle(workspaceFocused, splitLeftPanelWidth, workspacePanelTrack)}
       >
-        <div className="split-chat-slot" hidden={chatSlotHidden}>
+        <div
+          className={[
+            'split-chat-slot',
+            chatSlotHidden ? 'split-chat-slot-hidden' : '',
+          ].filter(Boolean).join(' ')}
+          aria-hidden={chatSlotHidden || undefined}
+        >
           {commentInspectorActive ? (
             <div
               id={commentInspectorPortalId}

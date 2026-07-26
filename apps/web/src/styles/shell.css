@@ -2196,8 +2196,9 @@ a.avatar-item:visited {
   min-width: 0;
   overflow: hidden;
 }
-.split-chat-slot[hidden] {
-  display: none;
+.split-chat-slot-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 .split-chat-slot > .pane {
   flex: 1 1 auto;

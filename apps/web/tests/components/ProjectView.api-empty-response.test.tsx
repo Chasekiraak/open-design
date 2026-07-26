@@ -428,8 +428,15 @@ describe('ProjectView API empty response handling', () => {
       expect(split?.style.getPropertyValue('--project-chat-handle-width')).toBe('');
       expect(split?.style.getPropertyValue('--project-workspace-panel-track')).toBe('');
 
+      const chatSlot = split?.querySelector<HTMLDivElement>('.split-chat-slot');
+      expect(chatSlot).not.toBeNull();
+      fireEvent.transitionEnd(split!, { propertyName: '--project-chat-panel-width' });
+      await waitFor(() => expect(chatSlot).toHaveAttribute('aria-hidden', 'true'));
+      expect(chatSlot).not.toHaveAttribute('hidden');
+
       fireEvent.click(screen.getByTestId('workspace-focus-toggle'));
       expect(split?.classList.contains('split-focus')).toBe(false);
+      expect(chatSlot).not.toHaveAttribute('aria-hidden');
     }
   });
 
