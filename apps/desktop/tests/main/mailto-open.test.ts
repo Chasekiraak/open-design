@@ -8,7 +8,8 @@ import {
   resolveMailtoLaunch,
 } from "../../src/main/mailto-open.js";
 
-// Shape produced by `defaults read com.apple.launchservices.secure LSHandlers`
+// Shape produced by:
+// `defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers`
 // on a machine whose "default email reader" was switched to Chrome. The nested
 // LSHandlerPreferredVersions dict carries its own LSHandlerRoleAll = "-" that
 // a depth-blind scan would return instead of the real bundle id.
@@ -43,6 +44,17 @@ const LS_HANDLERS_MAIL_APP_MAILTO = `(
         };
         LSHandlerRoleAll = "com.readdle.smartemail-Mac";
         LSHandlerURLScheme = "mailto";
+    }
+)`;
+
+const LS_HANDLERS_EDGE_MAILTO = `(
+        {
+        LSHandlerContentType = "com.apple.default-app.mail-client";
+        LSHandlerRoleAll = "com.microsoft.edgemac";
+    },
+        {
+        LSHandlerRoleAll = "com.microsoft.edgemac";
+        LSHandlerURLScheme = mailto;
     }
 )`;
 
@@ -126,12 +138,26 @@ describe("resolveMailtoLaunch", () => {
 });
 
 describe("readDefaultMailtoHandlerBundleId", () => {
-  test("parses the handler out of the defaults output", async () => {
-    const result = await readDefaultMailtoHandlerBundleId(async () => ({
-      stdout: LS_HANDLERS_CHROME_MAILTO,
-      stderr: "",
-    }));
-    expect(result).toBe("com.google.chrome");
+  test("reads the real macOS LaunchServices domain and detects an Edge mailto handler", async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const result = await readDefaultMailtoHandlerBundleId(async (file, args) => {
+      calls.push({ file, args });
+      return {
+        stdout: LS_HANDLERS_EDGE_MAILTO,
+        stderr: "",
+      };
+    });
+
+    expect(calls).toEqual([{
+      file: "defaults",
+      args: [
+        "read",
+        "com.apple.LaunchServices/com.apple.launchservices.secure",
+        "LSHandlers",
+      ],
+    }]);
+    expect(result).toBe("com.microsoft.edgemac");
+    expect(resolveMailtoLaunch(result)).toBe("apple-mail");
   });
 
   test("returns null when the read fails (no overrides recorded)", async () => {
@@ -141,6 +167,19 @@ describe("readDefaultMailtoHandlerBundleId", () => {
     expect(result).toBeNull();
   });
 });
+
+const expectedRealMailtoHandler = process.env.OD_EXPECT_REAL_MAILTO_HANDLER;
+const realMacLaunchServicesTest =
+  process.platform === "darwin" && expectedRealMailtoHandler ? test : test.skip;
+
+realMacLaunchServicesTest(
+  "reads this machine's real mailto handler through the macOS LaunchServices domain",
+  async () => {
+    const handler = await readDefaultMailtoHandlerBundleId();
+    expect(handler).toBe(expectedRealMailtoHandler);
+    expect(resolveMailtoLaunch(handler)).toBe("apple-mail");
+  },
+);
 
 describe("openFirstPartyMailto", () => {
   const MAILTO = "mailto:support@open-design.ai";

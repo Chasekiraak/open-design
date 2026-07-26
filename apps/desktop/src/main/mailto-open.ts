@@ -39,10 +39,11 @@ export function isBrowserBundleId(bundleId: string): boolean {
   return BROWSER_BUNDLE_ID_SUBSTRINGS.some((needle) => normalized.includes(needle));
 }
 
-// Parse the old-style plist text `defaults read com.apple.launchservices.secure
-// LSHandlers` prints and return the bundle id registered for the `mailto`
-// scheme, lowercased, or null when no override exists (macOS then routes
-// mailto to Apple Mail, the built-in default). Entries look like:
+// Parse the old-style plist text printed by:
+// `defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers`
+// and return the bundle id registered for the `mailto` scheme, lowercased, or
+// null when no override exists (macOS then routes mailto to Apple Mail, the
+// built-in default). Entries look like:
 //
 //     {
 //         LSHandlerPreferredVersions =         {
@@ -149,7 +150,7 @@ export async function readDefaultMailtoHandlerBundleId(
   try {
     const { stdout } = await runCommand("defaults", [
       "read",
-      "com.apple.launchservices.secure",
+      "com.apple.LaunchServices/com.apple.launchservices.secure",
       "LSHandlers",
     ]);
     return extractDefaultMailtoHandlerBundleId(stdout);
