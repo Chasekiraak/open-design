@@ -272,6 +272,10 @@ interface PullIntent {
   revision: number;
   timer: unknown | null;
   driving: Promise<boolean> | null;
+  /** A live hub event may reserve priority for one retry. Persistent failures
+   * continue backing off after this reaches zero, but may no longer starve
+   * broad reconnect recovery. A newer event refreshes the budget. */
+  foregroundRetryBudget?: number;
 }
 
 interface CatalogProjectRetry {
@@ -280,12 +284,14 @@ interface CatalogProjectRetry {
   projectId: string;
   failures: number;
   timer: unknown | null;
+  foregroundRetryBudget?: number;
 }
 
 interface CatchUpSweepOutcome {
   retryLane: boolean;
   retryProjectIds: string[];
   retryWorkspaceId: string | null;
+  preemptedByForeground?: boolean;
 }
 
 type PullAttempt =
@@ -313,6 +319,7 @@ type PullDecision =
     };
 
 const MAX_CATALOG_PROPAGATION_RETRIES = 5;
+const FOREGROUND_CATCH_UP_QUIET_MS = 250;
 
 export function createProactiveContentPull(
   deps: ProactiveContentPullDeps,
@@ -352,6 +359,15 @@ export function createProactiveContentPull(
   };
   const random = deps.random ?? Math.random;
   let disposed = false;
+  let foregroundGeneration = 0;
+  let foregroundEventsInFlight = 0;
+  let foregroundResumeTimer: unknown | null = null;
+  const foregroundIntents = new Set<PullIntent>();
+  const foregroundCatalogRetries = new Set<CatalogProjectRetry>();
+  const foregroundResumeRequests = new Map<
+    CatchUpMode,
+    CatchUpSweepRequest
+  >();
 
   const reportTiming = (
     event: Parameters<NonNullable<ProactiveContentPullDeps['onTiming']>>[0],
@@ -624,9 +640,42 @@ export function createProactiveContentPull(
     intent.timer = null;
   }
 
+  function markIntentForeground(intent: PullIntent): void {
+    intent.foregroundRetryBudget = 1;
+    if (foregroundIntents.has(intent)) {
+      cancelForegroundResumeTimer();
+      return;
+    }
+    foregroundIntents.add(intent);
+    cancelForegroundResumeTimer();
+  }
+
+  function releaseIntentForeground(intent: PullIntent): void {
+    delete intent.foregroundRetryBudget;
+    if (foregroundIntents.delete(intent)) {
+      armForegroundResumeTimer();
+    }
+  }
+
+  function transferIntentForeground(
+    source: PullIntent,
+    target: PullIntent,
+  ): void {
+    if (!foregroundIntents.delete(source)) return;
+    const sourceBudget = source.foregroundRetryBudget ?? 0;
+    delete source.foregroundRetryBudget;
+    target.foregroundRetryBudget = Math.max(
+      target.foregroundRetryBudget ?? 0,
+      sourceBudget,
+    );
+    foregroundIntents.add(target);
+    cancelForegroundResumeTimer();
+  }
+
   function clearIntent(intent: PullIntent): void {
     cancelIntentTimer(intent);
     if (intents.get(intent.key) === intent) intents.delete(intent.key);
+    releaseIntentForeground(intent);
   }
 
   function createIntent(
@@ -676,6 +725,7 @@ export function createProactiveContentPull(
     target: PullIntent,
     source: PullIntent,
   ): boolean {
+    transferIntentForeground(source, target);
     const changed = mergeIntentUpdate(target, source.event, source.force);
     target.failures = Math.max(target.failures, source.failures);
     return changed;
@@ -697,7 +747,7 @@ export function createProactiveContentPull(
     handle = scheduler.setTimeout(async () => {
       if (intent.timer !== handle) return;
       intent.timer = null;
-      await driveIntent(intent);
+      await driveIntent(intent, true);
     }, delayMs);
     intent.timer = handle;
     (
@@ -725,11 +775,13 @@ export function createProactiveContentPull(
     // first share whose owner row has not propagated gets exactly the bounded
     // catalog policy. Transfer ownership by removing the provisional intent
     // before scheduling the project retry; otherwise both timers can survive.
+    const foreground = foregroundIntents.has(intent);
     clearIntent(intent);
     await requestCatalogProjectRecovery(
       workspaceId,
       projectId,
       'external',
+      foreground,
     );
     return true;
   }
@@ -905,15 +957,30 @@ export function createProactiveContentPull(
     return true;
   }
 
-  function driveIntent(intent: PullIntent): Promise<boolean> {
+  function driveIntent(
+    intent: PullIntent,
+    consumeForegroundRetry = false,
+  ): Promise<boolean> {
     if (disposed || intents.get(intent.key) !== intent) {
       return Promise.resolve(true);
     }
     if (intent.driving) return intent.driving;
+    if (consumeForegroundRetry && foregroundIntents.has(intent)) {
+      intent.foregroundRetryBudget = Math.max(
+        0,
+        (intent.foregroundRetryBudget ?? 0) - 1,
+      );
+    }
     const run = runIntent(intent);
     intent.driving = run;
     const clearDriving = () => {
       if (intent.driving === run) intent.driving = null;
+      if (
+        foregroundIntents.has(intent) &&
+        (intent.foregroundRetryBudget ?? 0) <= 0
+      ) {
+        releaseIntentForeground(intent);
+      }
     };
     // A `.finally()` call creates a second promise that mirrors rejection; if
     // nobody observes that derived promise it can surface as an unhandled
@@ -926,6 +993,7 @@ export function createProactiveContentPull(
     event: ProactiveContentPullEvent,
     ownerHint?: string,
     force = false,
+    foreground = false,
   ): Promise<boolean> {
     try {
       const provisionalKey = provisionalIntentKey(event);
@@ -963,6 +1031,7 @@ export function createProactiveContentPull(
             event.workspaceId,
             event.projectId,
             'external',
+            foreground,
           );
           return false;
         }
@@ -971,9 +1040,11 @@ export function createProactiveContentPull(
         if (!pending) {
           pending = createIntent(provisionalKey, event, force);
           intents.set(provisionalKey, pending);
+          if (foreground) markIntentForeground(pending);
           scheduleRetry(pending);
           return false;
         }
+        if (foreground) markIntentForeground(pending);
         const wake = mergeIntentUpdate(pending, event, force);
         if (wake) {
           cancelIntentTimer(pending);
@@ -1013,6 +1084,10 @@ export function createProactiveContentPull(
       }
       let intent = intents.get(key);
       const pending = intents.get(provisionalKey);
+      if (foreground) {
+        if (intent) markIntentForeground(intent);
+        if (pending) markIntentForeground(pending);
+      }
       let absorbedWake = false;
       let migrated = false;
       if (pending && pending !== intent) {
@@ -1043,6 +1118,7 @@ export function createProactiveContentPull(
           intent.skipNextForceProbe = true;
         }
         intents.set(key, intent);
+        if (foreground) markIntentForeground(intent);
         return await driveIntent(intent);
       }
       if (force && !effectiveForce) {
@@ -1080,7 +1156,9 @@ export function createProactiveContentPull(
     expectedWorkspaceId?: string,
     expectedProjectIds: ReadonlySet<string> = new Set(),
     targetedOnly = false,
+    foreground = false,
   ): Promise<CatchUpSweepOutcome> {
+    const foregroundGenerationAtStart = foregroundGeneration;
     const lane = targetedOnly ? 'targeted' : 'broad';
     if (
       !deps.listSharedProjects ||
@@ -1160,6 +1238,7 @@ export function createProactiveContentPull(
 
     let complete = true;
     let retrySweep = false;
+    let preemptedByForeground = false;
     const visibleProjectIds = new Set(projects.map((project) => project.projectId));
     const retryProjectIds: string[] = [];
     for (const expectedProjectId of expectedProjectIds) {
@@ -1213,6 +1292,27 @@ export function createProactiveContentPull(
     // Deliberately sequential: reconnect is a recovery path, not permission
     // to fan out one request per shared project at once.
     for (const candidate of orderedCandidates) {
+      // A verified hub event is the latency-sensitive lane. It already runs
+      // independently from broad reconnect recovery, but two Vela children
+      // still contend for the same session/network/object-store resources.
+      // Never abort a pull already materializing (the transport does not yet
+      // expose a proven-safe cancellation boundary); once that candidate
+      // settles, stop before launching the next historical download. Targeted
+      // first-share recovery is deliberately exempt.
+      if (
+        !targetedOnly &&
+        (
+          foregroundEventsInFlight > 0 ||
+          foregroundIntents.size > 0 ||
+          foregroundCatalogRetries.size > 0 ||
+          foregroundResumeTimer != null ||
+          foregroundGeneration !== foregroundGenerationAtStart
+        )
+      ) {
+        complete = false;
+        preemptedByForeground = true;
+        break;
+      }
       const { project, forcePull } = candidate;
       const binding = deps.getLocalBinding(project.projectId);
       if (binding?.visibility === 'personal') continue;
@@ -1252,6 +1352,7 @@ export function createProactiveContentPull(
         { projectId: project.projectId, workspaceId, version },
         project.ownerMemberId,
         forcePull,
+        foreground,
       )) {
         complete = false;
       }
@@ -1267,10 +1368,94 @@ export function createProactiveContentPull(
       complete,
     });
     return {
-      retryLane: retrySweep,
+      // The foreground resume re-runs the whole sweep, including any head
+      // read that failed before preemption. Do not also schedule the ordinary
+      // failure retry or two background lanes would restart together.
+      retryLane: preemptedByForeground ? false : retrySweep,
       retryProjectIds,
       retryWorkspaceId: workspaceId,
+      ...(preemptedByForeground ? { preemptedByForeground: true } : {}),
     };
+  }
+
+  function mergeForegroundResumeRequest(
+    mode: CatchUpMode,
+    request: CatchUpSweepRequest,
+  ): void {
+    const existing = foregroundResumeRequests.get(mode);
+    if (
+      existing &&
+      existing.expectedWorkspaceId === request.expectedWorkspaceId
+    ) {
+      for (const projectId of request.expectedProjectIds) {
+        existing.expectedProjectIds.add(projectId);
+      }
+      return;
+    }
+    foregroundResumeRequests.set(mode, {
+      ...(request.expectedWorkspaceId
+        ? { expectedWorkspaceId: request.expectedWorkspaceId }
+        : {}),
+      expectedProjectIds: new Set(request.expectedProjectIds),
+    });
+  }
+
+  function cancelForegroundResumeTimer(): void {
+    if (foregroundResumeTimer == null) return;
+    scheduler.clearTimeout(foregroundResumeTimer);
+    foregroundResumeTimer = null;
+  }
+
+  function armForegroundResumeTimer(): void {
+    if (
+      disposed ||
+      foregroundEventsInFlight > 0 ||
+      foregroundIntents.size > 0 ||
+      foregroundCatalogRetries.size > 0 ||
+      foregroundResumeRequests.size === 0 ||
+      foregroundResumeTimer != null
+    ) {
+      return;
+    }
+    const generation = foregroundGeneration;
+    let handle: unknown;
+    handle = scheduler.setTimeout(async () => {
+      if (foregroundResumeTimer !== handle) return;
+      foregroundResumeTimer = null;
+      if (disposed) return;
+      if (
+        foregroundEventsInFlight > 0 ||
+        foregroundIntents.size > 0 ||
+        foregroundCatalogRetries.size > 0 ||
+        foregroundGeneration !== generation
+      ) {
+        armForegroundResumeTimer();
+        return;
+      }
+      const requests = [...foregroundResumeRequests.entries()];
+      foregroundResumeRequests.clear();
+      await Promise.all(
+        requests.map(([mode, request]) =>
+          requestCatchUp(
+            mode,
+            request.expectedWorkspaceId,
+            request.expectedProjectIds,
+            'foreground-resume',
+          )),
+      );
+    }, FOREGROUND_CATCH_UP_QUIET_MS);
+    foregroundResumeTimer = handle;
+    (
+      handle as { unref?: () => void } | null | undefined
+    )?.unref?.();
+  }
+
+  function deferCatchUpForForeground(
+    mode: CatchUpMode,
+    request: CatchUpSweepRequest,
+  ): void {
+    mergeForegroundResumeRequest(mode, request);
+    armForegroundResumeTimer();
   }
 
   function cancelCatchUpRetry(lane: CatchUpLane): void {
@@ -1332,6 +1517,19 @@ export function createProactiveContentPull(
     return JSON.stringify([workspaceId, projectId]);
   }
 
+  function markCatalogRetryForeground(retry: CatalogProjectRetry): void {
+    retry.foregroundRetryBudget = 1;
+    foregroundCatalogRetries.add(retry);
+    cancelForegroundResumeTimer();
+  }
+
+  function releaseCatalogRetryForeground(retry: CatalogProjectRetry): void {
+    delete retry.foregroundRetryBudget;
+    if (foregroundCatalogRetries.delete(retry)) {
+      armForegroundResumeTimer();
+    }
+  }
+
   function clearCatalogProjectRetry(
     workspaceId: string,
     projectId: string,
@@ -1342,6 +1540,7 @@ export function createProactiveContentPull(
     if (retry.timer != null) scheduler.clearTimeout(retry.timer);
     retry.timer = null;
     catalogProjectRetries.delete(key);
+    releaseCatalogRetryForeground(retry);
   }
 
   function clearCatalogRetriesOutsideWorkspace(workspaceId: string): void {
@@ -1397,7 +1596,19 @@ export function createProactiveContentPull(
     handle = scheduler.setTimeout(async () => {
       if (retry?.timer !== handle) return;
       retry.timer = null;
+      if (foregroundCatalogRetries.has(retry)) {
+        retry.foregroundRetryBudget = Math.max(
+          0,
+          (retry.foregroundRetryBudget ?? 0) - 1,
+        );
+      }
       await requestCatalogProjectRecovery(workspaceId, projectId, 'retry');
+      if (
+        foregroundCatalogRetries.has(retry) &&
+        (retry.foregroundRetryBudget ?? 0) <= 0
+      ) {
+        releaseCatalogRetryForeground(retry);
+      }
     }, delayMs);
     retry.timer = handle;
     (
@@ -1409,20 +1620,27 @@ export function createProactiveContentPull(
     workspaceId: string,
     projectId: string,
     source: 'external' | 'retry',
+    foreground = false,
   ): Promise<void> {
     if (disposed) return;
     const key = catalogProjectRetryKey(workspaceId, projectId);
     if (source === 'external') {
       clearCatalogRetriesOutsideWorkspace(workspaceId);
       clearCatalogProjectRetry(workspaceId, projectId);
-      catalogProjectRetries.set(key, {
+      const retry: CatalogProjectRetry = {
         key,
         workspaceId,
         projectId,
         failures: 0,
         timer: null,
-      });
+      };
+      catalogProjectRetries.set(key, retry);
+      if (foreground) markCatalogRetryForeground(retry);
     }
+    const retryState = catalogProjectRetries.get(key);
+    const runForeground = Boolean(
+      retryState && foregroundCatalogRetries.has(retryState),
+    );
     let targeted = targetedCatalogRecoveries.get(key);
     if (!targeted) {
       targeted = (async () => {
@@ -1431,6 +1649,7 @@ export function createProactiveContentPull(
           workspaceId,
           new Set([projectId]),
           true,
+          runForeground,
         );
         if (outcome.retryProjectIds.length > 0) {
           const currentIdentity = await deps.getWorkspaceIdentity().catch(
@@ -1473,6 +1692,7 @@ export function createProactiveContentPull(
     const retry = catalogProjectRetries.get(key);
     if (retry?.timer == null) {
       catalogProjectRetries.delete(key);
+      if (retry) releaseCatalogRetryForeground(retry);
     }
   }
 
@@ -1480,7 +1700,7 @@ export function createProactiveContentPull(
     mode: CatchUpMode,
     expectedWorkspaceId?: string,
     expectedProjectIds: ReadonlySet<string> = new Set(),
-    source: 'external' | 'retry' = 'external',
+    source: 'external' | 'retry' | 'foreground-resume' = 'external',
   ): Promise<void> {
     if (disposed) return;
     const lane = catchUpLanes[mode];
@@ -1527,6 +1747,9 @@ export function createProactiveContentPull(
           next.expectedProjectIds,
         );
         lane.completedGeneration = generation;
+        if (outcome.preemptedByForeground) {
+          deferCatchUpForForeground(mode, next);
+        }
         for (const projectId of outcome.retryProjectIds) {
           if (outcome.retryWorkspaceId) {
             scheduleCatalogProjectRetry(
@@ -1568,7 +1791,20 @@ export function createProactiveContentPull(
           atMs: Date.now(),
         });
       }
-      await processContentChanged(event);
+      const isForeground = Boolean(event.projectId);
+      if (isForeground) {
+        foregroundGeneration += 1;
+        foregroundEventsInFlight += 1;
+        cancelForegroundResumeTimer();
+      }
+      try {
+        await processContentChanged(event, undefined, false, isForeground);
+      } finally {
+        if (isForeground) {
+          foregroundEventsInFlight -= 1;
+          armForegroundResumeTimer();
+        }
+      }
     },
     catchUpPublishedHeads: (workspaceId) =>
       requestCatchUp('full', workspaceId),
@@ -1584,9 +1820,13 @@ export function createProactiveContentPull(
       for (const lane of Object.values(catchUpLanes)) {
         cancelCatchUpRetry(lane);
       }
+      cancelForegroundResumeTimer();
+      foregroundIntents.clear();
+      foregroundResumeRequests.clear();
       for (const retry of [...catalogProjectRetries.values()]) {
         clearCatalogProjectRetry(retry.workspaceId, retry.projectId);
       }
+      foregroundCatalogRetries.clear();
       targetedCatalogRecoveries.clear();
       targetedCatalogReads.clear();
     },

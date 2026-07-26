@@ -61,9 +61,10 @@ function makeRetryScheduler() {
       delays.push(delayMs);
       return handle;
     },
-    clearTimeout(handle: { id: number }) {
-      cleared.push(handle.id);
-      tasks.delete(handle.id);
+    clearTimeout(handle: unknown) {
+      const id = (handle as { id: number }).id;
+      cleared.push(id);
+      tasks.delete(id);
     },
   };
   return {
@@ -74,6 +75,14 @@ function makeRetryScheduler() {
     async runNext() {
       const task = [...tasks.values()].sort((a, b) => a.handle.id - b.handle.id)[0];
       if (!task) throw new Error('expected a scheduled retry');
+      tasks.delete(task.handle.id);
+      await task.callback();
+    },
+    async runDelay(delayMs: number) {
+      const task = [...tasks.values()]
+        .sort((a, b) => a.handle.id - b.handle.id)
+        .find((candidate) => candidate.delayMs === delayMs);
+      if (!task) throw new Error(`expected a scheduled ${delayMs}ms retry`);
       tasks.delete(task.handle.id);
       await task.callback();
     },
@@ -1038,6 +1047,585 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     );
     releaseHistory();
     await Promise.all([full, pendingFull, event]);
+  });
+
+  it('stops a broad sweep before its next project when a different live event arrives, then resumes after a quiet delay', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    const event = pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('live-project'),
+    );
+
+    releaseHistory();
+    await Promise.all([broad, event]);
+
+    expect(deps.pullCalls).toEqual(['history-a', 'live-project']);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toEqual([
+      'history-a',
+      'live-project',
+      'history-b',
+    ]);
+  });
+
+  it('stops a broad sweep before its next project when the live event coalesces with its current project', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'proj-1') await historyGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['proj-1']));
+    const event = pull.handleContentChanged(baseEvent);
+    releaseHistory();
+    await Promise.all([broad, event]);
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toEqual(['proj-1', 'history-b']);
+  });
+
+  it('keeps a targeted first-share recovery runnable while a live event suppresses broad work', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let releaseEvent!: () => void;
+    const eventGate = new Promise<void>((resolve) => {
+      releaseEvent = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      getLocalBinding: (projectId) =>
+        projectId === 'fresh-share'
+          ? null
+          : { workspaceId: 'ws-1', visibility: 'team' },
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+        { projectId: 'fresh-share', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'live-project') await eventGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    const event = pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('live-project'),
+    );
+    releaseHistory();
+    await broad;
+
+    const targeted = pull.materializeMissingProjects('ws-1', 'fresh-share');
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('fresh-share'),
+    );
+
+    releaseEvent();
+    await Promise.all([event, targeted]);
+  });
+
+  it('extends one broad-resume delay across overlapping live events and clears it on dispose', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let releaseFirstEvent!: () => void;
+    const firstEventGate = new Promise<void>((resolve) => {
+      releaseFirstEvent = resolve;
+    });
+    let releaseSecondEvent!: () => void;
+    const secondEventGate = new Promise<void>((resolve) => {
+      releaseSecondEvent = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'live-a') await firstEventGate;
+        if (target.projectId === 'live-b') await secondEventGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    const firstEvent = pull.handleContentChanged({
+      projectId: 'live-a',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    const secondEvent = pull.handleContentChanged({
+      projectId: 'live-b',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toEqual([
+        'history-a',
+        'live-a',
+        'live-b',
+      ]),
+    );
+
+    releaseHistory();
+    await broad;
+    expect(retry.tasks.size).toBe(0);
+
+    releaseFirstEvent();
+    await firstEvent;
+    expect(retry.tasks.size).toBe(0);
+
+    releaseSecondEvent();
+    await secondEvent;
+    expect(retry.tasks.size).toBe(1);
+
+    pull.dispose();
+    expect(retry.tasks.size).toBe(0);
+    expect(retry.cleared).toHaveLength(1);
+  });
+
+  it('restarts the quiet delay for a later live event without starving deferred broad work', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let releaseLaterEvent!: () => void;
+    const laterEventGate = new Promise<void>((resolve) => {
+      releaseLaterEvent = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'later-live') await laterEventGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    await pull.handleContentChanged({
+      projectId: 'first-live',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    releaseHistory();
+    await broad;
+    expect(retry.tasks.size).toBe(1);
+
+    const laterEvent = pull.handleContentChanged({
+      projectId: 'later-live',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('later-live'),
+    );
+    expect(retry.tasks.size).toBe(0);
+    expect(retry.cleared).toHaveLength(1);
+
+    releaseLaterEvent();
+    await laterEvent;
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toContain('history-b');
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('keeps broad work deferred while a live event is waiting for its transport retry', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let liveAttempts = 0;
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      random: () => 1,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'live-project') {
+          liveAttempts += 1;
+          if (liveAttempts === 1) throw new Error('transient transport failure');
+        }
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    await pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    expect(retry.delays).toEqual([1_000]);
+
+    releaseHistory();
+    await broad;
+
+    expect(deps.pullCalls).toEqual(['history-a', 'live-project']);
+    expect(retry.delays).toEqual([1_000]);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toEqual([
+      'history-a',
+      'live-project',
+      'live-project',
+    ]);
+    expect(retry.delays).toEqual([1_000, 250]);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toEqual([
+      'history-a',
+      'live-project',
+      'live-project',
+      'history-b',
+    ]);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('transfers foreground priority when a provisional retry merges into a scoped pull', async () => {
+    const retry = makeRetryScheduler();
+    let identityAvailable = true;
+    let releaseScopedPull!: () => void;
+    const scopedPullGate = new Promise<void>((resolve) => {
+      releaseScopedPull = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      random: () => 1,
+      getWorkspaceIdentity: async () =>
+        identityAvailable
+          ? {
+              workspaceId: 'ws-1',
+              resourceTeamId: 'team-1',
+              workspaceMemberId: 'wm-member',
+            }
+          : null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'proj-1') await scopedPullGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const targeted = pull.materializeMissingProjects('ws-1', 'proj-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['proj-1']));
+
+    identityAvailable = false;
+    await pull.handleContentChanged(baseEvent);
+    expect(retry.delays).toEqual([1_000]);
+    identityAvailable = true;
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await broad;
+    expect(deps.pullCalls).toEqual(['proj-1']);
+
+    const foregroundRetry = retry.runNext();
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toEqual(['proj-1']),
+    );
+    releaseScopedPull();
+    await Promise.all([targeted, foregroundRetry]);
+
+    expect(retry.delays).toEqual([1_000, 250]);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(deps.pullCalls).toEqual(['proj-1', 'history-b']);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('keeps first-share recovery ahead of broad work through its first catalog retry and pull', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    let releaseFirstShare!: () => void;
+    const firstShareGate = new Promise<void>((resolve) => {
+      releaseFirstShare = resolve;
+    });
+    let catalogReads = 0;
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      random: () => 1,
+      getLocalBinding: () => null,
+      resolveSharedProjectOwner: async (projectId) =>
+        projectId === 'first-share' ? null : 'wm-owner',
+      listSharedProjects: async () => {
+        catalogReads += 1;
+        if (catalogReads === 1) {
+          return [
+            { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+            { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+          ];
+        }
+        if (catalogReads === 2) return [];
+        return [
+          { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+          { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+          { projectId: 'first-share', ownerMemberId: 'wm-owner' },
+        ];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'first-share') await firstShareGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    await pull.handleContentChanged({
+      projectId: 'first-share',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    expect(retry.delays).toEqual([1_000]);
+
+    releaseHistory();
+    await broad;
+    expect(deps.pullCalls).toEqual(['history-a']);
+    expect(retry.delays).toEqual([1_000]);
+
+    const firstShareRetry = retry.runDelay(1_000);
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toEqual(['history-a', 'first-share']),
+    );
+    expect(
+      [...retry.tasks.values()].map((task) => task.delayMs),
+    ).not.toContain(250);
+
+    releaseFirstShare();
+    await firstShareRetry;
+    expect(retry.delays.at(-1)).toBe(250);
+
+    await retry.runDelay(250);
+    expect(deps.pullCalls).toEqual([
+      'history-a',
+      'first-share',
+      'history-b',
+    ]);
+  });
+
+  it('lets broad work resume after one priority retry while a failing live intent keeps backing off', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      random: () => 1,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyGate;
+        if (target.projectId === 'live-project') {
+          throw new Error('persistent transport failure');
+        }
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    await pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    releaseHistory();
+    await broad;
+
+    expect(retry.delays).toEqual([1_000]);
+    await retry.runDelay(1_000);
+
+    // The second transport retry remains scheduled, but its persistent
+    // failure may no longer starve unrelated catch-up work.
+    expect(retry.delays).toEqual([1_000, 2_000, 250]);
+    await retry.runDelay(250);
+    expect(deps.pullCalls).toEqual([
+      'history-a',
+      'live-project',
+      'live-project',
+      'history-b',
+    ]);
+    expect(
+      [...retry.tasks.values()].map((task) => task.delayMs),
+    ).toEqual([2_000]);
+  });
+
+  it('refreshes the one-retry priority budget when a new event arrives', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHistoryA!: () => void;
+    const historyAGate = new Promise<void>((resolve) => {
+      releaseHistoryA = resolve;
+    });
+    let releaseHistoryB!: () => void;
+    const historyBGate = new Promise<void>((resolve) => {
+      releaseHistoryB = resolve;
+    });
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      random: () => 1,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-c', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'history-a') await historyAGate;
+        if (target.projectId === 'history-b') await historyBGate;
+        if (target.projectId === 'live-project') {
+          throw new Error('persistent transport failure');
+        }
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() => expect(deps.pullCalls).toEqual(['history-a']));
+    await pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    releaseHistoryA();
+    await broad;
+    await retry.runDelay(1_000);
+    const firstResume = retry.runDelay(250);
+    await vi.waitFor(() => expect(deps.pullCalls).toContain('history-b'));
+
+    // A repeated event gives the still-pending intent one fresh priority
+    // retry, even though the content version did not change.
+    await pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    releaseHistoryB();
+    await firstResume;
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).not.toContain('history-c'),
+    );
+
+    await retry.runDelay(2_000);
+    expect(deps.pullCalls).not.toContain('history-c');
+    await retry.runDelay(250);
+    expect(deps.pullCalls).toContain('history-c');
   });
 
   it('keeps concurrent first-share catalog retries independent', async () => {
