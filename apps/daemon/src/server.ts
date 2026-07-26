@@ -3542,6 +3542,18 @@ export async function startServer({
     onError: (error) =>
       console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
     onCatchUp: (event) => {
+      if (
+        event.phase === 'retry-scheduled' ||
+        event.phase === 'retry-exhausted'
+      ) {
+        console.info(
+          `[od] shared-project content catch-up ${event.phase} mode=${event.mode} ` +
+            `workspaceId=${event.workspaceId ?? 'unknown'} ` +
+            `projectId=${event.projectId ?? 'all'} attempt=${event.attempt ?? event.failures ?? 0} ` +
+            `delayMs=${event.delayMs ?? 0}`,
+        );
+        return;
+      }
       if (event.phase === 'skipped') {
         console.info(
           `[od] shared-project content catch-up skipped mode=${event.mode} reason=${event.reason ?? 'unknown'}`,

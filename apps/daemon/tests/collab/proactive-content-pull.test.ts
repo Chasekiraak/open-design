@@ -837,6 +837,130 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(retry.tasks.size).toBe(0);
   });
 
+  it('still materializes visible projects while one targeted first share is absent from the catalog', async () => {
+    const retry = makeRetryScheduler();
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'visible-project', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'still-propagating');
+
+    expect(deps.pullCalls).toEqual(['visible-project']);
+    expect(retry.delays).toEqual([1_000]);
+    expect(retry.tasks.size).toBe(1);
+  });
+
+  it('keeps concurrent first-share catalog retries independent', async () => {
+    const retry = makeRetryScheduler();
+    let releaseCatalog!: () => void;
+    const catalogGate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    let reads = 0;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => {
+        reads += 1;
+        if (reads === 1) await catalogGate;
+        return [];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const first = pull.materializeMissingProjects('ws-1', 'project-a');
+    await vi.waitFor(() => expect(reads).toBe(1));
+    const second = pull.materializeMissingProjects('ws-1', 'project-b');
+    releaseCatalog();
+    await Promise.all([first, second]);
+
+    expect(reads).toBe(2);
+    expect(retry.delays).toEqual([1_000, 1_000]);
+    expect(retry.tasks.size).toBe(2);
+  });
+
+  it('cancels targeted catalog retries from the previous workspace', async () => {
+    const retry = makeRetryScheduler();
+    let activeWorkspaceId = 'ws-1';
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      getWorkspaceIdentity: async () => ({
+        workspaceId: activeWorkspaceId,
+        resourceTeamId: `team-${activeWorkspaceId}`,
+        workspaceMemberId: 'wm-member',
+      }),
+      listSharedProjects: async () => [],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'project-a');
+    activeWorkspaceId = 'ws-2';
+    await pull.materializeMissingProjects('ws-2', 'project-b');
+
+    expect(retry.cleared).toHaveLength(1);
+    expect(retry.tasks.size).toBe(1);
+  });
+
+  it('does not let an in-flight old-workspace sweep restore a stale retry', async () => {
+    const retry = makeRetryScheduler();
+    let activeWorkspaceId = 'ws-1';
+    let releaseOldCatalog!: () => void;
+    const oldCatalogGate = new Promise<void>((resolve) => {
+      releaseOldCatalog = resolve;
+    });
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      getWorkspaceIdentity: async () => ({
+        workspaceId: activeWorkspaceId,
+        resourceTeamId: `team-${activeWorkspaceId}`,
+        workspaceMemberId: 'wm-member',
+      }),
+      listSharedProjects: async (workspaceId) => {
+        if (workspaceId === 'ws-1') await oldCatalogGate;
+        return [];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const oldSweep = pull.materializeMissingProjects('ws-1', 'project-a');
+    await Promise.resolve();
+    activeWorkspaceId = 'ws-2';
+    const newSweep = pull.materializeMissingProjects('ws-2', 'project-b');
+    releaseOldCatalog();
+    await Promise.all([oldSweep, newSweep]);
+
+    expect(retry.delays).toEqual([1_000, 1_000]);
+    expect(retry.cleared).toHaveLength(1);
+    expect(retry.tasks.size).toBe(1);
+  });
+
   it('does not drop a third sweep requested while the trailing sweep is running', async () => {
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
@@ -930,12 +1054,21 @@ describe('proactive content pull retry coordinator', () => {
   it('retries a first-share content event while the owner catalog row is still propagating', async () => {
     const retry = makeRetryScheduler();
     let ownerReads = 0;
+    let catalogReads = 0;
     const deps = makeDeps({
       getLocalBinding: () => null,
       resolveSharedProjectOwner: async () => {
         ownerReads += 1;
-        return ownerReads === 1 ? null : 'wm-owner';
+        return null;
       },
+      listSharedProjects: async () => {
+        catalogReads += 1;
+        return catalogReads === 1
+          ? []
+          : [{ projectId: 'proj-1', ownerMemberId: 'wm-owner' }];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
     });
     Object.assign(deps, {
       scheduler: retry.scheduler,
@@ -950,16 +1083,22 @@ describe('proactive content pull retry coordinator', () => {
 
     await retry.runNext();
 
-    expect(ownerReads).toBe(2);
+    expect(ownerReads).toBe(1);
+    expect(catalogReads).toBe(2);
     expect(deps.pullCalls).toEqual(['proj-1']);
     expect(retry.tasks.size).toBe(0);
   });
 
   it('bounds retries for a first-share event whose catalog owner never appears', async () => {
     const retry = makeRetryScheduler();
+    const onCatchUp = vi.fn();
     const deps = makeDeps({
       getLocalBinding: () => null,
       resolveSharedProjectOwner: async () => null,
+      listSharedProjects: async () => [],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      onCatchUp,
     });
     Object.assign(deps, {
       scheduler: retry.scheduler,
@@ -973,6 +1112,51 @@ describe('proactive content pull retry coordinator', () => {
     }
 
     expect(retry.delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
+    expect(retry.tasks.size).toBe(0);
+    expect(deps.pullCalls).toEqual([]);
+    expect(onCatchUp).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'retry-exhausted',
+      mode: 'missing-only',
+      workspaceId: 'ws-1',
+      projectId: 'proj-1',
+      attempt: 5,
+    }));
+
+    await pull.handleContentChanged(baseEvent);
+
+    expect(retry.delays).toEqual([
+      1_000,
+      2_000,
+      4_000,
+      8_000,
+      16_000,
+      1_000,
+    ]);
+    expect(retry.tasks.size).toBe(1);
+    expect(onCatchUp).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'retry-scheduled',
+      mode: 'missing-only',
+      workspaceId: 'ws-1',
+      projectId: 'proj-1',
+      attempt: 1,
+      delayMs: 1_000,
+    }));
+  });
+
+  it('does not retry authoritative owner absence for an already-bound project', async () => {
+    const retry = makeRetryScheduler();
+    const deps = makeDeps({
+      resolveSharedProjectOwner: async () => null,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+
+    expect(retry.delays).toEqual([]);
     expect(retry.tasks.size).toBe(0);
     expect(deps.pullCalls).toEqual([]);
   });
@@ -1460,6 +1644,42 @@ describe('proactive content pull retry coordinator', () => {
     pull.dispose();
 
     expect(retry.cleared).toHaveLength(1);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('does not schedule a catalog retry after dispose wins an in-flight sweep race', async () => {
+    const retry = makeRetryScheduler();
+    let catalogStarted!: () => void;
+    let releaseCatalog!: () => void;
+    const started = new Promise<void>((resolve) => {
+      catalogStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => {
+        catalogStarted();
+        await gate;
+        return [];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const sweep = pull.materializeMissingProjects('ws-1', 'project-a');
+    await started;
+    pull.dispose();
+    releaseCatalog();
+    await sweep;
+
+    expect(retry.delays).toEqual([]);
     expect(retry.tasks.size).toBe(0);
   });
 

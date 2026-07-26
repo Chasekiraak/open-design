@@ -1,26 +1,73 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+const {
+  execFileMock,
+  listProcessSnapshotsMock,
+  stopProcessesMock,
+} = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+  listProcessSnapshotsMock: vi.fn(),
+  stopProcessesMock: vi.fn(),
+}));
 
 vi.mock('node:child_process', () => ({ execFile: execFileMock }));
+vi.mock('@open-design/platform', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@open-design/platform')>(),
+  listProcessSnapshots: listProcessSnapshotsMock,
+  stopProcesses: stopProcessesMock,
+}));
 
 import { runVelaCommand } from '../../src/integrations/vela-command.js';
 import { runVelaResourceCommand } from '../../src/collab/vela-cli-resource-adapter.js';
 
+function stoppedResult(
+  matchedPids: number[],
+  forcedPids: number[] = [],
+) {
+  return {
+    alreadyStopped: false,
+    forcedPids,
+    matchedPids,
+    remainingPids: [],
+    stoppedPids: matchedPids,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('runVelaCommand', () => {
   beforeEach(() => {
     execFileMock.mockReset();
+    listProcessSnapshotsMock.mockReset();
+    stopProcessesMock.mockReset();
+    listProcessSnapshotsMock.mockResolvedValue([]);
+    stopProcessesMock.mockResolvedValue(stoppedResult([4321]));
     execFileMock.mockImplementation(
       (
         _command: string,
         _args: string[],
         _options: unknown,
         callback: (error: Error | null, stdout: string) => void,
-      ) => callback(null, '{"ok":true}\n'),
+      ) => {
+        callback(null, '{"ok":true}\n');
+        return { pid: 4321 };
+      },
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('uses the configured AMR binary and feature-test login profile', async () => {
@@ -82,46 +129,222 @@ describe('runVelaCommand', () => {
     expect(execFileMock.mock.calls[0]?.[0]).toBe(process.execPath);
   });
 
-  it('passes an explicit deadline and terminating signal to the child process', async () => {
-    await runVelaCommand(['resource', 'pull', 'project-1'], {
+  it('hard-terminates an ignored-SIGTERM process tree before rejecting a deadline', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let callback!: (error: Error | null, stdout: string) => void;
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        complete: (error: Error | null, stdout: string) => void,
+      ) => {
+        callback = complete;
+        return { pid: 4321 };
+      },
+    );
+    listProcessSnapshotsMock.mockResolvedValue([
+      { command: 'vela', pid: 4321, ppid: 1 },
+      { command: 'vela-worker', pid: 4322, ppid: 4321 },
+    ]);
+    const stopped = deferred<ReturnType<typeof stoppedResult>>();
+    stopProcessesMock.mockReturnValue(stopped.promise);
+
+    const command = runVelaCommand(['resource', 'pull', 'project-1'], {
       env: {
         ...process.env,
         VELA_BIN: process.execPath,
         OD_DATA_DIR: '',
       },
-      timeoutMs: 30_000,
+      timeoutMs: 50,
+      terminationGraceMs: 25,
     });
+    const rejected = vi.fn();
+    void command.catch(rejected);
 
-    const options = execFileMock.mock.calls[0]?.[2] as {
-      timeout?: number;
-      killSignal?: NodeJS.Signals;
-    };
-    expect(options.timeout).toBe(30_000);
-    expect(options.killSignal).toBe('SIGTERM');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(stopProcessesMock).toHaveBeenCalledWith([4322, 4321], {
+      termGraceMs: 25,
+      killGraceMs: 25,
+    });
+    callback(new Error('terminated'), '');
+    await Promise.resolve();
+    expect(rejected).not.toHaveBeenCalled();
+
+    stopped.resolve(stoppedResult([4322, 4321], [4322, 4321]));
+    await expect(command).rejects.toMatchObject({
+      code: 'ETIMEDOUT',
+      name: 'TimeoutError',
+    });
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'phase=completed reason=timeout timeoutMs=50 childPid=4321 forced=2 remaining=0',
+      ),
+    );
   });
 
-  it('bounds production resource pulls so a stuck child cannot hold the project lock forever', async () => {
+  it('settles only once when callback, abort, and timeout race', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = new AbortController();
+    let callback!: (error: Error | null, stdout: string) => void;
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        complete: (error: Error | null, stdout: string) => void,
+      ) => {
+        callback = complete;
+        return { pid: 4321 };
+      },
+    );
+    const stopped = deferred<ReturnType<typeof stoppedResult>>();
+    stopProcessesMock.mockReturnValue(stopped.promise);
+
+    const command = runVelaCommand(['resource', 'pull', 'project-1'], {
+      env: {
+        ...process.env,
+        VELA_BIN: process.execPath,
+        OD_DATA_DIR: '',
+      },
+      timeoutMs: 50,
+      signal: controller.signal,
+    });
+    const fulfilled = vi.fn();
+    const rejected = vi.fn();
+    void command.then(fulfilled, rejected);
+
+    await vi.advanceTimersByTimeAsync(50);
+    controller.abort(new Error('late abort'));
+    callback(null, '{"version":2}\n');
+    await Promise.resolve();
+    expect(stopProcessesMock).toHaveBeenCalledTimes(1);
+    expect(fulfilled).not.toHaveBeenCalled();
+    expect(rejected).not.toHaveBeenCalled();
+
+    stopped.resolve(stoppedResult([4321]));
+    await expect(command).rejects.toMatchObject({
+      code: 'ETIMEDOUT',
+      name: 'TimeoutError',
+    });
+    expect(fulfilled).not.toHaveBeenCalled();
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts before spawn without launching a child', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled'));
+
+    await expect(runVelaCommand(['resource', 'pull', 'project-1'], {
+      env: {
+        ...process.env,
+        VELA_BIN: process.execPath,
+        OD_DATA_DIR: '',
+      },
+      signal: controller.signal,
+    })).rejects.toMatchObject({
+      code: 'ABORT_ERR',
+      name: 'AbortError',
+    });
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('waits for confirmed termination when an active command is aborted', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = new AbortController();
+    let callback!: (error: Error | null, stdout: string) => void;
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        complete: (error: Error | null, stdout: string) => void,
+      ) => {
+        callback = complete;
+        return { pid: 4321 };
+      },
+    );
+    const stopped = deferred<ReturnType<typeof stoppedResult>>();
+    stopProcessesMock.mockReturnValue(stopped.promise);
+    const command = runVelaCommand(['resource', 'pull', 'project-1'], {
+      env: {
+        ...process.env,
+        VELA_BIN: process.execPath,
+        OD_DATA_DIR: '',
+      },
+      signal: controller.signal,
+    });
+    const rejected = vi.fn();
+    void command.catch(rejected);
+
+    controller.abort(new Error('cancelled'));
+    callback(null, '{"version":2}\n');
+    await Promise.resolve();
+    expect(rejected).not.toHaveBeenCalled();
+
+    stopped.resolve(stoppedResult([4321]));
+    await expect(command).rejects.toMatchObject({
+      code: 'ABORT_ERR',
+      name: 'AbortError',
+    });
+  });
+
+  it('bounds production resource pulls at 30s but leaves head commands unbounded', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('VELA_BIN', process.execPath);
     vi.stubEnv('OD_DATA_DIR', '');
-    try {
-      await runVelaResourceCommand([
-        'pull',
-        'project',
-        'resource-1',
-        '/tmp/project-1',
-        '--ref',
-        'published',
-        '--json',
-      ], 'workspace-1');
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    let callback!: (error: Error | null, stdout: string) => void;
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        complete: (error: Error | null, stdout: string) => void,
+      ) => {
+        callback = complete;
+        return { pid: 4321 };
+      },
+    );
+
+    const head = runVelaResourceCommand([
+      'head',
+      'resource-1',
+      '--ref',
+      'published',
+      '--json',
+    ], 'workspace-1');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(stopProcessesMock).not.toHaveBeenCalled();
+    callback(null, '{"version":1}\n');
+    await expect(head).resolves.toBe('{"version":1}\n');
+
+    const pull = runVelaResourceCommand([
+      'pull',
+      'project',
+      'resource-1',
+      '/tmp/project-1',
+      '--ref',
+      'published',
+      '--json',
+    ], 'workspace-1');
+    const pullRejection = expect(pull).rejects.toMatchObject({
+      code: 'ETIMEDOUT',
+      name: 'TimeoutError',
+    });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(stopProcessesMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopProcessesMock).toHaveBeenCalledTimes(1);
+    await pullRejection;
 
     const options = execFileMock.mock.calls[0]?.[2] as {
       timeout?: number;
-      killSignal?: NodeJS.Signals;
+      signal?: AbortSignal;
     };
-    expect(options.timeout).toBe(30_000);
-    expect(options.killSignal).toBe('SIGTERM');
+    expect(options.timeout).toBeUndefined();
+    expect(options.signal).toBeUndefined();
   });
 });
