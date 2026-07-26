@@ -3729,7 +3729,7 @@ button.home-hero__capability-word:focus-visible {
      lighter than `.is-active`, and give both cards the exact same affordance. */
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
   background: color-mix(in srgb, var(--accent-tint) 26%, var(--bg-panel));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 7%, transparent), var(--shadow-xs);
+  box-shadow: var(--shadow-xs);
 }
 .home-hero__recommendation-badge {
   display: inline-flex;
