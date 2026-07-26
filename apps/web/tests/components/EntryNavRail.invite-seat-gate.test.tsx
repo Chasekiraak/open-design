@@ -159,10 +159,51 @@ describe('EntryNavRail workspace-switcher invite target (recvqgbyLNk4eE)', () =>
     expect(menu().queryByRole('menuitem', { name: /邀请同事/ })).toBeNull();
   });
 
-  it('does not expose the invite entry without invite permission', () => {
+  it('keeps Personal Free owner actions visible and routes invite through Vela', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const context = freeContext();
+    renderRail({
+      ...context,
+      permissions: { ...context.permissions, canInviteMembers: false },
+    } as WorkspaceCollabContext);
+
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+    expect(menu().getByTestId('entry-nav-create-team')).toHaveAttribute(
+      'href',
+      expect.stringContaining('workspace=create'),
+    );
+    fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(String(openSpy.mock.calls[0]![0])).toContain('workspaceId=ws-personal');
+    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+  });
+
+  it.each(['owner', 'admin'] as const)(
+    'routes a Team %s without direct invite capability through Vela',
+    (role) => {
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+      const context = teamContext(3);
+      renderRail({
+        ...context,
+        role,
+        permissions: { ...context.permissions, canInviteMembers: false },
+      } as WorkspaceCollabContext);
+
+      fireEvent.click(screen.getByTestId('workspace-switcher'));
+      fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+      expect(screen.queryByRole('dialog')).toBeNull();
+    },
+  );
+
+  it('does not expose the invite entry to a Team member', () => {
     const context = teamContext(3);
     renderRail({
       ...context,
+      role: 'member',
       permissions: { ...context.permissions, canInviteMembers: false },
     } as WorkspaceCollabContext);
 
