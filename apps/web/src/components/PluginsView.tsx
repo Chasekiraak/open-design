@@ -972,6 +972,10 @@ export function ExtensionsMarketplace({
     if (!detail) return;
     setMenuId(null);
     setConfirmUninstallId(null);
+    if (detail.kind === 'plugin') {
+      navigate({ kind: 'marketplace-detail', pluginId: detail.record.id });
+      return;
+    }
     setCardDetail(detail);
   }
 
