@@ -284,19 +284,45 @@ export type WorkspaceInviteTarget =
 /**
  * Whether this member should discover the invite flow.
  *
- * This is deliberately not `permissions.canInviteMembers`: that capability
- * only answers whether the current workspace may send an invite directly.
- * Owners and admins still need the entry when B must first resolve a Free-plan
- * upgrade, add seats, or recover the workspace. Members do not manage the
- * roster, so their entry stays hidden.
+ * Direct invites and billing recovery are separate capabilities. A Personal
+ * Free owner (or a full Team owner) can still enter Vela's upgrade/seat flow
+ * without direct invite capability, but an admin never acquires billing power
+ * from role alone. Unknown seat state fails closed until the context refresh
+ * supplies an authoritative answer.
  */
 export function canAccessWorkspaceInviteFlow(
   context: WorkspaceCollabContext | null | undefined,
 ): boolean {
-  return (
-    context?.memberStatus === 'active' &&
-    (context.role === 'owner' || context.role === 'admin')
-  );
+  if (
+    !context ||
+    context.memberStatus !== 'active' ||
+    context.lifecycleState !== 'active' ||
+    (context.role !== 'owner' && context.role !== 'admin')
+  ) {
+    return false;
+  }
+
+  const canInviteMembers = context.permissions?.canInviteMembers === true;
+  const canManageBilling = context.permissions?.canManageBilling === true;
+  const needsTeamUpgrade =
+    context.billingState === 'free' || context.billingState === 'inactive';
+  if (needsTeamUpgrade) {
+    return context.role === 'owner' && canManageBilling;
+  }
+  if (context.workspaceType === 'personal') return canInviteMembers;
+
+  const isSeatFull = workspaceSeatFull(context);
+  if (isSeatFull === undefined) return false;
+  if (!isSeatFull) return canInviteMembers;
+  return context.role === 'owner' && canManageBilling;
+}
+
+function workspaceSeatFull(
+  context: WorkspaceCollabContext,
+): boolean | undefined {
+  const availableSeats = context.seatSummary?.availableSeats;
+  if (availableSeats !== undefined) return availableSeats <= 0;
+  return context.seatSummary?.isSeatFull;
 }
 
 /**
@@ -309,17 +335,18 @@ export function canAccessWorkspaceInviteFlow(
 export function resolveWorkspaceInviteTarget(
   context: WorkspaceCollabContext | null | undefined,
 ): WorkspaceInviteTarget {
-  if (!context) return { kind: 'unavailable' };
+  if (!context || !canAccessWorkspaceInviteFlow(context)) {
+    return { kind: 'unavailable' };
+  }
+  const needsTeamUpgrade =
+    context.billingState === 'free' || context.billingState === 'inactive';
   if (
     context.workspaceType === 'team' &&
+    !needsTeamUpgrade &&
+    workspaceSeatFull(context) === false &&
     context.permissions.canInviteMembers === true
   ) {
-    const availableSeats = context.seatSummary?.availableSeats;
-    const hasCapacity =
-      availableSeats !== undefined
-        ? availableSeats > 0
-        : context.seatSummary?.isSeatFull === false;
-    if (hasCapacity) return { kind: 'local' };
+    return { kind: 'local' };
   }
   const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
   if (!settingsUrl) return { kind: 'unavailable' };
