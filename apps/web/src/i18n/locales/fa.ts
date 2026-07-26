@@ -5190,5 +5190,9 @@ export const fa: Dict = {
   'pluginDetail.loadFailed': 'Failed to load plugin: {error}',
   'pluginDetail.applyFailed': 'Apply failed. Make sure the daemon is reachable.',
   'pluginDetail.examples': 'Examples',
+  'skillDetail.providedBy': 'provided by {author}',
+  'skillDetail.markdownNotice': 'The following content is taken verbatim from this skill’s SKILL.md',
+  'skillDetail.loadFailed': 'Couldn’t load this skill’s SKILL.md.',
+  'skillDetail.previewAria': '{title} SKILL.md preview',
   'common.dismiss': 'Dismiss',
 };

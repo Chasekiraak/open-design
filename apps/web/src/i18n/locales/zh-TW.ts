@@ -5649,5 +5649,9 @@ export const zhTW: Dict = {
   'pluginDetail.loadFailed': '外掛程式載入失敗：{error}',
   'pluginDetail.applyFailed': '套用失敗，請確認守護程式可存取。',
   'pluginDetail.examples': '範例',
+  'skillDetail.providedBy': '由 {author} 提供',
+  'skillDetail.markdownNotice': '以下內容來自該技能的 SKILL.md 原文',
+  'skillDetail.loadFailed': '無法載入此技能的 SKILL.md。',
+  'skillDetail.previewAria': '{title} SKILL.md 預覽',
   'common.dismiss': '關閉',
 };

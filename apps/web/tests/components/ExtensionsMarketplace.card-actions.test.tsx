@@ -59,9 +59,20 @@ const MARKETPLACE = {
 };
 
 const IMPORT_URL = 'https://example.com/imported-plugin';
+const SKILL_MARKDOWN = [
+  '# Heading',
+  '',
+  '```md',
+  '# code',
+  '```',
+  '',
+  '## Child heading',
+].join('\n');
 
 let skills: Array<typeof USER_SKILL>;
 let installResolvers: Array<() => void>;
+let skillDetailFailuresRemaining: number;
+let skillDetailRequests: number;
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -83,6 +94,8 @@ function installSuccessStream(id: string): Response {
 beforeEach(() => {
   skills = [USER_SKILL, OFFICIAL_SKILL];
   installResolvers = [];
+  skillDetailFailuresRemaining = 0;
+  skillDetailRequests = 0;
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.startsWith('/api/skills/import')) {
@@ -104,9 +117,14 @@ beforeEach(() => {
     }
     if (url === '/api/skills') return jsonResponse({ skills });
     if (url.startsWith('/api/skills/')) {
+      skillDetailRequests += 1;
+      if (skillDetailFailuresRemaining > 0) {
+        skillDetailFailuresRemaining -= 1;
+        return jsonResponse({}, 503);
+      }
       const id = decodeURIComponent(url.slice('/api/skills/'.length));
       const skill = skills.find((row) => row.id === id);
-      return skill ? jsonResponse({ ...skill, body: '# body' }) : jsonResponse({}, 404);
+      return skill ? jsonResponse({ ...skill, body: SKILL_MARKDOWN }) : jsonResponse({}, 404);
     }
     if (url.startsWith('/api/plugins/install')) {
       const body = JSON.parse(String(init?.body ?? '{}')) as { source?: string };
@@ -173,7 +191,50 @@ describe('ExtensionsMarketplace card affordances', () => {
     });
   });
 
-  it('#129 — a skill card opens the skill detail modal', async () => {
+  it('#5517 — a skill card opens the demo-aligned full-page detail and returns to the same list', async () => {
+    const { container } = renderMarketplace();
+    await showPersonalSkills(container);
+
+    const findSkillCard = async () => waitFor(() => {
+      const found = container.querySelector('.plugin-marketplace__item--skill');
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
+    const card = await findSkillCard();
+    expect(card.classList.contains('is-clickable')).toBe(true);
+    const pathnameBeforeDetail = window.location.pathname;
+
+    fireEvent.click(card);
+    await waitFor(() => {
+      expect(screen.getByTestId('skill-detail')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('skill-details-modal')).toBeNull();
+    expect(window.location.pathname).toBe(pathnameBeforeDetail);
+    expect(screen.getByRole('heading', { level: 1, name: USER_SKILL.name })).toBeTruthy();
+    expect(screen.getByText('provided by You')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Heading' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: 'Child heading' })).toBeTruthy();
+    expect(screen.getByText('# code').tagName).toBe('CODE');
+
+    fireEvent.click(screen.getByTestId('skill-detail-back'));
+    expect(screen.queryByTestId('skill-detail')).toBeNull();
+    const cardAfterBack = await findSkillCard();
+    await waitFor(() => expect(document.activeElement).toBe(cardAfterBack));
+    expect(window.location.pathname).toBe(pathnameBeforeDetail);
+
+    fireEvent.click(await findSkillCard());
+    await waitFor(() => {
+      expect(screen.getByTestId('skill-detail')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('skill-detail-close'));
+    expect(screen.queryByTestId('skill-detail')).toBeNull();
+    const cardAfterClose = await findSkillCard();
+    await waitFor(() => expect(document.activeElement).toBe(cardAfterClose));
+    expect(window.location.pathname).toBe(pathnameBeforeDetail);
+  });
+
+  it('#5517 — the full-page skill detail preserves retry after a load failure', async () => {
+    skillDetailFailuresRemaining = 1;
     const { container } = renderMarketplace();
     await showPersonalSkills(container);
 
@@ -182,12 +243,42 @@ describe('ExtensionsMarketplace card affordances', () => {
       expect(found).toBeTruthy();
       return found as HTMLElement;
     });
-    expect(card.classList.contains('is-clickable')).toBe(true);
+    fireEvent.click(card);
 
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load this skill’s SKILL.md.',
+    );
+    expect(skillDetailRequests).toBe(1);
+    fireEvent.click(screen.getByTestId('skill-detail-retry'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Heading' })).toBeTruthy();
+    });
+    expect(skillDetailRequests).toBe(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('#5517 — the full-page skill Use action runs the selected skill and returns to the list', async () => {
+    const onUseSkill = vi.fn();
+    const { container } = renderMarketplace({ onUseSkill });
+    await showPersonalSkills(container);
+
+    const card = await waitFor(() => {
+      const found = container.querySelector('.plugin-marketplace__item--skill');
+      expect(found).toBeTruthy();
+      return found as HTMLElement;
+    });
     fireEvent.click(card);
     await waitFor(() => {
-      expect(screen.getByTestId('skill-details-modal')).toBeTruthy();
+      expect(screen.getByTestId('skill-detail')).toBeTruthy();
     });
+
+    fireEvent.click(screen.getByTestId('skill-detail-use'));
+    expect(onUseSkill).toHaveBeenCalledTimes(1);
+    expect(onUseSkill.mock.calls[0]![0]).toMatchObject({ id: USER_SKILL.id });
+    expect(screen.queryByTestId('skill-detail')).toBeNull();
+    expect(screen.queryByTestId('skill-details-modal')).toBeNull();
+    expect(container.querySelector('.plugin-marketplace__item--skill')).toBeTruthy();
   });
 
   it('#131 — a skill card runs the skill instead of offering nothing', async () => {

@@ -5361,5 +5361,9 @@ export interface Dict {
   'pluginDetail.loadFailed': string;
   'pluginDetail.applyFailed': string;
   'pluginDetail.examples': string;
+  'skillDetail.providedBy': string;
+  'skillDetail.markdownNotice': string;
+  'skillDetail.loadFailed': string;
+  'skillDetail.previewAria': string;
   'common.dismiss': string;
 }

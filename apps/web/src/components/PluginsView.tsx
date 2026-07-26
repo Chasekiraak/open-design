@@ -64,7 +64,7 @@ import {
 import { Icon } from './Icon';
 import { Toast } from './Toast';
 import { PluginDetailsModal } from './PluginDetailsModal';
-import { SkillDetailsModal } from './SkillDetailsModal';
+import { SkillDetailView } from './SkillDetailView';
 import { PluginsHomeSection } from './PluginsHomeSection';
 import { humanizeCategory } from './SkillsSection';
 import { buildCategoryCatalog, extractCategories } from './plugins-home/facets';
@@ -1534,6 +1534,40 @@ export function ExtensionsMarketplace({
     });
   }, [cards, category, query]);
 
+  if (cardDetail?.kind === 'skill') {
+    const selectedSkill = cardDetail.skill;
+    const closeSkillDetail = () => {
+      setCardDetail(null);
+      queueMicrotask(() => {
+        const trigger = [...document.querySelectorAll<HTMLElement>(
+          '.plugin-marketplace__item--skill[data-testid]',
+        )].find((card) => card.dataset.testid === `plugins-card-${selectedSkill.id}`);
+        trigger?.focus();
+      });
+    };
+    return (
+      <SkillDetailView
+        skill={selectedSkill}
+        author={
+          scope === 'official'
+            ? 'Open Design'
+            : scope === 'team'
+              ? 'Nexu Team'
+              : t('chat.you')
+        }
+        onBack={closeSkillDetail}
+        {...(onUseSkill
+          ? {
+            onUse: () => {
+              setCardDetail(null);
+              onUseSkill(selectedSkill);
+            },
+          }
+          : {})}
+      />
+    );
+  }
+
   return (
     <section className="plugin-marketplace" aria-labelledby="plugin-marketplace-title">
       <header className="plugin-marketplace__hero">
@@ -1914,22 +1948,6 @@ export function ExtensionsMarketplace({
           />
         ) : null}
       </AnimatePresence>
-      {cardDetail?.kind === 'skill' ? (
-        <SkillDetailsModal
-          skillId={cardDetail.skill.id}
-          summary={cardDetail.skill}
-          onClose={() => setCardDetail(null)}
-          {...(onUseSkill
-            ? {
-              onUse: () => {
-                const skill = cardDetail.skill;
-                setCardDetail(null);
-                onUseSkill(skill);
-              },
-            }
-            : {})}
-        />
-      ) : null}
       {createOpen ? (
         <div
           className="plugin-marketplace__modal-backdrop"

@@ -5642,5 +5642,9 @@ export const zhCN: Dict = {
   'pluginDetail.loadFailed': '插件加载失败：{error}',
   'pluginDetail.applyFailed': '应用失败，请确认守护进程可访问。',
   'pluginDetail.examples': '示例',
+  'skillDetail.providedBy': '由 {author} 提供',
+  'skillDetail.markdownNotice': '以下内容来自该技能的 SKILL.md 原文',
+  'skillDetail.loadFailed': '无法加载此技能的 SKILL.md。',
+  'skillDetail.previewAria': '{title} SKILL.md 预览',
   'common.dismiss': '关闭',
 };
