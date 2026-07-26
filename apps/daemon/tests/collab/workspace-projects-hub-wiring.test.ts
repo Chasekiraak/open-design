@@ -226,4 +226,46 @@ describe('server.ts wiring (source boundary)', () => {
     const cleanupBody = source.slice(start, end + 2);
     expect(cleanupBody).toContain('proactiveContentPull.dispose();');
   });
+
+  it('recovers promotion journals before registering collaboration pull routes', () => {
+    const recovery = source.indexOf(
+      'await recoverAuthorizedTeamProjectPromotions({',
+    );
+    const routes = source.indexOf(
+      'const collabSyncRoutes = registerCollabSyncRoutes(app, {',
+    );
+    expect(recovery).toBeGreaterThan(-1);
+    expect(routes).toBeGreaterThan(recovery);
+    expect(source.slice(recovery, routes)).toContain(
+      'allowedProjectsRoot: PROJECTS_DIR',
+    );
+    expect(source.slice(recovery, routes)).toContain(
+      'getTeamProjectMaterialization(',
+    );
+  });
+
+  it('wires the exact proactive invocation and transactional receipt materializer', () => {
+    expect(source).toContain(
+      'materializeAuthorizedTeamMirror: (input, scope, receipt) =>\n' +
+        '        materializePulledTeamMirror(db, input, scope, receipt)',
+    );
+    expect(source).toContain(
+      '}, target.authorizationWitness, expectedVersion, target.authorizedStageInvocation)',
+    );
+    expect(source).toContain(
+      'getActiveWorkspaceSnapshot: authorizedActiveWorkspaceSnapshot',
+    );
+  });
+
+  it('authorizes no-pin reconnect catch-up from verified workspace identity', () => {
+    const anchor = 'listSharedProjects: async (workspaceId) => {';
+    const start = source.indexOf(anchor);
+    const end = source.indexOf('hasMaterializedProject:', start);
+    const body = source.slice(start, end);
+    expect(body).not.toContain('activeWorkspace.get()');
+    expect(body).toContain('collab.workspaceContext.current({})');
+    expect(body).toContain('const before = authorizedActiveWorkspaceSnapshot()');
+    expect(body).toContain('const after = authorizedActiveWorkspaceSnapshot()');
+    expect(body).toContain('after.generation !== before.generation');
+  });
 });

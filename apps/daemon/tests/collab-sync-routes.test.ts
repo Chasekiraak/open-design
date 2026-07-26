@@ -32,6 +32,7 @@ import {
   type TeamMirrorPullScope,
 } from '../src/routes/collab-sync.js';
 import { writeProjectManifest } from '../src/project-locations.js';
+import type { AuthorizedTeamProjectPullReceipt } from '../src/collab/authorized-team-project-pull.js';
 
 vi.mock('../src/collab/vela-cli-resource-adapter.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/collab/vela-cli-resource-adapter.js')>();
@@ -73,6 +74,13 @@ function fakeProjectStore(): PulledProjectStore & {
       if (localRecordChanged) projects.set(input.id, input);
       bindings.set(input.id, scope);
       return { localRecordChanged };
+    },
+    materializeAuthorizedTeamMirror(
+      input: RegisterPulledProjectInput,
+      scope: TeamMirrorPullScope,
+      _receipt: AuthorizedTeamProjectPullReceipt,
+    ) {
+      return store.materializeTeamMirror(input, scope);
     },
   };
   return store;
@@ -126,6 +134,15 @@ async function mintProactivePullWitness(
   scope: TeamMirrorPullScope,
   version: number,
 ): Promise<ProactivePullAuthorizationWitness> {
+  return (await mintProactivePullTarget(projectId, scope, version))
+    .authorizationWitness!;
+}
+
+async function mintProactivePullTarget(
+  projectId: string,
+  scope: TeamMirrorPullScope,
+  version: number,
+): Promise<ProactiveContentPullTarget> {
   const targets: ProactiveContentPullTarget[] = [];
   const pull = createProactiveContentPull({
     getLocalBinding: () => ({
@@ -143,16 +160,59 @@ async function mintProactivePullWitness(
       return { status: 'pulled', version };
     },
   });
+  try {
+    await pull.handleContentChanged({
+      projectId,
+      workspaceId: scope.workspaceId,
+      version,
+    });
+  } finally {
+    pull.dispose();
+  }
+  const target = targets[0];
+  if (!target?.authorizationWitness) {
+    throw new Error('expected proactive guard to issue a witness');
+  }
+  return target;
+}
+
+async function invokeThroughProactivePull(
+  handle: CollabSyncRoutesHandle,
+  projectId: string,
+  scope: TeamMirrorPullScope,
+  version: number,
+) {
+  let outcome: Awaited<ReturnType<CollabSyncRoutesHandle['pullSharedProject']>>
+    | undefined;
+  const pull = createProactiveContentPull({
+    getLocalBinding: () => ({
+      workspaceId: scope.workspaceId,
+      visibility: 'team',
+    }),
+    getWorkspaceIdentity: async () => ({
+      workspaceId: scope.workspaceId,
+      resourceTeamId: scope.resourceTeamId,
+      workspaceMemberId: scope.viewerMemberId,
+    }),
+    resolveSharedProjectOwner: async () => scope.ownerMemberId,
+    pullSharedProject: async (target, expectedVersion) => {
+      outcome = await handle.pullSharedProject(
+        target.projectId,
+        scope,
+        target.authorizationWitness,
+        expectedVersion,
+        target.authorizedStageInvocation,
+      );
+      return outcome;
+    },
+  });
   await pull.handleContentChanged({
     projectId,
     workspaceId: scope.workspaceId,
     version,
   });
-  const target = targets[0];
-  if (!target?.authorizationWitness) {
-    throw new Error('expected proactive guard to issue a witness');
-  }
-  return target.authorizationWitness;
+  if (!outcome) throw new Error('proactive pull did not invoke the route handle');
+  return outcome;
 }
 
 let server: http.Server | null = null;
@@ -1745,6 +1805,30 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     ownerMemberId: pullScope.ownerMemberId,
     sharedAt: '2026-07-25T00:00:00.000Z',
   });
+  const authorizedReceipt = (
+    projectId: string,
+    version: number,
+  ): AuthorizedTeamProjectPullReceipt => ({
+    schemaVersion: 1,
+    ...pullScope,
+    projectId,
+    resourceId: projectResourceIdFor(projectId, {
+      teamId: pullScope.resourceTeamId,
+      memberId: pullScope.ownerMemberId,
+      role: 'member',
+      lifecycleState: 'active',
+      workspaceType: 'team',
+    }),
+    ref: 'published',
+    version,
+    versionId: `version-${version}`,
+    manifestDigest: `sha256:${'a'.repeat(64)}`,
+    lifecycleState: 'active',
+    // Exercise the allowed small positive server/local clock skew while
+    // leaving enough wall-clock headroom for parallel test scheduling.
+    authorizedAt: new Date(Date.now() + 500).toISOString(),
+    expiresAt: new Date(Date.now() + 2_500).toISOString(),
+  });
 
   it('materializes content and fires the same post-pull signals as POST /collab/pull', async () => {
     const store = fakeProjectStore();
@@ -2029,6 +2113,503 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     ).toBe(false);
   });
 
+  it('uses the authorized staged transport only for a branded proactive invocation', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-route-'));
+    tempDirs.push(root);
+    const liveDir = path.join(root, 'project');
+    const stageDir = path.join(root, '.project.od-pull-stage-test');
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), '<title>Staged project</title>');
+    const receipt = authorizedReceipt('authorized-fast', 5);
+    const stage = vi.fn(async () => ({
+      stageDir,
+      identity: { dev: '1', ino: '2' },
+      receipt,
+      cleanup: vi.fn(async () => undefined),
+    }));
+    const promote = vi.fn(async (input: {
+      commit: () => { localRecordChanged: boolean };
+      isExpectedVersion: () => boolean;
+      validateReceipt: () => void;
+    }) => {
+      expect(input.isExpectedVersion()).toBe(true);
+      input.validateReceipt();
+      return input.commit();
+    });
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const store = fakeProjectStore();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: () => liveDir,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 7,
+        }),
+        stage,
+        promote,
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const outcome = await invokeThroughProactivePull(
+      api.handle,
+      'authorized-fast',
+      pullScope,
+      5,
+    );
+
+    expect(outcome).toEqual({ status: 'pulled', version: 5 });
+    expect(stage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'authorized-fast',
+      liveDir,
+      scope: pullScope,
+      expectedVersion: 5,
+    }));
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(adapterPull).not.toHaveBeenCalled();
+    expect(store.projects.get('authorized-fast')?.name).toBe('Staged project');
+  });
+
+  it('never accepts an authorized-stage-shaped HTTP body', async () => {
+    const stage = vi.fn();
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const response = await api.json('/api/projects/http-stage-injection/collab/pull', {
+      method: 'POST',
+      headers: {
+        'x-od-workspace-id': pullScope.workspaceId,
+        'x-od-workspace-member-id': pullScope.viewerMemberId,
+        'x-od-workspace-role': 'member',
+      },
+      body: {
+        authorizedStageInvocation: {
+          kind: 'authorized-proactive-stage',
+          expectedVersion: 5,
+          isStillExpected: true,
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(adapterPull).toHaveBeenCalledTimes(1);
+    expect(stage).not.toHaveBeenCalled();
+  });
+
+  it('fails a real but already-stale authorized invocation without legacy fallback', async () => {
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const writeMaterializedVersion = vi.fn(async () => undefined);
+    const stage = vi.fn();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    // The helper's proactive intent has completed before it returns, so this
+    // is a genuine WeakSet-issued invocation whose liveness closure is stale.
+    const stale = await mintProactivePullTarget(
+      'stale-before-route',
+      pullScope,
+      5,
+    );
+
+    await expect(api.handle.pullSharedProject(
+      'stale-before-route',
+      pullScope,
+      stale.authorizationWitness,
+      5,
+      stale.authorizedStageInvocation,
+    )).resolves.toEqual({ status: 'register_failed' });
+    expect(stage).not.toHaveBeenCalled();
+    expect(adapterPull).not.toHaveBeenCalled();
+    expect(writeMaterializedVersion).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['scope mismatch', false],
+    ['spread forgery', true],
+  ])('fails a nonempty authorized invocation with %s without legacy fallback', async (
+    _case,
+    spreadInvocation,
+  ) => {
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const writeMaterializedVersion = vi.fn(async () => undefined);
+    const stage = vi.fn();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const issuedProjectId = spreadInvocation
+      ? 'spread-forgery'
+      : 'scope-mismatch-source';
+    const routedProjectId = spreadInvocation
+      ? issuedProjectId
+      : 'scope-mismatch-target';
+    const target = await mintProactivePullTarget(
+      issuedProjectId,
+      pullScope,
+      5,
+    );
+    const invocation = spreadInvocation
+      ? { ...target.authorizedStageInvocation! }
+      : target.authorizedStageInvocation;
+
+    await expect(api.handle.pullSharedProject(
+      routedProjectId,
+      pullScope,
+      target.authorizationWitness,
+      5,
+      invocation,
+    )).resolves.toEqual({ status: 'register_failed' });
+    expect(stage).not.toHaveBeenCalled();
+    expect(adapterPull).not.toHaveBeenCalled();
+    expect(writeMaterializedVersion).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unknown command "pull" for "team-projects"', true],
+    ['HTTP 403 forbidden', false],
+    ['HTTP 500 unavailable', false],
+    ['network timeout', false],
+    ['authorized pull response is not valid JSON', false],
+  ])('falls back only for old-CLI capability absence: %s', async (
+    message,
+    shouldFallback,
+  ) => {
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage: vi.fn(async () => {
+          throw new Error(message);
+        }),
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const outcome = await invokeThroughProactivePull(
+      api.handle,
+      `fallback-${shouldFallback}`,
+      pullScope,
+      5,
+    );
+
+    expect(adapterPull).toHaveBeenCalledTimes(shouldFallback ? 1 : 0);
+    expect(outcome).toEqual(
+      shouldFallback
+        ? { status: 'pulled', version: 5 }
+        : { status: 'register_failed' },
+    );
+  });
+
+  it('uses the captured expected version as a legacy lower bound after capability fallback', async () => {
+    const writeMaterializedVersion = vi.fn(async () => undefined);
+    const adapterPull = vi.fn(async () => null);
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage: vi.fn(async () => {
+          throw new Error('unknown command "pull" for "team-projects"');
+        }),
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    await expect(invokeThroughProactivePull(
+      api.handle,
+      'legacy-null-version',
+      pullScope,
+      5,
+    )).resolves.toEqual({ status: 'pulled', version: 5 });
+    expect(writeMaterializedVersion).toHaveBeenCalledWith(
+      'legacy-null-version',
+      pullScope,
+      5,
+    );
+    await expect(invokeThroughProactivePull(
+      api.handle,
+      'legacy-null-version',
+      pullScope,
+      6,
+    )).resolves.toEqual({ status: 'pulled', version: 6 });
+    expect(writeMaterializedVersion).toHaveBeenLastCalledWith(
+      'legacy-null-version',
+      pullScope,
+      6,
+    );
+  });
+
+  it('prefers a real legacy transport version over the fallback lower bound', async () => {
+    const writeMaterializedVersion = vi.fn(async () => undefined);
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage: vi.fn(async () => {
+          throw new Error('unknown flag: --expected-version');
+        }),
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 8 })),
+        pull: vi.fn(async () => ({ version: 8 })),
+        syncLatest: vi.fn(async () => ({ version: 8 })),
+      },
+    });
+
+    await expect(invokeThroughProactivePull(
+      api.handle,
+      'legacy-real-version',
+      pullScope,
+      5,
+    )).resolves.toEqual({ status: 'pulled', version: 8 });
+    expect(writeMaterializedVersion).toHaveBeenCalledWith(
+      'legacy-real-version',
+      pullScope,
+      8,
+    );
+  });
+
+  it('does not advance the fallback lower bound when post-pull authorization fails', async () => {
+    const writeMaterializedVersion = vi.fn(async () => undefined);
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: async () => null,
+      writeMaterializedVersion,
+      authorizedTeamProjectPull: {
+        journalDir: '/unused',
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage: vi.fn(async () => {
+          throw new Error('unknown command "pull" for "team-projects"');
+        }),
+        promote: vi.fn(),
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => null),
+        pull: vi.fn(async () => null),
+        syncLatest: vi.fn(async () => null),
+      },
+    });
+
+    await expect(invokeThroughProactivePull(
+      api.handle,
+      'legacy-post-auth-fail',
+      pullScope,
+      5,
+    )).resolves.toEqual({ status: 'revoked' });
+    expect(writeMaterializedVersion).not.toHaveBeenCalled();
+  });
+
+  it('preempts an old authorized stage and commits only the newer receipt', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-preempt-'));
+    tempDirs.push(root);
+    const liveDir = path.join(root, 'preempt');
+    const stage4 = path.join(root, '.preempt.od-pull-stage-v4');
+    await mkdir(stage4);
+    await writeFile(path.join(stage4, 'index.html'), '<title>Version four</title>');
+    let firstCleaned = false;
+    const stage = vi.fn(async (input: {
+      expectedVersion: number;
+      signal?: AbortSignal;
+    }) => {
+      if (input.expectedVersion === 3) {
+        await new Promise<void>((_resolve, reject) => {
+          input.signal?.addEventListener('abort', () => {
+            firstCleaned = true;
+            reject(new DOMException('aborted', 'AbortError'));
+          }, { once: true });
+        });
+      }
+      return {
+        stageDir: stage4,
+        identity: { dev: '1', ino: '4' },
+        receipt: authorizedReceipt('preempt', 4),
+        cleanup: vi.fn(async () => undefined),
+      };
+    });
+    const promote = vi.fn(async (input: {
+      validateReceipt: () => void;
+      isExpectedVersion: () => boolean;
+      commit: () => { localRecordChanged: boolean };
+    }) => {
+      expect(input.isExpectedVersion()).toBe(true);
+      input.validateReceipt();
+      return input.commit();
+    });
+    const adapterPull = vi.fn(async () => ({ version: 99 }));
+    const store = fakeProjectStore();
+    const materializeAuthorized = vi.spyOn(
+      store,
+      'materializeAuthorizedTeamMirror',
+    );
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: () => liveDir,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote,
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 99 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 99 })),
+      },
+    });
+    const proactive = createProactiveContentPull({
+      getLocalBinding: () => ({
+        workspaceId: pullScope.workspaceId,
+        visibility: 'team',
+      }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: pullScope.workspaceId,
+        resourceTeamId: pullScope.resourceTeamId,
+        workspaceMemberId: pullScope.viewerMemberId,
+      }),
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      pullSharedProject: (target, version) =>
+        api.handle.pullSharedProject(
+          target.projectId,
+          pullScope,
+          target.authorizationWitness,
+          version,
+          target.authorizedStageInvocation,
+        ),
+    });
+
+    try {
+      const first = proactive.handleContentChanged({
+        projectId: 'preempt',
+        workspaceId: pullScope.workspaceId,
+        version: 3,
+      });
+      await vi.waitFor(() => expect(stage).toHaveBeenCalledTimes(1));
+      const second = proactive.handleContentChanged({
+        projectId: 'preempt',
+        workspaceId: pullScope.workspaceId,
+        version: 4,
+      });
+      await Promise.all([first, second]);
+    } finally {
+      proactive.dispose();
+    }
+
+    expect(firstCleaned).toBe(true);
+    expect(stage.mock.calls.map(([input]) => input.expectedVersion)).toEqual([
+      3,
+      4,
+    ]);
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(materializeAuthorized).toHaveBeenCalledTimes(1);
+    expect(materializeAuthorized.mock.calls[0]?.[2].version).toBe(4);
+    expect(adapterPull).not.toHaveBeenCalled();
+  });
+
   it('fails closed when active workspace identity drifts after the authoritative lookup', async () => {
     const activeContext = await fixedShareContextProvider(true).current({});
     const current = vi.fn()
@@ -2292,12 +2873,51 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       otherWorkspaceScope,
     );
 
+    let mismatchedSettled = false;
+    void mismatched.finally(() => {
+      mismatchedSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(mismatchedSettled).toBe(false);
+    expect(adapterPull).toHaveBeenCalledTimes(1);
+    releasePull();
     await expect(mismatched).resolves.toEqual({
       status: 'register_failed',
     });
-    releasePull();
     await expect(active).resolves.toEqual({ status: 'pulled', version: 5 });
     expect(adapterPull).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows different project ids to enter transport concurrently', async () => {
+    let releasePull!: () => void;
+    const pullGate = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    const adapterPull = vi.fn(async () => {
+      await pullGate;
+      return { version: 5 };
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const first = api.handle.pullSharedProject('parallel-a', pullScope);
+    const second = api.handle.pullSharedProject('parallel-b', pullScope);
+    await vi.waitFor(() => expect(adapterPull).toHaveBeenCalledTimes(2));
+    releasePull();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { status: 'pulled', version: 5 },
+      { status: 'pulled', version: 5 },
+    ]);
   });
 
   it('releases the per-project pull lock after a transport deadline rejects', async () => {

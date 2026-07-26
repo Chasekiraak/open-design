@@ -32,6 +32,7 @@
 
 const WITNESS_MAX_AGE_MS = 5_000;
 const issuedAuthorizationWitnesses = new WeakSet<object>();
+const issuedAuthorizedStageInvocations = new WeakSet<object>();
 
 export interface ProactiveContentPullEvent {
   projectId?: string | undefined;
@@ -44,6 +45,34 @@ export interface ProactiveContentPullEvent {
 export interface ProactiveContentPullProjectRef {
   projectId: string;
   ownerMemberId: string;
+}
+
+export function activeTeamWorkspaceIdentity(context: {
+  workspaceId?: string | null;
+  teamId?: string | null;
+  workspaceMemberId?: string | null;
+  workspaceType?: string | null;
+  memberStatus?: string | null;
+  lifecycleState?: string | null;
+} | null): {
+  workspaceId: string;
+  resourceTeamId: string;
+  workspaceMemberId: string;
+} | null {
+  const workspaceId = context?.workspaceId?.trim() ?? '';
+  const resourceTeamId = context?.teamId?.trim() ?? '';
+  const workspaceMemberId = context?.workspaceMemberId?.trim() ?? '';
+  if (
+    context?.workspaceType !== 'team' ||
+    context.memberStatus !== 'active' ||
+    context.lifecycleState !== 'active' ||
+    !workspaceId ||
+    !resourceTeamId ||
+    !workspaceMemberId
+  ) {
+    return null;
+  }
+  return { workspaceId, resourceTeamId, workspaceMemberId };
 }
 
 export interface ProactivePullAuthorizationScope {
@@ -59,6 +88,63 @@ export interface ProactivePullAuthorizationWitness
   readonly kind: 'proactive-content-pull';
   readonly version: number;
   readonly verifiedAtMs: number;
+}
+
+export interface AuthorizedProactivePullInvocation
+  extends ProactivePullAuthorizationScope {
+  readonly kind: 'authorized-proactive-stage';
+  readonly expectedVersion: number;
+  readonly isStillExpected: () => boolean;
+  readonly signal: AbortSignal;
+}
+
+function issueAuthorizedProactivePullInvocation(
+  scope: ProactivePullAuthorizationScope,
+  expectedVersion: number,
+  isStillExpected: () => boolean,
+  signal: AbortSignal,
+): AuthorizedProactivePullInvocation {
+  const invocation = Object.freeze({
+    kind: 'authorized-proactive-stage' as const,
+    ...scope,
+    expectedVersion,
+    isStillExpected,
+    signal,
+  });
+  issuedAuthorizedStageInvocations.add(invocation);
+  return invocation;
+}
+
+export function isAuthorizedProactivePullInvocation(
+  invocation: AuthorizedProactivePullInvocation | undefined,
+  scope: ProactivePullAuthorizationScope,
+  expectedVersion: number | undefined,
+): boolean {
+  return Boolean(
+    isBoundProactivePullInvocation(invocation, scope, expectedVersion) &&
+    !invocation!.signal.aborted &&
+    invocation!.isStillExpected()
+  );
+}
+
+export function isBoundProactivePullInvocation(
+  invocation: AuthorizedProactivePullInvocation | undefined,
+  scope: ProactivePullAuthorizationScope,
+  expectedVersion: number | undefined,
+): boolean {
+  return Boolean(
+    invocation &&
+    issuedAuthorizedStageInvocations.has(invocation) &&
+    Number.isSafeInteger(expectedVersion) &&
+    expectedVersion != null &&
+    expectedVersion >= 0 &&
+    invocation.expectedVersion === expectedVersion &&
+    invocation.projectId === scope.projectId &&
+    invocation.workspaceId === scope.workspaceId &&
+    invocation.resourceTeamId === scope.resourceTeamId &&
+    invocation.viewerMemberId === scope.viewerMemberId &&
+    invocation.ownerMemberId === scope.ownerMemberId
+  );
 }
 
 function issueProactivePullAuthorizationWitness(
@@ -117,6 +203,7 @@ export interface ProactiveContentPullTarget {
   viewerMemberId: string;
   ownerMemberId: string;
   authorizationWitness?: ProactivePullAuthorizationWitness;
+  authorizedStageInvocation?: AuthorizedProactivePullInvocation;
 }
 
 export interface ProactiveContentPullDeps {
@@ -272,6 +359,7 @@ interface PullIntent {
   revision: number;
   timer: unknown | null;
   driving: Promise<boolean> | null;
+  abortController?: AbortController;
   /** A live hub event may reserve priority for one retry. Persistent failures
    * continue backing off after this reaches zero, but may no longer starve
    * broad reconnect recovery. A newer event refreshes the budget. */
@@ -559,6 +647,12 @@ export function createProactiveContentPull(
     if (targetForPull.authorizationWitness?.version !== event.version) {
       delete targetForPull.authorizationWitness;
     }
+    if (
+      targetForPull.authorizedStageInvocation?.expectedVersion !==
+      event.version
+    ) {
+      delete targetForPull.authorizedStageInvocation;
+    }
     const run = (async (): Promise<ProjectPullCompletion> => {
       let outcome: ProactiveContentPullOutcome | null = null;
       try {
@@ -584,6 +678,7 @@ export function createProactiveContentPull(
         try {
           const callbackTarget = { ...targetForPull };
           delete callbackTarget.authorizationWitness;
+          delete callbackTarget.authorizedStageInvocation;
           await deps.onPulled?.(callbackTarget, outcome.version);
         } catch (error) {
           // Content is already durable and the cursor must stay advanced; a
@@ -673,6 +768,8 @@ export function createProactiveContentPull(
   }
 
   function clearIntent(intent: PullIntent): void {
+    intent.abortController?.abort();
+    delete intent.abortController;
     cancelIntentTimer(intent);
     if (intents.get(intent.key) === intent) intents.delete(intent.key);
     releaseIntentForeground(intent);
@@ -713,6 +810,7 @@ export function createProactiveContentPull(
       (intent.desiredVersion == null || incomingVersion > intent.desiredVersion);
     const strongerForce = force && !intent.force;
     if (higherVersion) {
+      intent.abortController?.abort();
       intent.desiredVersion = incomingVersion;
       intent.event = { ...event };
     }
@@ -894,7 +992,36 @@ export function createProactiveContentPull(
         }
         return { kind: 'retry-now' };
       }
-      const completion = await runPull(target, intent.event);
+      const expectedVersion = intent.desiredVersion;
+      const abortController = new AbortController();
+      intent.abortController = abortController;
+      const targetForPull: ProactiveContentPullTarget = {
+        ...target,
+        ...(expectedVersion != null
+          ? {
+              authorizedStageInvocation:
+                issueAuthorizedProactivePullInvocation(
+                  target,
+                  expectedVersion,
+                  () =>
+                    intents.get(intent.key) === intent &&
+                    intent.desiredVersion === expectedVersion,
+                  abortController.signal,
+                ),
+            }
+          : {}),
+      };
+      let completion: ProjectPullCompletion;
+      try {
+        completion = await runPull(targetForPull, {
+          ...intent.event,
+          ...(expectedVersion != null ? { version: expectedVersion } : {}),
+        });
+      } finally {
+        if (intent.abortController === abortController) {
+          delete intent.abortController;
+        }
+      }
       if (completion.outcome?.status === 'revoked') {
         return { kind: 'revoked' };
       }

@@ -220,7 +220,14 @@ import {
   resolveAmrProfile,
 } from './integrations/vela.js';
 import { projectResourceIdFor } from './integrations/vela-team-projects.js';
-import { materializePulledTeamMirror } from './collab/team-mirror-materializer.js';
+import {
+  getTeamProjectMaterialization,
+  latestTeamProjectMaterializationVersion,
+  materializePulledTeamMirror,
+  teamProjectMaterializationMatches,
+  teamProjectMaterializationSupersedes,
+} from './collab/team-mirror-materializer.js';
+import { recoverAuthorizedTeamProjectPromotions } from './collab/team-mirror-promotion.js';
 import {
   amrAccountFailureDetails,
   classifyAmrAccountFailureSignal,
@@ -666,7 +673,10 @@ import { registerCollabContextRoutes } from './routes/collab-context.js';
 import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
-import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
+import {
+  createActiveWorkspaceSelectionStore,
+  resolveAuthorizedActiveTeamWorkspaceSnapshot,
+} from './collab/active-workspace-selection.js';
 import {
   headerValue,
   isWorkspaceResourceLocked,
@@ -685,7 +695,10 @@ import {
   listVelaWorkspaceDirectory,
 } from './collab/vela-workspace-context.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
-import { createProactiveContentPull } from './collab/proactive-content-pull.js';
+import {
+  activeTeamWorkspaceIdentity,
+  createProactiveContentPull,
+} from './collab/proactive-content-pull.js';
 import {
   emitSharedProjectPullTiming,
   sharedProjectPullProfileEnabled,
@@ -2683,6 +2696,33 @@ export async function startServer({
     };
   };
   const activeWorkspace = createActiveWorkspaceSelectionStore(RUNTIME_DATA_DIR);
+  const teamMirrorPromotionJournalDir = path.join(
+    RUNTIME_DATA_DIR,
+    'team-mirror-promotions',
+  );
+  await recoverAuthorizedTeamProjectPromotions({
+    journalDir: teamMirrorPromotionJournalDir,
+    allowedProjectsRoot: PROJECTS_DIR,
+    isCommitted: (entry) => {
+      const stored = getTeamProjectMaterialization(
+        db,
+        entry.receipt.workspaceId,
+        entry.receipt.projectId,
+      );
+      return teamProjectMaterializationMatches(stored, entry.receipt);
+    },
+    isSuperseded: (entry) => {
+      const stored = getTeamProjectMaterialization(
+        db,
+        entry.receipt.workspaceId,
+        entry.receipt.projectId,
+      );
+      return teamProjectMaterializationSupersedes(stored, entry.receipt);
+    },
+    onError: (error) => {
+      console.warn('[od] failed to recover authorized team mirror promotion:', error);
+    },
+  });
   // What this daemon has learned about each workspace's type, memoized off reads
   // it already performs (the workspace directory the web fetches on every load,
   // the workspace context the invalidation poller reads every 15s). It is the
@@ -3349,6 +3389,14 @@ export async function startServer({
   collabPublishWatcher.start();
   const sharedProjectPullProfiling =
     sharedProjectPullProfileEnabled(process.env);
+  const authorizedActiveWorkspaceSnapshot = () =>
+    resolveAuthorizedActiveTeamWorkspaceSnapshot(
+      activeWorkspace.snapshot(),
+      collab.workspaceContext.lastKnownSnapshot?.() ?? {
+        context: null,
+        generation: 0,
+      },
+    );
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     // Register-on-pull: after a member pulls a shared project, insert a local
@@ -3378,6 +3426,8 @@ export async function startServer({
         });
       },
       materializeTeamMirror: (input, scope) => materializePulledTeamMirror(db, input, scope),
+      materializeAuthorizedTeamMirror: (input, scope, receipt) =>
+        materializePulledTeamMirror(db, input, scope, receipt),
     },
     resolveProjectDir: async (projectId) => {
       const project = getProject(db, projectId);
@@ -3386,14 +3436,25 @@ export async function startServer({
     },
     resolvePullDir: (projectId) => resolveProjectDir(PROJECTS_DIR, projectId),
     readMaterializedVersion: (projectId, scope) => {
-      const stored = teamResourceVersions.get(
+      const authorized = getTeamProjectMaterialization(
+        db,
         scope.workspaceId,
-        'project-content',
-        teamProjectContentResourceId(projectId, scope),
+        projectId,
       );
-      if (stored == null) return null;
-      const parsed = Number(stored);
-      return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+      return latestTeamProjectMaterializationVersion(
+        authorized,
+        teamResourceVersions.get(
+          scope.workspaceId,
+          'project-content',
+          teamProjectContentResourceId(projectId, scope),
+        ),
+        projectId,
+        scope,
+      );
+    },
+    authorizedTeamProjectPull: {
+      journalDir: teamMirrorPromotionJournalDir,
+      getActiveWorkspaceSnapshot: authorizedActiveWorkspaceSnapshot,
     },
     writeMaterializedVersion: (projectId, scope, version) =>
       teamResourceVersions.set(
@@ -3478,12 +3539,7 @@ export async function startServer({
     // keys on: only an ACTIVE team member has a principal that may pull.
     getWorkspaceIdentity: async () => {
       const context = await collab.workspaceContext.current({});
-      if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
-      return {
-        workspaceId: context.workspaceId,
-        resourceTeamId: context.teamId ?? context.workspaceId,
-        workspaceMemberId: context.workspaceMemberId,
-      };
+      return activeTeamWorkspaceIdentity(context);
     },
     // A witness may skip the route's pre-transport catalog gate, so only this
     // uncached authoritative lookup is allowed to mint one. The display SWR
@@ -3496,9 +3552,22 @@ export async function startServer({
     // into this daemon's pull loop.
     listSharedProjects: async (workspaceId) => {
       if (!velaCliWorkspaceTeamProjectCatalog) return [];
-      if (activeWorkspace.get()?.trim() !== workspaceId) return [];
+      const beforeContext =
+        await collab.workspaceContext.current({}).catch(() => null);
+      if (!beforeContext) return [];
+      const before = authorizedActiveWorkspaceSnapshot();
+      if (before.workspaceId !== workspaceId) return [];
       const projects = await velaCliWorkspaceTeamProjectCatalog.list();
-      if (activeWorkspace.get()?.trim() !== workspaceId) return [];
+      const afterContext =
+        await collab.workspaceContext.current({}).catch(() => null);
+      if (!afterContext) return [];
+      const after = authorizedActiveWorkspaceSnapshot();
+      if (
+        after.workspaceId !== workspaceId ||
+        after.generation !== before.generation
+      ) {
+        return [];
+      }
       return projects
         .filter((project) => project.workspaceId === workspaceId && project.access.canView)
         .map((project) => ({
@@ -3517,12 +3586,24 @@ export async function startServer({
       );
       return (await readProjectManifest(projectDir)) != null;
     },
-    materializedVersion: (target) =>
-      teamResourceVersions.get(
+    materializedVersion: (target) => {
+      const authorized = getTeamProjectMaterialization(
+        db,
         target.workspaceId,
-        'project-content',
-        teamProjectContentResourceId(target.projectId, target),
-      ),
+        target.projectId,
+      );
+      const version = latestTeamProjectMaterializationVersion(
+        authorized,
+        teamResourceVersions.get(
+          target.workspaceId,
+          'project-content',
+          teamProjectContentResourceId(target.projectId, target),
+        ),
+        target.projectId,
+        target,
+      );
+      return version == null ? null : String(version);
+    },
     // The resource is owner-scoped; the same captured team/owner principal is
     // used by the shared pull below. The member session remains the transport
     // credential, while Vela validates the active workspace server-side.
@@ -3540,7 +3621,7 @@ export async function startServer({
         resourceTeamId: target.resourceTeamId,
         viewerMemberId: target.viewerMemberId,
         ownerMemberId: target.ownerMemberId,
-      }, target.authorizationWitness, expectedVersion),
+      }, target.authorizationWitness, expectedVersion, target.authorizedStageInvocation),
     // All Projects is a list-level surface and does not subscribe to every
     // project-scoped SSE. Once an inbound pull has actually materialized the
     // tree, nudge that surface so its failed pre-pull cover scan runs again

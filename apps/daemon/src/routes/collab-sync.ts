@@ -15,9 +15,24 @@ import {
   type ResourceHubPrincipal,
 } from '../collab/resource-principal.js';
 import {
+  isAuthorizedProactivePullInvocation,
+  isBoundProactivePullInvocation,
   isFreshProactivePullAuthorizationWitness,
+  type AuthorizedProactivePullInvocation,
   type ProactivePullAuthorizationWitness,
 } from '../collab/proactive-content-pull.js';
+import {
+  isAuthorizedTeamProjectPullUnavailable,
+  stageAuthorizedTeamProjectPull,
+  validateAuthorizedTeamProjectPullReceipt,
+  type AuthorizedTeamProjectPullReceipt,
+  type StageAuthorizedTeamProjectPullInput,
+  type StagedAuthorizedTeamProjectPull,
+} from '../collab/authorized-team-project-pull.js';
+import {
+  promoteAuthorizedTeamProjectStage,
+  type PromoteAuthorizedTeamProjectStageInput,
+} from '../collab/team-mirror-promotion.js';
 import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
@@ -61,6 +76,11 @@ export interface PulledProjectStore {
     input: RegisterPulledProjectInput,
     scope: TeamMirrorPullScope,
   ) => { localRecordChanged: boolean };
+  materializeAuthorizedTeamMirror?: (
+    input: RegisterPulledProjectInput,
+    scope: TeamMirrorPullScope,
+    receipt: AuthorizedTeamProjectPullReceipt,
+  ) => { localRecordChanged: boolean };
 }
 
 export interface RegisterCollabSyncRoutesDeps {
@@ -102,6 +122,21 @@ export interface RegisterCollabSyncRoutesDeps {
     version: number,
   ) => void | Promise<void>;
   readManifest?: (projectDir: string) => Promise<PulledProjectManifest | null>;
+  authorizedTeamProjectPull?: {
+    journalDir: string;
+    getActiveWorkspaceSnapshot: () => {
+      workspaceId: string | null;
+      generation: number;
+    };
+    stage?: (
+      input: StageAuthorizedTeamProjectPullInput,
+    ) => Promise<StagedAuthorizedTeamProjectPull>;
+    promote?: (
+      input: PromoteAuthorizedTeamProjectStageInput<{
+        localRecordChanged: boolean;
+      }>,
+    ) => Promise<{ localRecordChanged: boolean }>;
+  };
   onTeamShareStateChanged?: (input: {
     projectId: string;
     principal?: ResourceHubPrincipal | null;
@@ -188,6 +223,7 @@ export interface CollabSyncRoutesHandle {
     scope: TeamMirrorPullScope,
     authorizationWitness?: ProactivePullAuthorizationWitness,
     expectedVersion?: number,
+    authorizedStageInvocation?: AuthorizedProactivePullInvocation,
   ): Promise<CollabSyncPullOutcome>;
 }
 
@@ -593,6 +629,7 @@ export function registerCollabSyncRoutes(
   async function preparePulledProjectRegistration(
     projectId: string,
     scope: TeamMirrorPullScope | null,
+    projectDirOverride?: string,
   ): Promise<PreparedPulledProjectRegistration | null> {
     if (!projectStore || !resolvePullDir) {
       if (scope) throw new Error('team mirror project store unavailable');
@@ -603,7 +640,7 @@ export function registerCollabSyncRoutes(
       if (!existing && projectStore.has(projectId)) return null;
       if (existing && cleanPulledProjectName(existing.name) !== PULLED_PROJECT_PLACEHOLDER_NAME) return null;
     }
-    const projectDir = resolvePullDir(projectId);
+    const projectDir = projectDirOverride ?? resolvePullDir(projectId);
     let manifest: PulledProjectManifest | null = null;
     try {
       manifest = await readManifest(projectDir);
@@ -630,6 +667,7 @@ export function registerCollabSyncRoutes(
     prepared: PreparedPulledProjectRegistration | null,
     scope: TeamMirrorPullScope | null,
     teamProject: TeamProject | null,
+    receipt?: AuthorizedTeamProjectPullReceipt,
   ): boolean {
     if (!prepared || !projectStore) return false;
     const { existing, fallbackName, manifest, now, projectId } = prepared;
@@ -651,6 +689,16 @@ export function registerCollabSyncRoutes(
           : now,
     };
     if (scope) {
+      if (receipt) {
+        if (!projectStore.materializeAuthorizedTeamMirror) {
+          throw new Error('authorized team mirror materializer unavailable');
+        }
+        return projectStore.materializeAuthorizedTeamMirror(
+          input,
+          scope,
+          receipt,
+        ).localRecordChanged;
+      }
       if (!projectStore.materializeTeamMirror) {
         throw new Error('team mirror materializer unavailable');
       }
@@ -945,6 +993,7 @@ export function registerCollabSyncRoutes(
     scope: TeamMirrorPullScope | null,
     authorizationWitness?: ProactivePullAuthorizationWitness,
     expectedVersion?: number,
+    authorizedStageInvocation?: AuthorizedProactivePullInvocation,
   ): Promise<CollabSyncPullOutcome> {
     reportPullTiming({
       phase: 'route-started',
@@ -965,6 +1014,137 @@ export function registerCollabSyncRoutes(
     };
     try {
     let authoritativeSharedProject: TeamProject | null = null;
+    let authorizedCapabilityFallbackVersion: number | null = null;
+    const authorizedPull = deps.authorizedTeamProjectPull;
+    const hasStageInvocation = authorizedStageInvocation !== undefined;
+    const hasAuthorizedStageBrand = Boolean(
+      scope &&
+      isBoundProactivePullInvocation(
+        authorizedStageInvocation,
+        {
+          projectId,
+          workspaceId: scope.workspaceId,
+          resourceTeamId: scope.resourceTeamId,
+          viewerMemberId: scope.viewerMemberId,
+          ownerMemberId: scope.ownerMemberId,
+        },
+        expectedVersion,
+      ),
+    );
+    if (hasStageInvocation && !hasAuthorizedStageBrand) {
+      return complete({ status: 'register_failed' });
+    }
+    if (
+      hasAuthorizedStageBrand &&
+      (
+        !authorizedStageInvocation ||
+        authorizedStageInvocation.signal.aborted ||
+        !authorizedStageInvocation.isStillExpected() ||
+        !authorizedPull ||
+        !resolvePullDir
+      )
+    ) {
+      return complete({ status: 'register_failed' });
+    }
+    const useAuthorizedStage = hasAuthorizedStageBrand;
+    if (
+      useAuthorizedStage &&
+      scope &&
+      authorizedPull &&
+      resolvePullDir &&
+      authorizedStageInvocation &&
+      expectedVersion != null
+    ) {
+      const activeSnapshot = authorizedPull.getActiveWorkspaceSnapshot();
+      if (
+        activeSnapshot.workspaceId !== scope.workspaceId ||
+        !authorizedStageInvocation.isStillExpected()
+      ) {
+        return complete({ status: 'register_failed' });
+      }
+      let staged: StagedAuthorizedTeamProjectPull | null = null;
+      try {
+        staged = await (authorizedPull.stage ?? stageAuthorizedTeamProjectPull)({
+          projectId,
+          liveDir: resolvePullDir(projectId),
+          scope,
+          expectedVersion,
+          signal: authorizedStageInvocation.signal,
+        });
+      } catch (error) {
+        if (!isAuthorizedTeamProjectPullUnavailable(error)) {
+          console.warn('[od] authorized proactive team pull failed closed:', error);
+          return complete({ status: 'register_failed' });
+        }
+        // Old CLIs can materialize successfully while returning no version.
+        // The event version is only a proven lower bound after the legacy
+        // pull and every post-pull authorization/registration gate succeeds;
+        // it is never persisted as an authorized receipt.
+        authorizedCapabilityFallbackVersion = expectedVersion;
+      }
+      if (staged) {
+        let localRecordChanged = false;
+        try {
+          const prepared = await preparePulledProjectRegistration(
+            projectId,
+            scope,
+            staged.stageDir,
+          );
+          const result = await (
+            authorizedPull.promote ?? promoteAuthorizedTeamProjectStage
+          )({
+            receipt: staged.receipt,
+            liveDir: resolvePullDir(projectId),
+            stageDir: staged.stageDir,
+            expectedStageIdentity: staged.identity,
+            journalDir: authorizedPull.journalDir,
+            expectedWorkspaceId: scope.workspaceId,
+            activeWorkspaceGeneration: activeSnapshot.generation,
+            getActiveWorkspaceSnapshot:
+              authorizedPull.getActiveWorkspaceSnapshot,
+            isExpectedVersion:
+              authorizedStageInvocation.isStillExpected,
+            validateReceipt: () =>
+              validateAuthorizedTeamProjectPullReceipt(staged!.receipt, {
+                projectId,
+                scope,
+                expectedVersion,
+              }),
+            commit: () => ({
+              localRecordChanged: registerPreparedPulledProject(
+                prepared,
+                scope,
+                null,
+                staged!.receipt,
+              ),
+            }),
+            onPostCommitCleanupError: (error) => {
+              console.warn(
+                '[od] authorized team project committed; deferred promotion cleanup:',
+                error,
+              );
+            },
+          });
+          localRecordChanged = result.localRecordChanged;
+        } catch (error) {
+          console.warn('[od] failed to promote authorized team project:', error);
+          return complete({ status: 'register_failed' });
+        } finally {
+          try {
+            await staged.cleanup();
+          } catch (error) {
+            console.warn('[od] failed to clean authorized team project stage:', error);
+          }
+        }
+        notifyFilesChanged?.(projectId);
+        if (localRecordChanged) notifyProjectMetadataChanged?.(projectId);
+        markTeamProjectRevoked?.(projectId, false);
+        return complete({
+          status: 'pulled',
+          version: staged.receipt.version,
+        });
+      }
+    }
     const reuseInitialAuthorization = Boolean(
       scope &&
       isFreshProactivePullAuthorizationWitness(authorizationWitness, {
@@ -1045,10 +1225,16 @@ export function registerCollabSyncRoutes(
     reportPullTiming({
       phase: 'transport-done',
       projectId,
-      ...(result.version != null ? { version: result.version } : {}),
+      ...(result.version != null
+        ? { version: result.version }
+        : authorizedCapabilityFallbackVersion != null
+          ? { version: authorizedCapabilityFallbackVersion }
+          : {}),
       atMs: Date.now(),
     });
-    if (result.version !== null) {
+    const materializedVersion =
+      result.version ?? authorizedCapabilityFallbackVersion;
+    if (materializedVersion !== null) {
       let prepared: PreparedPulledProjectRegistration | null = null;
       try {
         prepared = await preparePulledProjectRegistration(projectId, scope);
@@ -1059,7 +1245,7 @@ export function registerCollabSyncRoutes(
       reportPullTiming({
         phase: 'registration-prepared',
         projectId,
-        version: result.version,
+        version: materializedVersion,
         atMs: Date.now(),
       });
 
@@ -1083,7 +1269,7 @@ export function registerCollabSyncRoutes(
         reportPullTiming({
           phase: 'catalog-revalidated',
           projectId,
-          version: result.version,
+          version: materializedVersion,
           atMs: Date.now(),
         });
         // Keep this check adjacent to the synchronous SQLite transaction.
@@ -1095,7 +1281,7 @@ export function registerCollabSyncRoutes(
         reportPullTiming({
           phase: 'scope-revalidated',
           projectId,
-          version: result.version,
+          version: materializedVersion,
           atMs: Date.now(),
         });
       } else if (resolveSharedProject) {
@@ -1120,7 +1306,7 @@ export function registerCollabSyncRoutes(
       reportPullTiming({
         phase: 'mirror-materialized',
         projectId,
-        version: result.version,
+        version: materializedVersion,
         atMs: Date.now(),
       });
       // Persist the exact version before notifying readers. A file-change
@@ -1131,14 +1317,18 @@ export function registerCollabSyncRoutes(
           reportPullTiming({
             phase: 'version-write-started',
             projectId,
-            version: result.version,
+            version: materializedVersion,
             atMs: Date.now(),
           });
-          await deps.writeMaterializedVersion(projectId, scope, result.version);
+          await deps.writeMaterializedVersion(
+            projectId,
+            scope,
+            materializedVersion,
+          );
           reportPullTiming({
             phase: 'persisted',
             projectId,
-            version: result.version,
+            version: materializedVersion,
             atMs: Date.now(),
           });
         } catch (error) {
@@ -1165,7 +1355,7 @@ export function registerCollabSyncRoutes(
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
     markTeamProjectRevoked?.(projectId, false);
-    return complete({ status: 'pulled', version: result.version });
+    return complete({ status: 'pulled', version: materializedVersion });
     } finally {
       reportPullTiming({
         phase: 'route-completed',
@@ -1186,6 +1376,7 @@ export function registerCollabSyncRoutes(
   // under more than one scope (see `scopedProjectKey` in collab/runtime.ts) —
   // only identically-routed pulls may share a result.
   const pullsInFlight = new Map<string, Promise<CollabSyncPullOutcome>>();
+  const projectPullTails = new Map<string, Promise<void>>();
 
   function pullSharedProjectCoalesced(
     projectId: string,
@@ -1193,8 +1384,9 @@ export function registerCollabSyncRoutes(
     scope: TeamMirrorPullScope | null,
     authorizationWitness?: ProactivePullAuthorizationWitness,
     expectedVersion?: number,
+    authorizedStageInvocation?: AuthorizedProactivePullInvocation,
   ): Promise<CollabSyncPullOutcome> {
-    const key = JSON.stringify([
+    const mutationKey = JSON.stringify([
       projectId,
       principal?.teamId ?? null,
       principal?.memberId ?? null,
@@ -1203,21 +1395,52 @@ export function registerCollabSyncRoutes(
       scope?.viewerMemberId ?? null,
       scope?.ownerMemberId ?? null,
     ]);
+    const key = JSON.stringify([
+      mutationKey,
+      authorizedStageInvocation === undefined
+        ? 'legacy'
+        : isBoundProactivePullInvocation(
+            authorizedStageInvocation,
+            {
+              projectId,
+              workspaceId: scope?.workspaceId ?? '',
+              resourceTeamId: scope?.resourceTeamId ?? '',
+              viewerMemberId: scope?.viewerMemberId ?? '',
+              ownerMemberId: scope?.ownerMemberId ?? '',
+            },
+            expectedVersion,
+          )
+          ? 'authorized-stage'
+          : 'invalid-stage',
+    ]);
     const existing = pullsInFlight.get(key);
     if (existing) return existing;
+    const previous = projectPullTails.get(projectId) ?? Promise.resolve();
     const run = (async () => {
       try {
+        await previous.catch(() => undefined);
         return await pullSharedProjectOnce(
           projectId,
           principal,
           scope,
           authorizationWitness,
           expectedVersion,
+          authorizedStageInvocation,
         );
       } finally {
         pullsInFlight.delete(key);
       }
     })();
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    projectPullTails.set(projectId, tail);
+    void tail.finally(() => {
+      if (projectPullTails.get(projectId) === tail) {
+        projectPullTails.delete(projectId);
+      }
+    });
     pullsInFlight.set(key, run);
     return run;
   }
@@ -1342,6 +1565,7 @@ export function registerCollabSyncRoutes(
       scope: TeamMirrorPullScope,
       authorizationWitness?: ProactivePullAuthorizationWitness,
       expectedVersion?: number,
+      authorizedStageInvocation?: AuthorizedProactivePullInvocation,
     ): Promise<CollabSyncPullOutcome> {
       const principal: ResourceHubPrincipal = {
         teamId: scope.resourceTeamId,
@@ -1356,6 +1580,7 @@ export function registerCollabSyncRoutes(
         scope,
         authorizationWitness,
         expectedVersion,
+        authorizedStageInvocation,
       );
     },
   };

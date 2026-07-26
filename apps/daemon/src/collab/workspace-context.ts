@@ -53,6 +53,15 @@ export interface WorkspaceContextProvider {
    * reads this instead of awaiting `.current()`.
    */
   lastKnown?(): WorkspaceCollabContext | null;
+  /**
+   * Same cached identity plus a monotonic generation that advances whenever
+   * an observed authorization identity changes, including A -> B -> A between
+   * two callers' snapshots.
+   */
+  lastKnownSnapshot?(): {
+    context: WorkspaceCollabContext | null;
+    generation: number;
+  };
 }
 
 /**
@@ -75,11 +84,29 @@ export function withLastKnownWorkspaceContext(
   provider: WorkspaceContextProvider,
 ): WorkspaceContextProvider {
   let lastKnown: WorkspaceCollabContext | null = null;
+  let lastIdentityKey: string | null | undefined;
+  let generation = 0;
+  const observe = (context: WorkspaceCollabContext | null): void => {
+    const identityKey = context
+      ? JSON.stringify([
+          context.workspaceId,
+          context.teamId ?? context.workspaceId,
+          context.workspaceMemberId,
+          context.memberStatus,
+          context.lifecycleState,
+        ])
+      : null;
+    if (identityKey !== lastIdentityKey) {
+      generation += 1;
+      lastIdentityKey = identityKey;
+    }
+    lastKnown = context;
+  };
   return {
     ...provider,
     async current(req: WorkspaceContextRequest): Promise<WorkspaceCollabContext | null> {
       const context = await provider.current(req);
-      lastKnown = context;
+      observe(context);
       return context;
     },
     // Dev/demo provider only (see `set?` above): a direct override is also a
@@ -88,12 +115,13 @@ export function withLastKnownWorkspaceContext(
     ...(provider.set
       ? {
           set: (context: WorkspaceCollabContext | null) => {
-            lastKnown = context;
+            observe(context);
             provider.set!(context);
           },
         }
       : {}),
     lastKnown: () => lastKnown,
+    lastKnownSnapshot: () => ({ context: lastKnown, generation }),
   };
 }
 

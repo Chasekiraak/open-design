@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  activeTeamWorkspaceIdentity,
   createProactiveContentPull,
+  isAuthorizedProactivePullInvocation,
   isFreshProactivePullAuthorizationWitness,
   type ProactiveContentPull,
   type ProactiveContentPullDeps,
@@ -90,6 +92,33 @@ function makeRetryScheduler() {
 }
 
 describe('proactive content pull (hub project-content-changed consumer)', () => {
+  it.each([
+    ['billing_past_due'],
+    ['locked'],
+    ['deleting'],
+    ['deleted'],
+  ])('rejects %s workspace lifecycle before pull authorization', (lifecycleState) => {
+    expect(activeTeamWorkspaceIdentity({
+      workspaceId: 'ws-1',
+      teamId: 'team-1',
+      workspaceMemberId: 'wm-member',
+      workspaceType: 'team',
+      memberStatus: 'active',
+      lifecycleState,
+    })).toBeNull();
+  });
+
+  it('rejects missing resource-team or member identities before authorization', () => {
+    expect(activeTeamWorkspaceIdentity({
+      workspaceId: '',
+      teamId: '',
+      workspaceMemberId: '',
+      workspaceType: 'team',
+      memberStatus: 'active',
+      lifecycleState: 'active',
+    })).toBeNull();
+  });
+
   it('pulls a locally-bound team project owned by a teammate', async () => {
     const deps = makeDeps();
     const pull = createProactiveContentPull(deps);
@@ -2640,5 +2669,74 @@ describe('proactive content pull retry coordinator', () => {
     // The second scope guarded once before waiting, then guarded again after
     // the foreign-scope completion instead of trusting that outcome.
     expect(identityReads).toBe(3);
+  });
+
+  it('brands the exact in-flight version and invalidates it when a newer event arrives', async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const targets: ProactiveContentPullTarget[] = [];
+    const deps = makeDeps({
+      pullSharedProject: async (target, expectedVersion) => {
+        targets.push(target);
+        if (expectedVersion === 3) await firstGate;
+        return { status: 'pulled', version: expectedVersion ?? null };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const first = pull.handleContentChanged(baseEvent);
+    await vi.waitFor(() => expect(targets).toHaveLength(1));
+    const firstInvocation = targets[0]!.authorizedStageInvocation;
+    expect(isAuthorizedProactivePullInvocation(
+      firstInvocation,
+      targets[0]!,
+      3,
+    )).toBe(true);
+
+    const second = pull.handleContentChanged({ ...baseEvent, version: 4 });
+    await vi.waitFor(() => {
+      expect(firstInvocation?.isStillExpected()).toBe(false);
+    });
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(targets.map((target) => target.authorizedStageInvocation?.expectedVersion))
+      .toEqual([3, 4]);
+    expect(isAuthorizedProactivePullInvocation(
+      { ...targets[1]!.authorizedStageInvocation! },
+      targets[1]!,
+      4,
+    )).toBe(false);
+  });
+
+  it('aborts an in-flight authorized stage immediately when a newer version arrives', async () => {
+    const versions: number[] = [];
+    let firstSignal: AbortSignal | undefined;
+    const deps = makeDeps({
+      pullSharedProject: async (target, expectedVersion) => {
+        versions.push(expectedVersion!);
+        if (expectedVersion === 3) {
+          firstSignal = target.authorizedStageInvocation?.signal;
+          await new Promise<void>((resolve) => {
+            firstSignal?.addEventListener('abort', () => resolve(), {
+              once: true,
+            });
+          });
+          return { status: 'register_failed' };
+        }
+        return { status: 'pulled', version: expectedVersion! };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const first = pull.handleContentChanged(baseEvent);
+    await vi.waitFor(() => expect(versions).toEqual([3]));
+    const second = pull.handleContentChanged({ ...baseEvent, version: 4 });
+
+    await vi.waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    await Promise.all([first, second]);
+    expect(versions).toEqual([3, 4]);
   });
 });
