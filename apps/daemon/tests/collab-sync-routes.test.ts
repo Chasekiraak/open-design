@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import http from 'node:http';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -21,6 +29,14 @@ import {
   type ProactiveContentPullTarget,
   type ProactivePullAuthorizationWitness,
 } from '../src/collab/proactive-content-pull.js';
+import { resolveAuthorizedActiveTeamWorkspaceSnapshot } from '../src/collab/active-workspace-selection.js';
+import { promoteAuthorizedTeamProjectStage } from '../src/collab/team-mirror-promotion.js';
+import {
+  getTeamProjectMaterialization,
+  materializePulledTeamMirror,
+} from '../src/collab/team-mirror-materializer.js';
+import { withLastKnownWorkspaceContext } from '../src/collab/workspace-context.js';
+import { closeDatabase, getProject, openDatabase } from '../src/db.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
 import { projectResourceIdFor } from '../src/integrations/vela-team-projects.js';
 import {
@@ -2175,6 +2191,101 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(promote).toHaveBeenCalledTimes(1);
     expect(adapterPull).not.toHaveBeenCalled();
     expect(store.projects.get('authorized-fast')?.name).toBe('Staged project');
+  });
+
+  it('commits a staged receipt through a transient A to null to A context gap', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-transient-route-'));
+    tempDirs.push(root);
+    const projectId = 'authorized-transient-route';
+    const liveDir = path.join(root, projectId);
+    const stageDir = path.join(root, `.${projectId}.od-pull-stage-test`);
+    await mkdir(liveDir);
+    await writeFile(path.join(liveDir, 'index.html'), '<title>Old project</title>');
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), '<title>Staged project</title>');
+
+    const activeContext = await fixedShareContextProvider(true).current({});
+    if (!activeContext) throw new Error('expected active team context');
+    let currentContext: WorkspaceCollabContext | null = activeContext;
+    const workspaceContext = withLastKnownWorkspaceContext({
+      current: async () => currentContext,
+    });
+    await workspaceContext.current({});
+    const capturedSnapshot = workspaceContext.lastKnownSnapshot!();
+    const activeWorkspaceSelection = {
+      workspaceId: pullScope.workspaceId,
+      generation: 0,
+    };
+    const getActiveWorkspaceSnapshot = () =>
+      resolveAuthorizedActiveTeamWorkspaceSnapshot(
+        activeWorkspaceSelection,
+        workspaceContext.lastKnownSnapshot!(),
+      );
+
+    const db = openDatabase(root, { dataDir: root });
+    const projectStore: PulledProjectStore = {
+      get: (id) => getProject(db, id),
+      has: (id) => getProject(db, id) != null,
+      register: () => {
+        throw new Error('authorized route must use the transactional materializer');
+      },
+      materializeAuthorizedTeamMirror: (input, scope, pullReceipt) =>
+        materializePulledTeamMirror(db, input, scope, pullReceipt),
+    };
+    const pullReceipt = authorizedReceipt(projectId, 5);
+    const stage = vi.fn(async () => {
+      // Reproduce the production failure window while the Vela child owns the
+      // staged bytes: the same active identity briefly becomes unavailable,
+      // then recovers before the atomic promotion boundary.
+      currentContext = null;
+      await workspaceContext.current({});
+      currentContext = activeContext;
+      await workspaceContext.current({});
+      const stat = await lstat(stageDir);
+      return {
+        stageDir,
+        identity: { dev: String(stat.dev), ino: String(stat.ino) },
+        receipt: pullReceipt,
+        cleanup: async () => {
+          await rm(stageDir, { recursive: true, force: true });
+        },
+      };
+    });
+    const notifyFilesChanged = vi.fn();
+
+    try {
+      const api = await startSyncServer(workspaceContext, {
+        projectStore,
+        resolvePullDir: () => liveDir,
+        resolveSharedProject: resolvePulledSharedProject,
+        notifyFilesChanged,
+        authorizedTeamProjectPull: {
+          journalDir: path.join(root, '.journals'),
+          getActiveWorkspaceSnapshot,
+          stage,
+          promote: promoteAuthorizedTeamProjectStage,
+        },
+      });
+
+      await expect(invokeThroughProactivePull(
+        api.handle,
+        projectId,
+        pullScope,
+        5,
+      )).resolves.toEqual({ status: 'pulled', version: 5 });
+
+      expect(workspaceContext.lastKnownSnapshot!()).toEqual(capturedSnapshot);
+      expect(await readFile(path.join(liveDir, 'index.html'), 'utf8'))
+        .toContain('Staged project');
+      expect(getProject(db, projectId)?.name).toBe('Staged project');
+      expect(
+        getTeamProjectMaterialization(db, pullScope.workspaceId, projectId),
+      ).toEqual(pullReceipt);
+      expect(notifyFilesChanged).toHaveBeenCalledOnce();
+      expect(notifyFilesChanged).toHaveBeenCalledWith(projectId);
+    } finally {
+      closeDatabase();
+    }
   });
 
   it('logs the project, version, and non-sensitive snapshot reason when promotion fails', async () => {
