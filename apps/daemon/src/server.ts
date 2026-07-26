@@ -692,8 +692,13 @@ import {
 import { resolveWorkspaceScope } from './collab/workspace-scope.js';
 import {
   createWorkspaceContextProviderFromEnv,
-  listVelaWorkspaceDirectory,
+  fetchVelaWorkspaceDirectory,
 } from './collab/vela-workspace-context.js';
+import {
+  createWorkspaceBillingRuntimeCoordinator,
+  shouldEmitWorkspaceBillingRuntimeNudge,
+  WorkspaceBillingAccessRevokedError,
+} from './collab/workspace-billing-runtime.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
 import {
   activeTeamWorkspaceIdentity,
@@ -712,6 +717,7 @@ import {
 import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
 import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
+import { fetchVelaWorkspaceBillingProjection } from './integrations/vela-billing.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { createShouldPublish } from './collab/should-publish.js';
 import { recoverPersistedTeamShareOwnership } from './collab/persisted-team-share.js';
@@ -2730,10 +2736,14 @@ export async function startServer({
   // recorded in — and a project-scoped collab call may only be pinned to — a
   // workspace that can actually host a team plane. See collab/team-share-scope.ts.
   const workspaceTypes = createWorkspaceTypeRegistry();
+  const fetchWorkspaceDirectory = async () => {
+    const result = await fetchVelaWorkspaceDirectory();
+    if (result.ok) workspaceTypes.learn(result.items);
+    return result;
+  };
   const listWorkspaceDirectory = async () => {
-    const items = await listVelaWorkspaceDirectory();
-    workspaceTypes.learn(items);
-    return items;
+    const result = await fetchWorkspaceDirectory();
+    return result.items;
   };
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
   const teamProjectContentResourceId = (
@@ -3703,12 +3713,46 @@ export async function startServer({
         3000,
       )
     : null;
+  const workspaceBillingRuntime = createWorkspaceBillingRuntimeCoordinator({
+    fetchProjection: async ({ workspaceId, workspaceMemberId }) => {
+      const directory = await fetchWorkspaceDirectory();
+      if (!directory.ok) {
+        throw Object.assign(new Error('workspace directory unavailable'), {
+          code: 'workspace_directory_unavailable',
+        });
+      }
+      const membership = directory.items.find(
+        (item) =>
+          item.workspaceId === workspaceId &&
+          item.workspaceMemberId === workspaceMemberId &&
+          item.workspaceType === 'team' &&
+          item.memberStatus === 'active' &&
+          item.lifecycleState === 'active',
+      );
+      if (!membership) throw new WorkspaceBillingAccessRevokedError();
+      return fetchVelaWorkspaceBillingProjection(workspaceId);
+    },
+    onStateChange: (state) => {
+      // The request that created a runtime already receives this state in its
+      // response. Background catch-up/retry/poll completion needs a thin nudge
+      // so old and new web clients re-read the same explicit route.
+      if (!shouldEmitWorkspaceBillingRuntimeNudge(state)) return;
+      emitWorkspaceEvent({
+        type: 'billing-changed',
+        workspaceId: state.workspaceId,
+        revision: `runtime:${state.revision}`,
+        at: Date.now(),
+      });
+    },
+  });
   registerCollabContextRoutes(app, {
     workspaceContext: collab.workspaceContext,
     activeWorkspace,
+    billingRuntime: workspaceBillingRuntime,
     // Same directory read the route would have made on its own, wrapped so every
     // workspace type it carries is memoized for the team-share invariant.
     listWorkspaceDirectory,
+    fetchWorkspaceDirectory,
     // Reuse the shared team-projects lister (which holds the shared vela-cli
     // catalog adapter). Without this the endpoint built a fresh adapter per
     // request and re-ran the one-off `vela team-projects --help` capability
@@ -3919,8 +3963,18 @@ export async function startServer({
         }
         case 'workspace-context-changed':
           handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
+          // Revalidate exact membership before the next billing projection.
+          // A removed/rebound member must clear money and entitlement state,
+          // even when no billing-specific event accompanies the roster change.
+          workspaceBillingRuntime.refreshAll('workspace-context-changed');
           break;
         case 'billing-changed':
+          workspaceBillingRuntime.invalidate({
+            domain: 'legacy',
+            ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-billing-changed',
+          });
           emitWorkspaceEvent({
             type: 'billing-changed',
             ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
@@ -3930,6 +3984,12 @@ export async function startServer({
           break;
         case 'billing-subscription-changed':
           if (!event.workspaceId) break;
+          workspaceBillingRuntime.invalidate({
+            domain: 'subscription',
+            workspaceId: event.workspaceId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-billing-subscription-changed',
+          });
           emitWorkspaceEvent({
             type: 'billing-subscription-changed',
             workspaceId: event.workspaceId,
@@ -3939,6 +3999,13 @@ export async function startServer({
           break;
         case 'wallet-balance-changed':
           if (!event.workspaceId || !event.workspaceMemberId) break;
+          workspaceBillingRuntime.invalidate({
+            domain: 'wallet',
+            workspaceId: event.workspaceId,
+            workspaceMemberId: event.workspaceMemberId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-wallet-balance-changed',
+          });
           emitWorkspaceEvent({
             type: 'wallet-balance-changed',
             workspaceId: event.workspaceId,
@@ -3966,6 +4033,7 @@ export async function startServer({
       // Close the disconnect gap: one catch-up cycle over the same reads the
       // pollers watch, plus a comment pull for open projects.
       void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+      workspaceBillingRuntime.reconnect();
       void collabCloud?.pollOnce().catch(() => undefined);
       // Same catch-up principle for the design-system/skill resource
       // reconciler: a missed 'team-resources-changed' push during the
@@ -11029,6 +11097,7 @@ export async function startServer({
       routineService?.stop();
       workspaceInvalidationPoller.stop();
       hubEventsSubscriber.stop();
+      workspaceBillingRuntime.dispose();
       proactiveContentPull.dispose();
     };
     const shutdownDaemonRuns = async () => {

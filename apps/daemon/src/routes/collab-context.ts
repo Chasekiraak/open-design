@@ -41,7 +41,16 @@ import {
   fetchVelaBillingSummary,
   type VelaWorkspaceBillingProjection,
 } from '../integrations/vela-billing.js';
-import { listVelaWorkspaceDirectory } from '../collab/vela-workspace-context.js';
+import {
+  listVelaWorkspaceDirectory,
+  type WorkspaceDirectoryFetchResult,
+} from '../collab/vela-workspace-context.js';
+import {
+  createWorkspaceBillingRuntimeCoordinator,
+  WorkspaceBillingInterestError,
+  type WorkspaceBillingRuntimeCoordinator,
+  type WorkspaceBillingRuntimeResult,
+} from '../collab/workspace-billing-runtime.js';
 
 export interface RegisterCollabContextRoutesDeps {
   workspaceContext: WorkspaceContextProvider;
@@ -57,6 +66,8 @@ export interface RegisterCollabContextRoutesDeps {
   fetchWorkspaceBillingProjection?: (
     workspaceId: string,
   ) => Promise<VelaWorkspaceBillingProjection>;
+  /** Daemon-owned exact-scope billing state. Shared with upstream SSE hooks. */
+  billingRuntime?: WorkspaceBillingRuntimeCoordinator;
   /** Injectable for tests; defaults to the vela billing catalog CLI 收口. */
   fetchBillingCatalog?: (workspaceId: string) => Promise<WorkspaceBillingCatalog | null>;
   /** Injectable for tests; defaults to the vela billing checkout CLI 收口. */
@@ -87,6 +98,11 @@ export interface RegisterCollabContextRoutesDeps {
   };
   /** Injectable for tests; defaults to the Vela workspace directory API. */
   listWorkspaceDirectory?: () => Promise<WorkspaceDirectoryItem[]>;
+  /**
+   * Directory read with an authoritative-success bit. An unavailable backend
+   * must never be collapsed into a confirmed empty membership list.
+   */
+  fetchWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   /**
    * Collab realtime hop-2 — the workspace-scoped invalidation SSE seams. When
    * both are provided the daemon registers `GET /api/workspace/events`; the route
@@ -154,6 +170,12 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
           workspaceBalance: await deps.fetchWorkspaceBalance!(workspaceId),
         })
       : (workspaceId: string) => fetchVelaWorkspaceBillingProjection(workspaceId));
+  const billingRuntime =
+    deps.billingRuntime ??
+    createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: ({ workspaceId }) =>
+        fetchWorkspaceBillingProjection(workspaceId),
+    });
   const fetchBillingCatalog =
     deps.fetchBillingCatalog ?? ((workspaceId: string) => fetchVelaBillingCatalog(workspaceId));
   const startCheckout =
@@ -165,6 +187,12 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const listMembers = deps.listMembers ?? (async () => []);
   const listWorkspaceDirectory =
     deps.listWorkspaceDirectory ?? (() => listVelaWorkspaceDirectory());
+  const fetchWorkspaceDirectory =
+    deps.fetchWorkspaceDirectory ??
+    (async (): Promise<WorkspaceDirectoryFetchResult> => ({
+      ok: true,
+      items: await listWorkspaceDirectory(),
+    }));
 
   // Desktop invite hand-off ("桌面唤起和本地恢复"): the desktop app parses the
   // opendesign:// invite deeplink and POSTs the nonce here. The daemon consumes
@@ -371,7 +399,32 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       return res.json(body);
     }
 
-    const directory = await listWorkspaceDirectory().catch(() => []);
+    const clientId = req.header('x-od-workspace-runtime-client-id') ?? undefined;
+    const clientGeneration =
+      req.header('x-od-workspace-runtime-generation') ?? undefined;
+    const directoryResult = await fetchWorkspaceDirectory().catch(
+      (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+    );
+    if (!directoryResult.ok) {
+      billingRuntime.markWorkspaceUnavailable(
+        requestedWorkspaceId,
+        'workspace_directory_unavailable',
+      );
+      const unavailable = clientId
+        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
+        : null;
+      if (unavailable?.state.status === 'error') {
+        const body: WorkspaceBillingResponse = {
+          summary: null,
+          workspaceBalance: null,
+          workspaceSnapshot: null,
+          workspaceRuntime: unavailable.state,
+        };
+        return res.json(body);
+      }
+      return res.status(503).json({ error: 'workspace_directory_unavailable' });
+    }
+    const directory = directoryResult.items;
     const membership = directory.find(
       (item) =>
         item.workspaceId === requestedWorkspaceId &&
@@ -380,12 +433,58 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
         item.lifecycleState === 'active',
     );
     if (!membership) {
+      billingRuntime.revokeWorkspace(requestedWorkspaceId);
+      const revoked = clientId
+        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
+        : null;
+      if (revoked?.state.status === 'access-revoked') {
+        const body: WorkspaceBillingResponse = {
+          summary: null,
+          workspaceBalance: null,
+          workspaceSnapshot: null,
+          workspaceRuntime: revoked.state,
+        };
+        return res.json(body);
+      }
       return res.status(409).json({ error: 'workspace_not_authorized' });
     }
-    const [accountSummary, projection] = await Promise.all([
-      fetchBilling(),
-      fetchWorkspaceBillingProjection(requestedWorkspaceId),
-    ]);
+    billingRuntime.retainWorkspaceMember(
+      requestedWorkspaceId,
+      membership.workspaceMemberId,
+    );
+    billingRuntime.authorizeWorkspaceMember({
+      workspaceId: requestedWorkspaceId,
+      workspaceMemberId: membership.workspaceMemberId,
+    });
+    let accountSummary: WorkspaceBillingSummary | null;
+    let runtimeResult: WorkspaceBillingRuntimeResult;
+    try {
+      [accountSummary, runtimeResult] = await Promise.all([
+        fetchBilling(),
+        billingRuntime.read(
+          {
+            workspaceId: requestedWorkspaceId,
+            workspaceMemberId: membership.workspaceMemberId,
+          },
+          {
+            reason: 'explicit-billing-read',
+            ...(clientId ? { clientId } : {}),
+            ...(clientGeneration ? { clientGeneration } : {}),
+          },
+        ),
+      ]);
+    } catch (error) {
+      if (error instanceof WorkspaceBillingInterestError) {
+        return res.status(409).json({
+          error: error.code,
+          ...(error.acceptedGeneration
+            ? { acceptedGeneration: error.acceptedGeneration }
+            : {}),
+        });
+      }
+      throw error;
+    }
+    const projection = runtimeResult.projection;
     const workspaceBalance = projection.workspaceBalance;
     const authorizedWorkspaceBalance =
       workspaceBalance?.workspaceId === requestedWorkspaceId &&
@@ -404,6 +503,7 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       ...(authorizedWorkspaceSnapshot
         ? { workspaceSnapshot: authorizedWorkspaceSnapshot }
         : {}),
+      workspaceRuntime: runtimeResult.state,
     };
     return res.json(body);
   });

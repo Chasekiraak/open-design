@@ -80,6 +80,7 @@ class MockWorkspaceEventSource {
 
 describe('useWorkspaceBilling explicit scope', () => {
   beforeEach(() => {
+    window.sessionStorage.clear();
     resetCoalescedGet();
     resetWorkspaceContextCache();
     resetWorkspaceBillingCache();
@@ -90,6 +91,7 @@ describe('useWorkspaceBilling explicit scope', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    window.sessionStorage.clear();
     resetCoalescedGet();
     resetWorkspaceContextCache();
     resetWorkspaceBillingCache();
@@ -412,10 +414,11 @@ describe('useWorkspaceBilling explicit scope', () => {
       resolveWorkspaceB = resolve;
     });
     const billingCalls: string[] = [];
+    const runtimeHeaders: Array<{ clientId: string; generation: string }> = [];
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url === '/api/workspace/context') {
           return new Response(JSON.stringify({ context: currentContext }), {
@@ -425,6 +428,11 @@ describe('useWorkspaceBilling explicit scope', () => {
         }
         if (url.startsWith('/api/workspace/billing?')) {
           billingCalls.push(url);
+          const headers = new Headers(init?.headers);
+          runtimeHeaders.push({
+            clientId: headers.get('x-od-workspace-runtime-client-id') ?? '',
+            generation: headers.get('x-od-workspace-runtime-generation') ?? '',
+          });
           const parsed = new URL(url, 'http://open-design.test');
           const workspaceId = parsed.searchParams.get('workspaceId');
           expect(parsed.searchParams.get('scope')).toBe('workspace');
@@ -475,6 +483,100 @@ describe('useWorkspaceBilling explicit scope', () => {
       '/api/workspace/billing?scope=workspace&workspaceId=workspace-a',
       '/api/workspace/billing?scope=workspace&workspaceId=workspace-b',
     ]);
+    expect(runtimeHeaders).toHaveLength(2);
+    expect(runtimeHeaders[0]!.clientId).not.toBe('');
+    expect(runtimeHeaders[1]!.clientId).toBe(runtimeHeaders[0]!.clientId);
+    expect(BigInt(runtimeHeaders[1]!.generation)).toBeGreaterThan(
+      BigInt(runtimeHeaders[0]!.generation),
+    );
+  });
+
+  it('gives each renderer page lifecycle an independent runtime client id', async () => {
+    const runtimeHeaders: Array<{ clientId: string; generation: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          const headers = new Headers(init?.headers);
+          runtimeHeaders.push({
+            clientId: headers.get('x-od-workspace-runtime-client-id') ?? '',
+            generation: headers.get('x-od-workspace-runtime-generation') ?? '',
+          });
+          return new Response(JSON.stringify(billingResponse('workspace-a', '1.25')), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const firstPage = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(runtimeHeaders).toHaveLength(1));
+    firstPage.unmount();
+
+    // The reset seam models a new renderer module/page lifecycle while keeping
+    // sessionStorage intact, as Duplicate Tab/window.open may do.
+    resetCoalescedGet();
+    resetWorkspaceContextCache();
+    resetWorkspaceBillingCache();
+
+    const secondPage = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(runtimeHeaders).toHaveLength(2));
+    secondPage.unmount();
+
+    expect(runtimeHeaders[0]!.clientId).not.toBe('');
+    expect(runtimeHeaders[1]!.clientId).not.toBe(runtimeHeaders[0]!.clientId);
+    expect(runtimeHeaders.map((header) => header.generation)).toEqual(['1', '1']);
+  });
+
+  it('retains additive daemon runtime freshness metadata', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            workspaceRuntime: {
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              status: 'fresh',
+              revision: '7',
+              observedAt: '2026-07-27T00:00:00.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'poll-floor',
+              sourceGapDetected: false,
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(hook.result.current?.workspaceRuntime).toMatchObject({
+      status: 'fresh',
+      revision: '7',
+      reason: 'poll-floor',
+    }));
   });
 
   it('keeps B when the initial A context response arrives after the explicit switch', async () => {

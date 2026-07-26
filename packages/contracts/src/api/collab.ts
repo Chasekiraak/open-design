@@ -415,6 +415,34 @@ export interface WorkspaceBillingSnapshot {
 }
 
 /**
+ * Daemon-owned freshness metadata for one exact workspace/member billing
+ * projection. Additive to the legacy response so older clients keep consuming
+ * `workspaceBalance` / `workspaceSnapshot` unchanged.
+ */
+export type WorkspaceBillingRuntimeStatus =
+  | 'loading'
+  | 'fresh'
+  | 'stale'
+  | 'refreshing'
+  | 'error'
+  | 'access-revoked';
+
+export interface WorkspaceBillingRuntimeState {
+  workspaceId: string;
+  workspaceMemberId: string;
+  status: WorkspaceBillingRuntimeStatus;
+  /** Daemon-local uint64 rendered as a decimal string. */
+  revision: string;
+  observedAt: string | null;
+  retryAt: string | null;
+  errorCode: string | null;
+  /** Why the most recent state transition or authoritative read occurred. */
+  reason: string;
+  /** True when an ordered upstream revision skipped at least one value. */
+  sourceGapDetected: boolean;
+}
+
+/**
  * The caller's Vela account billing summary.
  *
  * `vela billing summary` remains account-scoped. The daemon must never turn it
@@ -472,6 +500,11 @@ export interface WorkspaceBillingResponse {
    * legacy summary + workspaceBalance fields.
    */
   workspaceSnapshot?: WorkspaceBillingSnapshot | null;
+  /**
+   * Additive daemon-owned freshness metadata. Missing means the connected
+   * daemon predates the runtime coordinator; values above remain authoritative.
+   */
+  workspaceRuntime?: WorkspaceBillingRuntimeState;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

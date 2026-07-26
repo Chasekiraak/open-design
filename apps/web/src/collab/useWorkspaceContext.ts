@@ -35,11 +35,42 @@ const WORKSPACE_CONTEXT_COALESCE_KEY = 'workspace-context';
 // last-known signed-in state instantly while the background read revalidates.
 let cachedWorkspaceContext: WorkspaceContextState['context'] = null;
 let workspaceContextRevision = 0;
+let volatileWorkspaceRuntimeClientId: string | null = null;
+let workspaceRuntimeGeneration = 0n;
+let lastWorkspaceRuntimeInterestKey: string | null = null;
+let lastWorkspaceRuntimeInterestGeneration = '0';
 
 /** Test seam: clear the module-level context cache between tests. */
 export function resetWorkspaceContextCache(): void {
   cachedWorkspaceContext = null;
   workspaceContextRevision = 0;
+  volatileWorkspaceRuntimeClientId = null;
+  workspaceRuntimeGeneration = 0n;
+  lastWorkspaceRuntimeInterestKey = null;
+  lastWorkspaceRuntimeInterestGeneration = '0';
+}
+
+function workspaceRuntimeClientId(): string {
+  if (volatileWorkspaceRuntimeClientId) return volatileWorkspaceRuntimeClientId;
+  // Deliberately renderer-lifetime only. Duplicate Tab/window.open may copy
+  // sessionStorage, so persisting this id can make two windows submit
+  // independent generation streams under one daemon client identity.
+  const generated =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `runtime-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  volatileWorkspaceRuntimeClientId = generated;
+  return generated;
+}
+
+function workspaceRuntimeGenerationFor(interestKey: string): string {
+  if (lastWorkspaceRuntimeInterestKey === interestKey) {
+    return lastWorkspaceRuntimeInterestGeneration;
+  }
+  workspaceRuntimeGeneration += 1n;
+  lastWorkspaceRuntimeInterestKey = interestKey;
+  lastWorkspaceRuntimeInterestGeneration = workspaceRuntimeGeneration.toString();
+  return lastWorkspaceRuntimeInterestGeneration;
 }
 
 /**
@@ -310,6 +341,10 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
   const billingRequestKey = billingScopeKey
     ? `${billingScopeKey}:context-revision:${workspaceContextRevision}`
     : null;
+  const billingRuntimeGeneration =
+    billingRequestKey && context?.workspaceType === 'team'
+      ? workspaceRuntimeGenerationFor(billingRequestKey)
+      : null;
   const [state, setState] = useState<{
     scopeKey: string;
     response: WorkspaceBillingResponse;
@@ -319,6 +354,7 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
   const activeRequestKeyRef = useRef<string | null>(billingRequestKey);
   const requestEpochRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runtimeManagedRef = useRef(false);
   activeScopeKeyRef.current = billingScopeKey;
   activeRequestKeyRef.current = billingRequestKey;
 
@@ -355,13 +391,26 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
     const requestEpoch = ++requestEpochRef.current;
     try {
       const fetchBilling = async () => {
-        const res = await fetch(billingUrl, { cache: 'no-store' });
+        const runtimeHeaders =
+          context?.workspaceType === 'team'
+            ? {
+                'x-od-workspace-runtime-client-id': workspaceRuntimeClientId(),
+                'x-od-workspace-runtime-generation': billingRuntimeGeneration ?? '0',
+              }
+            : undefined;
+        const res = await fetch(billingUrl, {
+          cache: 'no-store',
+          ...(runtimeHeaders ? { headers: runtimeHeaders } : {}),
+        });
         if (!res.ok) throw new Error(`billing ${res.status}`);
         const body = (await res.json()) as WorkspaceBillingResponse;
         return {
           summary: body.summary ?? null,
           workspaceBalance: body.workspaceBalance ?? null,
           workspaceSnapshot: body.workspaceSnapshot ?? null,
+          ...(body.workspaceRuntime
+            ? { workspaceRuntime: body.workspaceRuntime }
+            : {}),
         };
       };
       const response = force
@@ -373,6 +422,7 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
         activeScopeKeyRef.current === scopeKey &&
         activeRequestKeyRef.current === requestKey
       ) {
+        runtimeManagedRef.current = Boolean(response.workspaceRuntime);
         if (retryTimerRef.current) {
           clearTimeout(retryTimerRef.current);
           retryTimerRef.current = null;
@@ -388,6 +438,7 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
         activeRequestKeyRef.current === requestKey
       ) {
         const lastGood = cachedWorkspaceBillingResponses.get(scopeKey);
+        runtimeManagedRef.current = Boolean(lastGood?.workspaceRuntime);
         if (lastGood) {
           setState({ scopeKey, response: lastGood });
         } else if (clearOnFailure) {
@@ -416,7 +467,13 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
         }
       }
     }
-  }, [billingRequestKey, billingScopeKey, billingUrl]);
+  }, [
+    billingRequestKey,
+    billingRuntimeGeneration,
+    billingScopeKey,
+    billingUrl,
+    context?.workspaceType,
+  ]);
 
   useEffect(() => {
     void loadBilling(true, true);
@@ -445,7 +502,12 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') void loadBilling(false);
+      // New daemons own the 30s safety floor and bounded retries. Keep the old
+      // browser poll only as an additive compatibility path for old daemons
+      // whose response has no runtime metadata.
+      if (!runtimeManagedRef.current && document.visibilityState === 'visible') {
+        void loadBilling(false);
+      }
     }, WORKSPACE_BILLING_POLL_MS);
     return () => clearInterval(interval);
   }, [loadBilling]);
