@@ -701,6 +701,7 @@ import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { createShouldPublish } from './collab/should-publish.js';
+import { recoverPersistedTeamShareOwnership } from './collab/persisted-team-share.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { readProjectManifest } from './project-locations.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
@@ -2947,16 +2948,11 @@ export async function startServer({
     },
   });
   for (const share of listTeamWorkspaceProjectShares(db)) {
-    const ownerMemberId = share.createdByWorkspaceMemberId ?? share.updatedByWorkspaceMemberId;
-    if (!share.projectId || !share.workspaceId || !ownerMemberId) continue;
+    const restored = recoverPersistedTeamShareOwnership(share);
+    if (!restored) continue;
     collab.rememberTeamShare(
-      share.projectId,
-      {
-        memberId: ownerMemberId,
-        teamId: share.workspaceId,
-        role: 'member',
-        lifecycleState: 'active',
-      },
+      restored.projectId,
+      restored.principal,
       share.syncState === 'synced' || share.syncState === 'sync_failed' || share.syncState === 'pending_upload'
         ? share.syncState
         : 'pending_upload',
