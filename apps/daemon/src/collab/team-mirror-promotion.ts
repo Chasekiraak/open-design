@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { renameSync } from 'node:fs';
 import {
   lstat,
   mkdir,
@@ -37,6 +38,7 @@ interface ActiveWorkspaceSnapshot {
 
 interface PromotionDurability {
   syncDirectory?: (directory: string) => Promise<void>;
+  renameDirectorySync?: (from: string, to: string) => void;
 }
 
 export interface PromoteAuthorizedTeamProjectStageInput<T> {
@@ -304,6 +306,8 @@ export async function promoteAuthorizedTeamProjectStage<T>(
     `${expectedRecoveryPrefix(liveDir)}${id}`,
   );
   const syncDirectory = directorySync(input.durability);
+  const renameDirectorySync =
+    input.durability?.renameDirectorySync ?? renameSync;
   const liveExisted = await exists(liveDir);
   let originalLiveIdentity: AuthorizedTeamProjectStageIdentity | undefined;
   if (liveExisted) {
@@ -332,7 +336,32 @@ export async function promoteAuthorizedTeamProjectStage<T>(
   try {
     if (liveExisted) {
       await inspectOwnedDirectory(liveDir, originalLiveIdentity!, 'live team mirror');
-      await rename(liveDir, recoveryDir);
+      await inspectOwnedDirectory(
+        stageDir,
+        input.expectedStageIdentity,
+        'team mirror stage',
+      );
+      // A pair of awaited renames leaves a JavaScript-observable ENOENT
+      // window at `liveDir`; durability work between them made that window
+      // last seconds on a busy disk. Keep the two same-filesystem namespace
+      // mutations in one synchronous critical section so daemon readers can
+      // observe either the complete old tree or the complete promoted tree,
+      // never an absent path. The already-durable `prepared` journal covers
+      // a process crash after either syscall.
+      renameDirectorySync(liveDir, recoveryDir);
+      try {
+        renameDirectorySync(stageDir, liveDir);
+      } catch (error) {
+        try {
+          renameDirectorySync(recoveryDir, liveDir);
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            'team mirror swap failed and immediate live recovery failed',
+          );
+        }
+        throw error;
+      }
       const recovery = await inspectOwnedDirectory(
         recoveryDir,
         originalLiveIdentity!,
@@ -341,16 +370,14 @@ export async function promoteAuthorizedTeamProjectStage<T>(
       if (!sameIdentity(record.recoveryIdentity, recovery)) {
         throw new Error('team mirror recovery identity changed after live move');
       }
-      record.phase = 'live-moved';
-      await syncDirectory(path.dirname(liveDir));
-      await writeJournal(journalPath, record, syncDirectory);
+    } else {
+      await inspectOwnedDirectory(
+        stageDir,
+        input.expectedStageIdentity,
+        'team mirror stage',
+      );
+      await rename(stageDir, liveDir);
     }
-    await inspectOwnedDirectory(
-      stageDir,
-      input.expectedStageIdentity,
-      'team mirror stage',
-    );
-    await rename(stageDir, liveDir);
     await inspectOwnedDirectory(
       liveDir,
       input.expectedStageIdentity,

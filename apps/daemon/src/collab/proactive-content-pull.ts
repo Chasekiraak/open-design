@@ -94,6 +94,8 @@ export interface AuthorizedProactivePullInvocation
   extends ProactivePullAuthorizationScope {
   readonly kind: 'authorized-proactive-stage';
   readonly expectedVersion: number;
+  /** Opt-in profiling origin only; never participates in authorization. */
+  readonly profileReceivedAtMs?: number;
   readonly isStillExpected: () => boolean;
   readonly signal: AbortSignal;
 }
@@ -101,6 +103,7 @@ export interface AuthorizedProactivePullInvocation
 function issueAuthorizedProactivePullInvocation(
   scope: ProactivePullAuthorizationScope,
   expectedVersion: number,
+  profileReceivedAtMs: number | undefined,
   isStillExpected: () => boolean,
   signal: AbortSignal,
 ): AuthorizedProactivePullInvocation {
@@ -108,6 +111,7 @@ function issueAuthorizedProactivePullInvocation(
     kind: 'authorized-proactive-stage' as const,
     ...scope,
     expectedVersion,
+    ...(profileReceivedAtMs != null ? { profileReceivedAtMs } : {}),
     isStillExpected,
     signal,
   });
@@ -1046,6 +1050,7 @@ export function createProactiveContentPull(
                 issueAuthorizedProactivePullInvocation(
                   target,
                   expectedVersion,
+                  intent.event.profileReceivedAtMs,
                   () =>
                     intents.get(intent.key) === intent &&
                     intent.desiredVersion === expectedVersion,

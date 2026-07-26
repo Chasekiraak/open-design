@@ -83,6 +83,15 @@ export interface PulledProjectStore {
   ) => { localRecordChanged: boolean };
 }
 
+type CollabSyncPullTimingStatus =
+  | 'pulled'
+  | 'revoked'
+  | 'register_failed'
+  | 'threw'
+  | 'staged'
+  | 'capability-unavailable'
+  | 'failed';
+
 export interface RegisterCollabSyncRoutesDeps {
   collab: Pick<
     CollabRuntime,
@@ -181,6 +190,13 @@ export interface RegisterCollabSyncRoutesDeps {
     phase:
       | 'route-started'
       | 'initial-authorization-reused'
+      | 'authorized-stage-started'
+      | 'authorized-stage-done'
+      | 'authorized-receipt-validated'
+      | 'authorized-scope-revalidated'
+      | 'promotion-started'
+      | 'promotion-done'
+      | 'version-persisted'
       | 'transport-invoke'
       | 'transport-done'
       | 'registration-prepared'
@@ -192,8 +208,9 @@ export interface RegisterCollabSyncRoutesDeps {
       | 'route-completed';
     projectId: string;
     version?: number;
+    receivedAtMs?: number;
     atMs: number;
-    status?: 'pulled' | 'revoked' | 'register_failed' | 'threw';
+    status?: CollabSyncPullTimingStatus;
   }) => void;
 }
 
@@ -995,9 +1012,42 @@ export function registerCollabSyncRoutes(
     expectedVersion?: number,
     authorizedStageInvocation?: AuthorizedProactivePullInvocation,
   ): Promise<CollabSyncPullOutcome> {
+    const profileReceivedAtMs =
+      authorizedStageInvocation?.profileReceivedAtMs;
+    type AuthorizedPullTimingPhase =
+      | 'authorized-stage-started'
+      | 'authorized-stage-done'
+      | 'authorized-receipt-validated'
+      | 'authorized-scope-revalidated'
+      | 'promotion-started'
+      | 'promotion-done'
+      | 'version-persisted';
+    const reportAuthorizedPullTiming = (
+      phase: AuthorizedPullTimingPhase,
+      status?: Extract<
+        CollabSyncPullTimingStatus,
+        'pulled' | 'staged' | 'capability-unavailable' | 'failed'
+      >,
+      version = expectedVersion,
+    ): void => {
+      reportPullTiming({
+        phase,
+        projectId,
+        ...(version != null ? { version } : {}),
+        ...(profileReceivedAtMs != null
+          ? { receivedAtMs: profileReceivedAtMs }
+          : {}),
+        atMs: Date.now(),
+        ...(status ? { status } : {}),
+      });
+    };
     reportPullTiming({
       phase: 'route-started',
       projectId,
+      ...(expectedVersion != null ? { version: expectedVersion } : {}),
+      ...(profileReceivedAtMs != null
+        ? { receivedAtMs: profileReceivedAtMs }
+        : {}),
       atMs: Date.now(),
     });
     let terminalStatus: 'pulled' | 'revoked' | 'register_failed' | 'threw' =
@@ -1063,6 +1113,7 @@ export function registerCollabSyncRoutes(
         return complete({ status: 'register_failed' });
       }
       let staged: StagedAuthorizedTeamProjectPull | null = null;
+      reportAuthorizedPullTiming('authorized-stage-started');
       try {
         staged = await (authorizedPull.stage ?? stageAuthorizedTeamProjectPull)({
           projectId,
@@ -1071,8 +1122,15 @@ export function registerCollabSyncRoutes(
           expectedVersion,
           signal: authorizedStageInvocation.signal,
         });
+        reportAuthorizedPullTiming('authorized-stage-done', 'staged');
       } catch (error) {
-        if (!isAuthorizedTeamProjectPullUnavailable(error)) {
+        const capabilityUnavailable =
+          isAuthorizedTeamProjectPullUnavailable(error);
+        reportAuthorizedPullTiming(
+          'authorized-stage-done',
+          capabilityUnavailable ? 'capability-unavailable' : 'failed',
+        );
+        if (!capabilityUnavailable) {
           console.warn('[od] authorized proactive team pull failed closed:', error);
           return complete({ status: 'register_failed' });
         }
@@ -1084,12 +1142,33 @@ export function registerCollabSyncRoutes(
       }
       if (staged) {
         let localRecordChanged = false;
+        let promotionStarted = false;
         try {
+          validateAuthorizedTeamProjectPullReceipt(staged.receipt, {
+            projectId,
+            scope,
+            expectedVersion,
+          });
+          reportAuthorizedPullTiming('authorized-receipt-validated');
           const prepared = await preparePulledProjectRegistration(
             projectId,
             scope,
             staged.stageDir,
           );
+          const postStageSnapshot =
+            authorizedPull.getActiveWorkspaceSnapshot();
+          if (
+            postStageSnapshot.workspaceId !== scope.workspaceId ||
+            postStageSnapshot.generation !== activeSnapshot.generation ||
+            !authorizedStageInvocation.isStillExpected()
+          ) {
+            throw new Error(
+              'authorized team project scope changed before promotion',
+            );
+          }
+          reportAuthorizedPullTiming('authorized-scope-revalidated');
+          reportAuthorizedPullTiming('promotion-started');
+          promotionStarted = true;
           const result = await (
             authorizedPull.promote ?? promoteAuthorizedTeamProjectStage
           )({
@@ -1110,14 +1189,22 @@ export function registerCollabSyncRoutes(
                 scope,
                 expectedVersion,
               }),
-            commit: () => ({
-              localRecordChanged: registerPreparedPulledProject(
-                prepared,
-                scope,
-                null,
-                staged!.receipt,
-              ),
-            }),
+            commit: () => {
+              const committed = {
+                localRecordChanged: registerPreparedPulledProject(
+                  prepared,
+                  scope,
+                  null,
+                  staged!.receipt,
+                ),
+              };
+              reportAuthorizedPullTiming(
+                'version-persisted',
+                undefined,
+                staged!.receipt.version,
+              );
+              return committed;
+            },
             onPostCommitCleanupError: (error) => {
               console.warn(
                 '[od] authorized team project committed; deferred promotion cleanup:',
@@ -1125,8 +1212,12 @@ export function registerCollabSyncRoutes(
               );
             },
           });
+          reportAuthorizedPullTiming('promotion-done', 'pulled');
           localRecordChanged = result.localRecordChanged;
         } catch (error) {
+          if (promotionStarted) {
+            reportAuthorizedPullTiming('promotion-done', 'failed');
+          }
           const observedSnapshot =
             authorizedPull.getActiveWorkspaceSnapshot();
           const workspaceAvailable = observedSnapshot.workspaceId !== null;
@@ -1389,6 +1480,9 @@ export function registerCollabSyncRoutes(
         phase: 'route-completed',
         projectId,
         ...(terminalVersion != null ? { version: terminalVersion } : {}),
+        ...(profileReceivedAtMs != null
+          ? { receivedAtMs: profileReceivedAtMs }
+          : {}),
         atMs: Date.now(),
         status: terminalStatus,
       });

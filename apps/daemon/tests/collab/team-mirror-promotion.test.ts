@@ -1,3 +1,4 @@
+import { renameSync } from 'node:fs';
 import { lstat, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -191,6 +192,141 @@ describe('authorized team mirror promotion', () => {
     expect(await readFile(path.join(fx.liveDir, 'index.html'), 'utf8')).toBe('new');
     expect(await readdir(fx.journalDir)).toEqual([]);
     expect((await readdir(fx.root)).some((name) => name.includes('.od-pull-recovery-'))).toBe(false);
+  });
+
+  it('keeps one complete live tree addressable at every async durability boundary', async () => {
+    const fx = await fixture();
+    await writeFile(path.join(fx.liveDir, 'old-only.txt'), 'old');
+    await writeFile(path.join(fx.stageDir, 'new-only.txt'), 'new');
+    const observedVersions: string[] = [];
+    const assertCompleteLiveTree = async (): Promise<void> => {
+      const [index, entries] = await Promise.all([
+        readFile(path.join(fx.liveDir, 'index.html'), 'utf8'),
+        readdir(fx.liveDir),
+      ]);
+      if (index === 'old') {
+        expect(entries.sort()).toEqual(['index.html', 'old-only.txt']);
+      } else {
+        expect(index).toBe('new');
+        expect(entries.sort()).toEqual(['index.html', 'new-only.txt']);
+      }
+      observedVersions.push(index);
+    };
+
+    await expect(promoteAuthorizedTeamProjectStage({
+      receipt: receipt(),
+      liveDir: fx.liveDir,
+      stageDir: fx.stageDir,
+      expectedStageIdentity: fx.stageIdentity,
+      journalDir: fx.journalDir,
+      activeWorkspaceGeneration: 4,
+      getActiveWorkspaceSnapshot: () => ({
+        workspaceId: 'workspace-1',
+        generation: 4,
+      }),
+      expectedWorkspaceId: 'workspace-1',
+      isExpectedVersion: () => true,
+      validateReceipt: () => undefined,
+      commit: () => ({ localRecordChanged: true }),
+      durability: {
+        syncDirectory: async () => {
+          await assertCompleteLiveTree();
+        },
+      },
+    })).resolves.toEqual({ localRecordChanged: true });
+
+    expect(observedVersions.length).toBeGreaterThan(0);
+    expect(observedVersions).toContain('old');
+    expect(observedVersions.at(-1)).toBe('new');
+    await assertCompleteLiveTree();
+  });
+
+  it('restores the old live tree synchronously when the stage rename fails', async () => {
+    const fx = await fixture();
+    const stageRenameFailure = new Error('injected stage rename failure');
+    let renameCalls = 0;
+
+    await expect(promoteAuthorizedTeamProjectStage({
+      receipt: receipt(),
+      liveDir: fx.liveDir,
+      stageDir: fx.stageDir,
+      expectedStageIdentity: fx.stageIdentity,
+      journalDir: fx.journalDir,
+      activeWorkspaceGeneration: 4,
+      getActiveWorkspaceSnapshot: () => ({
+        workspaceId: 'workspace-1',
+        generation: 4,
+      }),
+      expectedWorkspaceId: 'workspace-1',
+      isExpectedVersion: () => true,
+      validateReceipt: () => undefined,
+      commit: () => ({ localRecordChanged: true }),
+      durability: {
+        renameDirectorySync: (from, to) => {
+          renameCalls += 1;
+          if (renameCalls === 2) throw stageRenameFailure;
+          renameSync(from, to);
+        },
+      },
+    })).rejects.toBe(stageRenameFailure);
+
+    expect(renameCalls).toBe(3);
+    expect(await readFile(path.join(fx.liveDir, 'index.html'), 'utf8')).toBe('old');
+    await expect(lstat(fx.stageDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(fx.journalDir)).toEqual([]);
+    expect((await readdir(fx.root)).some(
+      (name) => name.includes('.od-pull-recovery-'),
+    )).toBe(false);
+  });
+
+  it('uses journal rollback when the immediate live restore also fails', async () => {
+    const fx = await fixture();
+    const stageRenameFailure = new Error('injected stage rename failure');
+    const immediateRestoreFailure = new Error('injected immediate restore failure');
+    let renameCalls = 0;
+    let thrown: unknown;
+
+    try {
+      await promoteAuthorizedTeamProjectStage({
+        receipt: receipt(),
+        liveDir: fx.liveDir,
+        stageDir: fx.stageDir,
+        expectedStageIdentity: fx.stageIdentity,
+        journalDir: fx.journalDir,
+        activeWorkspaceGeneration: 4,
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: 'workspace-1',
+          generation: 4,
+        }),
+        expectedWorkspaceId: 'workspace-1',
+        isExpectedVersion: () => true,
+        validateReceipt: () => undefined,
+        commit: () => ({ localRecordChanged: true }),
+        durability: {
+          renameDirectorySync: (from, to) => {
+            renameCalls += 1;
+            if (renameCalls === 2) throw stageRenameFailure;
+            if (renameCalls === 3) throw immediateRestoreFailure;
+            renameSync(from, to);
+          },
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(renameCalls).toBe(3);
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([
+      stageRenameFailure,
+      immediateRestoreFailure,
+    ]);
+    expect(await readFile(path.join(fx.liveDir, 'index.html'), 'utf8')).toBe('old');
+    await expect(lstat(fx.stageDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(fx.journalDir)).toEqual([]);
+    expect((await readdir(fx.root)).some(
+      (name) => name.includes('.od-pull-recovery-'),
+    )).toBe(false);
   });
 
   it('restores the old tree when the SQLite transaction fails', async () => {

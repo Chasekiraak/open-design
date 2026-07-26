@@ -30,7 +30,10 @@ import {
   type ProactivePullAuthorizationWitness,
 } from '../src/collab/proactive-content-pull.js';
 import { resolveAuthorizedActiveTeamWorkspaceSnapshot } from '../src/collab/active-workspace-selection.js';
-import { promoteAuthorizedTeamProjectStage } from '../src/collab/team-mirror-promotion.js';
+import {
+  promoteAuthorizedTeamProjectStage,
+  type PromoteAuthorizedTeamProjectStageInput,
+} from '../src/collab/team-mirror-promotion.js';
 import {
   getTeamProjectMaterialization,
   materializePulledTeamMirror,
@@ -197,6 +200,7 @@ async function invokeThroughProactivePull(
   projectId: string,
   scope: TeamMirrorPullScope,
   version: number,
+  profileReceivedAtMs?: number,
 ) {
   let outcome: Awaited<ReturnType<CollabSyncRoutesHandle['pullSharedProject']>>
     | undefined;
@@ -226,6 +230,7 @@ async function invokeThroughProactivePull(
     projectId,
     workspaceId: scope.workspaceId,
     version,
+    ...(profileReceivedAtMs != null ? { profileReceivedAtMs } : {}),
   });
   if (!outcome) throw new Error('proactive pull did not invoke the route handle');
   return outcome;
@@ -2154,10 +2159,12 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     });
     const adapterPull = vi.fn(async () => ({ version: 5 }));
     const store = fakeProjectStore();
+    const onPullTiming = vi.fn();
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
       resolvePullDir: () => liveDir,
       resolveSharedProject: resolvePulledSharedProject,
+      onPullTiming,
       authorizedTeamProjectPull: {
         journalDir: path.join(root, '.journals'),
         getActiveWorkspaceSnapshot: () => ({
@@ -2174,11 +2181,13 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
         syncLatest: vi.fn(async () => ({ version: 5 })),
       },
     });
+    const profileReceivedAtMs = Date.now() - 100;
     const outcome = await invokeThroughProactivePull(
       api.handle,
       'authorized-fast',
       pullScope,
       5,
+      profileReceivedAtMs,
     );
 
     expect(outcome).toEqual({ status: 'pulled', version: 5 });
@@ -2191,6 +2200,149 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(promote).toHaveBeenCalledTimes(1);
     expect(adapterPull).not.toHaveBeenCalled();
     expect(store.projects.get('authorized-fast')?.name).toBe('Staged project');
+    expect(onPullTiming.mock.calls.map(([event]) => event.phase)).toEqual([
+      'route-started',
+      'authorized-stage-started',
+      'authorized-stage-done',
+      'authorized-receipt-validated',
+      'authorized-scope-revalidated',
+      'promotion-started',
+      'version-persisted',
+      'promotion-done',
+      'route-completed',
+    ]);
+    expect(onPullTiming.mock.calls.map(([event]) => event.receivedAtMs))
+      .toEqual(Array(9).fill(profileReceivedAtMs));
+  });
+
+  it('coalesces direct, targeted, and broad recovery onto one stable authorized promotion', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-overlap-'));
+    tempDirs.push(root);
+    const projectId = 'authorized-overlap';
+    const liveDir = path.join(root, projectId);
+    const stageDir = path.join(
+      root,
+      `.${projectId}.od-pull-stage-overlap`,
+    );
+    await mkdir(liveDir);
+    await writeFile(path.join(liveDir, 'index.html'), 'old');
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), 'new');
+    let releaseStage!: () => void;
+    const stageGate = new Promise<void>((resolve) => {
+      releaseStage = resolve;
+    });
+    const stage = vi.fn(async () => {
+      await stageGate;
+      const identity = await lstat(stageDir);
+      return {
+        stageDir,
+        identity: {
+          dev: String(identity.dev),
+          ino: String(identity.ino),
+        },
+        receipt: authorizedReceipt(projectId, 5),
+        cleanup: vi.fn(async () => undefined),
+      };
+    });
+    const observedLiveVersions: string[] = [];
+    const promote = vi.fn((
+      input: PromoteAuthorizedTeamProjectStageInput<{
+        localRecordChanged: boolean;
+      }>,
+    ) =>
+      promoteAuthorizedTeamProjectStage({
+        ...input,
+        durability: {
+          syncDirectory: async () => {
+            observedLiveVersions.push(
+              await readFile(path.join(liveDir, 'index.html'), 'utf8'),
+            );
+          },
+        },
+      }));
+    const store = fakeProjectStore();
+    const materializeAuthorized = vi.spyOn(
+      store,
+      'materializeAuthorizedTeamMirror',
+    );
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: () => liveDir,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote,
+      },
+    });
+    const proactive = createProactiveContentPull({
+      getLocalBinding: () => ({
+        workspaceId: pullScope.workspaceId,
+        visibility: 'team',
+      }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: pullScope.workspaceId,
+        resourceTeamId: pullScope.resourceTeamId,
+        workspaceMemberId: pullScope.viewerMemberId,
+      }),
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      pullSharedProject: (target, version) =>
+        api.handle.pullSharedProject(
+          target.projectId,
+          pullScope,
+          target.authorizationWitness,
+          version,
+          target.authorizedStageInvocation,
+        ),
+      listSharedProjects: async () => [{
+        projectId,
+        ownerMemberId: pullScope.ownerMemberId,
+      }],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 5,
+      materializedVersion: () => '4',
+    });
+
+    try {
+      const direct = proactive.handleContentChanged({
+        projectId,
+        workspaceId: pullScope.workspaceId,
+        version: 5,
+      });
+      await vi.waitFor(() => expect(stage).toHaveBeenCalledTimes(1));
+      expect(await readFile(path.join(liveDir, 'index.html'), 'utf8'))
+        .toBe('old');
+
+      const targeted = proactive.materializeMissingProjects(
+        pullScope.workspaceId,
+        projectId,
+      );
+      const broad = proactive.catchUpPublishedHeads(
+        pullScope.workspaceId,
+      );
+      await Promise.resolve();
+      expect(stage).toHaveBeenCalledTimes(1);
+      releaseStage();
+      await Promise.all([direct, targeted, broad]);
+    } finally {
+      proactive.dispose();
+    }
+
+    expect(stage).toHaveBeenCalledTimes(1);
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(materializeAuthorized).toHaveBeenCalledTimes(1);
+    expect(observedLiveVersions.every(
+      (version) => version === 'old' || version === 'new',
+    )).toBe(true);
+    expect(observedLiveVersions).toContain('old');
+    expect(observedLiveVersions.at(-1)).toBe('new');
+    expect(await readFile(path.join(liveDir, 'index.html'), 'utf8'))
+      .toBe('new');
   });
 
   it('commits a staged receipt through a transient A to null to A context gap', async () => {
@@ -2674,8 +2826,11 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     tempDirs.push(root);
     const liveDir = path.join(root, 'preempt');
     const stage4 = path.join(root, '.preempt.od-pull-stage-v4');
+    await mkdir(liveDir);
+    await writeFile(path.join(liveDir, 'index.html'), '<title>Version three</title>');
     await mkdir(stage4);
     await writeFile(path.join(stage4, 'index.html'), '<title>Version four</title>');
+    const stage4Stat = await lstat(stage4);
     let firstCleaned = false;
     const stage = vi.fn(async (input: {
       expectedVersion: number;
@@ -2691,20 +2846,30 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       }
       return {
         stageDir: stage4,
-        identity: { dev: '1', ino: '4' },
+        identity: {
+          dev: String(stage4Stat.dev),
+          ino: String(stage4Stat.ino),
+        },
         receipt: authorizedReceipt('preempt', 4),
         cleanup: vi.fn(async () => undefined),
       };
     });
-    const promote = vi.fn(async (input: {
-      validateReceipt: () => void;
-      isExpectedVersion: () => boolean;
-      commit: () => { localRecordChanged: boolean };
-    }) => {
-      expect(input.isExpectedVersion()).toBe(true);
-      input.validateReceipt();
-      return input.commit();
-    });
+    const observedLiveVersions: string[] = [];
+    const promote = vi.fn((
+      input: PromoteAuthorizedTeamProjectStageInput<{
+        localRecordChanged: boolean;
+      }>,
+    ) =>
+      promoteAuthorizedTeamProjectStage({
+        ...input,
+        durability: {
+          syncDirectory: async () => {
+            observedLiveVersions.push(
+              await readFile(path.join(liveDir, 'index.html'), 'utf8'),
+            );
+          },
+        },
+      }));
     const adapterPull = vi.fn(async () => ({ version: 99 }));
     const store = fakeProjectStore();
     const materializeAuthorized = vi.spyOn(
@@ -2759,6 +2924,8 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
         version: 3,
       });
       await vi.waitFor(() => expect(stage).toHaveBeenCalledTimes(1));
+      expect(await readFile(path.join(liveDir, 'index.html'), 'utf8'))
+        .toBe('<title>Version three</title>');
       const second = proactive.handleContentChanged({
         projectId: 'preempt',
         workspaceId: pullScope.workspaceId,
@@ -2778,6 +2945,15 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(materializeAuthorized).toHaveBeenCalledTimes(1);
     expect(materializeAuthorized.mock.calls[0]?.[2].version).toBe(4);
     expect(adapterPull).not.toHaveBeenCalled();
+    expect(observedLiveVersions.every(
+      (version) =>
+        version === '<title>Version three</title>' ||
+        version === '<title>Version four</title>',
+    )).toBe(true);
+    expect(observedLiveVersions).toContain('<title>Version three</title>');
+    expect(observedLiveVersions.at(-1)).toBe('<title>Version four</title>');
+    expect(await readFile(path.join(liveDir, 'index.html'), 'utf8'))
+      .toBe('<title>Version four</title>');
   });
 
   it('fails closed when active workspace identity drifts after the authoritative lookup', async () => {
