@@ -3785,7 +3785,9 @@ button.home-hero__capability-word:focus-visible {
   align-items: center;
   gap: 3px;
   position: absolute;
-  z-index: 1;
+  /* Scenario art has a positioned inner SVG. Keep the recommendation above
+     that artwork rather than letting the later sibling cover the badge. */
+  z-index: 2;
   top: 8px;
   left: 8px;
   padding: 3px 6px;
