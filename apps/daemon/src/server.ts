@@ -3486,7 +3486,11 @@ export async function startServer({
         workspaceMemberId: context.workspaceMemberId,
       };
     },
-    resolveSharedProjectOwner,
+    // A witness may skip the route's pre-transport catalog gate, so only this
+    // uncached authoritative lookup is allowed to mint one. The display SWR
+    // owner cache remains wired everywhere else.
+    resolveSharedProjectOwner: async (projectId) =>
+      (await resolveSharedProject(projectId))?.ownerMemberId ?? null,
     // Catch-up reads the rich catalog exactly once per verified connection
     // (or missing-project floor). Re-check the active scope after the CLI
     // await so a concurrent workspace switch cannot feed another team's rows
@@ -3531,13 +3535,13 @@ export async function startServer({
         lifecycleState: 'active',
         workspaceType: 'team',
       }),
-    pullSharedProject: (target) =>
+    pullSharedProject: (target, expectedVersion) =>
       collabSyncRoutes.pullSharedProject(target.projectId, {
         workspaceId: target.workspaceId,
         resourceTeamId: target.resourceTeamId,
         viewerMemberId: target.viewerMemberId,
         ownerMemberId: target.ownerMemberId,
-      }),
+      }, target.authorizationWitness, expectedVersion),
     // All Projects is a list-level surface and does not subscribe to every
     // project-scoped SSE. Once an inbound pull has actually materialized the
     // tree, nudge that surface so its failed pre-pull cover scan runs again

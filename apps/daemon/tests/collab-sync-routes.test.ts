@@ -16,6 +16,11 @@ import {
   type CreateCollabRuntimeOptions,
 } from '../src/collab/runtime.js';
 import type { WorkspaceContextProvider } from '../src/collab/workspace-context.js';
+import {
+  createProactiveContentPull,
+  type ProactiveContentPullTarget,
+  type ProactivePullAuthorizationWitness,
+} from '../src/collab/proactive-content-pull.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
 import { projectResourceIdFor } from '../src/integrations/vela-team-projects.js';
 import {
@@ -114,6 +119,40 @@ function fixedShareContextProvider(canShareProjects: boolean): WorkspaceContextP
     },
   };
   return { current: async () => context };
+}
+
+async function mintProactivePullWitness(
+  projectId: string,
+  scope: TeamMirrorPullScope,
+  version: number,
+): Promise<ProactivePullAuthorizationWitness> {
+  const targets: ProactiveContentPullTarget[] = [];
+  const pull = createProactiveContentPull({
+    getLocalBinding: () => ({
+      workspaceId: scope.workspaceId,
+      visibility: 'team',
+    }),
+    getWorkspaceIdentity: async () => ({
+      workspaceId: scope.workspaceId,
+      resourceTeamId: scope.resourceTeamId,
+      workspaceMemberId: scope.viewerMemberId,
+    }),
+    resolveSharedProjectOwner: async () => scope.ownerMemberId,
+    pullSharedProject: async (input) => {
+      targets.push(input);
+      return { status: 'pulled', version };
+    },
+  });
+  await pull.handleContentChanged({
+    projectId,
+    workspaceId: scope.workspaceId,
+    version,
+  });
+  const target = targets[0];
+  if (!target?.authorizationWitness) {
+    throw new Error('expected proactive guard to issue a witness');
+  }
+  return target.authorizationWitness;
 }
 
 let server: http.Server | null = null;
@@ -1876,6 +1915,120 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(catalogStartedBeforeInitialScopeFinished).toBe(1);
   });
 
+  it('reuses a fresh internal guard witness but keeps post-pull reauthorization', async () => {
+    const activeContext = await fixedShareContextProvider(true).current({});
+    const current = vi.fn(async () => activeContext);
+    const resolveSharedProject = vi.fn(resolvePulledSharedProject);
+    const onPullTiming = vi.fn();
+    const api = await startSyncServer({ current }, {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject,
+      onPullTiming,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => ({ version: 5 })),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const projectId = 'handle-fresh-witness';
+    const witness = await mintProactivePullWitness(projectId, pullScope, 5);
+    const outcome = await api.handle.pullSharedProject(
+      projectId,
+      pullScope,
+      witness,
+      5,
+    );
+
+    expect(outcome).toEqual({ status: 'pulled', version: 5 });
+    // The witness replaces only the duplicate PRE-transport checks. The final
+    // uncached catalog + active-scope gates still run immediately before the
+    // mirror transaction.
+    expect(resolveSharedProject).toHaveBeenCalledTimes(1);
+    expect(current).toHaveBeenCalledTimes(1);
+    expect(onPullTiming).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'initial-authorization-reused',
+      projectId: 'handle-fresh-witness',
+      version: 5,
+    }));
+  });
+
+  it('falls back to all initial gates for a copied witness', async () => {
+    const activeContext = await fixedShareContextProvider(true).current({});
+    const current = vi.fn(async () => activeContext);
+    const resolveSharedProject = vi.fn(resolvePulledSharedProject);
+    const api = await startSyncServer({ current }, {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => ({ version: 5 })),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const projectId = 'handle-copied-witness';
+    const witness = await mintProactivePullWitness(projectId, pullScope, 5);
+    const outcome = await api.handle.pullSharedProject(
+      projectId,
+      pullScope,
+      { ...witness },
+      5,
+    );
+
+    expect(outcome).toEqual({ status: 'pulled', version: 5 });
+    expect(resolveSharedProject).toHaveBeenCalledTimes(2);
+    expect(current).toHaveBeenCalledTimes(3);
+  });
+
+  it('ignores an authorization-witness-shaped HTTP body', async () => {
+    const resolveSharedProject = vi.fn(resolvePulledSharedProject);
+    const onPullTiming = vi.fn();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject,
+      onPullTiming,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => ({ version: 5 })),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const projectId = 'http-witness-injection';
+    const witness = await mintProactivePullWitness(projectId, pullScope, 5);
+
+    const response = await api.json(
+      `/api/projects/${projectId}/collab/pull`,
+      {
+        method: 'POST',
+        headers: {
+          'x-od-workspace-id': pullScope.workspaceId,
+          'x-od-workspace-member-id': pullScope.viewerMemberId,
+          'x-od-workspace-role': 'member',
+        },
+        body: {
+          authorizationWitness: witness,
+          expectedVersion: 5,
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolveSharedProject).toHaveBeenCalledTimes(2);
+    expect(
+      onPullTiming.mock.calls.some(
+        ([event]) => event.phase === 'initial-authorization-reused',
+      ),
+    ).toBe(false);
+  });
+
   it('fails closed when active workspace identity drifts after the authoritative lookup', async () => {
     const activeContext = await fixedShareContextProvider(true).current({});
     const current = vi.fn()
@@ -1943,14 +2096,21 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       },
     });
 
-    const outcomePromise = api.handle.pullSharedProject('handle-unshared-during-pull', pullScope);
+    const projectId = 'handle-unshared-during-pull';
+    const witness = await mintProactivePullWitness(projectId, pullScope, 5);
+    const outcomePromise = api.handle.pullSharedProject(
+      projectId,
+      pullScope,
+      witness,
+      5,
+    );
     await vi.waitFor(() => expect(adapterPull).toHaveBeenCalledTimes(1));
     shared = false;
     releasePull();
 
     await expect(outcomePromise).resolves.toEqual({ status: 'revoked' });
-    expect(resolveSharedProject).toHaveBeenCalledTimes(2);
-    expect(store.has('handle-unshared-during-pull')).toBe(false);
+    expect(resolveSharedProject).toHaveBeenCalledTimes(1);
+    expect(store.has(projectId)).toBe(false);
     expect(notifyFilesChanged).not.toHaveBeenCalled();
     expect(revoked).toHaveBeenCalledWith('handle-unshared-during-pull', true);
   });
@@ -1965,14 +2125,14 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
           teamId: 'team-other',
         }
       : activeContext);
-    let releaseSecondCatalog!: () => void;
-    const secondCatalogGate = new Promise<void>((resolve) => {
-      releaseSecondCatalog = resolve;
+    let releaseFinalCatalog!: () => void;
+    const finalCatalogGate = new Promise<void>((resolve) => {
+      releaseFinalCatalog = resolve;
     });
     let catalogCalls = 0;
     const resolveSharedProject = vi.fn(async (projectId: string) => {
       catalogCalls += 1;
-      if (catalogCalls === 2) await secondCatalogGate;
+      if (catalogCalls === 1) await finalCatalogGate;
       return {
         projectId,
         ownerMemberId: pullScope.ownerMemberId,
@@ -1996,13 +2156,20 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       },
     });
 
-    const outcomePromise = api.handle.pullSharedProject('handle-second-catalog-drift', pullScope);
-    await vi.waitFor(() => expect(resolveSharedProject).toHaveBeenCalledTimes(2));
+    const projectId = 'handle-second-catalog-drift';
+    const witness = await mintProactivePullWitness(projectId, pullScope, 5);
+    const outcomePromise = api.handle.pullSharedProject(
+      projectId,
+      pullScope,
+      witness,
+      5,
+    );
+    await vi.waitFor(() => expect(resolveSharedProject).toHaveBeenCalledTimes(1));
     drifted = true;
-    releaseSecondCatalog();
+    releaseFinalCatalog();
 
     await expect(outcomePromise).resolves.toEqual({ status: 'register_failed' });
-    expect(store.has('handle-second-catalog-drift')).toBe(false);
+    expect(store.has(projectId)).toBe(false);
     expect(notifyFilesChanged).not.toHaveBeenCalled();
     expect(onPullTiming).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: 'route-completed',
@@ -2088,6 +2255,49 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       'persisted',
       'route-completed',
     ]);
+  });
+
+  it('does not coalesce the same project across different workspace scopes', async () => {
+    let releasePull!: () => void;
+    const pullGate = new Promise<void>((resolve) => {
+      releasePull = resolve;
+    });
+    const adapterPull = vi.fn(async () => {
+      await pullGate;
+      return { version: 5 };
+    });
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: resolvePulledSharedProject,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const otherWorkspaceScope = {
+      ...pullScope,
+      workspaceId: 'ws-other',
+    };
+
+    const active = api.handle.pullSharedProject(
+      'cross-workspace-pull',
+      pullScope,
+    );
+    await vi.waitFor(() => expect(adapterPull).toHaveBeenCalledTimes(1));
+    const mismatched = api.handle.pullSharedProject(
+      'cross-workspace-pull',
+      otherWorkspaceScope,
+    );
+
+    await expect(mismatched).resolves.toEqual({
+      status: 'register_failed',
+    });
+    releasePull();
+    await expect(active).resolves.toEqual({ status: 'pulled', version: 5 });
+    expect(adapterPull).toHaveBeenCalledTimes(1);
   });
 
   it('releases the per-project pull lock after a transport deadline rejects', async () => {

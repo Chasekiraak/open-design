@@ -14,6 +14,10 @@ import {
   contextToResourceHubPrincipal,
   type ResourceHubPrincipal,
 } from '../collab/resource-principal.js';
+import {
+  isFreshProactivePullAuthorizationWitness,
+  type ProactivePullAuthorizationWitness,
+} from '../collab/proactive-content-pull.js';
 import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
@@ -141,6 +145,7 @@ export interface RegisterCollabSyncRoutesDeps {
   onPullTiming?: (event: {
     phase:
       | 'route-started'
+      | 'initial-authorization-reused'
       | 'transport-invoke'
       | 'transport-done'
       | 'registration-prepared'
@@ -178,7 +183,12 @@ export interface CollabSyncRoutesHandle {
    * from). Concurrent pulls for the same project+scope — including a member
    * web's racing POST — coalesce onto one in-flight materialization.
    */
-  pullSharedProject(projectId: string, scope: TeamMirrorPullScope): Promise<CollabSyncPullOutcome>;
+  pullSharedProject(
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    authorizationWitness?: ProactivePullAuthorizationWitness,
+    expectedVersion?: number,
+  ): Promise<CollabSyncPullOutcome>;
 }
 
 const SYNC_INTENT_EVENTS: ReadonlySet<ProjectSyncIntentEvent> = new Set([
@@ -933,6 +943,8 @@ export function registerCollabSyncRoutes(
     projectId: string,
     principal: ResourceHubPrincipal | null,
     scope: TeamMirrorPullScope | null,
+    authorizationWitness?: ProactivePullAuthorizationWitness,
+    expectedVersion?: number,
   ): Promise<CollabSyncPullOutcome> {
     reportPullTiming({
       phase: 'route-started',
@@ -952,53 +964,66 @@ export function registerCollabSyncRoutes(
       return outcome;
     };
     try {
-    // The initial active-scope check and authoritative catalog lookup are
-    // independent, read-only safety gates. In the Vela-backed runtime both can
-    // be cold subprocess/network reads, so start the catalog read before
-    // awaiting identity instead of paying their latency serially. Settle it
-    // eagerly so an inactive scope can still fail fast without leaving an
-    // unhandled rejection. The second scope check below remains mandatory: it
-    // catches a workspace switch that happens while the catalog read is in
-    // flight.
-    const initialSharedProjectRead = resolveSharedProject
-      ? Promise.resolve()
-          .then(() => resolveSharedProject(projectId, scope))
-          .then(
-            (project) => ({ ok: true as const, project }),
-            () => ({ ok: false as const }),
-          )
-      : null;
-    if (scope && !(await capturedScopeIsStillActive(scope))) {
-      return complete({ status: 'register_failed' });
-    }
-    // Revocation gate: a project may only be pulled while it is still shared to
-    // the caller's team. Once the owner moves it out of the team its catalog
-    // entry disappears, and a stale local copy must stop syncing new content.
-    // A transient catalog/hub lookup error falls through to the existing pull
-    // path rather than hard-denying a legitimate pull.
     let authoritativeSharedProject: TeamProject | null = null;
-    if (initialSharedProjectRead) {
-      let stillShared = true;
-      const initialSharedProject = await initialSharedProjectRead;
-      if (initialSharedProject.ok) {
-        authoritativeSharedProject = initialSharedProject.project;
-        stillShared = authoritativeSharedProject != null &&
-          (!scope || authoritativeSharedProject.ownerMemberId === scope.ownerMemberId);
-      } else {
-        if (scope) return complete({ status: 'register_failed' });
-        stillShared = true;
-      }
+    const reuseInitialAuthorization = Boolean(
+      scope &&
+      isFreshProactivePullAuthorizationWitness(authorizationWitness, {
+        projectId,
+        workspaceId: scope.workspaceId,
+        resourceTeamId: scope.resourceTeamId,
+        viewerMemberId: scope.viewerMemberId,
+        ownerMemberId: scope.ownerMemberId,
+      }, expectedVersion),
+    );
+    if (reuseInitialAuthorization) {
+      reportPullTiming({
+        phase: 'initial-authorization-reused',
+        projectId,
+        version: authorizationWitness!.version,
+        atMs: Date.now(),
+      });
+    } else {
+      // The initial active-scope check and authoritative catalog lookup are
+      // independent, read-only safety gates. A fresh, branded proactive
+      // witness already ran both immediately before this internal call; HTTP
+      // callers have no path to provide one and always execute these gates.
+      const initialSharedProjectRead = resolveSharedProject
+        ? Promise.resolve()
+            .then(() => resolveSharedProject(projectId, scope))
+            .then(
+              (project) => ({ ok: true as const, project }),
+              () => ({ ok: false as const }),
+            )
+        : null;
       if (scope && !(await capturedScopeIsStillActive(scope))) {
         return complete({ status: 'register_failed' });
       }
-      if (!stillShared) {
-        // The project has left the team: mark the stale local mirror revoked so
-        // its files stop being served (non-destructive — files remain on disk).
-        markTeamProjectRevoked?.(projectId, true);
-        return complete({ status: 'revoked' });
+      // Revocation gate: a project may only be pulled while it is still shared
+      // to the caller's team. Transient uncertainty fails closed for scoped
+      // pulls; the post-transport gate below always repeats this uncached.
+      if (initialSharedProjectRead) {
+        let stillShared = true;
+        const initialSharedProject = await initialSharedProjectRead;
+        if (initialSharedProject.ok) {
+          authoritativeSharedProject = initialSharedProject.project;
+          stillShared = authoritativeSharedProject != null &&
+            (!scope || authoritativeSharedProject.ownerMemberId === scope.ownerMemberId);
+        } else {
+          if (scope) return complete({ status: 'register_failed' });
+          stillShared = true;
+        }
+        if (scope && !(await capturedScopeIsStillActive(scope))) {
+          return complete({ status: 'register_failed' });
+        }
+        if (!stillShared) {
+          // The project has left the team: mark the stale local mirror revoked
+          // so its files stop being served (files remain on disk).
+          markTeamProjectRevoked?.(projectId, true);
+          return complete({ status: 'revoked' });
+        }
+      } else if (scope) {
+        return complete({ status: 'register_failed' });
       }
-    } else if (scope) {
-      return complete({ status: 'register_failed' });
     }
     reportPullTiming({
       phase: 'transport-invoke',
@@ -1166,18 +1191,29 @@ export function registerCollabSyncRoutes(
     projectId: string,
     principal: ResourceHubPrincipal | null,
     scope: TeamMirrorPullScope | null,
+    authorizationWitness?: ProactivePullAuthorizationWitness,
+    expectedVersion?: number,
   ): Promise<CollabSyncPullOutcome> {
     const key = JSON.stringify([
       projectId,
       principal?.teamId ?? null,
       principal?.memberId ?? null,
+      scope?.workspaceId ?? null,
+      scope?.resourceTeamId ?? null,
       scope?.viewerMemberId ?? null,
+      scope?.ownerMemberId ?? null,
     ]);
     const existing = pullsInFlight.get(key);
     if (existing) return existing;
     const run = (async () => {
       try {
-        return await pullSharedProjectOnce(projectId, principal, scope);
+        return await pullSharedProjectOnce(
+          projectId,
+          principal,
+          scope,
+          authorizationWitness,
+          expectedVersion,
+        );
       } finally {
         pullsInFlight.delete(key);
       }
@@ -1304,6 +1340,8 @@ export function registerCollabSyncRoutes(
     async pullSharedProject(
       projectId: string,
       scope: TeamMirrorPullScope,
+      authorizationWitness?: ProactivePullAuthorizationWitness,
+      expectedVersion?: number,
     ): Promise<CollabSyncPullOutcome> {
       const principal: ResourceHubPrincipal = {
         teamId: scope.resourceTeamId,
@@ -1312,7 +1350,13 @@ export function registerCollabSyncRoutes(
         lifecycleState: 'active',
         workspaceType: 'team',
       };
-      return pullSharedProjectCoalesced(projectId, principal, scope);
+      return pullSharedProjectCoalesced(
+        projectId,
+        principal,
+        scope,
+        authorizationWitness,
+        expectedVersion,
+      );
     },
   };
 }

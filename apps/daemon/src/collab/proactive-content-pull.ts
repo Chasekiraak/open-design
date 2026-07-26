@@ -30,6 +30,9 @@
 // pulling). The cursor only advances on a successful pull — failures keep it
 // behind so the same-version retry stays possible.
 
+const WITNESS_MAX_AGE_MS = 5_000;
+const issuedAuthorizationWitnesses = new WeakSet<object>();
+
 export interface ProactiveContentPullEvent {
   projectId?: string | undefined;
   workspaceId?: string | undefined;
@@ -41,6 +44,60 @@ export interface ProactiveContentPullEvent {
 export interface ProactiveContentPullProjectRef {
   projectId: string;
   ownerMemberId: string;
+}
+
+export interface ProactivePullAuthorizationScope {
+  projectId: string;
+  workspaceId: string;
+  resourceTeamId: string;
+  viewerMemberId: string;
+  ownerMemberId: string;
+}
+
+export interface ProactivePullAuthorizationWitness
+  extends ProactivePullAuthorizationScope {
+  readonly kind: 'proactive-content-pull';
+  readonly version: number;
+  readonly verifiedAtMs: number;
+}
+
+function issueProactivePullAuthorizationWitness(
+  scope: ProactivePullAuthorizationScope,
+  version: number,
+  verifiedAtMs = Date.now(),
+): ProactivePullAuthorizationWitness {
+  const witness = Object.freeze({
+    kind: 'proactive-content-pull' as const,
+    ...scope,
+    version,
+    verifiedAtMs,
+  });
+  issuedAuthorizationWitnesses.add(witness);
+  return witness;
+}
+
+export function isFreshProactivePullAuthorizationWitness(
+  witness: ProactivePullAuthorizationWitness | undefined,
+  scope: ProactivePullAuthorizationScope,
+  expectedVersion: number | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!witness || !issuedAuthorizationWitnesses.has(witness)) return false;
+  const ageMs = nowMs - witness.verifiedAtMs;
+  return Boolean(
+    expectedVersion != null &&
+    Number.isSafeInteger(expectedVersion) &&
+    expectedVersion >= 0 &&
+    witness.version === expectedVersion &&
+    Number.isFinite(witness.verifiedAtMs) &&
+    ageMs >= 0 &&
+    ageMs <= WITNESS_MAX_AGE_MS &&
+    witness.projectId === scope.projectId &&
+    witness.workspaceId === scope.workspaceId &&
+    witness.resourceTeamId === scope.resourceTeamId &&
+    witness.viewerMemberId === scope.viewerMemberId &&
+    witness.ownerMemberId === scope.ownerMemberId
+  );
 }
 
 /** Outcome contract of the injected pull — structurally the same shape
@@ -59,6 +116,7 @@ export interface ProactiveContentPullTarget {
   resourceTeamId: string;
   viewerMemberId: string;
   ownerMemberId: string;
+  authorizationWitness?: ProactivePullAuthorizationWitness;
 }
 
 export interface ProactiveContentPullDeps {
@@ -78,7 +136,10 @@ export interface ProactiveContentPullDeps {
   resolveSharedProjectOwner: (projectId: string) => Promise<string | null>;
   /** The shared pull flow (revocation gate → pull → register → signals) —
    *  `CollabSyncRoutesHandle.pullSharedProject` in production wiring. */
-  pullSharedProject: (target: ProactiveContentPullTarget) => Promise<ProactiveContentPullOutcome>;
+  pullSharedProject: (
+    target: ProactiveContentPullTarget,
+    expectedVersion?: number,
+  ) => Promise<ProactiveContentPullOutcome>;
   /**
    * One workspace-scoped catalog read used only on a verified hub connection
    * (first connect and reconnect). Optional so event-driven consumers remain
@@ -408,8 +469,9 @@ export function createProactiveContentPull(
       }
     };
     const identityRead = startRead(() => deps.getWorkspaceIdentity());
-    const ownerRead = ownerHint?.trim()
-      ? Promise.resolve(ownerHint.trim())
+    const hintedOwner = ownerHint?.trim();
+    const ownerRead = hintedOwner
+      ? Promise.resolve(hintedOwner)
       : startRead(() => deps.resolveSharedProjectOwner(projectId));
     const [identityResult, ownerResult] = await Promise.allSettled([
       identityRead,
@@ -447,14 +509,26 @@ export function createProactiveContentPull(
     if (owner === identity.workspaceMemberId) {
       return { kind: 'skip', retryable: false, reason: 'self-owner' };
     }
+    const scope = {
+      projectId,
+      workspaceId: targetWorkspaceId,
+      resourceTeamId: identity.resourceTeamId,
+      viewerMemberId: identity.workspaceMemberId,
+      ownerMemberId: owner,
+    };
     return {
       kind: 'target',
       target: {
-        projectId,
-        workspaceId: targetWorkspaceId,
-        resourceTeamId: identity.resourceTeamId,
-        viewerMemberId: identity.workspaceMemberId,
-        ownerMemberId: owner,
+        ...scope,
+        ...(!hintedOwner &&
+        event.version != null &&
+        Number.isSafeInteger(event.version) &&
+        event.version >= 0
+          ? {
+              authorizationWitness:
+                issueProactivePullAuthorizationWitness(scope, event.version),
+            }
+          : {}),
       },
     };
   }
@@ -465,6 +539,10 @@ export function createProactiveContentPull(
   ): Promise<ProjectPullCompletion> {
     const { projectId } = target;
     const scopeKey = pullScopeKey(target);
+    const targetForPull = { ...target };
+    if (targetForPull.authorizationWitness?.version !== event.version) {
+      delete targetForPull.authorizationWitness;
+    }
     const run = (async (): Promise<ProjectPullCompletion> => {
       let outcome: ProactiveContentPullOutcome | null = null;
       try {
@@ -477,7 +555,7 @@ export function createProactiveContentPull(
             : {}),
           atMs: Date.now(),
         });
-        outcome = await deps.pullSharedProject(target);
+        outcome = await deps.pullSharedProject(targetForPull, event.version);
         if (outcome?.status !== 'pulled') return { scopeKey, outcome };
         // Advance the cursor only with the version the pull itself reported
         // as materialized — trusting the event's number here could mark
@@ -488,7 +566,9 @@ export function createProactiveContentPull(
           pulledVersions.set(scopeKey, outcome.version);
         }
         try {
-          await deps.onPulled?.(target, outcome.version);
+          const callbackTarget = { ...targetForPull };
+          delete callbackTarget.authorizationWitness;
+          await deps.onPulled?.(callbackTarget, outcome.version);
         } catch (error) {
           // Content is already durable and the cursor must stay advanced; a
           // failed list invalidation is recoverable via its polling floor.

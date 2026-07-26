@@ -17,6 +17,7 @@ export type SharedProjectPullTimingPhase =
   | 'invoke'
   | 'completed'
   | 'route-started'
+  | 'initial-authorization-reused'
   | 'transport-invoke'
   | 'transport-done'
   | 'registration-prepared'

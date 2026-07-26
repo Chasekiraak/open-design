@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createProactiveContentPull,
+  isFreshProactivePullAuthorizationWitness,
   type ProactiveContentPull,
   type ProactiveContentPullDeps,
+  type ProactiveContentPullTarget,
 } from '../../src/collab/proactive-content-pull.js';
 
 // Hub push-channel consumer for 'project-content-changed' (recvqmKQRiIlYf):
@@ -86,6 +88,58 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1']);
   });
 
+  it('issues the pull target a fresh witness bound to the guarded event version', async () => {
+    const receivedTargets: ProactiveContentPullTarget[] = [];
+    const deps = makeDeps({
+      pullSharedProject: async (target) => {
+        receivedTargets.push(target);
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+
+    const receivedTarget = receivedTargets[0];
+    expect(receivedTarget).toBeDefined();
+    expect(receivedTarget!.authorizationWitness).toMatchObject({
+      kind: 'proactive-content-pull',
+      projectId: 'proj-1',
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-member',
+      ownerMemberId: 'wm-owner',
+      version: 3,
+    });
+    expect(isFreshProactivePullAuthorizationWitness(
+      receivedTarget!.authorizationWitness,
+      receivedTarget!,
+      3,
+    )).toBe(true);
+  });
+
+  it('does not re-sign a catalog owner hint as a fresh authorization witness', async () => {
+    const receivedTargets: ProactiveContentPullTarget[] = [];
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        receivedTargets.push(target);
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(receivedTargets[0]).toBeDefined();
+    expect(receivedTargets[0]!.authorizationWitness).toBeUndefined();
+  });
+
   it('reports queue, invoke, and completion timing for a profiled hub event', async () => {
     const onTiming = vi.fn();
     const deps = makeDeps({ onTiming });
@@ -165,13 +219,13 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     const pull = createProactiveContentPull(deps);
     await pull.handleContentChanged(baseEvent);
     expect(deps.pullCalls).toEqual(['proj-1']);
-    expect(onPulled).toHaveBeenCalledWith({
+    expect(onPulled).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'proj-1',
       workspaceId: 'ws-1',
       resourceTeamId: 'team-1',
       viewerMemberId: 'wm-member',
       ownerMemberId: 'wm-owner',
-    }, 3);
+    }), 3);
   });
 
   it('skips an unbound project when the event carries no workspace scope', async () => {
