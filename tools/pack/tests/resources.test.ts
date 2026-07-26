@@ -47,6 +47,17 @@ async function matchingVelaCliCommand(
   if (args[0] === "--version") {
     return { stderr: "", stdout: `${await pinnedVelaCliVersion()}\n` };
   }
+  if (args[0] === "billing") {
+    return {
+      stderr: "",
+      stdout: [
+        "Usage:",
+        "  vela billing workspace-snapshot [flags]",
+        "      --workspace-id string",
+        "      --format string",
+      ].join("\n"),
+    };
+  }
   return {
     stderr: "",
     stdout: [
@@ -266,6 +277,39 @@ describe("copyOptionalVelaCliBinary", () => {
           },
         }),
       ).rejects.toThrow(/authorized staged pull/i);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a strict build when Vela lacks workspace billing snapshots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "open-design-tools-pack-vela-billing-"));
+    const source = join(root, "source", "vela");
+    const resourceRoot = join(root, "resources", "open-design");
+    const expectedVersion = await pinnedVelaCliVersion();
+
+    try {
+      await mkdir(join(root, "source"), { recursive: true });
+      await writeFile(source, "#!/bin/sh\nexit 0\n", "utf8");
+      await writeFakeOpenCodeCompanion(source);
+
+      await expect(
+        copyOptionalVelaCliBinary({
+          env: { OPEN_DESIGN_VELA_CLI_BIN: source },
+          platform: "mac",
+          requireBundled: true,
+          resourceRoot,
+          runCommand: async (_binary, args) => {
+            if (args[0] === "--version") {
+              return { stderr: "", stdout: `${expectedVersion}\n` };
+            }
+            if (args[0] === "team-projects") {
+              return matchingVelaCliCommand(source, args);
+            }
+            throw new Error('unknown command "workspace-snapshot" for "vela billing"');
+          },
+        }),
+      ).rejects.toThrow(/workspace billing snapshot/i);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

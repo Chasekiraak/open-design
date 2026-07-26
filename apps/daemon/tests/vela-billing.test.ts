@@ -223,6 +223,26 @@ describe('vela billing 收口', () => {
     expect(out.workspaceBalance?.balanceUsd).toBe('7.8900');
   });
 
+  it('falls back when the installed old CLI rejects the new snapshot flags', async () => {
+    const seen: string[][] = [];
+    const out = await fetchVelaWorkspaceBillingProjection('ws_team', {
+      run: async (args) => {
+        seen.push(args);
+        if (args[0] === 'workspace-snapshot') {
+          throw new Error('unknown flag: --workspace-id');
+        }
+        return WORKSPACE_BALANCE_SAMPLE;
+      },
+    });
+
+    expect(seen).toEqual([
+      ['workspace-snapshot', '--workspace-id', 'ws_team', '--format', 'json'],
+      ['workspace-balance', '--workspace-id', 'ws_team', '--format', 'json'],
+    ]);
+    expect(out.snapshot).toBeNull();
+    expect(out.workspaceBalance?.balanceUsd).toBe('7.8900');
+  });
+
   it('does not turn an auth/network snapshot failure into a successful empty balance', async () => {
     await expect(
       fetchVelaWorkspaceBillingProjection('ws_team', {

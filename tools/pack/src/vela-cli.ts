@@ -12,6 +12,16 @@ const AUTHORIZED_PULL_HELP_MARKERS = [
   "--ref",
   "--json",
 ] as const;
+const WORKSPACE_BILLING_SNAPSHOT_HELP_ARGS = [
+  "billing",
+  "workspace-snapshot",
+  "--help",
+] as const;
+const WORKSPACE_BILLING_SNAPSHOT_HELP_MARKERS = [
+  "workspace-snapshot",
+  "--workspace-id",
+  "--format",
+] as const;
 
 type VelaCliPlatform = "linux" | "mac" | "win";
 type VelaCliCommandResult = {
@@ -114,6 +124,30 @@ async function validateBundledVelaCliBinary(
   if (missingMarkers.length > 0) {
     throw strictResolutionError(
       `bundled Vela CLI lacks the authorized staged pull capability markers: ${missingMarkers.join(", ")}`,
+    );
+  }
+
+  let billingSnapshotHelpResult: VelaCliCommandResult;
+  try {
+    billingSnapshotHelpResult = await runCommand(
+      source,
+      WORKSPACE_BILLING_SNAPSHOT_HELP_ARGS,
+    );
+  } catch (error) {
+    throw strictResolutionError(
+      "bundled Vela CLI lacks the workspace billing snapshot capability",
+      error,
+    );
+  }
+  const billingSnapshotHelp =
+    `${billingSnapshotHelpResult.stdout}\n${billingSnapshotHelpResult.stderr}`;
+  const missingBillingSnapshotMarkers =
+    WORKSPACE_BILLING_SNAPSHOT_HELP_MARKERS.filter(
+      (marker) => !billingSnapshotHelp.includes(marker),
+    );
+  if (missingBillingSnapshotMarkers.length > 0) {
+    throw strictResolutionError(
+      `bundled Vela CLI lacks the workspace billing snapshot capability markers: ${missingBillingSnapshotMarkers.join(", ")}`,
     );
   }
 }

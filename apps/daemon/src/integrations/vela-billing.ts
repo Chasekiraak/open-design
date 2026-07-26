@@ -83,9 +83,10 @@ export async function fetchVelaWorkspaceBalance(
 
 /**
  * Prefer Vela's atomic plan+wallet snapshot. An old CLI/server may report the
- * typed unsupported sentinel; only that compatibility case falls back to the
- * legacy wallet command. Auth/network/parse failures stay unavailable instead
- * of being misclassified as an old server.
+ * typed unsupported sentinel. Older Cobra builds instead reject the first new
+ * command flag before resolving the unknown subcommand; both compatibility
+ * cases fall back to the legacy wallet command. Auth/network/parse failures
+ * stay unavailable instead of being misclassified as an old server.
  */
 export async function fetchVelaWorkspaceBillingProjection(
   workspaceId: string,
@@ -120,7 +121,10 @@ export async function fetchVelaWorkspaceBillingProjection(
       },
     };
   } catch (error) {
-    if (!(error instanceof VelaWorkspaceBillingSnapshotUnsupportedError)) {
+    if (
+      !(error instanceof VelaWorkspaceBillingSnapshotUnsupportedError) &&
+      !isWorkspaceBillingSnapshotUnsupported(error, '')
+    ) {
       throw error;
     }
     const legacyStdout = await run([
@@ -479,6 +483,7 @@ function isWorkspaceBillingSnapshotUnsupported(error: unknown, stderr: string): 
   return (
     detail.includes('billing_workspace_snapshot_unsupported') ||
     detail.includes('workspace billing snapshot unsupported') ||
+    detail.includes('unknown flag: --workspace-id') ||
     (
       detail.includes('unknown command') &&
       detail.includes('workspace-snapshot')
