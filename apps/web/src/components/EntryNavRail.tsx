@@ -328,9 +328,9 @@ function workspaceSeatFull(
 /**
  * Chooses the first safe invite surface. The local form is only valid when a
  * team is positively known to have direct invite capability and capacity.
- * Personal, capability-gated, full-seat, and not-yet-known seat states go to
- * Vela, whose dashboard owns the authoritative upgrade/seat/invite decision.
- * Missing routing data fails closed.
+ * Personal, Free-plan, and full-seat owner states go to Vela, whose dashboard
+ * owns the authoritative upgrade/seat/invite decision. Missing routing or seat
+ * data fails closed.
  */
 export function resolveWorkspaceInviteTarget(
   context: WorkspaceCollabContext | null | undefined,
