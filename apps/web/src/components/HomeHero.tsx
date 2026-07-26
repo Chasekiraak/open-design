@@ -1391,6 +1391,23 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     });
   }
 
+  // Workspace context deserves a visible Home entry. Keep the project picker
+  // as the single flow so this direct affordance and the `+` menu stay in sync.
+  function openWorkspaceProjectReference() {
+    trackHomeChatComposerClick(analytics.track, {
+      page_name: 'home',
+      area: 'chat_composer',
+      element: 'plus_pick',
+      resource_kind: 'workspace',
+      resource_id: 'reference-project',
+    });
+    trackProjectReferenceModalSurfaceView(analytics.track, {
+      page_name: 'home',
+      area: 'project_reference_modal',
+    });
+    setProjectReferenceOpen(true);
+  }
+
   async function handleLinkLocalCodeContext() {
     const selected = await onPickLocalCodeDir?.();
     if (!selected) {
@@ -2293,18 +2310,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 fileInputRef.current?.click();
               }}
               onReferenceProject={() => {
-                trackHomeChatComposerClick(analytics.track, {
-                  page_name: 'home',
-                  area: 'chat_composer',
-                  element: 'plus_pick',
-                  resource_kind: 'workspace',
-                  resource_id: 'reference-project',
-                });
-                trackProjectReferenceModalSurfaceView(analytics.track, {
-                  page_name: 'home',
-                  area: 'project_reference_modal',
-                });
-                setProjectReferenceOpen(true);
+                openWorkspaceProjectReference();
               }}
               onLinkLocalCode={onPickLocalCodeDir ? () => {
                 trackHomeChatComposerClick(analytics.track, {
@@ -2436,6 +2442,18 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             ) : null}
           </div>
           <div className="home-hero__foot-right">
+            <Button
+              type="button"
+              variant="ghost"
+              className="home-hero__workspace-trigger od-tooltip"
+              data-testid="home-hero-workspace-trigger"
+              title={t('chat.plus.referenceProject')}
+              data-tooltip={t('chat.plus.referenceProject')}
+              onClick={openWorkspaceProjectReference}
+            >
+              <Icon name="folder" size={14} aria-hidden />
+              <span>{t('settings.workspace')}</span>
+            </Button>
             <ComposerModePicker
               mode={sessionMode}
               selectedMode={selectedSessionMode}

@@ -571,8 +571,7 @@ describe('HomeView context picker', () => {
     );
 
     await screen.findByTestId('home-hero-input');
-    fireEvent.click(screen.getByTestId('home-hero-plus-trigger'));
-    fireEvent.click(await screen.findByTestId('composer-plus-reference-project'));
+    fireEvent.click(screen.getByTestId('home-hero-workspace-trigger'));
     await screen.findByText('Reference A');
     fireEvent.click(screen.getByRole('button', { name: 'Reference project' }));
 
