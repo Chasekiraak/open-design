@@ -2190,6 +2190,7 @@ a.avatar-item:visited {
     --project-chat-handle-width 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .split-chat-slot {
+  grid-column: 1;
   position: relative;
   display: flex;
   min-height: 0;
@@ -2205,6 +2206,7 @@ a.avatar-item:visited {
   min-width: 0;
 }
 .split-edit-divider {
+  grid-column: 2;
   width: 8px;
   min-width: 8px;
   height: 100%;
@@ -2273,6 +2275,7 @@ a.avatar-item:visited {
   overflow: hidden;
 }
 .split-resize-handle {
+  grid-column: 2;
   position: relative;
   z-index: 45;
   width: 8px;
@@ -2281,6 +2284,9 @@ a.avatar-item:visited {
   cursor: col-resize;
   background: transparent;
   touch-action: none;
+}
+.split > .workspace {
+  grid-column: 3;
 }
 .split-resize-handle::before {
   content: "";

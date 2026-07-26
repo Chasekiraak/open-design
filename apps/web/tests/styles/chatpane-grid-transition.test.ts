@@ -39,4 +39,16 @@ describe('recvqadaNlQZNM — project focus mode chat pane jitters while collapsi
       expect(cssDeclarations(routinesCss, selector).join('\n')).not.toMatch(/\bgrid-template-columns\s*:/);
     }
   });
+
+  it('pins each split child to its track when focus mode unmounts the resize handle', () => {
+    expect(cssDeclarations(shellCss, '.split-chat-slot').join('\n')).toMatch(/\bgrid-column:\s*1\s*;/);
+
+    const handleRules = cssDeclarations(shellCss, '.split-resize-handle').join('\n');
+    expect(handleRules).toMatch(/\bgrid-column:\s*2\s*;/);
+    expect(cssDeclarations(shellCss, '.split-edit-divider').join('\n')).toMatch(/\bgrid-column:\s*2\s*;/);
+
+    expect(cssDeclarations(shellCss, '.split > .workspace').join('\n')).toMatch(
+      /\bgrid-column:\s*3\s*;/,
+    );
+  });
 });
