@@ -8,6 +8,10 @@ import {
 } from '../integrations/vela-command.js';
 import { projectResourceIdFor } from '../integrations/vela-team-projects.js';
 import type { ResourcePublishAdapter } from './publish-scheduler.js';
+import {
+  emitVelaResourcePullProfile,
+  sharedProjectPullProfileEnabled,
+} from './pull-profile.js';
 import type { ResourceHubPrincipal } from './resource-principal.js';
 
 // The `vela resource` transport for the publish/pull machinery (T7c). Instead of
@@ -240,14 +244,28 @@ export function parseVelaResourceSnapshot(stdout: string): VelaResourceSnapshotR
   }
 }
 
-export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) =>
-  runVelaCommand(
+export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) => {
+  const workspaceOptions = velaWorkspaceCommandOptions(workspaceId);
+  const profilePull =
+    args[0] === 'pull' && sharedProjectPullProfileEnabled(process.env);
+  return runVelaCommand(
     ['resource', ...args],
     {
-      ...velaWorkspaceCommandOptions(workspaceId),
+      ...workspaceOptions,
+      configuredEnv: {
+        ...workspaceOptions.configuredEnv,
+        ...(profilePull ? { VELA_RESOURCE_PULL_PROFILE: '1' } : {}),
+      },
       ...(args[0] === 'pull' ? { timeoutMs: RESOURCE_PULL_TIMEOUT_MS } : {}),
+      ...(profilePull
+        ? {
+            onStderr: (stderr: string) =>
+              emitVelaResourcePullProfile(stderr, process.env),
+          }
+        : {}),
     },
   );
+};
 
 const defaultRunVelaResource: RunVelaResource = runVelaResourceCommand;
 

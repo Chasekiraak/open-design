@@ -137,6 +137,19 @@ export interface RegisterCollabSyncRoutesDeps {
    * record, so steady-state content pulls emit nothing.
    */
   notifyProjectMetadataChanged?: (projectId: string) => void;
+  /** Opt-in, secret-free timing observer. It must not affect pull behavior. */
+  onPullTiming?: (event: {
+    phase:
+      | 'route-started'
+      | 'transport-invoke'
+      | 'transport-done'
+      | 'persisted'
+      | 'route-completed';
+    projectId: string;
+    version?: number;
+    atMs: number;
+    status?: 'pulled' | 'revoked' | 'register_failed' | 'threw';
+  }) => void;
 }
 
 /** Result of one shared-project content pull — the same flow whether it was
@@ -430,6 +443,15 @@ export function registerCollabSyncRoutes(
     notifyProjectMetadataChanged,
   } = deps;
   const readManifest = deps.readManifest ?? readProjectManifest;
+  const reportPullTiming = (
+    event: Parameters<NonNullable<RegisterCollabSyncRoutesDeps['onPullTiming']>>[0],
+  ): void => {
+    try {
+      deps.onPullTiming?.(event);
+    } catch {
+      // Diagnostics are observational and must never affect pull behavior.
+    }
+  };
 
   async function principalForRequest(req: {
     get(name: string): string | undefined;
@@ -907,6 +929,24 @@ export function registerCollabSyncRoutes(
     principal: ResourceHubPrincipal | null,
     scope: TeamMirrorPullScope | null,
   ): Promise<CollabSyncPullOutcome> {
+    reportPullTiming({
+      phase: 'route-started',
+      projectId,
+      atMs: Date.now(),
+    });
+    let terminalStatus: 'pulled' | 'revoked' | 'register_failed' | 'threw' =
+      'threw';
+    let terminalVersion: number | undefined;
+    const complete = (
+      outcome: CollabSyncPullOutcome,
+    ): CollabSyncPullOutcome => {
+      terminalStatus = outcome.status;
+      if (outcome.status === 'pulled' && outcome.version != null) {
+        terminalVersion = outcome.version;
+      }
+      return outcome;
+    };
+    try {
     // The initial active-scope check and authoritative catalog lookup are
     // independent, read-only safety gates. In the Vela-backed runtime both can
     // be cold subprocess/network reads, so start the catalog read before
@@ -924,7 +964,7 @@ export function registerCollabSyncRoutes(
           )
       : null;
     if (scope && !(await capturedScopeIsStillActive(scope))) {
-      return { status: 'register_failed' };
+      return complete({ status: 'register_failed' });
     }
     // Revocation gate: a project may only be pulled while it is still shared to
     // the caller's team. Once the owner moves it out of the team its catalog
@@ -940,29 +980,51 @@ export function registerCollabSyncRoutes(
         stillShared = authoritativeSharedProject != null &&
           (!scope || authoritativeSharedProject.ownerMemberId === scope.ownerMemberId);
       } else {
-        if (scope) return { status: 'register_failed' };
+        if (scope) return complete({ status: 'register_failed' });
         stillShared = true;
       }
       if (scope && !(await capturedScopeIsStillActive(scope))) {
-        return { status: 'register_failed' };
+        return complete({ status: 'register_failed' });
       }
       if (!stillShared) {
         // The project has left the team: mark the stale local mirror revoked so
         // its files stop being served (non-destructive — files remain on disk).
         markTeamProjectRevoked?.(projectId, true);
-        return { status: 'revoked' };
+        return complete({ status: 'revoked' });
       }
     } else if (scope) {
-      return { status: 'register_failed' };
+      return complete({ status: 'register_failed' });
     }
-    const result = await pullLatest(projectId, principal);
+    reportPullTiming({
+      phase: 'transport-invoke',
+      projectId,
+      atMs: Date.now(),
+    });
+    let result: Awaited<ReturnType<typeof pullLatest>>;
+    try {
+      result = await pullLatest(projectId, principal);
+    } catch (error) {
+      reportPullTiming({
+        phase: 'transport-done',
+        projectId,
+        atMs: Date.now(),
+        status: 'threw',
+      });
+      throw error;
+    }
+    reportPullTiming({
+      phase: 'transport-done',
+      projectId,
+      ...(result.version != null ? { version: result.version } : {}),
+      atMs: Date.now(),
+    });
     if (result.version !== null) {
       let prepared: PreparedPulledProjectRegistration | null = null;
       try {
         prepared = await preparePulledProjectRegistration(projectId, scope);
       } catch (error) {
         console.warn('[od] failed to prepare pulled team project:', error);
-        return { status: 'register_failed' };
+        return complete({ status: 'register_failed' });
       }
 
       // The initial catalog result only authorized starting the transfer. The
@@ -973,20 +1035,20 @@ export function registerCollabSyncRoutes(
         try {
           authoritativeSharedProject = await resolveSharedProject!(projectId, scope);
         } catch {
-          return { status: 'register_failed' };
+          return complete({ status: 'register_failed' });
         }
         if (!authoritativeSharedProject) {
           markTeamProjectRevoked?.(projectId, true);
-          return { status: 'revoked' };
+          return complete({ status: 'revoked' });
         }
         if (authoritativeSharedProject.ownerMemberId !== scope.ownerMemberId) {
-          return { status: 'register_failed' };
+          return complete({ status: 'register_failed' });
         }
         // Keep this check adjacent to the synchronous SQLite transaction.
         // Nothing below may await before materializeTeamMirror revalidates the
         // binding and commits it.
         if (!(await capturedScopeIsStillActive(scope))) {
-          return { status: 'register_failed' };
+          return complete({ status: 'register_failed' });
         }
       } else if (resolveSharedProject) {
         try {
@@ -1005,7 +1067,7 @@ export function registerCollabSyncRoutes(
         );
       } catch (error) {
         console.warn('[od] failed to register pulled team project:', error);
-        return { status: 'register_failed' };
+        return complete({ status: 'register_failed' });
       }
       // Persist the exact version before notifying readers. A file-change
       // subscriber may immediately re-check /collab/status; it must never
@@ -1013,9 +1075,15 @@ export function registerCollabSyncRoutes(
       if (scope && deps.writeMaterializedVersion) {
         try {
           await deps.writeMaterializedVersion(projectId, scope, result.version);
+          reportPullTiming({
+            phase: 'persisted',
+            projectId,
+            version: result.version,
+            atMs: Date.now(),
+          });
         } catch (error) {
           console.warn('[od] failed to persist pulled team project version:', error);
-          return { status: 'register_failed' };
+          return complete({ status: 'register_failed' });
         }
       }
       // The pull already materialized new bytes on disk at this point —
@@ -1037,7 +1105,16 @@ export function registerCollabSyncRoutes(
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
     markTeamProjectRevoked?.(projectId, false);
-    return { status: 'pulled', version: result.version };
+    return complete({ status: 'pulled', version: result.version });
+    } finally {
+      reportPullTiming({
+        phase: 'route-completed',
+        projectId,
+        ...(terminalVersion != null ? { version: terminalVersion } : {}),
+        atMs: Date.now(),
+        status: terminalStatus,
+      });
+    }
   }
 
   // In-flight pulls keyed by project + resource-hub scope. A hub-event

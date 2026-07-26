@@ -86,6 +86,29 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1']);
   });
 
+  it('reports queue, invoke, and completion timing for a profiled hub event', async () => {
+    const onTiming = vi.fn();
+    const deps = makeDeps({ onTiming });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged({
+      ...baseEvent,
+      profileReceivedAtMs: 100,
+    });
+
+    expect(onTiming.mock.calls.map(([event]) => event.phase)).toEqual([
+      'queued',
+      'invoke',
+      'completed',
+    ]);
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'invoke',
+      projectId: 'proj-1',
+      version: 3,
+      receivedAtMs: 100,
+    }));
+  });
+
   it('starts the independent identity and owner guards concurrently', async () => {
     let releaseIdentity!: () => void;
     let identityStarted!: () => void;

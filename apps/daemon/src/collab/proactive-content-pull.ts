@@ -34,6 +34,8 @@ export interface ProactiveContentPullEvent {
   projectId?: string | undefined;
   workspaceId?: string | undefined;
   version?: number | undefined;
+  /** Internal diagnostic origin; never serialized to the hub or web. */
+  profileReceivedAtMs?: number | undefined;
 }
 
 export interface ProactiveContentPullProjectRef {
@@ -100,6 +102,15 @@ export interface ProactiveContentPullDeps {
    *  to invalidate list-level cover reads that do not subscribe to the
    *  project's own SSE stream. */
   onPulled?: (target: ProactiveContentPullTarget, version: number) => void | Promise<void>;
+  /** Opt-in, secret-free timing observer. It must not affect pull behavior. */
+  onTiming?: (event: {
+    phase: 'queued' | 'invoke' | 'completed';
+    projectId: string;
+    version?: number;
+    receivedAtMs?: number;
+    atMs: number;
+    status?: string;
+  }) => void;
   /** Secret-free lifecycle diagnostics for the bounded catch-up sweep. */
   onCatchUp?: (event: {
     phase:
@@ -264,6 +275,16 @@ export function createProactiveContentPull(
   };
   const random = deps.random ?? Math.random;
   let disposed = false;
+
+  const reportTiming = (
+    event: Parameters<NonNullable<ProactiveContentPullDeps['onTiming']>>[0],
+  ): void => {
+    try {
+      deps.onTiming?.(event);
+    } catch {
+      // Diagnostics are observational and must never affect pull behavior.
+    }
+  };
   /** Monotonic completion counter per project scope. A missing-only manifest
    *  probe captures this before awaiting I/O, then compares it afterwards so
    *  a successful full-sweep pull cannot disappear in the probe → inFlight
@@ -407,12 +428,22 @@ export function createProactiveContentPull(
 
   async function runPull(
     target: ProactiveContentPullTarget,
+    event: ProactiveContentPullEvent,
   ): Promise<ProjectPullCompletion> {
     const { projectId } = target;
     const scopeKey = pullScopeKey(target);
     const run = (async (): Promise<ProjectPullCompletion> => {
       let outcome: ProactiveContentPullOutcome | null = null;
       try {
+        reportTiming({
+          phase: 'invoke',
+          projectId,
+          ...(event.version != null ? { version: event.version } : {}),
+          ...(event.profileReceivedAtMs != null
+            ? { receivedAtMs: event.profileReceivedAtMs }
+            : {}),
+          atMs: Date.now(),
+        });
         outcome = await deps.pullSharedProject(target);
         if (outcome?.status !== 'pulled') return { scopeKey, outcome };
         // Advance the cursor only with the version the pull itself reported
@@ -437,6 +468,16 @@ export function createProactiveContentPull(
         deps.onError?.(error);
         return { scopeKey, outcome: null };
       } finally {
+        reportTiming({
+          phase: 'completed',
+          projectId,
+          ...(event.version != null ? { version: event.version } : {}),
+          ...(event.profileReceivedAtMs != null
+            ? { receivedAtMs: event.profileReceivedAtMs }
+            : {}),
+          atMs: Date.now(),
+          status: outcome?.status ?? 'failed',
+        });
         const generation = (completionGenerations.get(scopeKey) ?? 0) + 1;
         completionGenerations.set(scopeKey, generation);
         if (outcomeCoversVersion(outcome, undefined)) {
@@ -688,7 +729,7 @@ export function createProactiveContentPull(
         }
         return { kind: 'retry-now' };
       }
-      const completion = await runPull(target);
+      const completion = await runPull(target, intent.event);
       if (completion.outcome?.status === 'revoked') {
         return { kind: 'revoked' };
       }
@@ -1315,6 +1356,17 @@ export function createProactiveContentPull(
 
   return {
     async handleContentChanged(event: ProactiveContentPullEvent): Promise<void> {
+      if (event.projectId) {
+        reportTiming({
+          phase: 'queued',
+          projectId: event.projectId,
+          ...(event.version != null ? { version: event.version } : {}),
+          ...(event.profileReceivedAtMs != null
+            ? { receivedAtMs: event.profileReceivedAtMs }
+            : {}),
+          atMs: Date.now(),
+        });
+      }
       await processContentChanged(event);
     },
     catchUpPublishedHeads: (workspaceId) =>

@@ -1981,11 +1981,13 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     });
     const store = fakeProjectStore();
     const notifyFilesChanged = vi.fn();
+    const onPullTiming = vi.fn();
     const api = await startSyncServer({ current }, {
       projectStore: store,
       resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
       resolveSharedProject,
       notifyFilesChanged,
+      onPullTiming,
     }, {
       adapter: {
         publish: vi.fn(async () => ({ version: 5 })),
@@ -2002,18 +2004,30 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     await expect(outcomePromise).resolves.toEqual({ status: 'register_failed' });
     expect(store.has('handle-second-catalog-drift')).toBe(false);
     expect(notifyFilesChanged).not.toHaveBeenCalled();
+    expect(onPullTiming).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'route-completed',
+      projectId: 'handle-second-catalog-drift',
+      status: 'register_failed',
+    }));
   });
 
   it('reports revoked (and flags the mirror) when the project is no longer team-shared', async () => {
     const revoked: Array<{ projectId: string; revoked: boolean }> = [];
+    const onPullTiming = vi.fn();
     const api = await startSyncServer(fixedShareContextProvider(true), {
       resolveSharedProject: async () => null,
       markTeamProjectRevoked: (projectId, value) => revoked.push({ projectId, revoked: value }),
+      onPullTiming,
     });
 
     const outcome = await api.handle.pullSharedProject('handle-revoked', pullScope);
     expect(outcome).toEqual({ status: 'revoked' });
     expect(revoked).toContainEqual({ projectId: 'handle-revoked', revoked: true });
+    expect(onPullTiming).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'route-completed',
+      projectId: 'handle-revoked',
+      status: 'revoked',
+    }));
   });
 
   it('coalesces a racing POST /collab/pull and handle pull into one adapter pull', async () => {
@@ -2029,12 +2043,14 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     const publish = vi.fn(async () => ({ version: 5 }));
     const store = fakeProjectStore();
     const writeMaterializedVersion = vi.fn(async () => undefined);
+    const onPullTiming = vi.fn();
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
       resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
       resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
       resolveSharedProject: resolvePulledSharedProject,
       writeMaterializedVersion,
+      onPullTiming,
     }, {
       adapter: { publish, pull: adapterPull, syncLatest },
     });
@@ -2060,6 +2076,13 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(adapterPull).toHaveBeenCalledTimes(1);
     expect(writeMaterializedVersion).toHaveBeenCalledTimes(1);
     expect(writeMaterializedVersion).toHaveBeenCalledWith('race-pull', pullScope, 5);
+    expect(onPullTiming.mock.calls.map(([event]) => event.phase)).toEqual([
+      'route-started',
+      'transport-invoke',
+      'transport-done',
+      'persisted',
+      'route-completed',
+    ]);
   });
 
   it('releases the per-project pull lock after a transport deadline rejects', async () => {
@@ -2067,12 +2090,14 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       .mockRejectedValueOnce(new Error('vela resource pull timed out'))
       .mockResolvedValueOnce({ version: 5 });
     const store = fakeProjectStore();
+    const onPullTiming = vi.fn();
     const api = await startSyncServer(fixedShareContextProvider(true), {
       projectStore: store,
       resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
       resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
       resolveSharedProject: resolvePulledSharedProject,
       writeMaterializedVersion: async () => undefined,
+      onPullTiming,
     }, {
       adapter: {
         publish: vi.fn(async () => ({ version: 5 })),
@@ -2084,6 +2109,13 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     await expect(
       api.handle.pullSharedProject('deadline-retry', pullScope),
     ).rejects.toThrow('timed out');
+    expect(onPullTiming.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({ phase: 'route-started' }),
+      expect.objectContaining({ phase: 'transport-invoke' }),
+      expect.objectContaining({ phase: 'transport-done', status: 'threw' }),
+      expect.objectContaining({ phase: 'route-completed', status: 'threw' }),
+    ]);
+    onPullTiming.mockClear();
     await expect(
       api.handle.pullSharedProject('deadline-retry', pullScope),
     ).resolves.toEqual({ status: 'pulled', version: 5 });

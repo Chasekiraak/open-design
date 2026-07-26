@@ -32,6 +32,11 @@ export interface VelaCommandOptions {
   signal?: AbortSignal;
   /** Grace for each of SIGTERM and SIGKILL confirmation. Defaults to 500ms. */
   terminationGraceMs?: number;
+  /**
+   * Observe buffered stderr after the child exits. The stdout return contract
+   * stays unchanged; observer failures never affect command completion.
+   */
+  onStderr?: (stderr: string) => void;
 }
 
 type VelaTerminationReason = 'abort' | 'timeout';
@@ -260,8 +265,15 @@ export function runVelaCommand(
         maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (terminating) return;
+        if (stderr && options.onStderr) {
+          try {
+            options.onStderr(stderr);
+          } catch {
+            // Diagnostics are observational and must never change transport.
+          }
+        }
         if (error) settle({ error });
         else settle({ stdout });
       },

@@ -92,6 +92,45 @@ describe('runVelaCommand', () => {
     expect(options.env.AMR_CLIENT_SOURCE).toBe('open_design');
   });
 
+  it('delivers successful stderr diagnostics without changing stdout', async () => {
+    const onStderr = vi.fn(() => {
+      throw new Error('diagnostic observer failed');
+    });
+    execFileMock.mockImplementationOnce(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (
+          error: Error | null,
+          stdout: string,
+          stderr: string,
+        ) => void,
+      ) => {
+        callback(
+          null,
+          '{"version":3}\n',
+          '{"event":"resource_pull_profile","schemaVersion":1}\n',
+        );
+        return { pid: 4321 };
+      },
+    );
+
+    await expect(
+      runVelaCommand(['resource', 'pull', 'project-1'], {
+        env: {
+          ...process.env,
+          VELA_BIN: process.execPath,
+          OD_DATA_DIR: '',
+        },
+        onStderr,
+      }),
+    ).resolves.toBe('{"version":3}\n');
+    expect(onStderr).toHaveBeenCalledWith(
+      '{"event":"resource_pull_profile","schemaVersion":1}\n',
+    );
+  });
+
   it('keeps the Settings-backed AMR binary authoritative over inherited VELA_BIN', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'od-vela-command-'));
     try {
@@ -346,5 +385,105 @@ describe('runVelaCommand', () => {
     };
     expect(options.timeout).toBeUndefined();
     expect(options.signal).toBeUndefined();
+  });
+
+  it('enables Vela pull profiling only behind the OD opt-in', async () => {
+    vi.stubEnv('OD_COLLAB_PULL_PROFILE', '1');
+    vi.stubEnv('VELA_BIN', process.execPath);
+    vi.stubEnv('OD_DATA_DIR', '');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    execFileMock.mockImplementationOnce(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (
+          error: Error | null,
+          stdout: string,
+          stderr: string,
+        ) => void,
+      ) => {
+        callback(
+          null,
+          '{"version":3}\n',
+          `${JSON.stringify({
+            event: 'resource_pull_profile',
+            schemaVersion: 1,
+            startedAt: '2026-07-26T00:00:00.000Z',
+            finishedAt: '2026-07-26T00:00:02.500Z',
+            success: true,
+            kind: 'project',
+            resourceId: 'project-content-project-1',
+            ref: 'published',
+            totalMs: 2500,
+            phases: [],
+          })}\n`,
+        );
+        return { pid: 4321 };
+      },
+    );
+
+    await expect(
+      runVelaResourceCommand([
+        'pull',
+        'project',
+        'project-content-project-1',
+        '/tmp/project-1',
+        '--ref',
+        'published',
+        '--json',
+      ], 'workspace-1'),
+    ).resolves.toBe('{"version":3}\n');
+
+    const options = execFileMock.mock.calls[0]?.[2] as {
+      env: NodeJS.ProcessEnv;
+    };
+    expect(options.env.VELA_RESOURCE_PULL_PROFILE).toBe('1');
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('"phase":"vela-child-done"'),
+    );
+  });
+
+  it('does not force Vela profiling or log stderr by default', async () => {
+    vi.stubEnv('OD_COLLAB_PULL_PROFILE', '');
+    vi.stubEnv('VELA_RESOURCE_PULL_PROFILE', '');
+    vi.stubEnv('VELA_BIN', process.execPath);
+    vi.stubEnv('OD_DATA_DIR', '');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    execFileMock.mockImplementationOnce(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (
+          error: Error | null,
+          stdout: string,
+          stderr: string,
+        ) => void,
+      ) => {
+        callback(
+          null,
+          '{"version":3}\n',
+          '{"event":"resource_pull_profile","schemaVersion":1}\n',
+        );
+        return { pid: 4321 };
+      },
+    );
+
+    await runVelaResourceCommand([
+      'pull',
+      'project',
+      'project-content-project-1',
+      '/tmp/project-1',
+      '--ref',
+      'published',
+      '--json',
+    ], 'workspace-1');
+
+    const options = execFileMock.mock.calls[0]?.[2] as {
+      env: NodeJS.ProcessEnv;
+    };
+    expect(options.env.VELA_RESOURCE_PULL_PROFILE).not.toBe('1');
+    expect(info).not.toHaveBeenCalled();
   });
 });

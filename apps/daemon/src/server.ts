@@ -686,6 +686,10 @@ import {
 } from './collab/vela-workspace-context.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
 import { createProactiveContentPull } from './collab/proactive-content-pull.js';
+import {
+  emitSharedProjectPullTiming,
+  sharedProjectPullProfileEnabled,
+} from './collab/pull-profile.js';
 import { createSyncDigestReader } from './collab/sync-digest.js';
 import {
   createCollabSyncSnapshotStore,
@@ -3344,6 +3348,8 @@ export async function startServer({
     onError: (error) => console.warn('[od] collab publish watcher error:', error),
   });
   collabPublishWatcher.start();
+  const sharedProjectPullProfiling =
+    sharedProjectPullProfileEnabled(process.env);
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     // Register-on-pull: after a member pulls a shared project, insert a local
@@ -3435,6 +3441,11 @@ export async function startServer({
         projectId,
         at: Date.now(),
       }),
+    ...(sharedProjectPullProfiling
+      ? {
+          onPullTiming: emitSharedProjectPullTiming,
+        }
+      : {}),
     // Resolve the owner's display name + role from the collab-cloud directory so
     // /collab/status can hand the client a named "shared project" banner.
     ...(collabCloud
@@ -3539,6 +3550,11 @@ export async function startServer({
         at: Date.now(),
       });
     },
+    ...(sharedProjectPullProfiling
+      ? {
+          onTiming: emitSharedProjectPullTiming,
+        }
+      : {}),
     onError: (error) =>
       console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
     onCatchUp: (event) => {
@@ -3779,7 +3795,22 @@ export async function startServer({
           // live in collab/proactive-content-pull.ts — an owner daemon
           // receiving its own publish echo never pulls over its working
           // tree, and failures degrade silently to the web's status polling.
-          void proactiveContentPull.handleContentChanged(event);
+          if (sharedProjectPullProfiling) {
+            const profileReceivedAtMs = Date.now();
+            emitSharedProjectPullTiming({
+              phase: 'event-received',
+              projectId: event.projectId ?? 'unknown',
+              ...(event.version != null ? { version: event.version } : {}),
+              receivedAtMs: profileReceivedAtMs,
+              atMs: profileReceivedAtMs,
+            });
+            void proactiveContentPull.handleContentChanged({
+              ...event,
+              profileReceivedAtMs,
+            });
+          } else {
+            void proactiveContentPull.handleContentChanged(event);
+          }
           // Keep the thin nudge for an OPEN project view so its status/banner
           // refreshes immediately rather than on the next ~5s poll tick.
           if (event.projectId && activeProjectEventSinks.has(event.projectId)) {
