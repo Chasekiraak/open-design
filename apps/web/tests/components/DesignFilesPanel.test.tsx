@@ -760,71 +760,56 @@ describe("DesignFilesPanel persisted (empty) folders", () => {
 });
 
 // A non-owner member's local mirror trailing the published head
-// (`downloadPending`, see useProjectCollab) is project-wide: the daemon's
-// `pull` materializes the whole tree in one external CLI call, so there is
-// no per-file "this one landed" signal to key a finer-grained flag off of.
-// While it holds, every currently-listed file (a plain local-disk read, so
-// it could be stale content or mid-overwrite by the in-flight pull) renders
-// as an inert skeleton instead of its real name/thumbnail, and no click
-// handler is wired up at all — there is nothing to open until the pull
-// confirms.
+// (`downloadPending`, see useProjectCollab) can still have a complete older
+// materialization. Keep that useful content visible while the project-level
+// sync badge communicates that a newer version is arriving. Only the
+// no-local-content case should replace the empty state with a loading surface.
 describe("DesignFilesPanel pending sync (downloadPending)", () => {
   afterEach(() => cleanup());
 
-  it("renders a non-html file as a skeleton row and blocks opening it", () => {
+  it("keeps an existing non-html file visible and openable while a newer version downloads", () => {
     const { onOpenFile } = renderPanel(
       [file({ name: "notes.txt", kind: "text", mime: "text/plain" })],
       { downloadPending: true },
     );
 
     const row = screen.getByTestId("design-file-row-notes.txt");
-    expect(row.className).toContain("df-row-pending");
-    expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(row.getAttribute("aria-busy")).toBe("true");
-    // The real name/size/time never render — only shimmering placeholders —
-    // so the file's actual name is not readable from the row.
-    expect(row.querySelector(".df-row-name")).toBeNull();
-    expect(row.querySelector(".df-row-name-btn")).toBeNull();
-    expect(row.querySelector(".skeleton-block")).toBeTruthy();
-    expect(row.querySelector(".df-row-icon-pending.skeleton-shimmer")).toBeTruthy();
+    expect(row.className).not.toContain("df-row-pending");
+    expect(row.querySelector(".df-row-name")?.textContent).toBe("notes.txt");
+    expect(row.querySelector(".skeleton-block")).toBeNull();
 
-    fireEvent.click(row);
-    expect(onOpenFile).not.toHaveBeenCalled();
+    fireEvent.click(row.querySelector(".df-row-name-btn")!);
+    expect(onOpenFile).toHaveBeenCalledWith("notes.txt");
   });
 
-  it("renders an HTML page as a skeleton card and blocks opening it (no thumbnail fetch)", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("keeps an existing HTML page card visible and openable while a newer version downloads", () => {
     const { onOpenFile } = renderPanel(
       [file({ name: "page.html", kind: "html", mime: "text/html" })],
       { downloadPending: true },
     );
 
     const card = screen.getByTestId("design-file-row-page.html");
-    expect(card.className).toContain("df-card-pending");
-    expect(card.querySelector(".df-card-thumb-pending.skeleton-shimmer")).toBeTruthy();
-    // No real page-thumbnail machinery runs for a pending card.
-    expect(card.querySelector("iframe")).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    fireEvent.click(card);
-    expect(onOpenFile).not.toHaveBeenCalled();
+    expect(card.className).not.toContain("df-card-pending");
+    expect(card.textContent).toContain("page.html");
+    const openButton = card.querySelector<HTMLButtonElement>(".df-card-thumb");
+    expect(openButton).toBeTruthy();
+    fireEvent.click(openButton!);
+    expect(onOpenFile).toHaveBeenCalledWith("page.html");
   });
 
-  it("renders an image as a skeleton card and blocks opening it", () => {
+  it("keeps an existing image card visible and openable while a newer version downloads", () => {
     const { onOpenFile } = renderPanel(
       [file({ name: "photo.png", kind: "image", mime: "image/png" })],
       { downloadPending: true },
     );
 
     const card = screen.getByTestId("design-file-row-photo.png");
-    expect(card.className).toContain("df-card-pending");
+    expect(card.className).not.toContain("df-card-pending");
     expect(card.className).toContain("df-card--image");
-    expect(card.querySelector("img")).toBeNull();
-    expect(card.querySelector(".df-card-thumb-pending.skeleton-shimmer")).toBeTruthy();
-
-    fireEvent.click(card);
-    expect(onOpenFile).not.toHaveBeenCalled();
+    const openButton = card.querySelector<HTMLButtonElement>(".df-card-thumb");
+    expect(openButton).toBeTruthy();
+    fireEvent.click(openButton!);
+    expect(onOpenFile).toHaveBeenCalledWith("photo.png");
   });
 
   it("still reports the correct per-category file counts in the tab bar while pending", () => {
@@ -838,54 +823,48 @@ describe("DesignFilesPanel pending sync (downloadPending)", () => {
     expect(tabLabels().join(" ")).toContain("2");
   });
 
-  it("renders real, clickable rows once downloadPending clears", () => {
-    const onOpenFile = vi.fn();
+  it("uses the syncing empty state only when no local content is available", () => {
+    renderPanel([], { downloadPending: true, viewerOnly: true });
+
+    expect(screen.getByTestId("design-files-syncing")).toBeTruthy();
+    expect(screen.queryByTestId("design-files-empty")).toBeNull();
+  });
+
+  it("replaces the retained materialization directly when the pull completes", () => {
+    const commonProps = {
+      projectId: "test-project",
+      liveArtifacts: [],
+      onRefreshFiles: vi.fn(),
+      onOpenFile: vi.fn(),
+      onOpenLiveArtifact: vi.fn(),
+      onRenameFile: vi.fn(),
+      onDeleteFile: vi.fn(),
+      onDeleteFiles: vi.fn(),
+      onUpload: vi.fn(),
+      onUploadFiles: vi.fn(),
+      onPaste: vi.fn(),
+      onNewSketch: vi.fn(),
+      viewerOnly: true,
+    };
     const { rerender } = render(
       <DesignFilesPanel
-        projectId="test-project"
-        files={[file({ name: "notes.txt", kind: "text", mime: "text/plain" })]}
-        liveArtifacts={[]}
-        onRefreshFiles={vi.fn()}
-        onOpenFile={onOpenFile}
-        onOpenLiveArtifact={vi.fn()}
-        onRenameFile={vi.fn()}
-        onDeleteFile={vi.fn()}
-        onDeleteFiles={vi.fn()}
-        onUpload={vi.fn()}
-        onUploadFiles={vi.fn()}
-        onPaste={vi.fn()}
-        onNewSketch={vi.fn()}
+        {...commonProps}
+        files={[file({ name: "version-one.txt", kind: "text", mime: "text/plain" })]}
         downloadPending
       />,
     );
-    expect(screen.getByTestId("design-file-row-notes.txt").className).toContain(
-      "df-row-pending",
-    );
+    expect(screen.getByText("version-one.txt")).toBeTruthy();
+    expect(document.querySelector(".skeleton-block")).toBeNull();
 
     rerender(
       <DesignFilesPanel
-        projectId="test-project"
-        files={[file({ name: "notes.txt", kind: "text", mime: "text/plain" })]}
-        liveArtifacts={[]}
-        onRefreshFiles={vi.fn()}
-        onOpenFile={onOpenFile}
-        onOpenLiveArtifact={vi.fn()}
-        onRenameFile={vi.fn()}
-        onDeleteFile={vi.fn()}
-        onDeleteFiles={vi.fn()}
-        onUpload={vi.fn()}
-        onUploadFiles={vi.fn()}
-        onPaste={vi.fn()}
-        onNewSketch={vi.fn()}
+        {...commonProps}
+        files={[file({ name: "version-two.txt", kind: "text", mime: "text/plain" })]}
         downloadPending={false}
       />,
     );
-    const row = screen.getByTestId("design-file-row-notes.txt");
-    expect(row.className).not.toContain("df-row-pending");
-    expect(row.querySelector(".df-row-name")?.textContent).toBe("notes.txt");
-    // The row container itself carries no click handler — only its cells
-    // do (name / icon / size / time) — so click the real open target.
-    fireEvent.click(row.querySelector(".df-row-name-btn")!);
-    expect(onOpenFile).toHaveBeenCalledWith("notes.txt");
+    expect(screen.queryByText("version-one.txt")).toBeNull();
+    expect(screen.getByText("version-two.txt")).toBeTruthy();
+    expect(document.querySelector(".skeleton-block")).toBeNull();
   });
 });

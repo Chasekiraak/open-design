@@ -339,11 +339,11 @@ interface Props {
   /** Optional override for the read-only notice text. */
   readonlyNotice?: string;
   /**
-   * Team-share file-sync state for every open design-file tab (not terminal /
-   * side-chat / browser tabs). `downloading` — a non-owner member's local copy
-   * has not caught up to the published head. `uploading` — the owner's local
-   * edits have not yet been published. Null once caught up / not a shared
-   * project. See `FileSyncBadge` for the rendered icon.
+   * Team-share file-sync state for the project. It is rendered on the Design
+   * Files root tab and open design-file tabs (never terminal / side-chat /
+   * browser tabs). `downloading` — a non-owner member's local copy has not
+   * caught up to the published head. `uploading` — the owner's local edits
+   * have not yet been published. Null once caught up / not a shared project.
    */
   fileSyncBadge?: FileSyncBadgeState | null;
 }
@@ -1358,6 +1358,15 @@ export function FileWorkspace({
   const [activeTab, setActiveTab] = useState<string>(
     tabsState.active ?? defaultRootTab,
   );
+  const fileSyncBadgeLabel = fileSyncBadge
+    ? fileSyncBadge === 'downloading'
+      ? t('workspace.fileSyncDownloading')
+      : t('workspace.fileSyncUploading')
+    : null;
+  const designFilesTabLabel = t('workspace.designFiles');
+  const designFilesTabTitle = fileSyncBadgeLabel
+    ? `${designFilesTabLabel} · ${fileSyncBadgeLabel}`
+    : designFilesTabLabel;
 
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -3420,15 +3429,20 @@ export function FileWorkspace({
             className={`ws-tab design-files-tab ${activeTab === DESIGN_FILES_TAB ? 'active' : ''}`}
             role="tab"
             aria-selected={activeTab === DESIGN_FILES_TAB}
+            aria-label={designFilesTabTitle}
             tabIndex={0}
             data-testid="design-files-tab"
             onClick={() => setPersistedActive(DESIGN_FILES_TAB)}
-            title={t('workspace.designFiles')}
+            title={designFilesTabTitle}
           >
             <span className="tab-icon" aria-hidden>
-              <Icon name="grid" size={14} />
+              {fileSyncBadge ? (
+                <FileSyncBadge state={fileSyncBadge} size={14} />
+              ) : (
+                <Icon name="grid" size={14} />
+              )}
             </span>
-            <span className="ws-tab-label">{t('workspace.designFiles')}</span>
+            <span className="ws-tab-label">{designFilesTabLabel}</span>
           </button>
           {visibleOrderedWorkspaceTabs.map((entry) => {
             if (entry.kind === 'browser') {
