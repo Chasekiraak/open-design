@@ -9,6 +9,7 @@ import type {
   WorkspaceTeamBillingPlanId,
   WorkspaceBillingResponse,
   WorkspaceBillingSummary,
+  WorkspaceWalletBalance,
   WorkspaceDirectoryItem,
   WorkspaceDirectoryResponse,
   WorkspaceContextResponse,
@@ -36,6 +37,7 @@ import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
   fetchVelaBillingSummary,
+  fetchVelaWorkspaceBalance,
 } from '../integrations/vela-billing.js';
 import { listVelaWorkspaceDirectory } from '../collab/vela-workspace-context.js';
 
@@ -46,7 +48,9 @@ export interface RegisterCollabContextRoutesDeps {
   /** Injectable for tests; defaults to creating invites on B with the vela session. */
   createInvite?: (input: CreateWorkspaceInviteInput) => Promise<CreateInviteOutcome>;
   /** Injectable for tests; defaults to the vela billing CLI 收口. */
-  fetchBilling?: (workspaceId: string) => Promise<WorkspaceBillingSummary | null>;
+  fetchBilling?: () => Promise<WorkspaceBillingSummary | null>;
+  /** Injectable for tests; returns one backend-proven v2 workspace wallet. */
+  fetchWorkspaceBalance?: (workspaceId: string) => Promise<WorkspaceWalletBalance | null>;
   /** Injectable for tests; defaults to the vela billing catalog CLI 收口. */
   fetchBillingCatalog?: (workspaceId: string) => Promise<WorkspaceBillingCatalog | null>;
   /** Injectable for tests; defaults to the vela billing checkout CLI 收口. */
@@ -135,8 +139,10 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const consumeInvite = deps.consumeInvite ?? ((nonce: string) => consumeInviteContinuation(nonce));
   const createInvite =
     deps.createInvite ?? ((input: CreateWorkspaceInviteInput) => createWorkspaceInvite(input));
-  const fetchBilling =
-    deps.fetchBilling ?? ((workspaceId: string) => fetchVelaBillingSummary(workspaceId));
+  const fetchBilling = deps.fetchBilling ?? (() => fetchVelaBillingSummary());
+  const fetchWorkspaceBalance =
+    deps.fetchWorkspaceBalance ??
+    ((workspaceId: string) => fetchVelaWorkspaceBalance(workspaceId));
   const fetchBillingCatalog =
     deps.fetchBillingCatalog ?? ((workspaceId: string) => fetchVelaBillingCatalog(workspaceId));
   const startCheckout =
@@ -327,26 +333,52 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     res.json(body);
   });
 
-  // A-lane billing 收口: the client's credits chip fetches the caller's real
-  // plan tier + credit balance here. The daemon shells out to `vela billing
-  // summary` (same vela session as resources); a null summary means the CLI /
-  // session is unavailable and the client keeps its context-derived tier hint.
-  // This route is also the sync-back path after a user upgrades in Vela Web.
+  // Billing reads are explicit at the HTTP boundary:
+  // - scope=account is the personal/account summary;
+  // - scope=workspace requires a workspaceId that exactly matches the current
+  //   authorized team context, then joins that account metadata with Vela's
+  //   independently scoped v2 wallet response.
   //
-  // Scoped to the ACTIVE workspace, exactly like the catalog route below it.
-  // The handler used to take no request at all, which made the summary an
-  // account question: switching workspaces re-read the same wallet and the
-  // same tier, so one account displayed identical credits everywhere (#134).
-  // Unlike the catalog, an absent workspace is NOT an empty answer here —
-  // B's wallet is readable without one — so the read still happens and the
-  // summary simply carries a null workspace stamp.
+  // The route never uses active context to SELECT the requested id and never
+  // copies a request id onto account data. If either half of a team read is
+  // unavailable, return no summary so the UI cannot fall back to account money.
   app.get('/api/workspace/billing', async (req, res) => {
+    const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
+    const requestedWorkspaceId =
+      typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    if (
+      (scope !== 'account' && scope !== 'workspace') ||
+      (scope === 'account' && requestedWorkspaceId) ||
+      (scope === 'workspace' && !requestedWorkspaceId)
+    ) {
+      return res.status(400).json({ error: 'invalid_billing_scope' });
+    }
+    if (scope === 'account') {
+      const summary = await fetchBilling();
+      const body: WorkspaceBillingResponse = { summary };
+      return res.json(body);
+    }
+
     const authorization = req.header('authorization') ?? undefined;
     const context = await workspaceContext.current({ authorization });
-    const workspaceId = context?.workspaceId?.trim() ?? '';
-    const summary = await fetchBilling(workspaceId);
+    const contextMatches =
+      context?.workspaceType === 'team' &&
+      context.workspaceId?.trim() === requestedWorkspaceId &&
+      context.memberStatus === 'active' &&
+      context.lifecycleState === 'active';
+    if (!contextMatches) {
+      return res.status(409).json({ error: 'workspace_context_mismatch' });
+    }
+    const [accountSummary, workspaceBalance] = await Promise.all([
+      fetchBilling(),
+      fetchWorkspaceBalance(requestedWorkspaceId),
+    ]);
+    const summary =
+      accountSummary && workspaceBalance
+        ? { ...accountSummary, workspaceId: null, workspaceBalance }
+        : null;
     const body: WorkspaceBillingResponse = { summary };
-    res.json(body);
+    return res.json(body);
   });
 
   app.get('/api/workspace/billing/catalog', async (req, res) => {

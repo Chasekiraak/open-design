@@ -377,32 +377,32 @@ export function buildWorkspaceSeatSummary(input: {
   };
 }
 
+/** One backend-proven v2 workspace wallet balance. */
+export interface WorkspaceWalletBalance {
+  workspaceId: string;
+  workspaceMemberId: string;
+  balanceUsd: string;
+  billingScopeVersion: 2;
+  expiresAt: string | null;
+  updatedAt: string | null;
+}
+
 /**
- * A caller's Vela billing summary (A-lane data), surfaced through the vela CLI
- * 收口 (`vela billing summary --format json`) so the client can show real
- * credits + plan tier instead of a placeholder. `null` when the CLI or the
- * signed-in billing session is unavailable — the client falls back to the
- * plan-tier hint it already has from the workspace context.
+ * The caller's Vela account billing summary plus, for an explicit team request,
+ * one independently verified workspace wallet balance.
+ *
+ * `vela billing summary` remains account-scoped. The daemon must never turn it
+ * into workspace data by copying a requested id onto the response. A team
+ * balance is trustworthy only when `workspaceBalance` came from Vela's
+ * `/api/v1/workspaces/{workspaceId}/wallet/balance` contract and carries that
+ * same backend-returned workspace identity.
  */
 export interface WorkspaceBillingSummary {
   /**
-   * The workspace this summary was requested FOR, or null when the daemon had
-   * no workspace context to scope the read with.
-   *
-   * Provenance, not identity: it records which workspace the client asked
-   * about so a summary left over from the workspace the user just switched
-   * away from is detectable instead of being displayed as the new one's. The
-   * route used to take no request at all, which is how one account showed the
-   * same credits and the same tier in every workspace it opened.
-   *
-   * NOTE: B's wallet itself is still ACCOUNT-scoped — `/api/v1/billing/summary`
-   * reads `credit_recharges` by `app_user_id` with no workspace dimension, and
-   * `vela billing summary` has no `--workspace-id` (only `team-catalog` and
-   * `checkout` do). The stamp and the workspace-scoped request are the client
-   * side of the contract; a genuinely per-workspace balance needs B to grow a
-   * workspace-scoped summary first.
+   * Deprecated compatibility field. Account summaries are not workspace
+   * identities, so this is always null. Use `workspaceBalance.workspaceId`.
    */
-  workspaceId: string | null;
+  workspaceId: null;
   /** Membership tier, e.g. `team` / `free`. */
   membershipTier: string;
   /** Total available credits (subscription + recharge), as a number. */
@@ -427,6 +427,8 @@ export interface WorkspaceBillingSummary {
   subscriptionStatus: string;
   /** Actions the caller may take, e.g. `subscription_checkout` / `billing_portal`. */
   availableActions: string[];
+  /** Explicit workspace wallet data, or null for an account/personal read. */
+  workspaceBalance: WorkspaceWalletBalance | null;
 }
 
 export interface WorkspaceBillingResponse {

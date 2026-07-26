@@ -126,19 +126,19 @@ describe('collab context routes', () => {
 });
 
 describe('workspace billing routes', () => {
-  // Acceptance #134: the summary was fetched with NO workspace at all — the
-  // handler took `_req`, so one account read the same credits and the same
-  // tier in every workspace it switched into. The summary must be requested
-  // FOR the active workspace, exactly like the catalog route beside it, and
-  // the response must say which workspace it describes so a stale read from
-  // the previous workspace is identifiable rather than silently displayed.
-  it('requests the ACTIVE workspace’s billing summary and stamps it with that workspace', async () => {
-    const calls: string[] = [];
+  // recvqgaMLxEdZX: a workspace request is selected explicitly by URL, then
+  // checked against the authorized local context. The account summary remains
+  // account-scoped; only B's v2 wallet response can identify a workspace
+  // balance, and the daemon must preserve that backend identity rather than
+  // stamping the caller's requested id onto an account response.
+  it('combines account summary with the explicit, backend-scoped workspace balance', async () => {
+    const accountCalls: string[] = [];
+    const workspaceCalls: string[] = [];
     const api = await startContextServer({
-      fetchBilling: async (workspaceId) => {
-        calls.push(workspaceId);
+      fetchBilling: async () => {
+        accountCalls.push('account');
         return {
-          workspaceId,
+          workspaceId: null,
           membershipTier: 'team_plus',
           totalAvailableCredits: 1_386_294,
           subscriptionCredits: 1_000_000,
@@ -146,26 +146,45 @@ describe('workspace billing routes', () => {
           balanceUsd: '13.86',
           subscriptionStatus: 'active',
           availableActions: ['billing_portal'],
+          workspaceBalance: null,
+        };
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        workspaceCalls.push(workspaceId);
+        return {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-26T12:00:00Z',
         };
       },
     });
     await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
 
-    const res = await api.req('/api/workspace/billing');
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
 
     expect(res.status).toBe(200);
-    expect(calls).toEqual(['wm-1']);
-    expect(res.body.summary).toMatchObject({ workspaceId: 'wm-1', membershipTier: 'team_plus' });
+    expect(accountCalls).toEqual(['account']);
+    expect(workspaceCalls).toEqual(['wm-1']);
+    expect(res.body.summary).toMatchObject({
+      workspaceId: null,
+      membershipTier: 'team_plus',
+      workspaceBalance: {
+        workspaceId: 'wm-1',
+        balanceUsd: '7.89',
+        billingScopeVersion: 2,
+      },
+    });
   });
 
-  // No workspace context (signed out of collab, or a plain local run) must NOT
-  // become a 500 or a null summary: B's wallet is reachable without a
-  // workspace, so the account-level read still answers — it is just unstamped.
-  it('still answers with an unstamped summary when no workspace context is set', async () => {
-    const calls: string[] = [];
+  it('reads the account summary explicitly without requesting a workspace balance', async () => {
+    const accountCalls: string[] = [];
+    const workspaceCalls: string[] = [];
     const api = await startContextServer({
-      fetchBilling: async (workspaceId) => {
-        calls.push(workspaceId);
+      fetchBilling: async () => {
+        accountCalls.push('account');
         return {
           workspaceId: null,
           membershipTier: '',
@@ -175,15 +194,74 @@ describe('workspace billing routes', () => {
           balanceUsd: '0',
           subscriptionStatus: '',
           availableActions: [],
+          workspaceBalance: null,
         };
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        workspaceCalls.push(workspaceId);
+        return null;
       },
     });
 
-    const res = await api.req('/api/workspace/billing');
+    const res = await api.req('/api/workspace/billing?scope=account');
 
     expect(res.status).toBe(200);
-    expect(calls).toEqual(['']);
-    expect(res.body.summary).toMatchObject({ workspaceId: null });
+    expect(accountCalls).toEqual(['account']);
+    expect(workspaceCalls).toEqual([]);
+    expect(res.body.summary).toMatchObject({ workspaceId: null, workspaceBalance: null });
+  });
+
+  it('fails closed when the explicit workspace does not match the authorized context', async () => {
+    const calls: string[] = [];
+    const api = await startContextServer({
+      fetchBilling: async () => {
+        calls.push('account');
+        return null;
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        calls.push(workspaceId);
+        return null;
+      },
+    });
+    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=other');
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'workspace_context_mismatch' });
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects missing or contradictory billing scope parameters', async () => {
+    const api = await startContextServer();
+    expect((await api.req('/api/workspace/billing')).status).toBe(400);
+    expect((await api.req('/api/workspace/billing?scope=workspace')).status).toBe(400);
+    expect(
+      (await api.req('/api/workspace/billing?scope=account&workspaceId=wm-1')).status,
+    ).toBe(400);
+  });
+
+  it('returns no team summary when the scoped balance is unavailable', async () => {
+    const api = await startContextServer({
+      fetchBilling: async () => ({
+        workspaceId: null,
+        membershipTier: 'team_plus',
+        totalAvailableCredits: 10,
+        subscriptionCredits: 10,
+        rechargeCredits: 0,
+        balanceUsd: '999.00',
+        subscriptionStatus: 'active',
+        availableActions: [],
+        workspaceBalance: null,
+      }),
+      fetchWorkspaceBalance: async () => null,
+    });
+    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ summary: null });
   });
 
   it('returns the real team billing catalog for the current workspace', async () => {

@@ -226,6 +226,7 @@ const WORKSPACE_STRING_FLAGS = new Set([
   'daemon-url', 'workspace', 'view', 'visibility', 'owner', 'project',
   'member', 'role', 'email', 'app-user', 'lifecycle-state',
   'member-status', 'can-share-projects', 'can-write-synced-files',
+  'workspace-type',
 ]);
 const WORKSPACE_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 // `od templates …` mirrors NewProjectPanel / ExamplesTab. Same surface,
@@ -6552,7 +6553,7 @@ async function runWorkspace(args) {
   od workspace projects batch-delete --workspace <id> --project <id> [--project <id> ...] [--json]
   od workspace projects batch-move --workspace <id> --visibility personal|team --project <id> [--project <id> ...] [--json]
   od workspace members list [--json]
-  od workspace billing [--json]
+  od workspace billing [--workspace-type personal|team] [--workspace <id>] [--json]
 
 Common options:
   --daemon-url <url>   Open Design daemon HTTP base.
@@ -6611,25 +6612,52 @@ Common options:
     return;
   }
 
-  // Dual-track parity for the account menu's credits card: the same
-  // /api/workspace/billing the UI reads, scoped to the daemon's active
-  // workspace. Prints the workspace it describes so an embedding agent can
-  // tell WHOSE billing it just read rather than assuming the account's.
+  // Dual-track parity for the account menu's credits card. Billing scope is an
+  // explicit CLI argument, never daemon active-workspace state: account is the
+  // compatibility default; team requires both type + workspace id.
   if (area === 'billing') {
-    const data = await workspaceContextRequest('/api/workspace/billing');
+    const workspaceType =
+      typeof flags['workspace-type'] === 'string'
+        ? flags['workspace-type'].trim().toLowerCase()
+        : '';
+    const workspaceId =
+      typeof flags.workspace === 'string' ? flags.workspace.trim() : '';
+    if (
+      (workspaceType && workspaceType !== 'personal' && workspaceType !== 'team') ||
+      (workspaceType === 'team' && !workspaceId) ||
+      (workspaceType === 'personal' && workspaceId) ||
+      (!workspaceType && workspaceId)
+    ) {
+      console.error(
+        'Usage: od workspace billing [--workspace-type personal|team] [--workspace <id>] [--json]',
+      );
+      process.exit(2);
+    }
+    const billingPath =
+      workspaceType === 'team'
+        ? `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}`
+        : '/api/workspace/billing?scope=account';
+    const data = await workspaceContextRequest(billingPath);
     if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     const summary = data?.summary ?? null;
     if (!summary) {
       console.log('No billing summary (no vela session or CLI unavailable).');
       return;
     }
-    console.log(`Workspace:\t${summary.workspaceId ?? '-'}`);
-    console.log(`Plan:\t${summary.membershipTier || 'free'}`);
+    const workspaceBalance = summary.workspaceBalance ?? null;
+    if (workspaceBalance) {
+      console.log(`Workspace:\t${workspaceBalance.workspaceId}`);
+    }
+    console.log(`Account plan:\t${summary.membershipTier || 'free'}`);
     console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
-    console.log(`Credits:\t${summary.totalAvailableCredits}`);
-    console.log(`  Plan credits:\t${summary.subscriptionCredits}`);
-    console.log(`  Top-up credits:\t${summary.rechargeCredits}`);
-    console.log(`Balance (USD):\t${summary.balanceUsd}`);
+    console.log(`Account credits:\t${summary.totalAvailableCredits}`);
+    console.log(`  Account plan credits:\t${summary.subscriptionCredits}`);
+    console.log(`  Account top-up credits:\t${summary.rechargeCredits}`);
+    console.log(
+      `${workspaceBalance ? 'Workspace' : 'Account'} balance (USD):\t${
+        workspaceBalance?.balanceUsd ?? summary.balanceUsd
+      }`,
+    );
     return;
   }
 

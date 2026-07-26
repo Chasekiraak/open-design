@@ -3,8 +3,10 @@ import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
   fetchVelaBillingSummary,
+  fetchVelaWorkspaceBalance,
   parseBillingCatalog,
   parseBillingSummary,
+  parseWorkspaceWalletBalance,
 } from '../src/integrations/vela-billing.js';
 
 // A representative `vela billing summary --format json` payload.
@@ -32,14 +34,23 @@ const CATALOG_SAMPLE = JSON.stringify({
   ],
 });
 
+const WORKSPACE_BALANCE_SAMPLE = JSON.stringify({
+  balanceUsd: '7.8900',
+  expiresAt: null,
+  updatedAt: '2026-07-26T12:00:00Z',
+  billingScopeVersion: 2,
+  workspaceId: 'ws_team',
+  workspaceMemberId: 'member_team',
+});
+
 describe('vela billing 收口', () => {
   // Acceptance #112: B splits the wallet into a subscription grant bucket and
   // a top-up bucket (`balances.subscriptionCredits` / `balances.rechargeCredits`,
   // summing to `totalAvailableCredits`). The mapper kept only the total, so the
   // menu's 附加积分 row had no field to read and could only ever print 0.
   it('maps the vela billing summary JSON, including BOTH credit buckets', () => {
-    expect(parseBillingSummary(SAMPLE, 'ws_team')).toEqual({
-      workspaceId: 'ws_team',
+    expect(parseBillingSummary(SAMPLE)).toEqual({
+      workspaceId: null,
       membershipTier: 'team',
       totalAvailableCredits: 12500,
       subscriptionCredits: 5000,
@@ -47,16 +58,17 @@ describe('vela billing 收口', () => {
       balanceUsd: '1.2500',
       subscriptionStatus: 'active',
       availableActions: ['subscription_checkout', 'billing_portal'],
+      workspaceBalance: null,
     });
   });
 
   it('returns null on empty or malformed output (clean "no summary")', () => {
-    expect(parseBillingSummary('', 'ws_team')).toBeNull();
-    expect(parseBillingSummary('not json', 'ws_team')).toBeNull();
+    expect(parseBillingSummary('')).toBeNull();
+    expect(parseBillingSummary('not json')).toBeNull();
   });
 
   it('degrades to null when the CLI throws — no billing session', async () => {
-    const out = await fetchVelaBillingSummary('ws_team', {
+    const out = await fetchVelaBillingSummary({
       run: async () => {
         throw new Error('no vela session');
       },
@@ -65,26 +77,55 @@ describe('vela billing 收口', () => {
   });
 
   it('drives the injected runner and maps its output', async () => {
-    const out = await fetchVelaBillingSummary('ws_team', { run: async () => SAMPLE });
+    const seen: string[][] = [];
+    const out = await fetchVelaBillingSummary({
+      run: async (args) => {
+        seen.push(args);
+        return SAMPLE;
+      },
+    });
     expect(out?.membershipTier).toBe('team');
     expect(out?.totalAvailableCredits).toBe(12500);
     expect(out?.rechargeCredits).toBe(7500);
     expect(out?.availableActions).toContain('billing_portal');
-  });
-
-  // #134 root cause: the summary went out with no workspace scope whatsoever,
-  // so B answered for the ACCOUNT and every workspace showed the same numbers.
-  // The workspace travels the same way it does for collab / resources /
-  // team-projects — as VELA_WORKSPACE_ID on the child env — and the summary is
-  // stamped with it so the client can tell whose billing it is holding.
-  it('stamps the summary with the workspace it was requested for', async () => {
-    const out = await fetchVelaBillingSummary('ws_team', { run: async () => SAMPLE });
-    expect(out?.workspaceId).toBe('ws_team');
-  });
-
-  it('leaves the stamp null when no workspace is known', async () => {
-    const out = await fetchVelaBillingSummary('', { run: async () => SAMPLE });
     expect(out?.workspaceId).toBeNull();
+    expect(seen).toEqual([['summary', '--format', 'json']]);
+  });
+
+  it('fetches one explicit workspace balance and preserves backend scope identity', async () => {
+    const seen: string[][] = [];
+    const out = await fetchVelaWorkspaceBalance('ws_team', {
+      run: async (args) => {
+        seen.push(args);
+        return WORKSPACE_BALANCE_SAMPLE;
+      },
+    });
+    expect(out).toEqual({
+      balanceUsd: '7.8900',
+      expiresAt: null,
+      updatedAt: '2026-07-26T12:00:00Z',
+      billingScopeVersion: 2,
+      workspaceId: 'ws_team',
+      workspaceMemberId: 'member_team',
+    });
+    expect(seen).toEqual([
+      ['workspace-balance', '--workspace-id', 'ws_team', '--format', 'json'],
+    ]);
+  });
+
+  it('rejects an unscoped or foreign workspace balance instead of self-stamping it', () => {
+    expect(parseWorkspaceWalletBalance(JSON.stringify({ balanceUsd: '7.89' }), 'ws_team')).toBeNull();
+    expect(
+      parseWorkspaceWalletBalance(
+        JSON.stringify({
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          workspaceId: 'ws_other',
+          workspaceMemberId: 'member_other',
+        }),
+        'ws_team',
+      ),
+    ).toBeNull();
   });
 
   it('maps the vela team billing catalog JSON into client catalog data', () => {

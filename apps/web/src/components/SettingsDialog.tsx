@@ -4546,13 +4546,12 @@ export function SettingsDialog({
                               ? formatAmrWalletBalance(amrWalletSnapshot.balanceUsd)
                               : null;
                           // recvpZPzGJL7o7: `amrStatusBalance` and `amrWalletBalance`
-                          // are both vela ACCOUNT-scoped reads — the same
-                          // scope `resolvePlanTier` exists to override for the
-                          // plan badge right next to this number. Workspace
-                          // billing (when it has loaded) is the workspace-scoped
-                          // source of truth and wins here for the same reason;
-                          // the account-scoped pair stays as the fallback for
-                          // local/BYOK use with no workspace billing at all.
+                          // are both vela ACCOUNT-scoped reads. A team balance
+                          // may only come from the nested v2 workspace wallet
+                          // response whose workspace identity Vela returned;
+                          // never display the account summary's balance as a
+                          // team fallback. Personal/local use keeps the account
+                          // summary and login-status fallbacks.
                           //
                           // recvqakgSc1Pwd: this must read `balanceUsd` — the
                           // dollar figure vela already computed — not
@@ -4562,13 +4561,19 @@ export function SettingsDialog({
                           // credits count as a dollar amount is what put
                           // "Balance $388307.00" on a workspace whose real
                           // balance was under $39.
+                          const workspaceBalanceUsd =
+                            workspaceContext?.workspaceType === 'team'
+                              ? workspaceBilling?.workspaceBalance?.balanceUsd
+                              : workspaceBilling?.balanceUsd;
                           const amrWorkspaceBalance =
-                            amrWalletVisible && workspaceBilling
-                              ? formatVelaBalanceUsd(workspaceBilling.balanceUsd)
+                            amrWalletVisible && workspaceBalanceUsd
+                              ? formatVelaBalanceUsd(workspaceBalanceUsd)
                               : null;
                           const amrCardBalanceLabel =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? amrWorkspaceBalance ?? amrStatusBalance ?? amrWalletBalance
+                              ? workspaceContext?.workspaceType === 'team'
+                                ? amrWorkspaceBalance
+                                : amrWorkspaceBalance ?? amrStatusBalance ?? amrWalletBalance
                               : null;
                           // vela's `account.plan` is ACCOUNT-scoped, so a member
                           // whose plan is held by the team workspace reads

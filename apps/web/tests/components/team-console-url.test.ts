@@ -107,7 +107,7 @@ describe('workspaceUpgradeUrl', () => {
     workspaceSettingsUrl: settingsUrl,
   };
   const billingSummary = (membershipTier: string): WorkspaceBillingSummary => ({
-    workspaceId: 'ws-1',
+    workspaceId: null,
     membershipTier,
     totalAvailableCredits: 0,
     subscriptionCredits: 0,
@@ -115,6 +115,7 @@ describe('workspaceUpgradeUrl', () => {
     balanceUsd: '0.00',
     subscriptionStatus: membershipTier ? 'active' : 'none',
     availableActions: [],
+    workspaceBalance: null,
   });
 
   it('sends a personal workspace to the wallet pricing modal, never a team billing deep link', () => {

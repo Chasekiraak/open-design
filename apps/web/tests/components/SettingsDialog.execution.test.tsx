@@ -2393,7 +2393,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (url === '/api/workspace/billing') {
+      if (url.startsWith('/api/workspace/billing?')) {
         return new Response(JSON.stringify({ summary: null }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -3824,7 +3824,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
         return new Response(
           JSON.stringify({
             context: {
+              workspaceId: 'ws-team',
               workspaceType: 'team',
+              workspaceMemberId: 'member-team',
               role: 'member',
               permissions: { canViewWorkspaceSettings: false },
             },
@@ -3832,11 +3834,11 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (url === '/api/workspace/billing') {
+      if (url.startsWith('/api/workspace/billing?')) {
         return new Response(
           JSON.stringify({
             summary: {
-              workspaceId: 'ws-team',
+              workspaceId: null,
               membershipTier: 'team',
               // recvqakgSc1Pwd: B reports credits and USD on separate scales
               // (thousands of credits per dollar) — a real workspace read
@@ -3848,9 +3850,17 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
               totalAvailableCredits: 99933,
               subscriptionCredits: 99933,
               rechargeCredits: 0,
-              balanceUsd: '9.9933',
+              balanceUsd: '131.23',
               subscriptionStatus: 'active',
               availableActions: [],
+              workspaceBalance: {
+                workspaceId: 'ws-team',
+                workspaceMemberId: 'member-team',
+                balanceUsd: '9.9933',
+                billingScopeVersion: 2,
+                expiresAt: null,
+                updatedAt: '2026-07-26T12:00:00Z',
+              },
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },

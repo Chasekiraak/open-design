@@ -993,9 +993,11 @@ function AppInner() {
     billing: workspaceBilling,
     context: workspaceContext,
     accountPlan:
-      amrLoginStatus?.account?.plan?.trim()
-      || amrLoginStatus?.user?.plan?.trim()
-      || null,
+      workspaceContextLoading || workspaceContext?.workspaceType === 'team'
+        ? null
+        : amrLoginStatus?.account?.plan?.trim()
+          || amrLoginStatus?.user?.plan?.trim()
+          || null,
   });
   // Child surfaces report status snapshots, not login events. Deduplicate the
   // signed-in transition here: restarting the model poll for every Settings

@@ -222,8 +222,29 @@ export function notifyWorkspaceContextRefresh(): void {
  * then falls back to the plan-tier hint the workspace context already carries.
  */
 export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
-  const [summary, setSummary] = useState<WorkspaceBillingSummary | null>(null);
+  const { context, loading: contextLoading } = useWorkspaceContext();
+  const workspaceId = context?.workspaceId?.trim() ?? '';
+  const billingScopeKey =
+    contextLoading
+      ? null
+      : context?.workspaceType === 'team'
+        ? workspaceId
+          ? `workspace-billing:workspace:${workspaceId}`
+          : null
+        : 'workspace-billing:account';
+  const billingUrl =
+    billingScopeKey === 'workspace-billing:account'
+      ? '/api/workspace/billing?scope=account'
+      : billingScopeKey
+        ? `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}`
+        : null;
+  const [state, setState] = useState<{
+    scopeKey: string;
+    summary: WorkspaceBillingSummary | null;
+  } | null>(null);
   const mountedRef = useRef(true);
+  const activeScopeKeyRef = useRef<string | null>(billingScopeKey);
+  activeScopeKeyRef.current = billingScopeKey;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -240,21 +261,34 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
   // Ambient triggers (focus/pageshow/visibility) stay on plain `coalescedGet`
   // and tolerate sub-second staleness, same as context/team-projects.
   const loadBilling = useCallback(async (clearOnFailure: boolean, force = false) => {
+    if (!billingScopeKey || !billingUrl) {
+      if (clearOnFailure && mountedRef.current) setState(null);
+      return;
+    }
+    const scopeKey = billingScopeKey;
     try {
       const fetchBilling = async () => {
-        const res = await fetch('/api/workspace/billing', { cache: 'no-store' });
+        const res = await fetch(billingUrl, { cache: 'no-store' });
         if (!res.ok) throw new Error(`billing ${res.status}`);
         const body = (await res.json()) as WorkspaceBillingResponse;
         return body.summary ?? null;
       };
       const summary = force
-        ? await forceCoalescedGet('workspace-billing', fetchBilling)
-        : await coalescedGet('workspace-billing', fetchBilling);
-      if (mountedRef.current) setSummary(summary);
+        ? await forceCoalescedGet(scopeKey, fetchBilling)
+        : await coalescedGet(scopeKey, fetchBilling);
+      if (mountedRef.current && activeScopeKeyRef.current === scopeKey) {
+        setState({ scopeKey, summary });
+      }
     } catch {
-      if (clearOnFailure && mountedRef.current) setSummary(null);
+      if (
+        clearOnFailure &&
+        mountedRef.current &&
+        activeScopeKeyRef.current === scopeKey
+      ) {
+        setState({ scopeKey, summary: null });
+      }
     }
-  }, []);
+  }, [billingScopeKey, billingUrl]);
 
   useEffect(() => {
     void loadBilling(true);
@@ -310,7 +344,7 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
     };
   }, [loadBilling]);
 
-  return summary;
+  return billingScopeKey && state?.scopeKey === billingScopeKey ? state.summary : null;
 }
 
 const WORKSPACE_BILLING_POLL_MS = 30_000;
