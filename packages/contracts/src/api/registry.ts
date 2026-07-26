@@ -700,7 +700,8 @@ export type InstallInput =
   | { source: 'local'; path: string };
 
 // Plugin-compatible remote source accepted by POST /api/skills/install:
-// `github:owner/repo` or a public HTTPS `.tar.gz` / `.tgz` archive.
+// a root `https://github.com/owner/repo` URL, `github:owner/repo`, or a public
+// HTTPS `.tar.gz` / `.tgz` archive.
 export interface InstallSkillRequest {
   source: string;
 }

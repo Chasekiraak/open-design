@@ -8545,7 +8545,7 @@ async function runLibraryList(name, args) {
 async function runSkills(args) {
   if (!args[0] || args[0] === 'help' || args.includes('--help') || args.includes('-h')) {
     console.log(`Usage:
-  od skill install <github:owner/repo|https://…tar.gz|https://…tgz> [--json]
+  od skill install <https://github.com/owner/repo|github:owner/repo|https://…tar.gz|https://…tgz> [--json]
   od skill list
   od skill show <id>
   od skill uninstall <id>
@@ -8566,7 +8566,7 @@ async function runSkillInstall(rest) {
   const source = positionalArgs(rest, LIBRARY_STRING_FLAGS)[0];
   if (!source) {
     console.error(
-      'Usage: od skill install <github:owner/repo|https://…tar.gz|https://…tgz> [--json] [--daemon-url <url>]',
+      'Usage: od skill install <https://github.com/owner/repo|github:owner/repo|https://…tar.gz|https://…tgz> [--json] [--daemon-url <url>]',
     );
     process.exit(2);
   }

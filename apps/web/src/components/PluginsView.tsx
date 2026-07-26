@@ -2010,7 +2010,11 @@ export function ExtensionsMarketplace({
                       value={createUrl}
                       onChange={(event) => setCreateUrl(event.target.value)}
                       disabled={createBusy !== null}
-                      placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'github:owner/repo'}
+                      placeholder={
+                        createKind === 'plugin'
+                          ? 'https://github.com/owner/plugin-repo'
+                          : 'https://github.com/owner/skill-repo'
+                      }
                     />
                     <button
                       type="button"

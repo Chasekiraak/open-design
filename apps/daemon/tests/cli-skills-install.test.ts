@@ -99,4 +99,22 @@ describe('od skill install CLI', () => {
       skill: { id: 'remote-skill' },
     });
   });
+
+  it('passes a browser GitHub repository URL to the shared daemon installer', async () => {
+    const result = await runCli([
+      'skill',
+      'install',
+      'https://github.com/leonxlnx/taste-skill',
+      '--daemon-url',
+      baseUrl,
+      '--json',
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(requests).toEqual([{
+      method: 'POST',
+      url: '/api/skills/install',
+      body: JSON.stringify({ source: 'https://github.com/leonxlnx/taste-skill' }),
+    }]);
+  });
 });

@@ -275,7 +275,7 @@ describe('ExtensionsMarketplace import', () => {
     fireEvent.click(container.querySelector('.plugin-marketplace__create')!);
     const urlInput = await waitFor(() =>
       container.querySelector<HTMLInputElement>(
-        'input[placeholder="https://example.com/open-design-suite"]',
+        'input[placeholder="https://github.com/owner/plugin-repo"]',
       )!,
     );
     fireEvent.change(urlInput, { target: { value: IMPORT_URL } });
@@ -304,10 +304,12 @@ describe('ExtensionsMarketplace import', () => {
 
     const urlInput = await waitFor(() =>
       container.querySelector<HTMLInputElement>(
-        'input[placeholder="github:owner/repo"]',
+        'input[placeholder="https://github.com/owner/skill-repo"]',
       )!,
     );
-    fireEvent.change(urlInput, { target: { value: 'github:owner/skill-repo' } });
+    fireEvent.change(urlInput, {
+      target: { value: 'https://github.com/owner/skill-repo' },
+    });
     fireEvent.click(screen.getByTestId('plugin-create-import-url'));
 
     await waitFor(() => {
@@ -316,7 +318,7 @@ describe('ExtensionsMarketplace import', () => {
       );
       expect(installCall).toBeTruthy();
       expect(JSON.parse(String(installCall?.[1]?.body))).toEqual({
-        source: 'github:owner/skill-repo',
+        source: 'https://github.com/owner/skill-repo',
       });
       expect(container.querySelector('.plugin-marketplace__create-panel')).toBeNull();
       expect(screen.getByTestId('plugins-tab-installed').classList.contains('is-active')).toBe(true);

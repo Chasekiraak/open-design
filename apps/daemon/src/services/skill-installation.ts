@@ -15,10 +15,13 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { x as extractTar } from 'tar';
 import { parseFrontmatter } from '../design-systems/frontmatter.js';
+import { resolveGithubRepositoryUrl } from '../github-install-source.js';
 import { safeExternalFetch } from '../plugins/plugin-asset-cache.js';
 import { findSkillById, listSkills, slugifySkillName } from '../skills.js';
 
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
+const MAX_SKILL_SCAN_DEPTH = 6;
+const MAX_SKILL_SCAN_ENTRIES = 10_000;
 const GITHUB_SKILL_SOURCE_RE =
   /^github:([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
 
@@ -48,6 +51,7 @@ export interface SkillRemoteInstallOptions {
 
 interface ResolvedSkillSource {
   fetchUrl: string;
+  preferredSkillDirectory?: string;
 }
 
 function error(
@@ -58,7 +62,13 @@ function error(
 }
 
 function resolveSkillSource(rawSource: string): ResolvedSkillSource | SkillRemoteInstallResult {
-  const source = rawSource.trim();
+  const browserGithub = resolveGithubRepositoryUrl(rawSource);
+  if (browserGithub.kind === 'invalid') {
+    return error('BAD_REQUEST', browserGithub.error);
+  }
+  const source = browserGithub.kind === 'repository'
+    ? browserGithub.source
+    : rawSource.trim();
   const github = GITHUB_SKILL_SOURCE_RE.exec(source);
   if (github) {
     const owner = github[1]!;
@@ -68,6 +78,7 @@ function resolveSkillSource(rawSource: string): ResolvedSkillSource | SkillRemot
     }
     return {
       fetchUrl: `https://codeload.github.com/${owner}/${repo}/tar.gz/HEAD`,
+      preferredSkillDirectory: repo,
     };
   }
   if (source.startsWith('github:')) {
@@ -165,28 +176,62 @@ async function measureSafeTree(root: string, maxBytes: number): Promise<number> 
   return total;
 }
 
-async function findSkillRoot(extractRoot: string): Promise<string | SkillRemoteInstallResult> {
+async function findSkillRoot(
+  extractRoot: string,
+  preferredSkillDirectory?: string,
+): Promise<string | SkillRemoteInstallResult> {
   const rootManifest = path.join(extractRoot, 'SKILL.md');
   if (await lstat(rootManifest).then((stats) => stats.isFile()).catch(() => false)) {
     return extractRoot;
   }
-  const entries = await readdir(extractRoot, { withFileTypes: true });
   const candidates: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const candidate = path.join(extractRoot, entry.name);
-    const manifest = path.join(candidate, 'SKILL.md');
-    if (await lstat(manifest).then((stats) => stats.isFile()).catch(() => false)) {
-      candidates.push(candidate);
+  let scannedEntries = 0;
+  async function scan(dir: string, depth: number): Promise<void> {
+    if (depth > MAX_SKILL_SCAN_DEPTH) return;
+    const entries = await readdir(dir, { withFileTypes: true });
+    scannedEntries += entries.length;
+    if (scannedEntries > MAX_SKILL_SCAN_ENTRIES) {
+      throw new Error(
+        `Skill archive contains more than ${MAX_SKILL_SCAN_ENTRIES} entries while locating SKILL.md`,
+      );
     }
+    if (entries.some((entry) => entry.isFile() && entry.name === 'SKILL.md')) {
+      candidates.push(dir);
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) await scan(path.join(dir, entry.name), depth + 1);
+    }
+  }
+  try {
+    await scan(extractRoot, 0);
+  } catch (cause) {
+    return error(
+      'INVALID_MANIFEST',
+      cause instanceof Error ? cause.message : String(cause),
+    );
   }
   if (candidates.length === 0) {
     return error('INVALID_MANIFEST', 'Skill archive does not contain a SKILL.md file');
   }
+  if (preferredSkillDirectory) {
+    const expectedSuffix = `/skills/${preferredSkillDirectory.toLowerCase()}`;
+    const preferred = candidates.filter((candidate) => {
+      const relative = path.relative(extractRoot, candidate).split(path.sep).join('/').toLowerCase();
+      return relative === expectedSuffix.slice(1) || relative.endsWith(expectedSuffix);
+    });
+    if (preferred.length === 1) return preferred[0]!;
+  }
   if (candidates.length > 1) {
+    const examples = candidates
+      .slice(0, 5)
+      .map((candidate) => path.relative(extractRoot, candidate).split(path.sep).join('/'))
+      .join(', ');
     return error(
       'INVALID_MANIFEST',
-      'Skill archive contains multiple top-level SKILL.md files; import one skill per archive',
+      `Skill repository contains multiple SKILL.md files (${examples}) and has no unique `
+      + `skills/${preferredSkillDirectory ?? '<repo-name>'}/SKILL.md default; `
+      + 'upload an archive containing exactly one skill',
     );
   }
   return candidates[0]!;
@@ -316,7 +361,10 @@ export async function installSkillFromRemoteSource(
       );
     }
 
-    const skillRoot = await findSkillRoot(extractRoot);
+    const skillRoot = await findSkillRoot(
+      extractRoot,
+      resolved.preferredSkillDirectory,
+    );
     if (typeof skillRoot !== 'string') return skillRoot;
     const identity = await readSkillIdentity(skillRoot);
     if ('ok' in identity) return identity;

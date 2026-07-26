@@ -79,6 +79,69 @@ describe('installSkillFromRemoteSource', () => {
     ).toBe('asset');
   });
 
+  it('installs a browser GitHub URL from the repo-named skill in a multi-skill repository', async () => {
+    const archive = await archiveFrom(async (root) => {
+      const repositoryRoot = path.join(root, 'taste-skill-main');
+      const defaultSkillRoot = path.join(repositoryRoot, 'skills', 'taste-skill');
+      const siblingSkillRoot = path.join(repositoryRoot, 'skills', 'other-skill');
+      await mkdir(path.join(defaultSkillRoot, 'assets'), { recursive: true });
+      await mkdir(siblingSkillRoot, { recursive: true });
+      await writeFile(
+        path.join(defaultSkillRoot, 'SKILL.md'),
+        '---\nname: design-taste-frontend\ndescription: Default taste skill\n---\n\n# Workflow\n',
+      );
+      await writeFile(path.join(defaultSkillRoot, 'assets', 'fixture.txt'), 'default asset');
+      await writeFile(
+        path.join(siblingSkillRoot, 'SKILL.md'),
+        '---\nname: other-skill\ndescription: Sibling fixture\n---\n\n# Other workflow\n',
+      );
+    }, ['taste-skill-main']);
+    const userSkillsRoot = await tempRoot('od-user-skills-');
+    const urls: string[] = [];
+
+    const result = await installSkillFromRemoteSource(
+      userSkillsRoot,
+      'https://github.com/leonxlnx/taste-skill',
+      { fetcher: archiveFetcher(archive, urls) },
+    );
+
+    expect(result).toMatchObject({ ok: true, id: 'design-taste-frontend' });
+    expect(urls).toEqual([
+      'https://codeload.github.com/leonxlnx/taste-skill/tar.gz/HEAD',
+    ]);
+    await expect(
+      readFile(
+        path.join(userSkillsRoot, 'design-taste-frontend', 'assets', 'fixture.txt'),
+        'utf8',
+      ),
+    ).resolves.toBe('default asset');
+  });
+
+  it('fails closed when a multi-skill repository has no unique repo-named default', async () => {
+    const archive = await archiveFrom(async (root) => {
+      for (const name of ['alpha-skill', 'beta-skill']) {
+        const skillRoot = path.join(root, 'collection-main', 'skills', name);
+        await mkdir(skillRoot, { recursive: true });
+        await writeFile(
+          path.join(skillRoot, 'SKILL.md'),
+          `---\nname: ${name}\ndescription: fixture\n---\n\n# Workflow\n`,
+        );
+      }
+    }, ['collection-main']);
+
+    const result = await installSkillFromRemoteSource(
+      await tempRoot('od-user-skills-'),
+      'https://github.com/owner/collection',
+      { fetcher: archiveFetcher(archive) },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'INVALID_MANIFEST',
+      error: expect.stringContaining('skills/collection/SKILL.md'),
+    });
+  });
+
   it('installs an HTTPS .tar.gz archive with SKILL.md at its root', async () => {
     const userSkillsRoot = await tempRoot('od-user-skills-');
     const result = await installSkillFromRemoteSource(
@@ -95,6 +158,10 @@ describe('installSkillFromRemoteSource', () => {
     'http://downloads.example/skill.tgz',
     'https://downloads.example/skill.zip',
     'github:owner/../repo',
+    'https://github.com/owner/repo/issues',
+    'https://owner@github.com/owner/repo',
+    'https://github.com/owner/repo?tab=readme',
+    'https://github.com.evil/owner/repo',
   ])('rejects an unsafe or unsupported source: %s', async (source) => {
     const result = await installSkillFromRemoteSource(
       await tempRoot('od-user-skills-'),
