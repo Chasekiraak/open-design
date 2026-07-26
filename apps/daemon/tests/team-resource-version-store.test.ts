@@ -48,8 +48,8 @@ describe('team resource version store', () => {
     expect(store.get('team-a', 'project-content', 'project-a')).toBeNull();
 
     // The rejected write must not poison the queue or leak into later writes.
-    // Concurrent keys serialize, and each next snapshot builds from the last
-    // successfully committed in-memory state.
+    // Concurrent keys share the next single-writer batch, which builds from
+    // the last successfully committed in-memory state.
     await Promise.all([
       store.set('team-a', 'project-content', 'project-b', '8'),
       store.set('team-a', 'project-content', 'project-c', '9'),
@@ -62,5 +62,119 @@ describe('team resource version store', () => {
     expect(reloaded.get('team-a', 'project-content', 'project-a')).toBeNull();
     expect(reloaded.get('team-a', 'project-content', 'project-b')).toBe('8');
     expect(reloaded.get('team-a', 'project-content', 'project-c')).toBe('9');
+  });
+
+  it('commits a burst of independent pull cursors in one durable snapshot', async () => {
+    const root = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'od-team-resource-versions-'),
+    );
+    roots.push(root);
+    const store = createTeamResourceVersionStore(root);
+    const writeFile = vi.spyOn(fs.promises, 'writeFile');
+
+    await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        store.set(
+          'team-a',
+          'project-content',
+          `project-${index}`,
+          String(index + 1),
+        ),
+      ),
+    );
+
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const reloaded = createTeamResourceVersionStore(root);
+    for (let index = 0; index < 20; index += 1) {
+      expect(
+        reloaded.get('team-a', 'project-content', `project-${index}`),
+      ).toBe(String(index + 1));
+    }
+  });
+
+  it('preserves cursors that arrive while an earlier batch is committing', async () => {
+    const root = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'od-team-resource-versions-'),
+    );
+    roots.push(root);
+    const store = createTeamResourceVersionStore(root);
+    const realRename = fs.promises.rename.bind(fs.promises);
+    let releaseFirstRename!: () => void;
+    let firstRenameStarted!: () => void;
+    const firstRenameGate = new Promise<void>((resolve) => {
+      releaseFirstRename = resolve;
+    });
+    const firstRenameStart = new Promise<void>((resolve) => {
+      firstRenameStarted = resolve;
+    });
+    const rename = vi.spyOn(fs.promises, 'rename').mockImplementationOnce(
+      async (oldPath, newPath) => {
+        firstRenameStarted();
+        await firstRenameGate;
+        await realRename(oldPath, newPath);
+      },
+    );
+
+    const first = store.set(
+      'team-a',
+      'project-content',
+      'project-a',
+      '1',
+    );
+    await firstRenameStart;
+    const later = Promise.all([
+      store.set('team-a', 'project-content', 'project-b', '2'),
+      store.set('team-a', 'project-content', 'project-c', '3'),
+    ]);
+    releaseFirstRename();
+    await Promise.all([first, later]);
+
+    expect(rename).toHaveBeenCalledTimes(2);
+    const reloaded = createTeamResourceVersionStore(root);
+    expect(reloaded.get('team-a', 'project-content', 'project-a')).toBe('1');
+    expect(reloaded.get('team-a', 'project-content', 'project-b')).toBe('2');
+    expect(reloaded.get('team-a', 'project-content', 'project-c')).toBe('3');
+  });
+
+  it('commits a later batch after the in-flight batch fails', async () => {
+    const root = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'od-team-resource-versions-'),
+    );
+    roots.push(root);
+    const store = createTeamResourceVersionStore(root);
+    let releaseFirstRename!: () => void;
+    let firstRenameStarted!: () => void;
+    const firstRenameGate = new Promise<void>((resolve) => {
+      releaseFirstRename = resolve;
+    });
+    const firstRenameStart = new Promise<void>((resolve) => {
+      firstRenameStarted = resolve;
+    });
+    vi.spyOn(fs.promises, 'rename').mockImplementationOnce(async () => {
+      firstRenameStarted();
+      await firstRenameGate;
+      throw new Error('first batch unavailable');
+    });
+
+    const failed = store.set(
+      'team-a',
+      'project-content',
+      'project-a',
+      '1',
+    );
+    await firstRenameStart;
+    const later = store.set(
+      'team-a',
+      'project-content',
+      'project-b',
+      '2',
+    );
+    releaseFirstRename();
+
+    await expect(failed).rejects.toThrow('first batch unavailable');
+    await expect(later).resolves.toBeUndefined();
+    const reloaded = createTeamResourceVersionStore(root);
+    expect(reloaded.get('team-a', 'project-content', 'project-a')).toBeNull();
+    expect(reloaded.get('team-a', 'project-content', 'project-b')).toBe('2');
   });
 });

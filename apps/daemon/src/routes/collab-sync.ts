@@ -143,6 +143,11 @@ export interface RegisterCollabSyncRoutesDeps {
       | 'route-started'
       | 'transport-invoke'
       | 'transport-done'
+      | 'registration-prepared'
+      | 'catalog-revalidated'
+      | 'scope-revalidated'
+      | 'mirror-materialized'
+      | 'version-write-started'
       | 'persisted'
       | 'route-completed';
     projectId: string;
@@ -1026,6 +1031,12 @@ export function registerCollabSyncRoutes(
         console.warn('[od] failed to prepare pulled team project:', error);
         return complete({ status: 'register_failed' });
       }
+      reportPullTiming({
+        phase: 'registration-prepared',
+        projectId,
+        version: result.version,
+        atMs: Date.now(),
+      });
 
       // The initial catalog result only authorized starting the transfer. The
       // owner may unshare while bytes are in flight, so scoped materialization
@@ -1044,12 +1055,24 @@ export function registerCollabSyncRoutes(
         if (authoritativeSharedProject.ownerMemberId !== scope.ownerMemberId) {
           return complete({ status: 'register_failed' });
         }
+        reportPullTiming({
+          phase: 'catalog-revalidated',
+          projectId,
+          version: result.version,
+          atMs: Date.now(),
+        });
         // Keep this check adjacent to the synchronous SQLite transaction.
         // Nothing below may await before materializeTeamMirror revalidates the
         // binding and commits it.
         if (!(await capturedScopeIsStillActive(scope))) {
           return complete({ status: 'register_failed' });
         }
+        reportPullTiming({
+          phase: 'scope-revalidated',
+          projectId,
+          version: result.version,
+          atMs: Date.now(),
+        });
       } else if (resolveSharedProject) {
         try {
           authoritativeSharedProject = await resolveSharedProject(projectId, null);
@@ -1069,11 +1092,23 @@ export function registerCollabSyncRoutes(
         console.warn('[od] failed to register pulled team project:', error);
         return complete({ status: 'register_failed' });
       }
+      reportPullTiming({
+        phase: 'mirror-materialized',
+        projectId,
+        version: result.version,
+        atMs: Date.now(),
+      });
       // Persist the exact version before notifying readers. A file-change
       // subscriber may immediately re-check /collab/status; it must never
       // observe the new bytes paired with the previous durable cursor.
       if (scope && deps.writeMaterializedVersion) {
         try {
+          reportPullTiming({
+            phase: 'version-write-started',
+            projectId,
+            version: result.version,
+            atMs: Date.now(),
+          });
           await deps.writeMaterializedVersion(projectId, scope, result.version);
           reportPullTiming({
             phase: 'persisted',

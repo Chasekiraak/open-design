@@ -2080,6 +2080,11 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       'route-started',
       'transport-invoke',
       'transport-done',
+      'registration-prepared',
+      'catalog-revalidated',
+      'scope-revalidated',
+      'mirror-materialized',
+      'version-write-started',
       'persisted',
       'route-completed',
     ]);

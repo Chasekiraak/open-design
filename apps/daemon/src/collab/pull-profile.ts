@@ -19,6 +19,11 @@ export type SharedProjectPullTimingPhase =
   | 'route-started'
   | 'transport-invoke'
   | 'transport-done'
+  | 'registration-prepared'
+  | 'catalog-revalidated'
+  | 'scope-revalidated'
+  | 'mirror-materialized'
+  | 'version-write-started'
   | 'persisted'
   | 'route-completed';
 
