@@ -2549,7 +2549,13 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                   data-placement={designSystemGuidePlacement}
                   role="status"
                 >
-                  {designSystemGuideCopy}
+                  <Icon
+                    name="sparkles"
+                    size={12}
+                    className="home-hero__design-system-guide-icon"
+                    aria-hidden
+                  />
+                  <span>{designSystemGuideCopy}</span>
                 </div>
               ) : null}
             </div>

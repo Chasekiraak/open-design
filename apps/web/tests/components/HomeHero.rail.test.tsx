@@ -149,9 +149,11 @@ describe('HomeHero intent rail', () => {
       renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
 
       expect(screen.getByTestId('home-hero-design-system-trigger')).toHaveTextContent('Add design system');
-      expect(screen.getByTestId('home-hero-design-system-guide')).toHaveTextContent(
+      const guide = screen.getByTestId('home-hero-design-system-guide');
+      expect(guide).toHaveTextContent(
         'Add a design system to keep layouts, colors, and components consistent.',
       );
+      expect(guide.querySelector('.home-hero__design-system-guide-icon')).toBeTruthy();
       const icon = screen.getByTestId('home-hero-design-system-trigger-icon');
       expect(icon).not.toHaveClass('is-first-run-guide');
 
