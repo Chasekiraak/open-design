@@ -2061,4 +2061,33 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(writeMaterializedVersion).toHaveBeenCalledTimes(1);
     expect(writeMaterializedVersion).toHaveBeenCalledWith('race-pull', pullScope, 5);
   });
+
+  it('releases the per-project pull lock after a transport deadline rejects', async () => {
+    const adapterPull = vi.fn()
+      .mockRejectedValueOnce(new Error('vela resource pull timed out'))
+      .mockResolvedValueOnce({ version: 5 });
+    const store = fakeProjectStore();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: store,
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      writeMaterializedVersion: async () => undefined,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    await expect(
+      api.handle.pullSharedProject('deadline-retry', pullScope),
+    ).rejects.toThrow('timed out');
+    await expect(
+      api.handle.pullSharedProject('deadline-retry', pullScope),
+    ).resolves.toEqual({ status: 'pulled', version: 5 });
+
+    expect(adapterPull).toHaveBeenCalledTimes(2);
+  });
 });

@@ -8,6 +8,7 @@ const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: execFileMock }));
 
 import { runVelaCommand } from '../../src/integrations/vela-command.js';
+import { runVelaResourceCommand } from '../../src/collab/vela-cli-resource-adapter.js';
 
 describe('runVelaCommand', () => {
   beforeEach(() => {
@@ -79,5 +80,48 @@ describe('runVelaCommand', () => {
     });
 
     expect(execFileMock.mock.calls[0]?.[0]).toBe(process.execPath);
+  });
+
+  it('passes an explicit deadline and terminating signal to the child process', async () => {
+    await runVelaCommand(['resource', 'pull', 'project-1'], {
+      env: {
+        ...process.env,
+        VELA_BIN: process.execPath,
+        OD_DATA_DIR: '',
+      },
+      timeoutMs: 30_000,
+    });
+
+    const options = execFileMock.mock.calls[0]?.[2] as {
+      timeout?: number;
+      killSignal?: NodeJS.Signals;
+    };
+    expect(options.timeout).toBe(30_000);
+    expect(options.killSignal).toBe('SIGTERM');
+  });
+
+  it('bounds production resource pulls so a stuck child cannot hold the project lock forever', async () => {
+    vi.stubEnv('VELA_BIN', process.execPath);
+    vi.stubEnv('OD_DATA_DIR', '');
+    try {
+      await runVelaResourceCommand([
+        'pull',
+        'project',
+        'resource-1',
+        '/tmp/project-1',
+        '--ref',
+        'published',
+        '--json',
+      ], 'workspace-1');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    const options = execFileMock.mock.calls[0]?.[2] as {
+      timeout?: number;
+      killSignal?: NodeJS.Signals;
+    };
+    expect(options.timeout).toBe(30_000);
+    expect(options.killSignal).toBe('SIGTERM');
   });
 });

@@ -17,6 +17,12 @@ export interface VelaCommandOptions {
   env?: NodeJS.ProcessEnv;
   configuredEnv?: Record<string, string>;
   maxBuffer?: number;
+  /** Reject and terminate the child when it exceeds this wall-clock budget. */
+  timeoutMs?: number;
+  /** Optional caller cancellation, forwarded to Node's child-process API. */
+  signal?: AbortSignal;
+  /** Signal used for deadline/cancellation termination. Defaults to SIGTERM. */
+  killSignal?: NodeJS.Signals;
 }
 
 export function velaWorkspaceCommandOptions(
@@ -85,6 +91,12 @@ export function runVelaCommand(
     launch,
   );
   const invocation = createCommandInvocation({ command: bin, args, env: childEnv });
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' &&
+    Number.isFinite(options.timeoutMs) &&
+    options.timeoutMs > 0
+      ? Math.floor(options.timeoutMs)
+      : undefined;
   return new Promise<string>((resolve, reject) => {
     execFile(
       invocation.command,
@@ -94,6 +106,9 @@ export function runVelaCommand(
         encoding: 'utf8',
         maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        killSignal: options.killSignal ?? 'SIGTERM',
       },
       (error, stdout) => {
         if (error) reject(error);

@@ -22,6 +22,10 @@ import type { ResourceHubPrincipal } from './resource-principal.js';
 
 const PUBLISHED_REF = 'published';
 const PROJECT_KIND = 'project';
+// A normal feature-test pull is expected to finish in roughly five seconds.
+// Give the transport a generous 6x envelope for large snapshots, but never
+// let a wedged Vela child hold the per-project materialization lock forever.
+const RESOURCE_PULL_TIMEOUT_MS = 30_000;
 const MEMBER_MIRROR_EXCLUDED_ENTRIES = [
   '.file-versions',
   '.live-artifacts',
@@ -239,7 +243,10 @@ export function parseVelaResourceSnapshot(stdout: string): VelaResourceSnapshotR
 export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) =>
   runVelaCommand(
     ['resource', ...args],
-    velaWorkspaceCommandOptions(workspaceId),
+    {
+      ...velaWorkspaceCommandOptions(workspaceId),
+      ...(args[0] === 'pull' ? { timeoutMs: RESOURCE_PULL_TIMEOUT_MS } : {}),
+    },
   );
 
 const defaultRunVelaResource: RunVelaResource = runVelaResourceCommand;
