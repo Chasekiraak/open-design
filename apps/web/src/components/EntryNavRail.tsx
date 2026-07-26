@@ -23,7 +23,13 @@
 // The gate is `workspaceType` + permissions, never the billing/provider axis — a
 // personal_byok workspace still has full team features.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { coalescedGet } from '../lib/coalesced-get';
 import type {
   WorkspaceActiveResponse,
@@ -129,6 +135,29 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
       <span className="entry-nav-rail__btn-label">{tooltip}</span>
     </button>
   );
+}
+
+function handleWorkspaceMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const items = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'),
+  );
+  if (items.length === 0) return;
+
+  const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+  let nextIndex: number;
+  if (event.key === 'Home') {
+    nextIndex = 0;
+  } else if (event.key === 'End') {
+    nextIndex = items.length - 1;
+  } else if (event.key === 'ArrowUp') {
+    nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+  } else {
+    nextIndex = currentIndex < 0 || currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
+  }
+
+  event.preventDefault();
+  items[nextIndex]?.focus();
 }
 
 // Team management (members, dashboard, settings) lives in B's vela/web console,
@@ -940,75 +969,89 @@ export function EntryNavRail({
               {teamOpen ? (
                 <>
                   <div className="entry-nav-rail__menu-backdrop" onClick={() => setTeamOpen(false)} />
-                  <div className="entry-nav-rail__team-menu" role="menu">
-                    {visibleWorkspaceItems.map((item) => {
-                      const active = item.workspaceId === context.workspaceId;
-                      const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
-                      return (
+                  <div
+                    className="entry-nav-rail__team-menu"
+                    role="menu"
+                    onKeyDown={handleWorkspaceMenuKeyDown}
+                  >
+                    <div
+                      className="entry-nav-rail__workspace-list"
+                      data-testid="workspace-switcher-list"
+                    >
+                      {visibleWorkspaceItems.map((item) => {
+                        const active = item.workspaceId === context.workspaceId;
+                        const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
+                        return (
+                          <button
+                            key={item.workspaceId}
+                            type="button"
+                            className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                            role="menuitem"
+                            aria-current={active ? 'true' : undefined}
+                            // Only the in-flight switch disables a row. Disabling the
+                            // CURRENT one made the UA grey it out, so the selected
+                            // workspace read as the inactive one and vice versa;
+                            // `.is-current` (bold + accent ✓) is the selected signal.
+                            disabled={workspaceSwitchingId === item.workspaceId}
+                            onClick={() => {
+                              void switchWorkspace(item.workspaceId);
+                            }}
+                          >
+                            <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
+                            {/* #5517's switcher rows are avatar + full name + ✓ only.
+                                The raw role word ate the name's width and truncated
+                                it; the role is already on 设置·工作区. */}
+                            <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
+                            {active ? <Icon name="check" size={14} /> : null}
+                          </button>
+                        );
+                      })}
+                      {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
+                        <div className="entry-nav-rail__menu-item is-muted" role="status">
+                          {t('common.loading')}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div
+                      className="entry-nav-rail__workspace-actions"
+                      data-testid="workspace-switcher-actions"
+                    >
+                      <div className="entry-nav-rail__menu-divider" />
+                      {canAccessInviteFlow && inviteTarget.kind !== 'unavailable' ? (
                         <button
-                          key={item.workspaceId}
                           type="button"
-                          className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                          className="entry-nav-rail__menu-item"
                           role="menuitem"
-                          aria-current={active ? 'true' : undefined}
-                          // Only the in-flight switch disables a row. Disabling the
-                          // CURRENT one made the UA grey it out, so the selected
-                          // workspace read as the inactive one and vice versa;
-                          // `.is-current` (bold + accent ✓) is the selected signal.
-                          disabled={workspaceSwitchingId === item.workspaceId}
                           onClick={() => {
-                            void switchWorkspace(item.workspaceId);
+                            setTeamOpen(false);
+                            if (inviteTarget.kind === 'vela') {
+                              window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
+                            } else if (inviteTarget.kind === 'local') {
+                              setInviteOpen(true);
+                            }
                           }}
                         >
-                          <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
-                          {/* #5517's switcher rows are avatar + full name + ✓ only.
-                              The raw role word ate the name's width and truncated
-                              it; the role is already on 设置·工作区. */}
-                          <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
-                          {active ? <Icon name="check" size={14} /> : null}
+                          <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
                         </button>
-                      );
-                    })}
-                    {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
-                      <div className="entry-nav-rail__menu-item is-muted" role="status">
-                        {t('common.loading')}
-                      </div>
-                    ) : null}
-                    <div className="entry-nav-rail__menu-divider" />
-                    {canAccessInviteFlow && inviteTarget.kind !== 'unavailable' ? (
-                      <button
-                        type="button"
-                        className="entry-nav-rail__menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          setTeamOpen(false);
-                          if (inviteTarget.kind === 'vela') {
-                            window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
-                          } else if (inviteTarget.kind === 'local') {
-                            setInviteOpen(true);
-                          }
-                        }}
-                      >
-                        <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
-                      </button>
-                    ) : null}
-                    {/* Creating a workspace is a B console flow (its sidebar owns the
-                        create dialog; there is no route or query param that opens it
-                        directly), so this entry links OUT instead of doing local work.
-                        With no console URL there is nowhere to send the user — render
-                        nothing rather than a control that silently does nothing. */}
-                    {workspaceSettingsUrl ? (
-                      <a
-                        className="entry-nav-rail__menu-item"
-                        role="menuitem"
-                        href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
-                        {...externalLinkProps}
-                        data-testid="entry-nav-create-team"
-                        onClick={() => setTeamOpen(false)}
-                      >
-                        <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
-                      </a>
-                    ) : null}
+                      ) : null}
+                      {/* Creating a workspace is a B console flow (its sidebar owns the
+                          create dialog; there is no route or query param that opens it
+                          directly), so this entry links OUT instead of doing local work.
+                          With no console URL there is nowhere to send the user — render
+                          nothing rather than a control that silently does nothing. */}
+                      {workspaceSettingsUrl ? (
+                        <a
+                          className="entry-nav-rail__menu-item"
+                          role="menuitem"
+                          href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
+                          {...externalLinkProps}
+                          data-testid="entry-nav-create-team"
+                          onClick={() => setTeamOpen(false)}
+                        >
+                          <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 </>
               ) : null}

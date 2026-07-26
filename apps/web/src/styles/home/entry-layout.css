@@ -5945,6 +5945,10 @@
   right: 0;
   width: auto;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(306px, 45vh);
+  overflow: hidden;
 }
 .entry-nav-rail__account-menu {
   padding: 6px;
@@ -5991,6 +5995,21 @@
   height: 8px;
 }
 .entry-nav-rail__team-menu { min-width: 0; }
+.entry-nav-rail__workspace-list {
+  min-height: 0;
+  max-height: 170px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.entry-nav-rail__workspace-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--bg-elevated);
+}
 /* Left-aligned identity header (small avatar beside the name/email stack),
    closed off by a dashed rule — mirrors the reference account menu. */
 .entry-nav-rail__account-head {
