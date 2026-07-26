@@ -1006,9 +1006,21 @@ export function createProactiveContentPull(
       candidates.push({ project, forcePull: mode === 'missing-only' });
     }
     let heads = 0;
+    // A project-specific first-share recovery must not wait behind historical
+    // missing projects from the same workspace. Keep the broad safety-floor
+    // sweep, but pull its explicit witnesses first so unrelated downloads
+    // cannot delay the event that requested this recovery.
+    const orderedCandidates = expectedProjectIds.size === 0
+      ? candidates
+      : [
+          ...candidates.filter(({ project }) =>
+            expectedProjectIds.has(project.projectId)),
+          ...candidates.filter(({ project }) =>
+            !expectedProjectIds.has(project.projectId)),
+        ];
     // Deliberately sequential: reconnect is a recovery path, not permission
     // to fan out one request per shared project at once.
-    for (const candidate of candidates) {
+    for (const candidate of orderedCandidates) {
       const { project, forcePull } = candidate;
       const binding = deps.getLocalBinding(project.projectId);
       if (binding?.visibility === 'personal') continue;

@@ -860,6 +860,23 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(retry.tasks.size).toBe(1);
   });
 
+  it('prioritizes the targeted first share ahead of unrelated missing projects', async () => {
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'unrelated-history', ownerMemberId: 'wm-owner' },
+        { projectId: 'fresh-share', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'fresh-share');
+
+    expect(deps.pullCalls).toEqual(['fresh-share', 'unrelated-history']);
+  });
+
   it('keeps concurrent first-share catalog retries independent', async () => {
     const retry = makeRetryScheduler();
     let releaseCatalog!: () => void;
