@@ -25,7 +25,11 @@ import {
   useWorkspaceBilling,
   useWorkspaceContext,
 } from '../collab/useWorkspaceContext';
-import { resolveWorkspaceInviteTarget, workspaceUpgradeUrl } from './EntryNavRail';
+import {
+  canAccessWorkspaceInviteFlow,
+  resolveWorkspaceInviteTarget,
+  workspaceUpgradeUrl,
+} from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
@@ -323,8 +327,7 @@ export function RecentProjectsStrip({
     collaborationEnabled ??
     (workspaceContextHasTeamIdentity(workspaceContext) &&
       workspaceContext?.permissions.canShareProjects === true);
-  const canInvite =
-    canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true;
+  const canAccessInviteFlow = canAccessWorkspaceInviteFlow(workspaceContext);
   // The invite dialog's seat-gate upgrade CTA: personal workspace → B's wallet
   // pricing modal, team → checkout vs change-plan by subscription state. One
   // shared decision point — see `workspaceUpgradeUrl` in EntryNavRail.tsx
@@ -959,9 +962,8 @@ export function RecentProjectsStrip({
             ) : null}
           </div>
           <div className="recent-projects__controls">
-            {collaborationAvailable &&
-            space === 'team' &&
-            canInvite &&
+            {space === 'team' &&
+            canAccessInviteFlow &&
             inviteTarget.kind !== 'unavailable' ? (
               <button
                 type="button"
@@ -1672,7 +1674,9 @@ export function RecentProjectsStrip({
       <InviteDialog
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
-        canAssignRoles={canInvite}
+        canAssignRoles={
+          canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true
+        }
         availableSeats={workspaceContext?.seatSummary?.availableSeats}
         onUpgrade={
           inviteUpgradeUrl

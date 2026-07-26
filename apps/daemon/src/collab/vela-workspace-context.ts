@@ -429,11 +429,11 @@ function synthesizeContext(item: WorkspaceDirectoryItem): WorkspaceCollabContext
       memberStatus: item.memberStatus,
     }),
   };
+  const settingsUrl = resolveWorkspaceSettingsUrl(item.workspaceId, undefined);
+  if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   if (item.workspaceType === 'team') {
     context.teamId = item.workspaceId;
     context.teamName = item.workspaceName;
-    const settingsUrl = resolveWorkspaceSettingsUrl(item.workspaceId, undefined);
-    if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   }
   return context;
 }

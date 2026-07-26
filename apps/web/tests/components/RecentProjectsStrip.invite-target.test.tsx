@@ -130,10 +130,31 @@ describe('RecentProjectsStrip invite target (recvqgbyLNk4eE)', () => {
     ).toBeNull();
   });
 
-  it('does not expose the invite entry without invite permission', () => {
+  it.each(['owner', 'admin'] as const)(
+    'routes a Team %s without direct invite capability through Vela',
+    (role) => {
+      const context = teamContext(3);
+      workspaceState.context = {
+        ...context,
+        role,
+        permissions: { ...context.permissions, canInviteMembers: false },
+      } as WorkspaceCollabContext;
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+      renderTeamProjects();
+
+      fireEvent.click(screen.getByRole('button', { name: /Invite teammates|邀请同事/ }));
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+      expect(screen.queryByRole('dialog')).toBeNull();
+    },
+  );
+
+  it('does not expose the invite entry to a Team member', () => {
     const context = teamContext(3);
     workspaceState.context = {
       ...context,
+      role: 'member',
       permissions: { ...context.permissions, canInviteMembers: false },
     } as WorkspaceCollabContext;
     renderTeamProjects();

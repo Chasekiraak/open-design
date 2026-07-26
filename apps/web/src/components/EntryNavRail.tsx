@@ -282,16 +282,38 @@ export type WorkspaceInviteTarget =
   | { kind: 'unavailable' };
 
 /**
+ * Whether this member should discover the invite flow.
+ *
+ * This is deliberately not `permissions.canInviteMembers`: that capability
+ * only answers whether the current workspace may send an invite directly.
+ * Owners and admins still need the entry when B must first resolve a Free-plan
+ * upgrade, add seats, or recover the workspace. Members do not manage the
+ * roster, so their entry stays hidden.
+ */
+export function canAccessWorkspaceInviteFlow(
+  context: WorkspaceCollabContext | null | undefined,
+): boolean {
+  return (
+    context?.memberStatus === 'active' &&
+    (context.role === 'owner' || context.role === 'admin')
+  );
+}
+
+/**
  * Chooses the first safe invite surface. The local form is only valid when a
- * team is positively known to have capacity. Personal, full-seat, and
- * not-yet-known seat states go to Vela, whose dashboard owns the authoritative
- * upgrade/seat/invite decision. Missing routing data fails closed.
+ * team is positively known to have direct invite capability and capacity.
+ * Personal, capability-gated, full-seat, and not-yet-known seat states go to
+ * Vela, whose dashboard owns the authoritative upgrade/seat/invite decision.
+ * Missing routing data fails closed.
  */
 export function resolveWorkspaceInviteTarget(
   context: WorkspaceCollabContext | null | undefined,
 ): WorkspaceInviteTarget {
   if (!context) return { kind: 'unavailable' };
-  if (context.workspaceType === 'team') {
+  if (
+    context.workspaceType === 'team' &&
+    context.permissions.canInviteMembers === true
+  ) {
     const availableSeats = context.seatSummary?.availableSeats;
     const hasCapacity =
       availableSeats !== undefined
@@ -366,6 +388,7 @@ export function EntryNavRail({
   // re-derive from role — the permission bits already fold role + lifecycle in.
   const canViewWorkspaceSettings = Boolean(permissions?.canViewWorkspaceSettings);
   const canInviteMembers = Boolean(permissions?.canInviteMembers);
+  const canAccessInviteFlow = canAccessWorkspaceInviteFlow(context);
   const workspaceSettingsUrl = context?.workspaceSettingsUrl?.trim() || null;
 
   // Account identity (real). No email field on the context → the head shows the
@@ -925,7 +948,7 @@ export function EntryNavRail({
                       </div>
                     ) : null}
                     <div className="entry-nav-rail__menu-divider" />
-                    {canInviteMembers && inviteTarget.kind !== 'unavailable' ? (
+                    {canAccessInviteFlow && inviteTarget.kind !== 'unavailable' ? (
                       <button
                         type="button"
                         className="entry-nav-rail__menu-item"

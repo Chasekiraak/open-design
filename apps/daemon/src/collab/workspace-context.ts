@@ -181,9 +181,9 @@ function nonNegativeInt(value: unknown, fallback: number): number {
 }
 
 /**
- * The URL of the team's settings/management console on the cloud web app. Team
- * management (members, billing, dashboard) lives there — the local client only
- * links out to it. Prefers an explicit value the upstream context carries;
+ * The URL of the workspace settings/management console on the cloud web app.
+ * Team actions (create, invite, members, billing) live there — the local client
+ * only links out to them. Prefers an explicit value the upstream context carries;
  * otherwise builds one from `OD_VELA_WEB_URL` when configured. Undefined when
  * neither is available (the client then hides the settings entry).
  */
@@ -276,10 +276,8 @@ export function parseWorkspaceCollabContext(input: unknown): WorkspaceCollabCont
     // a dev PUT that omits it must not silently disable the collab plane.
     context.teamId = workspaceId;
   }
-  if (workspaceType === 'team') {
-    const settingsUrl = resolveWorkspaceSettingsUrl(workspaceId, raw.workspaceSettingsUrl);
-    if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
-  }
+  const settingsUrl = resolveWorkspaceSettingsUrl(workspaceId, raw.workspaceSettingsUrl);
+  if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   if (typeof raw.teamName === 'string' && raw.teamName.trim()) {
     context.teamName = raw.teamName.trim();
   }
