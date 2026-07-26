@@ -3631,7 +3631,7 @@ button.home-hero__capability-word:focus-visible {
   bottom: 0;
   display: flex;
   align-items: center;
-  width: 60px;
+  width: 44px;
   z-index: 2;
   color: var(--text-muted);
   opacity: 0;
@@ -3650,28 +3650,23 @@ button.home-hero__capability-word:focus-visible {
   transition:
     transform 160ms var(--ease-out),
     color 160ms var(--ease-out);
+  /* Keep the chevron legible over a card without painting a separate white
+     * surface over the kinetic grid behind the rail. */
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--bg) 68%, transparent));
 }
 .home-hero__rail-edge--left {
   left: 0;
   justify-content: flex-start;
   padding-left: 8px;
   cursor: w-resize;
-  background: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--bg-app) 92%, transparent),
-    transparent
-  );
+  background: transparent;
 }
 .home-hero__rail-edge--right {
   right: 0;
   justify-content: flex-end;
   padding-right: 8px;
   cursor: e-resize;
-  background: linear-gradient(
-    to left,
-    color-mix(in srgb, var(--bg-app) 92%, transparent),
-    transparent
-  );
+  background: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
   .home-hero__rail-edge,
