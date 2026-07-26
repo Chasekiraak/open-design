@@ -297,13 +297,32 @@ export function createProactiveContentPull(
     if (event.workspaceId && targetWorkspaceId !== event.workspaceId) {
       return { kind: 'skip', retryable: false, reason: 'scope-mismatch' };
     }
-    let identity: Awaited<ReturnType<typeof deps.getWorkspaceIdentity>>;
-    try {
-      identity = await deps.getWorkspaceIdentity();
-    } catch (error) {
-      deps.onError?.(error);
+    // Identity and ownership are independent, read-only guards. Start both
+    // cold reads together: in the Vela-backed runtime each may spawn its own
+    // CLI/network round-trip, so serializing them adds their latencies before
+    // a pull can even begin. Promise.allSettled keeps every decision
+    // fail-closed while preserving the existing priority: identity validity
+    // and workspace scope are established before an owner result is trusted.
+    const startRead = <T>(read: () => Promise<T>): Promise<T> => {
+      try {
+        return Promise.resolve(read());
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+    const identityRead = startRead(() => deps.getWorkspaceIdentity());
+    const ownerRead = ownerHint?.trim()
+      ? Promise.resolve(ownerHint.trim())
+      : startRead(() => deps.resolveSharedProjectOwner(projectId));
+    const [identityResult, ownerResult] = await Promise.allSettled([
+      identityRead,
+      ownerRead,
+    ]);
+    if (identityResult.status === 'rejected') {
+      deps.onError?.(identityResult.reason);
       return { kind: 'skip', retryable: true, reason: 'identity-error' };
     }
+    const identity = identityResult.value;
     if (!identity) {
       return { kind: 'skip', retryable: true, reason: 'identity-missing' };
     }
@@ -313,14 +332,10 @@ export function createProactiveContentPull(
     // Fail-closed ownership: pulling over the single writer's working tree is
     // destructive, so an unresolvable owner refuses the pull rather than
     // guessing.
-    let owner: string | null = ownerHint?.trim() || null;
-    if (!owner) {
-      try {
-        owner = await deps.resolveSharedProjectOwner(projectId);
-      } catch {
-        return { kind: 'skip', retryable: true, reason: 'owner-error' };
-      }
+    if (ownerResult.status === 'rejected') {
+      return { kind: 'skip', retryable: true, reason: 'owner-error' };
     }
+    const owner = ownerResult.value;
     if (!owner) {
       return { kind: 'skip', retryable: false, reason: 'owner-missing' };
     }

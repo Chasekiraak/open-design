@@ -86,6 +86,42 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1']);
   });
 
+  it('starts the independent identity and owner guards concurrently', async () => {
+    let releaseIdentity!: () => void;
+    let identityStarted!: () => void;
+    const identityGate = new Promise<void>((resolve) => {
+      releaseIdentity = resolve;
+    });
+    const identityStart = new Promise<void>((resolve) => {
+      identityStarted = resolve;
+    });
+    const resolveSharedProjectOwner = vi.fn(async () => 'wm-owner');
+    const deps = makeDeps({
+      getWorkspaceIdentity: async () => {
+        identityStarted();
+        await identityGate;
+        return {
+          workspaceId: 'ws-1',
+          resourceTeamId: 'team-1',
+          workspaceMemberId: 'wm-member',
+        };
+      },
+      resolveSharedProjectOwner,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const pending = pull.handleContentChanged(baseEvent);
+    await identityStart;
+    await Promise.resolve();
+    const ownerStartedBeforeIdentityFinished =
+      resolveSharedProjectOwner.mock.calls.length;
+    releaseIdentity();
+    await pending;
+
+    expect(ownerStartedBeforeIdentityFinished).toBe(1);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
   it('skips an event without a projectId', async () => {
     const deps = makeDeps();
     const pull = createProactiveContentPull(deps);

@@ -907,6 +907,22 @@ export function registerCollabSyncRoutes(
     principal: ResourceHubPrincipal | null,
     scope: TeamMirrorPullScope | null,
   ): Promise<CollabSyncPullOutcome> {
+    // The initial active-scope check and authoritative catalog lookup are
+    // independent, read-only safety gates. In the Vela-backed runtime both can
+    // be cold subprocess/network reads, so start the catalog read before
+    // awaiting identity instead of paying their latency serially. Settle it
+    // eagerly so an inactive scope can still fail fast without leaving an
+    // unhandled rejection. The second scope check below remains mandatory: it
+    // catches a workspace switch that happens while the catalog read is in
+    // flight.
+    const initialSharedProjectRead = resolveSharedProject
+      ? Promise.resolve()
+          .then(() => resolveSharedProject(projectId, scope))
+          .then(
+            (project) => ({ ok: true as const, project }),
+            () => ({ ok: false as const }),
+          )
+      : null;
     if (scope && !(await capturedScopeIsStillActive(scope))) {
       return { status: 'register_failed' };
     }
@@ -916,13 +932,14 @@ export function registerCollabSyncRoutes(
     // A transient catalog/hub lookup error falls through to the existing pull
     // path rather than hard-denying a legitimate pull.
     let authoritativeSharedProject: TeamProject | null = null;
-    if (resolveSharedProject) {
+    if (initialSharedProjectRead) {
       let stillShared = true;
-      try {
-        authoritativeSharedProject = await resolveSharedProject(projectId, scope);
+      const initialSharedProject = await initialSharedProjectRead;
+      if (initialSharedProject.ok) {
+        authoritativeSharedProject = initialSharedProject.project;
         stillShared = authoritativeSharedProject != null &&
           (!scope || authoritativeSharedProject.ownerMemberId === scope.ownerMemberId);
-      } catch {
+      } else {
         if (scope) return { status: 'register_failed' };
         stillShared = true;
       }

@@ -1823,6 +1823,59 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(store.has('handle-catalog-error')).toBe(false);
   });
 
+  it('starts the independent initial scope and catalog guards concurrently', async () => {
+    const activeContext = await fixedShareContextProvider(true).current({});
+    let releaseInitialScope!: () => void;
+    let initialScopeStarted!: () => void;
+    const initialScopeGate = new Promise<void>((resolve) => {
+      releaseInitialScope = resolve;
+    });
+    const initialScopeStart = new Promise<void>((resolve) => {
+      initialScopeStarted = resolve;
+    });
+    let contextCalls = 0;
+    const current = vi.fn(async () => {
+      contextCalls += 1;
+      if (contextCalls === 1) {
+        initialScopeStarted();
+        await initialScopeGate;
+      }
+      return activeContext;
+    });
+    const resolveSharedProject = vi.fn(async (projectId: string) => ({
+      projectId,
+      ownerMemberId: pullScope.ownerMemberId,
+      sharedAt: '2026-07-25T00:00:00.000Z',
+    }));
+    const api = await startSyncServer({ current }, {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject,
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: vi.fn(async () => ({ version: 5 })),
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+
+    const outcomePromise = api.handle.pullSharedProject(
+      'handle-parallel-guards',
+      pullScope,
+    );
+    await initialScopeStart;
+    await Promise.resolve();
+    const catalogStartedBeforeInitialScopeFinished =
+      resolveSharedProject.mock.calls.length;
+    releaseInitialScope();
+
+    await expect(outcomePromise).resolves.toEqual({
+      status: 'pulled',
+      version: 5,
+    });
+    expect(catalogStartedBeforeInitialScopeFinished).toBe(1);
+  });
+
   it('fails closed when active workspace identity drifts after the authoritative lookup', async () => {
     const activeContext = await fixedShareContextProvider(true).current({});
     const current = vi.fn()
