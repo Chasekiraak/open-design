@@ -388,6 +388,33 @@ export interface WorkspaceWalletBalance {
 }
 
 /**
+ * One authoritative, explicitly scoped workspace billing snapshot from Vela.
+ *
+ * Revisions are opaque equality tokens. Clients use events only as invalidation
+ * signals and always re-read this snapshot; they never derive money or plan
+ * state from an event payload.
+ */
+export interface WorkspaceBillingSnapshot {
+  schemaVersion: 1;
+  workspaceId: string;
+  workspaceMemberId: string;
+  billingScopeVersion: 2;
+  billing: {
+    billingState: WorkspaceBillingState | null;
+    planId: string | null;
+  };
+  wallet: {
+    balanceUsd: string;
+    expiresAt: string | null;
+    updatedAt: string | null;
+  };
+  revisions: {
+    billing: string;
+    wallet: string;
+  };
+}
+
+/**
  * The caller's Vela account billing summary.
  *
  * `vela billing summary` remains account-scoped. The daemon must never turn it
@@ -439,6 +466,12 @@ export interface WorkspaceBillingResponse {
    * failed workspace-wallet read. Never inferred from `summary`.
    */
   workspaceBalance: WorkspaceWalletBalance | null;
+  /**
+   * Additive v1 workspace snapshot. Absent/null means the installed Vela CLI
+   * or backend does not expose the capability, so callers keep using the
+   * legacy summary + workspaceBalance fields.
+   */
+  workspaceSnapshot?: WorkspaceBillingSnapshot | null;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

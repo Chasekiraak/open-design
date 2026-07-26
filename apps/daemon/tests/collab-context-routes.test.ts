@@ -193,6 +193,51 @@ describe('workspace billing routes', () => {
     });
   });
 
+  it('returns an authorized atomic workspace plan and wallet snapshot additively', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: {
+          schemaVersion: 1,
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          billingScopeVersion: 2,
+          billing: { billingState: 'active', planId: 'team_plus' },
+          wallet: {
+            balanceUsd: '7.89',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00Z',
+          },
+          revisions: { billing: 'billing-2', wallet: 'wallet-2' },
+        },
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.workspaceSnapshot).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      billing: { billingState: 'active', planId: 'team_plus' },
+      revisions: { billing: 'billing-2', wallet: 'wallet-2' },
+    });
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      balanceUsd: '7.89',
+    });
+  });
+
   it('reads the account summary explicitly without requesting a workspace balance', async () => {
     const accountCalls: string[] = [];
     const workspaceCalls: string[] = [];

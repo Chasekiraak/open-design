@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  VelaWorkspaceBillingSnapshotUnsupportedError,
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
   fetchVelaBillingSummary,
+  fetchVelaWorkspaceBillingProjection,
   fetchVelaWorkspaceBalance,
   parseBillingCatalog,
   parseBillingSummary,
+  parseWorkspaceBillingSnapshot,
   parseWorkspaceWalletBalance,
 } from '../src/integrations/vela-billing.js';
 
@@ -41,6 +44,26 @@ const WORKSPACE_BALANCE_SAMPLE = JSON.stringify({
   billingScopeVersion: 2,
   workspaceId: 'ws_team',
   workspaceMemberId: 'member_team',
+});
+
+const WORKSPACE_SNAPSHOT_SAMPLE = JSON.stringify({
+  schemaVersion: 1,
+  workspaceId: 'ws_team',
+  workspaceMemberId: 'member_team',
+  billingScopeVersion: 2,
+  billing: {
+    billingState: 'active',
+    planId: 'team_plus',
+  },
+  wallet: {
+    balanceUsd: '7.8900',
+    expiresAt: null,
+    updatedAt: '2026-07-26T12:00:00Z',
+  },
+  revisions: {
+    billing: 'billing-rev-1',
+    wallet: 'wallet-rev-1',
+  },
 });
 
 describe('vela billing 收口', () => {
@@ -126,6 +149,88 @@ describe('vela billing 收口', () => {
         'ws_team',
       ),
     ).toBeNull();
+  });
+
+  it('maps one authoritative workspace billing snapshot without changing its scope', () => {
+    expect(parseWorkspaceBillingSnapshot(WORKSPACE_SNAPSHOT_SAMPLE, 'ws_team')).toEqual({
+      schemaVersion: 1,
+      workspaceId: 'ws_team',
+      workspaceMemberId: 'member_team',
+      billingScopeVersion: 2,
+      billing: {
+        billingState: 'active',
+        planId: 'team_plus',
+      },
+      wallet: {
+        balanceUsd: '7.8900',
+        expiresAt: null,
+        updatedAt: '2026-07-26T12:00:00Z',
+      },
+      revisions: {
+        billing: 'billing-rev-1',
+        wallet: 'wallet-rev-1',
+      },
+    });
+    expect(parseWorkspaceBillingSnapshot(WORKSPACE_SNAPSHOT_SAMPLE, 'ws_other')).toBeNull();
+    expect(
+      parseWorkspaceBillingSnapshot(
+        JSON.stringify({
+          ...JSON.parse(WORKSPACE_SNAPSHOT_SAMPLE),
+          billing: { billingState: 'mystery', planId: 'team_plus' },
+        }),
+        'ws_team',
+      ),
+    ).toBeNull();
+  });
+
+  it('uses the additive workspace snapshot command when the CLI supports it', async () => {
+    const seen: string[][] = [];
+    const out = await fetchVelaWorkspaceBillingProjection('ws_team', {
+      run: async (args) => {
+        seen.push(args);
+        return WORKSPACE_SNAPSHOT_SAMPLE;
+      },
+    });
+
+    expect(seen).toEqual([
+      ['workspace-snapshot', '--workspace-id', 'ws_team', '--format', 'json'],
+    ]);
+    expect(out.snapshot?.billing.planId).toBe('team_plus');
+    expect(out.workspaceBalance).toMatchObject({
+      workspaceId: 'ws_team',
+      workspaceMemberId: 'member_team',
+      balanceUsd: '7.8900',
+    });
+  });
+
+  it('falls back to the legacy balance command only for typed unsupported CLIs', async () => {
+    const seen: string[][] = [];
+    const out = await fetchVelaWorkspaceBillingProjection('ws_team', {
+      run: async (args) => {
+        seen.push(args);
+        if (args[0] === 'workspace-snapshot') {
+          throw new VelaWorkspaceBillingSnapshotUnsupportedError();
+        }
+        return WORKSPACE_BALANCE_SAMPLE;
+      },
+    });
+
+    expect(seen).toEqual([
+      ['workspace-snapshot', '--workspace-id', 'ws_team', '--format', 'json'],
+      ['workspace-balance', '--workspace-id', 'ws_team', '--format', 'json'],
+    ]);
+    expect(out.snapshot).toBeNull();
+    expect(out.workspaceBalance?.balanceUsd).toBe('7.8900');
+  });
+
+  it('does not turn an auth/network snapshot failure into a successful empty balance', async () => {
+    await expect(
+      fetchVelaWorkspaceBillingProjection('ws_team', {
+        run: async () => {
+          throw new Error('control key expired');
+        },
+      }),
+    ).rejects.toThrow('control key expired');
   });
 
   it('maps the vela team billing catalog JSON into client catalog data', () => {

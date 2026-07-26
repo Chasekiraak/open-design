@@ -27,10 +27,14 @@ export interface HubWorkspaceEvent {
     | 'presence-changed'
     | 'workspace-context-changed'
     | 'billing-changed'
+    | 'billing-subscription-changed'
+    | 'wallet-balance-changed'
     | 'project-metadata-changed'
     | 'project-content-changed'
     | 'team-resources-changed';
   workspaceId?: string;
+  workspaceMemberId?: string;
+  revision?: string;
   projectId?: string;
   resourceId?: string;
   /** Set on 'team-resources-changed': `resource_hub.resources.kind` at emit
@@ -54,6 +58,8 @@ const HUB_EVENT_TYPES = new Set<HubWorkspaceEvent['type']>([
   'presence-changed',
   'workspace-context-changed',
   'billing-changed',
+  'billing-subscription-changed',
+  'wallet-balance-changed',
   'project-metadata-changed',
   'project-content-changed',
   'team-resources-changed',
@@ -69,6 +75,10 @@ export function parseHubWorkspaceEvent(data: string): HubWorkspaceEvent | null {
     }
     const event: HubWorkspaceEvent = { type: parsed.type as HubWorkspaceEvent['type'] };
     if (typeof parsed.workspaceId === 'string') event.workspaceId = parsed.workspaceId;
+    if (typeof parsed.workspaceMemberId === 'string') {
+      event.workspaceMemberId = parsed.workspaceMemberId;
+    }
+    if (typeof parsed.revision === 'string') event.revision = parsed.revision;
     if (typeof parsed.projectId === 'string') event.projectId = parsed.projectId;
     if (typeof parsed.resourceId === 'string') event.resourceId = parsed.resourceId;
     if (typeof parsed.resourceKind === 'string') event.resourceKind = parsed.resourceKind;

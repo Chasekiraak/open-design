@@ -1,5 +1,7 @@
 import type {
   WorkspaceBillingCatalog,
+  WorkspaceBillingSnapshot,
+  WorkspaceBillingState,
   WorkspaceBillingSummary,
   WorkspaceTeamBillingPlanId,
   WorkspaceWalletBalance,
@@ -22,6 +24,20 @@ export type RunVelaBilling = (args: string[]) => Promise<string>;
 export interface FetchVelaBillingOptions {
   /** Injectable child-process runner; defaults to spawning the vela binary. */
   run?: RunVelaBilling;
+}
+
+export class VelaWorkspaceBillingSnapshotUnsupportedError extends Error {
+  readonly code = 'billing_workspace_snapshot_unsupported';
+
+  constructor() {
+    super('workspace billing snapshot unsupported');
+    this.name = 'VelaWorkspaceBillingSnapshotUnsupportedError';
+  }
+}
+
+export interface VelaWorkspaceBillingProjection {
+  snapshot: WorkspaceBillingSnapshot | null;
+  workspaceBalance: WorkspaceWalletBalance | null;
 }
 
 /** Fetch Vela's account-scoped billing summary through the CLI 收口. */
@@ -63,6 +79,69 @@ export async function fetchVelaWorkspaceBalance(
     return null;
   }
   return parseWorkspaceWalletBalance(stdout, requestedWorkspaceId);
+}
+
+/**
+ * Prefer Vela's atomic plan+wallet snapshot. An old CLI/server may report the
+ * typed unsupported sentinel; only that compatibility case falls back to the
+ * legacy wallet command. Auth/network/parse failures stay unavailable instead
+ * of being misclassified as an old server.
+ */
+export async function fetchVelaWorkspaceBillingProjection(
+  workspaceId: string,
+  options: FetchVelaBillingOptions = {},
+): Promise<VelaWorkspaceBillingProjection> {
+  const requestedWorkspaceId = workspaceId.trim();
+  if (!requestedWorkspaceId) {
+    return { snapshot: null, workspaceBalance: null };
+  }
+  const run = options.run ?? defaultRunVelaBilling;
+  try {
+    const stdout = await run([
+      'workspace-snapshot',
+      '--workspace-id',
+      requestedWorkspaceId,
+      '--format',
+      'json',
+    ]);
+    const snapshot = parseWorkspaceBillingSnapshot(stdout, requestedWorkspaceId);
+    if (!snapshot) {
+      throw new Error(`workspace billing snapshot is invalid for ${requestedWorkspaceId}`);
+    }
+    return {
+      snapshot,
+      workspaceBalance: {
+        workspaceId: snapshot.workspaceId,
+        workspaceMemberId: snapshot.workspaceMemberId,
+        balanceUsd: snapshot.wallet.balanceUsd,
+        billingScopeVersion: 2,
+        expiresAt: snapshot.wallet.expiresAt,
+        updatedAt: snapshot.wallet.updatedAt,
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof VelaWorkspaceBillingSnapshotUnsupportedError)) {
+      throw error;
+    }
+    const legacyStdout = await run([
+      'workspace-balance',
+      '--workspace-id',
+      requestedWorkspaceId,
+      '--format',
+      'json',
+    ]);
+    const workspaceBalance = parseWorkspaceWalletBalance(
+      legacyStdout,
+      requestedWorkspaceId,
+    );
+    if (!workspaceBalance) {
+      throw new Error(`workspace balance response is invalid for ${requestedWorkspaceId}`);
+    }
+    return {
+      snapshot: null,
+      workspaceBalance,
+    };
+  }
 }
 
 export interface BillingCheckoutOptions {
@@ -206,6 +285,68 @@ export function parseWorkspaceWalletBalance(
   };
 }
 
+/** Parse only a backend-proven snapshot for the exact requested workspace. */
+export function parseWorkspaceBillingSnapshot(
+  stdout: string,
+  requestedWorkspaceId: string,
+): WorkspaceBillingSnapshot | null {
+  const requested = requestedWorkspaceId.trim();
+  const trimmed = stdout.trim();
+  if (!requested || !trimmed) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const workspaceId = str(raw.workspaceId).trim();
+  const workspaceMemberId = str(raw.workspaceMemberId).trim();
+  const billing = objectRecord(raw.billing);
+  const wallet = objectRecord(raw.wallet);
+  const revisions = objectRecord(raw.revisions);
+  const billingState = nullableBillingState(billing.billingState);
+  const balanceUsd = str(wallet.balanceUsd).trim();
+  const billingRevision = str(revisions.billing).trim();
+  const walletRevision = str(revisions.wallet).trim();
+  if (
+    raw.schemaVersion !== 1 ||
+    raw.billingScopeVersion !== 2 ||
+    !isObjectRecord(raw.billing) ||
+    !isObjectRecord(raw.wallet) ||
+    !isObjectRecord(raw.revisions) ||
+    workspaceId !== requested ||
+    !workspaceMemberId ||
+    !balanceUsd ||
+    !billingRevision ||
+    !walletRevision ||
+    !isNullableBillingState(billing.billingState) ||
+    !isNullableNonEmptyString(billing.planId) ||
+    !isNullableNonEmptyString(wallet.expiresAt) ||
+    !isNullableNonEmptyString(wallet.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId,
+    workspaceMemberId,
+    billingScopeVersion: 2,
+    billing: {
+      billingState,
+      planId: nullableString(billing.planId),
+    },
+    wallet: {
+      balanceUsd,
+      expiresAt: nullableString(wallet.expiresAt),
+      updatedAt: nullableString(wallet.updatedAt),
+    },
+    revisions: {
+      billing: billingRevision,
+      wallet: walletRevision,
+    },
+  };
+}
+
 /** B sends credit buckets as decimal strings; a missing/garbage bucket is 0. */
 function credits(value: unknown): number {
   const parsed = Number(value ?? 0);
@@ -267,14 +408,80 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+function objectRecord(value: unknown): Record<string, unknown> {
+  return isObjectRecord(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+const WORKSPACE_BILLING_STATES: ReadonlySet<WorkspaceBillingState> = new Set([
+  'free',
+  'active',
+  'past_due',
+  'canceled',
+  'inactive',
+  'locked',
+]);
+
+function nullableBillingState(value: unknown): WorkspaceBillingState | null {
+  return typeof value === 'string' &&
+    WORKSPACE_BILLING_STATES.has(value as WorkspaceBillingState)
+    ? value as WorkspaceBillingState
+    : null;
+}
+
+function isNullableBillingState(value: unknown): boolean {
+  return value == null ||
+    (typeof value === 'string' &&
+      WORKSPACE_BILLING_STATES.has(value as WorkspaceBillingState));
+}
+
+function isNullableNonEmptyString(value: unknown): boolean {
+  return value == null || (typeof value === 'string' && value.trim().length > 0);
+}
+
 function parseTeamPlanId(value: unknown): WorkspaceTeamBillingPlanId | null {
   return value === 'team_plus' || value === 'team_pro' || value === 'team_max'
     ? value
     : null;
 }
 
-const defaultRunVelaBilling: RunVelaBilling = (args) =>
-  runVelaCommand(['billing', ...args], {
-    configuredEnv: { VELA_INVOCATION_SOURCE: 'open-design' },
-    maxBuffer: 4 * 1024 * 1024,
-  });
+const defaultRunVelaBilling: RunVelaBilling = async (args) => {
+  let stderr = '';
+  try {
+    return await runVelaCommand(['billing', ...args], {
+      configuredEnv: { VELA_INVOCATION_SOURCE: 'open-design' },
+      maxBuffer: 4 * 1024 * 1024,
+      onStderr: (value) => {
+        stderr = value;
+      },
+    });
+  } catch (error) {
+    if (
+      args[0] === 'workspace-snapshot' &&
+      isWorkspaceBillingSnapshotUnsupported(error, stderr)
+    ) {
+      throw new VelaWorkspaceBillingSnapshotUnsupportedError();
+    }
+    throw error;
+  }
+};
+
+function isWorkspaceBillingSnapshotUnsupported(error: unknown, stderr: string): boolean {
+  const detail = [
+    stderr,
+    error instanceof Error ? error.message : String(error),
+  ].join('\n').toLowerCase();
+  return (
+    detail.includes('billing_workspace_snapshot_unsupported') ||
+    detail.includes('workspace billing snapshot unsupported') ||
+    (
+      detail.includes('unknown command') &&
+      detail.includes('workspace-snapshot')
+    )
+  );
+}

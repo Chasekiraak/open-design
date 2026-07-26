@@ -49,6 +49,37 @@ describe('parseHubWorkspaceEvent', () => {
     expect(parseHubWorkspaceEvent('not json')).toBeNull();
   });
 
+  it('preserves v2 billing scope and revision fields for fail-closed consumers', () => {
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"wallet-balance-changed","workspaceId":"w1","workspaceMemberId":"m1","revision":"wallet-2"}',
+      ),
+    ).toEqual({
+      type: 'wallet-balance-changed',
+      workspaceId: 'w1',
+      workspaceMemberId: 'm1',
+      revision: 'wallet-2',
+    });
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing-3"}',
+      ),
+    ).toEqual({
+      type: 'billing-subscription-changed',
+      workspaceId: 'w1',
+      revision: 'billing-3',
+    });
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"billing-changed","workspaceId":"w1","revision":"billing-3"}',
+      ),
+    ).toEqual({
+      type: 'billing-changed',
+      workspaceId: 'w1',
+      revision: 'billing-3',
+    });
+  });
+
   // workspace-team continuous-sync priority 3: the resource-hub's
   // 'team-resources-changed' push (vela API PR: emits on a 'published' ref
   // move or a resource soft-delete) needs resourceKind + resourceStatus to

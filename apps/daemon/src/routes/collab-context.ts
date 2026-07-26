@@ -6,6 +6,7 @@ import type {
   WorkspaceBillingCatalog,
   WorkspaceBillingCatalogResponse,
   WorkspaceBillingCheckoutResponse,
+  WorkspaceBillingSnapshot,
   WorkspaceTeamBillingPlanId,
   WorkspaceBillingResponse,
   WorkspaceBillingSummary,
@@ -36,8 +37,9 @@ import {
 import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
+  fetchVelaWorkspaceBillingProjection,
   fetchVelaBillingSummary,
-  fetchVelaWorkspaceBalance,
+  type VelaWorkspaceBillingProjection,
 } from '../integrations/vela-billing.js';
 import { listVelaWorkspaceDirectory } from '../collab/vela-workspace-context.js';
 
@@ -51,6 +53,10 @@ export interface RegisterCollabContextRoutesDeps {
   fetchBilling?: () => Promise<WorkspaceBillingSummary | null>;
   /** Injectable for tests; returns one backend-proven v2 workspace wallet. */
   fetchWorkspaceBalance?: (workspaceId: string) => Promise<WorkspaceWalletBalance | null>;
+  /** Injectable for tests; returns the additive atomic plan+wallet projection. */
+  fetchWorkspaceBillingProjection?: (
+    workspaceId: string,
+  ) => Promise<VelaWorkspaceBillingProjection>;
   /** Injectable for tests; defaults to the vela billing catalog CLI 收口. */
   fetchBillingCatalog?: (workspaceId: string) => Promise<WorkspaceBillingCatalog | null>;
   /** Injectable for tests; defaults to the vela billing checkout CLI 收口. */
@@ -140,9 +146,14 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const createInvite =
     deps.createInvite ?? ((input: CreateWorkspaceInviteInput) => createWorkspaceInvite(input));
   const fetchBilling = deps.fetchBilling ?? (() => fetchVelaBillingSummary());
-  const fetchWorkspaceBalance =
-    deps.fetchWorkspaceBalance ??
-    ((workspaceId: string) => fetchVelaWorkspaceBalance(workspaceId));
+  const fetchWorkspaceBillingProjection =
+    deps.fetchWorkspaceBillingProjection ??
+    (deps.fetchWorkspaceBalance
+      ? async (workspaceId: string): Promise<VelaWorkspaceBillingProjection> => ({
+          snapshot: null,
+          workspaceBalance: await deps.fetchWorkspaceBalance!(workspaceId),
+        })
+      : (workspaceId: string) => fetchVelaWorkspaceBillingProjection(workspaceId));
   const fetchBillingCatalog =
     deps.fetchBillingCatalog ?? ((workspaceId: string) => fetchVelaBillingCatalog(workspaceId));
   const startCheckout =
@@ -371,18 +382,28 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     if (!membership) {
       return res.status(409).json({ error: 'workspace_not_authorized' });
     }
-    const [accountSummary, workspaceBalance] = await Promise.all([
+    const [accountSummary, projection] = await Promise.all([
       fetchBilling(),
-      fetchWorkspaceBalance(requestedWorkspaceId),
+      fetchWorkspaceBillingProjection(requestedWorkspaceId),
     ]);
+    const workspaceBalance = projection.workspaceBalance;
     const authorizedWorkspaceBalance =
       workspaceBalance?.workspaceId === requestedWorkspaceId &&
       workspaceBalance.workspaceMemberId === membership.workspaceMemberId
         ? workspaceBalance
         : null;
+    const snapshot = projection.snapshot;
+    const authorizedWorkspaceSnapshot: WorkspaceBillingSnapshot | null =
+      snapshot?.workspaceId === requestedWorkspaceId &&
+      snapshot.workspaceMemberId === membership.workspaceMemberId
+        ? snapshot
+        : null;
     const body: WorkspaceBillingResponse = {
       summary: accountSummary,
       workspaceBalance: authorizedWorkspaceBalance,
+      ...(authorizedWorkspaceSnapshot
+        ? { workspaceSnapshot: authorizedWorkspaceSnapshot }
+        : {}),
     };
     return res.json(body);
   });

@@ -3910,7 +3910,31 @@ export async function startServer({
           handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
           break;
         case 'billing-changed':
-          emitWorkspaceEvent({ type: 'billing-changed', at: Date.now() });
+          emitWorkspaceEvent({
+            type: 'billing-changed',
+            ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
+          break;
+        case 'billing-subscription-changed':
+          if (!event.workspaceId) break;
+          emitWorkspaceEvent({
+            type: 'billing-subscription-changed',
+            workspaceId: event.workspaceId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
+          break;
+        case 'wallet-balance-changed':
+          if (!event.workspaceId || !event.workspaceMemberId) break;
+          emitWorkspaceEvent({
+            type: 'wallet-balance-changed',
+            workspaceId: event.workspaceId,
+            workspaceMemberId: event.workspaceMemberId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
           break;
         case 'team-resources-changed': {
           // A design-system/plugin/skill resource was shared (moved the

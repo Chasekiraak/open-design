@@ -88,6 +88,29 @@ export interface WorkspaceContextChangedSsePayload {
 /** Subscription / seat billing changed. */
 export interface WorkspaceBillingChangedSsePayload {
   type: 'billing-changed';
+  /** Present on newer Vela versions; absent on legacy broad invalidations. */
+  workspaceId?: string;
+  /** Opaque revision shared with the additive v2 alias when both are emitted. */
+  revision?: string;
+  at?: number;
+}
+
+/** A workspace subscription/plan changed; re-read the scoped snapshot. */
+export interface WorkspaceBillingSubscriptionChangedSsePayload {
+  type: 'billing-subscription-changed';
+  workspaceId: string;
+  /** Opaque Vela revision; advisory dedupe only. */
+  revision?: string;
+  at?: number;
+}
+
+/** This authenticated member's sponsored workspace wallet changed. */
+export interface WorkspaceWalletBalanceChangedSsePayload {
+  type: 'wallet-balance-changed';
+  workspaceId: string;
+  workspaceMemberId: string;
+  /** Opaque Vela revision; advisory dedupe only. */
+  revision?: string;
   at?: number;
 }
 
@@ -102,7 +125,9 @@ export type WorkspaceInvalidationSsePayload =
   | TeamProjectContentReadySsePayload
   | WorkspaceMembersChangedSsePayload
   | WorkspaceContextChangedSsePayload
-  | WorkspaceBillingChangedSsePayload;
+  | WorkspaceBillingChangedSsePayload
+  | WorkspaceBillingSubscriptionChangedSsePayload
+  | WorkspaceWalletBalanceChangedSsePayload;
 
 /** The SSE `event:` names for the workspace-scoped invalidations. */
 export const WORKSPACE_INVALIDATION_EVENTS = [
@@ -111,6 +136,8 @@ export const WORKSPACE_INVALIDATION_EVENTS = [
   'members-changed',
   'workspace-context-changed',
   'billing-changed',
+  'billing-subscription-changed',
+  'wallet-balance-changed',
 ] as const;
 
 export type WorkspaceInvalidationEventName =
