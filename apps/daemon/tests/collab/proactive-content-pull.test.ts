@@ -770,6 +770,73 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(catalogReads).toBe(2);
   });
 
+  it('retries a missing-only sweep when the first catalog read is temporarily unavailable', async () => {
+    const retry = makeRetryScheduler();
+    let catalogReads = 0;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => {
+        catalogReads += 1;
+        if (catalogReads === 1) {
+          throw new Error('catalog has not propagated yet');
+        }
+        return [{ projectId: 'proj-1', ownerMemberId: 'wm-owner' }];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+
+    expect(catalogReads).toBe(1);
+    expect(deps.pullCalls).toEqual([]);
+    expect(retry.delays).toEqual([1_000]);
+    expect(retry.tasks.size).toBe(1);
+
+    await retry.runNext();
+
+    expect(catalogReads).toBe(2);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('retries a missing-only sweep until its newly-shared project reaches the catalog', async () => {
+    const retry = makeRetryScheduler();
+    let catalogReads = 0;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => {
+        catalogReads += 1;
+        return catalogReads === 1
+          ? []
+          : [{ projectId: 'proj-1', ownerMemberId: 'wm-owner' }];
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(deps.pullCalls).toEqual([]);
+    expect(retry.delays).toEqual([1_000]);
+
+    await retry.runNext();
+
+    expect(catalogReads).toBe(2);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+    expect(retry.tasks.size).toBe(0);
+  });
+
   it('does not drop a third sweep requested while the trailing sweep is running', async () => {
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
@@ -860,6 +927,56 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 });
 
 describe('proactive content pull retry coordinator', () => {
+  it('retries a first-share content event while the owner catalog row is still propagating', async () => {
+    const retry = makeRetryScheduler();
+    let ownerReads = 0;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      resolveSharedProjectOwner: async () => {
+        ownerReads += 1;
+        return ownerReads === 1 ? null : 'wm-owner';
+      },
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+
+    expect(deps.pullCalls).toEqual([]);
+    expect(retry.delays).toEqual([1_000]);
+
+    await retry.runNext();
+
+    expect(ownerReads).toBe(2);
+    expect(deps.pullCalls).toEqual(['proj-1']);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('bounds retries for a first-share event whose catalog owner never appears', async () => {
+    const retry = makeRetryScheduler();
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      resolveSharedProjectOwner: async () => null,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await retry.runNext();
+    }
+
+    expect(retry.delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
+    expect(retry.tasks.size).toBe(0);
+    expect(deps.pullCalls).toEqual([]);
+  });
+
   it.each([
     ['missing identity', 'null'],
     ['throwing identity lookup', 'throw'],
@@ -1322,6 +1439,28 @@ describe('proactive content pull retry coordinator', () => {
     expect(retry.cleared).toHaveLength(1);
     expect(retry.tasks.size).toBe(0);
     expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('dispose cancels a pending catalog-sweep retry timer', async () => {
+    const retry = makeRetryScheduler();
+    const deps = makeDeps({
+      listSharedProjects: async () => {
+        throw new Error('catalog unavailable');
+      },
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+    pull.dispose();
+
+    expect(retry.cleared).toHaveLength(1);
+    expect(retry.tasks.size).toBe(0);
   });
 
   it('does not treat a manifest appearing before retry as proof of the desired version', async () => {

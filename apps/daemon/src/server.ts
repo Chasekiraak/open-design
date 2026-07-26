@@ -3711,7 +3711,10 @@ export async function startServer({
           // reconciliation pass — see `collab/workspace-projects-reconciler.ts`.
           handleHubTeamProjectsChanged(emitTeamProjectsChangedDeduped, reconcileWorkspaceProjectsFromRemote);
           if (event.workspaceId) {
-            void proactiveContentPull.materializeMissingProjects(event.workspaceId);
+            void proactiveContentPull.materializeMissingProjects(
+              event.workspaceId,
+              event.projectId,
+            );
           }
           break;
         }

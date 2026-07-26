@@ -177,6 +177,20 @@ describe('server.ts wiring (source boundary)', () => {
     expect(caseNames).toEqual(['team-projects-changed']);
   });
 
+  it('passes the changed project id into first-share missing-project recovery', () => {
+    const switchBody = extractOnEventSwitchBody();
+    const teamProjectsCase = switchBody
+      .split(/(?=case '[a-z-]+':)/g)
+      .find((chunk) => chunk.startsWith("case 'team-projects-changed':"));
+
+    expect(teamProjectsCase).toContain(
+      'proactiveContentPull.materializeMissingProjects(\n' +
+        '              event.workspaceId,\n' +
+        '              event.projectId,\n' +
+        '            );',
+    );
+  });
+
   it('wires poller invalidations through reconciliation and missing-project materialization', () => {
     const anchor = 'createWorkspaceInvalidationPoller({';
     const start = source.indexOf(anchor);

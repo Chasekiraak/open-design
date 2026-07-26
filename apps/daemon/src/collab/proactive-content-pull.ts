@@ -139,7 +139,10 @@ export interface ProactiveContentPull {
    * Low-frequency catalog safety floor for the healthy-stream/missed-event
    * case. Only remote projects with no local materialization are considered.
    */
-  materializeMissingProjects(expectedWorkspaceId?: string): Promise<void>;
+  materializeMissingProjects(
+    expectedWorkspaceId?: string,
+    expectedProjectId?: string,
+  ): Promise<void>;
   /** Stop background recovery and release every pending retry timer. */
   dispose(): void;
 }
@@ -150,7 +153,12 @@ interface CatchUpLane {
   inFlight: Promise<void> | null;
   requestedGeneration: number;
   completedGeneration: number;
-  requestedSweep: { expectedWorkspaceId?: string } | null;
+  requestedSweep: {
+    expectedWorkspaceId?: string;
+    expectedProjectId?: string;
+  } | null;
+  retryFailures: number;
+  retryTimer: unknown | null;
 }
 
 type SuccessfulPullOutcome = Extract<
@@ -175,6 +183,10 @@ interface PullIntent {
   revision: number;
   timer: unknown | null;
   driving: Promise<boolean> | null;
+  /** Bounded only for an unbound first-share event whose catalog owner row
+   * has not propagated. Established pulls and transport failures retry
+   * indefinitely through their normal scope guards. */
+  failureLimit?: number;
 }
 
 type PullAttempt =
@@ -200,6 +212,8 @@ type PullDecision =
         | 'owner-error'
         | 'self-owner';
     };
+
+const MAX_CATALOG_PROPAGATION_RETRIES = 5;
 
 export function createProactiveContentPull(
   deps: ProactiveContentPullDeps,
@@ -246,12 +260,16 @@ export function createProactiveContentPull(
       requestedGeneration: 0,
       completedGeneration: 0,
       requestedSweep: null,
+      retryFailures: 0,
+      retryTimer: null,
     },
     'missing-only': {
       inFlight: null,
       requestedGeneration: 0,
       completedGeneration: 0,
       requestedSweep: null,
+      retryFailures: 0,
+      retryTimer: null,
     },
   };
 
@@ -337,7 +355,11 @@ export function createProactiveContentPull(
     }
     const owner = ownerResult.value;
     if (!owner) {
-      return { kind: 'skip', retryable: false, reason: 'owner-missing' };
+      // A first-share content event can arrive before the separate catalog
+      // upsert exposes its owner row. Retry this provisional, unbound guard
+      // for a bounded propagation window; once a scope was established,
+      // owner disappearance remains authoritative revocation and stops.
+      return { kind: 'skip', retryable: true, reason: 'owner-missing' };
     }
     if (owner === identity.workspaceMemberId) {
       return { kind: 'skip', retryable: false, reason: 'self-owner' };
@@ -486,6 +508,13 @@ export function createProactiveContentPull(
     if (disposed || intents.get(intent.key) !== intent || intent.timer != null) {
       return;
     }
+    if (
+      intent.failureLimit != null &&
+      intent.failures >= intent.failureLimit
+    ) {
+      clearIntent(intent);
+      return;
+    }
     intent.failures += 1;
     const delayMs = retryDelay(intent.failures);
     let handle: unknown;
@@ -507,12 +536,21 @@ export function createProactiveContentPull(
       if (!target) {
         const decision = await shouldPull(intent.event);
         if (decision.kind === 'skip') {
-          const establishedIdentityGone =
+          const establishedScopeGone =
             intent.expectedScopeKey != null &&
-            decision.reason === 'identity-missing';
+            (
+              decision.reason === 'identity-missing' ||
+              decision.reason === 'owner-missing'
+            );
+          if (
+            intent.expectedScopeKey == null &&
+            decision.reason === 'owner-missing'
+          ) {
+            intent.failureLimit = MAX_CATALOG_PROPAGATION_RETRIES;
+          }
           return {
             kind:
-              !decision.retryable || establishedIdentityGone
+              !decision.retryable || establishedScopeGone
                 ? 'stopped'
                 : 'failed',
             staleGuard: true,
@@ -520,6 +558,7 @@ export function createProactiveContentPull(
         }
         target = decision.target;
       }
+      delete intent.failureLimit;
       const { projectId } = target;
       const scopeKey = pullScopeKey(target);
       if (intent.expectedScopeKey && intent.expectedScopeKey !== scopeKey) {
@@ -696,9 +735,15 @@ export function createProactiveContentPull(
         let pending = intents.get(provisionalKey);
         if (!pending) {
           pending = createIntent(provisionalKey, event, force);
+          if (decision.reason === 'owner-missing') {
+            pending.failureLimit = MAX_CATALOG_PROPAGATION_RETRIES;
+          }
           intents.set(provisionalKey, pending);
           scheduleRetry(pending);
           return false;
+        }
+        if (decision.reason === 'owner-missing') {
+          pending.failureLimit = MAX_CATALOG_PROPAGATION_RETRIES;
         }
         const wake = mergeIntentUpdate(pending, event, force);
         if (wake) {
@@ -804,14 +849,15 @@ export function createProactiveContentPull(
   async function runCatchUpSweep(
     mode: 'full' | 'missing-only',
     expectedWorkspaceId?: string,
-  ): Promise<void> {
+    expectedProjectId?: string,
+  ): Promise<'settled' | 'retry'> {
     if (
       !deps.listSharedProjects ||
       !deps.publishedHead ||
       (mode === 'missing-only' && !deps.hasMaterializedProject)
     ) {
       deps.onCatchUp?.({ phase: 'skipped', mode, reason: 'unavailable' });
-      return;
+      return 'settled';
     }
     const identity = await deps.getWorkspaceIdentity().catch((error) => {
       deps.onError?.(error);
@@ -819,7 +865,7 @@ export function createProactiveContentPull(
     });
     if (!identity) {
       deps.onCatchUp?.({ phase: 'skipped', mode, reason: 'no-active-team' });
-      return;
+      return 'settled';
     }
     if (expectedWorkspaceId && identity.workspaceId !== expectedWorkspaceId) {
       deps.onCatchUp?.({
@@ -828,7 +874,7 @@ export function createProactiveContentPull(
         workspaceId: identity.workspaceId,
         reason: 'scope-mismatch',
       });
-      return;
+      return 'settled';
     }
 
     const { workspaceId } = identity;
@@ -848,10 +894,33 @@ export function createProactiveContentPull(
         heads: 0,
         complete: false,
       });
-      return;
+      return 'retry';
     }
 
     let complete = true;
+    let retrySweep = false;
+    if (
+      mode === 'missing-only' &&
+      expectedProjectId &&
+      !projects.some((project) => project.projectId === expectedProjectId)
+    ) {
+      const binding = deps.getLocalBinding(expectedProjectId);
+      // An existing local binding plus authoritative absence is an unshare,
+      // not propagation lag. Only an unseen project gets the bounded retry
+      // window needed by first-time sharing.
+      if (!binding) {
+        deps.onCatchUp?.({
+          phase: 'completed',
+          mode,
+          workspaceId,
+          scanned: projects.length,
+          candidates: 0,
+          heads: 0,
+          complete: false,
+        });
+        return 'retry';
+      }
+    }
     const candidates: Array<{
       project: ProactiveContentPullProjectRef;
       forcePull: boolean;
@@ -865,6 +934,7 @@ export function createProactiveContentPull(
         } catch (error) {
           deps.onError?.(error);
           complete = false;
+          retrySweep = true;
           continue;
         }
         if (materialized) continue;
@@ -902,6 +972,7 @@ export function createProactiveContentPull(
       } catch (error) {
         deps.onError?.(error);
         complete = false;
+        retrySweep = true;
         continue;
       }
       if (version == null) continue;
@@ -926,18 +997,60 @@ export function createProactiveContentPull(
       heads,
       complete,
     });
+    return retrySweep ? 'retry' : 'settled';
+  }
+
+  function cancelCatchUpRetry(lane: CatchUpLane): void {
+    if (lane.retryTimer == null) return;
+    scheduler.clearTimeout(lane.retryTimer);
+    lane.retryTimer = null;
+  }
+
+  function scheduleCatchUpRetry(
+    mode: CatchUpMode,
+    expectedWorkspaceId?: string,
+    expectedProjectId?: string,
+  ): void {
+    const lane = catchUpLanes[mode];
+    if (disposed || lane.retryTimer != null) return;
+    if (lane.retryFailures >= MAX_CATALOG_PROPAGATION_RETRIES) return;
+    lane.retryFailures += 1;
+    const delayMs = retryDelay(lane.retryFailures);
+    let handle: unknown;
+    handle = scheduler.setTimeout(async () => {
+      if (lane.retryTimer !== handle) return;
+      lane.retryTimer = null;
+      await requestCatchUp(
+        mode,
+        expectedWorkspaceId,
+        expectedProjectId,
+        'retry',
+      );
+    }, delayMs);
+    lane.retryTimer = handle;
+    (
+      handle as { unref?: () => void } | null | undefined
+    )?.unref?.();
   }
 
   async function requestCatchUp(
     mode: CatchUpMode,
     expectedWorkspaceId?: string,
+    expectedProjectId?: string,
+    source: 'external' | 'retry' = 'external',
   ): Promise<void> {
+    if (disposed) return;
     const lane = catchUpLanes[mode];
+    if (source === 'external') {
+      cancelCatchUpRetry(lane);
+      lane.retryFailures = 0;
+    }
     lane.requestedGeneration += 1;
     // The newest verified scope supersedes pending work on this lane. The
     // other mode remains independent and may run concurrently.
     lane.requestedSweep = {
       ...(expectedWorkspaceId ? { expectedWorkspaceId } : {}),
+      ...(expectedProjectId ? { expectedProjectId } : {}),
     };
     if (lane.inFlight) {
       return lane.inFlight;
@@ -947,8 +1060,22 @@ export function createProactiveContentPull(
         const generation = lane.requestedGeneration;
         const next = lane.requestedSweep ?? {};
         lane.requestedSweep = null;
-        await runCatchUpSweep(mode, next.expectedWorkspaceId);
+        const outcome = await runCatchUpSweep(
+          mode,
+          next.expectedWorkspaceId,
+          next.expectedProjectId,
+        );
         lane.completedGeneration = generation;
+        if (lane.completedGeneration < lane.requestedGeneration) continue;
+        if (outcome === 'retry') {
+          scheduleCatchUpRetry(
+            mode,
+            next.expectedWorkspaceId,
+            next.expectedProjectId,
+          );
+        } else {
+          lane.retryFailures = 0;
+        }
       }
     })();
     lane.inFlight = run;
@@ -963,14 +1090,18 @@ export function createProactiveContentPull(
     async handleContentChanged(event: ProactiveContentPullEvent): Promise<void> {
       await processContentChanged(event);
     },
-    catchUpPublishedHeads: (workspaceId) => requestCatchUp('full', workspaceId),
-    materializeMissingProjects: (workspaceId) =>
-      requestCatchUp('missing-only', workspaceId),
+    catchUpPublishedHeads: (workspaceId) =>
+      requestCatchUp('full', workspaceId),
+    materializeMissingProjects: (workspaceId, projectId) =>
+      requestCatchUp('missing-only', workspaceId, projectId),
     dispose(): void {
       if (disposed) return;
       disposed = true;
       for (const intent of intents.values()) clearIntent(intent);
       intents.clear();
+      for (const lane of Object.values(catchUpLanes)) {
+        cancelCatchUpRetry(lane);
+      }
     },
   };
 }
