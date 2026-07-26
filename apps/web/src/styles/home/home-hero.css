@@ -3787,17 +3787,6 @@ button.home-hero__capability-word:focus-visible {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   overflow: hidden;
 }
-.home-hero__scenario-card-art::before {
-  position: absolute;
-  top: 12px;
-  right: 13px;
-  width: 20px;
-  height: 20px;
-  border: 1px solid color-mix(in srgb, var(--scenario-art-accent) 24%, transparent);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--scenario-art-accent) 7%, transparent);
-  content: '';
-}
 .home-hero__scenario-card-art > * {
   position: relative;
   z-index: 1;
