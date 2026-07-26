@@ -200,7 +200,7 @@ describe('server.ts wiring (source boundary)', () => {
     );
   });
 
-  it('wires poller invalidations through reconciliation and stable catalog observations through missing-project recovery', () => {
+  it('wires poller invalidations through reconciliation and stable catalog observations through bounded full recovery', () => {
     const anchor = 'createWorkspaceInvalidationPoller({';
     const start = source.indexOf(anchor);
     expect(start, 'expected to find createWorkspaceInvalidationPoller(...) in server.ts').toBeGreaterThan(-1);
@@ -223,7 +223,7 @@ describe('server.ts wiring (source boundary)', () => {
     );
     expect(configBody).toContain(
       'onTeamProjectsObserved: ({ workspaceId }) =>\n' +
-        '      proactiveContentPull.materializeMissingProjects(workspaceId),',
+        '      proactiveContentPull.advanceRecoveryFloor(workspaceId),',
     );
     expect(configBody).not.toContain('activeWorkspace.get()');
     const emitStart = configBody.indexOf('emit: (payload) => {');
@@ -231,7 +231,7 @@ describe('server.ts wiring (source boundary)', () => {
     expect(emitStart).toBeGreaterThan(-1);
     expect(emitEnd).toBeGreaterThan(emitStart);
     expect(configBody.slice(emitStart, emitEnd)).not.toContain(
-      'proactiveContentPull.materializeMissingProjects',
+      'proactiveContentPull.advanceRecoveryFloor',
     );
   });
 

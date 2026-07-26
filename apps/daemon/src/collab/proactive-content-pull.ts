@@ -278,6 +278,9 @@ export interface ProactiveContentPullDeps {
     projectId?: string;
     scanned?: number;
     candidates?: number;
+    /** Remote published-head requests issued by this sweep. */
+    headChecks?: number;
+    /** Remote heads that resolved to a published version. */
     heads?: number;
     suppressed?: number;
     complete?: boolean;
@@ -313,6 +316,11 @@ export interface ProactiveContentPull {
    */
   catchUpPublishedHeads(expectedWorkspaceId?: string): Promise<void>;
   /**
+   * Advance the bounded full-recovery cursor from the existing safety-floor
+   * heartbeat, additionally healing projects whose local tree is absent.
+   */
+  advanceRecoveryFloor(expectedWorkspaceId?: string): Promise<void>;
+  /**
    * Low-frequency catalog safety floor for the healthy-stream/missed-event
    * case. Only remote projects with no local materialization are considered.
    */
@@ -329,6 +337,7 @@ type CatchUpMode = 'full' | 'missing-only';
 interface CatchUpSweepRequest {
   expectedWorkspaceId?: string;
   expectedProjectIds: Set<string>;
+  healMissing: boolean;
 }
 
 interface CatchUpLane {
@@ -420,6 +429,7 @@ type PullDecision =
 
 const MAX_CATALOG_PROPAGATION_RETRIES = 5;
 const FOREGROUND_CATCH_UP_QUIET_MS = 250;
+const BROAD_HEAD_CHECK_BUDGET = 4;
 const BROAD_HEAD_RETRY_BASE_MS = 15_000;
 const BROAD_HEAD_RETRY_MAX_MS = 5 * 60_000;
 
@@ -494,6 +504,10 @@ export function createProactiveContentPull(
    * permanent retry timer. Cool down only the exact guarded scope + head; a
    * later safety-floor pass, newer head, or targeted/live request retries. */
   const suppressedBroadHeads = new Map<string, SuppressedBroadHead>();
+  /** Resume each broad workspace/mode lane after the last candidate it
+   * inspected. The safety floor is intentionally timer-free: the existing
+   * heartbeat supplies the next bounded round. */
+  const broadHeadCursors = new Map<string, string>();
   /**
    * Full reconnect recovery may spend a long time walking historical heads.
    * Keep the missing-only safety floor on its own single-flight lane so a
@@ -1349,9 +1363,19 @@ export function createProactiveContentPull(
     expectedProjectIds: ReadonlySet<string> = new Set(),
     targetedOnly = false,
     foreground = false,
+    healMissing = false,
   ): Promise<CatchUpSweepOutcome> {
     const foregroundGenerationAtStart = foregroundGeneration;
     const lane = targetedOnly ? 'targeted' : 'broad';
+    const foregroundShouldPreempt = (): boolean =>
+      !targetedOnly &&
+      (
+        foregroundEventsInFlight > 0 ||
+        foregroundIntents.size > 0 ||
+        foregroundCatalogRetries.size > 0 ||
+        foregroundResumeTimer != null ||
+        foregroundGeneration !== foregroundGenerationAtStart
+      );
     if (
       !deps.listSharedProjects ||
       !deps.publishedHead ||
@@ -1404,6 +1428,40 @@ export function createProactiveContentPull(
     const { workspaceId } = identity;
     deps.onCatchUp?.({ phase: 'started', mode, lane, workspaceId });
 
+    let complete = true;
+    let retrySweep = false;
+    let preemptedByForeground = false;
+    let suppressed = 0;
+    let heads = 0;
+    let headChecks = 0;
+    const retryProjectIds: string[] = [];
+    const preemptedOutcome = (
+      scanned: number,
+      candidates: number,
+    ): CatchUpSweepOutcome => {
+      deps.onCatchUp?.({
+        phase: 'completed',
+        mode,
+        lane,
+        workspaceId,
+        scanned,
+        candidates,
+        headChecks,
+        heads,
+        suppressed,
+        complete: false,
+      });
+      return {
+        retryLane: false,
+        retryProjectIds,
+        retryWorkspaceId: workspaceId,
+        preemptedByForeground: true,
+      };
+    };
+    if (foregroundShouldPreempt()) {
+      return preemptedOutcome(0, 0);
+    }
+
     let projects: readonly ProactiveContentPullProjectRef[];
     try {
       projects = await (targetedOnly
@@ -1411,6 +1469,9 @@ export function createProactiveContentPull(
         : deps.listSharedProjects(workspaceId));
     } catch (error) {
       deps.onError?.(error);
+      if (foregroundShouldPreempt()) {
+        return preemptedOutcome(0, 0);
+      }
       deps.onCatchUp?.({
         phase: 'completed',
         mode,
@@ -1418,6 +1479,7 @@ export function createProactiveContentPull(
         workspaceId,
         scanned: 0,
         candidates: 0,
+        headChecks: 0,
         heads: 0,
         complete: false,
       });
@@ -1428,12 +1490,10 @@ export function createProactiveContentPull(
       };
     }
 
-    let complete = true;
-    let retrySweep = false;
-    let preemptedByForeground = false;
-    let suppressed = 0;
+    if (foregroundShouldPreempt()) {
+      return preemptedOutcome(projects.length, 0);
+    }
     const visibleProjectIds = new Set(projects.map((project) => project.projectId));
-    const retryProjectIds: string[] = [];
     for (const expectedProjectId of expectedProjectIds) {
       if (visibleProjectIds.has(expectedProjectId)) {
         clearCatalogProjectRetry(workspaceId, expectedProjectId);
@@ -1455,6 +1515,14 @@ export function createProactiveContentPull(
       : projects;
     for (const project of projectsToInspect) {
       if (project.ownerMemberId === identity.workspaceMemberId) continue;
+      // Full recovery still has to heal a missing local tree. Mark its
+      // candidates as force-capable and let processContentChanged perform the
+      // race-closing materialization probe once, after the authoritative head
+      // read. Missing-only needs the earlier probe as a catalog filter.
+      let forcePull =
+        mode === 'full' &&
+        healMissing &&
+        Boolean(deps.hasMaterializedProject);
       if (mode === 'missing-only') {
         let materialized: boolean;
         try {
@@ -1463,18 +1531,27 @@ export function createProactiveContentPull(
           deps.onError?.(error);
           complete = false;
           retrySweep = true;
+          if (foregroundShouldPreempt()) {
+            preemptedByForeground = true;
+            break;
+          }
           continue;
         }
-        if (materialized) continue;
+        if (foregroundShouldPreempt()) {
+          complete = false;
+          preemptedByForeground = true;
+          break;
+        }
+        if (mode === 'missing-only' && materialized) continue;
+        forcePull = !materialized;
       }
-      candidates.push({ project, forcePull: mode === 'missing-only' });
+      candidates.push({ project, forcePull });
     }
-    let heads = 0;
     // A project-specific first-share recovery must not wait behind historical
     // missing projects from the same workspace. Keep the broad safety-floor
     // sweep, but pull its explicit witnesses first so unrelated downloads
     // cannot delay the event that requested this recovery.
-    const orderedCandidates = expectedProjectIds.size === 0
+    const expectedFirstCandidates = expectedProjectIds.size === 0
       ? candidates
       : [
           ...candidates.filter(({ project }) =>
@@ -1482,9 +1559,34 @@ export function createProactiveContentPull(
           ...candidates.filter(({ project }) =>
             !expectedProjectIds.has(project.projectId)),
         ];
+    const broadCursorKey = JSON.stringify([mode, workspaceId]);
+    const previousBroadCursor = broadHeadCursors.get(broadCursorKey);
+    let broadStartIndex = 0;
+    if (!targetedOnly && previousBroadCursor) {
+      const exactIndex = expectedFirstCandidates.findIndex(
+        ({ project }) => project.projectId === previousBroadCursor,
+      );
+      if (exactIndex >= 0) {
+        broadStartIndex = (exactIndex + 1) % expectedFirstCandidates.length;
+      } else {
+        const nextIndex = expectedFirstCandidates.findIndex(
+          ({ project }) => project.projectId > previousBroadCursor,
+        );
+        broadStartIndex = nextIndex >= 0 ? nextIndex : 0;
+      }
+    }
+    const orderedCandidates = targetedOnly || broadStartIndex === 0
+      ? expectedFirstCandidates
+      : [
+          ...expectedFirstCandidates.slice(broadStartIndex),
+          ...expectedFirstCandidates.slice(0, broadStartIndex),
+        ];
+    const markBroadCandidateInspected = (projectId: string): void => {
+      if (!targetedOnly) broadHeadCursors.set(broadCursorKey, projectId);
+    };
     // Deliberately sequential: reconnect is a recovery path, not permission
     // to fan out one request per shared project at once.
-    for (const candidate of orderedCandidates) {
+    for (const candidate of preemptedByForeground ? [] : orderedCandidates) {
       // A verified hub event is the latency-sensitive lane. It already runs
       // independently from broad reconnect recovery, but two Vela children
       // still contend for the same session/network/object-store resources.
@@ -1492,24 +1594,21 @@ export function createProactiveContentPull(
       // expose a proven-safe cancellation boundary); once that candidate
       // settles, stop before launching the next historical download. Targeted
       // first-share recovery is deliberately exempt.
-      if (
-        !targetedOnly &&
-        (
-          foregroundEventsInFlight > 0 ||
-          foregroundIntents.size > 0 ||
-          foregroundCatalogRetries.size > 0 ||
-          foregroundResumeTimer != null ||
-          foregroundGeneration !== foregroundGenerationAtStart
-        )
-      ) {
+      if (foregroundShouldPreempt()) {
         complete = false;
         preemptedByForeground = true;
         break;
       }
       const { project, forcePull } = candidate;
       const binding = deps.getLocalBinding(project.projectId);
-      if (binding?.visibility === 'personal') continue;
-      if (binding && binding.workspaceId !== workspaceId) continue;
+      if (binding?.visibility === 'personal') {
+        markBroadCandidateInspected(project.projectId);
+        continue;
+      }
+      if (binding && binding.workspaceId !== workspaceId) {
+        markBroadCandidateInspected(project.projectId);
+        continue;
+      }
       const target: ProactiveContentPullTarget = {
         projectId: project.projectId,
         workspaceId,
@@ -1529,6 +1628,7 @@ export function createProactiveContentPull(
         // next safety floor, while targeted/live events continue to bypass.
         suppressed += 1;
         complete = false;
+        markBroadCandidateInspected(project.projectId);
         continue;
       }
       const persistedVersion = Number(
@@ -1541,28 +1641,50 @@ export function createProactiveContentPull(
           pulledVersions.set(scopeKey, persistedVersion);
         }
       }
+      if (!targetedOnly && headChecks >= BROAD_HEAD_CHECK_BUDGET) {
+        complete = false;
+        break;
+      }
       let version: number | null;
       try {
+        headChecks += 1;
         version = await deps.publishedHead(target);
       } catch (error) {
         deps.onError?.(error);
         complete = false;
         retrySweep = true;
+        markBroadCandidateInspected(project.projectId);
+        if (foregroundShouldPreempt()) {
+          preemptedByForeground = true;
+          break;
+        }
         continue;
+      }
+      markBroadCandidateInspected(project.projectId);
+      if (foregroundShouldPreempt()) {
+        complete = false;
+        preemptedByForeground = true;
+        break;
       }
       if (version == null) continue;
       heads += 1;
       if (!forcePull && Number.isFinite(persistedVersion) && persistedVersion >= version) {
         continue;
       }
-      if (!await processContentChanged(
+      const materialized = await processContentChanged(
         { projectId: project.projectId, workspaceId, version },
         project.ownerMemberId,
         forcePull,
         foreground,
         persistentRetry,
-      )) {
+      );
+      if (!materialized) {
         complete = false;
+      }
+      if (foregroundShouldPreempt()) {
+        complete = false;
+        preemptedByForeground = true;
+        break;
       }
     }
     deps.onCatchUp?.({
@@ -1572,6 +1694,7 @@ export function createProactiveContentPull(
       workspaceId,
       scanned: projects.length,
       candidates: candidates.length,
+      headChecks,
       heads,
       suppressed,
       complete,
@@ -1599,6 +1722,7 @@ export function createProactiveContentPull(
       for (const projectId of request.expectedProjectIds) {
         existing.expectedProjectIds.add(projectId);
       }
+      existing.healMissing ||= request.healMissing;
       return;
     }
     foregroundResumeRequests.set(mode, {
@@ -1606,6 +1730,7 @@ export function createProactiveContentPull(
         ? { expectedWorkspaceId: request.expectedWorkspaceId }
         : {}),
       expectedProjectIds: new Set(request.expectedProjectIds),
+      healMissing: request.healMissing,
     });
   }
 
@@ -1650,6 +1775,7 @@ export function createProactiveContentPull(
             request.expectedWorkspaceId,
             request.expectedProjectIds,
             'foreground-resume',
+            request.healMissing,
           )),
       );
     }, FOREGROUND_CATCH_UP_QUIET_MS);
@@ -1677,6 +1803,7 @@ export function createProactiveContentPull(
     mode: CatchUpMode,
     expectedWorkspaceId?: string,
     expectedProjectIds: ReadonlySet<string> = new Set(),
+    healMissing = false,
   ): void {
     const lane = catchUpLanes[mode];
     if (disposed || lane.retryTimer != null) return;
@@ -1711,6 +1838,7 @@ export function createProactiveContentPull(
         expectedWorkspaceId,
         expectedProjectIds,
         'retry',
+        healMissing,
       );
     }, delayMs);
     lane.retryTimer = handle;
@@ -1910,6 +2038,7 @@ export function createProactiveContentPull(
     expectedWorkspaceId?: string,
     expectedProjectIds: ReadonlySet<string> = new Set(),
     source: 'external' | 'retry' | 'foreground-resume' = 'external',
+    healMissing = false,
   ): Promise<void> {
     if (disposed) return;
     const lane = catchUpLanes[mode];
@@ -1928,10 +2057,12 @@ export function createProactiveContentPull(
       for (const projectId of expectedProjectIds) {
         lane.requestedSweep.expectedProjectIds.add(projectId);
       }
+      lane.requestedSweep.healMissing ||= healMissing;
     } else {
       lane.requestedSweep = {
         ...(expectedWorkspaceId ? { expectedWorkspaceId } : {}),
         expectedProjectIds: new Set(expectedProjectIds),
+        healMissing,
       };
     }
     if (lane.inFlight) {
@@ -1942,6 +2073,7 @@ export function createProactiveContentPull(
         const generation = lane.requestedGeneration;
         const next: CatchUpSweepRequest = lane.requestedSweep ?? {
           expectedProjectIds: new Set(),
+          healMissing: false,
         };
         lane.requestedSweep = null;
         if (next.expectedWorkspaceId) {
@@ -1954,6 +2086,9 @@ export function createProactiveContentPull(
           mode,
           next.expectedWorkspaceId,
           next.expectedProjectIds,
+          false,
+          false,
+          next.healMissing,
         );
         lane.completedGeneration = generation;
         if (outcome.preemptedByForeground) {
@@ -1973,6 +2108,7 @@ export function createProactiveContentPull(
             mode,
             next.expectedWorkspaceId,
             next.expectedProjectIds,
+            next.healMissing,
           );
         } else {
           lane.retryFailures = 0;
@@ -2017,6 +2153,14 @@ export function createProactiveContentPull(
     },
     catchUpPublishedHeads: (workspaceId) =>
       requestCatchUp('full', workspaceId),
+    advanceRecoveryFloor: (workspaceId) =>
+      requestCatchUp(
+        'full',
+        workspaceId,
+        new Set(),
+        'external',
+        true,
+      ),
     materializeMissingProjects: (workspaceId, projectId) =>
       projectId && workspaceId
         ? requestCatalogProjectRecovery(workspaceId, projectId, 'external')
@@ -2039,6 +2183,7 @@ export function createProactiveContentPull(
       targetedCatalogRecoveries.clear();
       targetedCatalogReads.clear();
       suppressedBroadHeads.clear();
+      broadHeadCursors.clear();
     },
   };
 }

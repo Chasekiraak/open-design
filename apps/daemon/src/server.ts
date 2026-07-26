@@ -3669,7 +3669,8 @@ export async function startServer({
       console.info(
         `[od] shared-project content catch-up completed mode=${event.mode} lane=${event.lane} ` +
           `workspaceId=${event.workspaceId ?? 'unknown'} scanned=${event.scanned ?? 0} ` +
-          `candidates=${event.candidates ?? 0} heads=${event.heads ?? 0} ` +
+          `candidates=${event.candidates ?? 0} headChecks=${event.headChecks ?? 0} ` +
+          `heads=${event.heads ?? 0} ` +
           `suppressed=${event.suppressed ?? 0} complete=${event.complete === true}`,
       );
     },
@@ -3725,8 +3726,9 @@ export async function startServer({
   // Collab realtime hop-2: daemon-side change source for the workspace SSE.
   // Diffs the same reads the web polls (context / team projects / members) and
   // emits a thin signal only on an actual change. The same 15s timer also asks
-  // the proactive pull coordinator to inspect locally missing projects at most
-  // every 30s, so a missed hub event cannot leave a stable catalog unsynced.
+  // the proactive pull coordinator to advance one bounded full-head batch at
+  // most every 30s, so missed content events and locally missing projects both
+  // converge without an additional recovery timer.
   // Runs IN ADDITION to the web polls, so a client whose SSE never connects is
   // unaffected.
   const workspaceInvalidationPoller = createWorkspaceInvalidationPoller({
@@ -3747,11 +3749,11 @@ export async function startServer({
     // poller throttles it to a 30s floor and never awaits the broad recovery,
     // keeping context/catalog/member polling responsive even when pulls are
     // slow. Scope comes from the successful context read, never activeWorkspace.
-    // The observed projects came from the display cache; materialization treats
+    // The observed projects came from the display cache; full recovery treats
     // them only as a nudge and independently re-checks authoritative active-team
-    // identity + catalog state before any pull.
+    // identity + catalog state before any head read or pull.
     onTeamProjectsObserved: ({ workspaceId }) =>
-      proactiveContentPull.materializeMissingProjects(workspaceId),
+      proactiveContentPull.advanceRecoveryFloor(workspaceId),
     onError: (error) => console.warn('[od] workspace invalidation poll error:', error),
   });
   workspaceInvalidationPoller.start();
@@ -3829,7 +3831,7 @@ export async function startServer({
           // Hub catalog writes carry the affected project id on current Vela
           // deployments, so keep the latency-sensitive recovery targeted. An
           // older/unscoped event still refreshes and reconciles the catalog;
-          // the poller's throttled 30s missing-project recovery remains its
+          // the poller's throttled 30s bounded full recovery remains its
           // safety floor.
           if (event.workspaceId && event.projectId) {
             void proactiveContentPull.materializeMissingProjects(

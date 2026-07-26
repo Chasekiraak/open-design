@@ -1125,9 +1125,217 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     ]);
   });
 
-  it('does not turn broad missing-project failures into permanent per-project retry timers', async () => {
+  it('budgets broad remote heads and rotates fairly without scheduling retries', async () => {
     const retry = makeRetryScheduler();
     const projects = Array.from({ length: 80 }, (_, index) => ({
+      projectId: `history-${String(index).padStart(2, '0')}`,
+      ownerMemberId: 'wm-owner',
+    }));
+    const headCalls: string[] = [];
+    const onCatchUp = vi.fn();
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      onCatchUp,
+      listSharedProjects: async () => projects,
+      hasMaterializedProject: () => false,
+      publishedHead: async (target) => {
+        headCalls.push(target.projectId);
+        return null;
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+    expect(headCalls).toEqual([
+      'history-00',
+      'history-01',
+      'history-02',
+      'history-03',
+    ]);
+    expect(onCatchUp).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'completed',
+      lane: 'broad',
+      headChecks: 4,
+      heads: 0,
+      complete: false,
+    }));
+    expect(retry.tasks.size).toBe(0);
+
+    await pull.materializeMissingProjects('ws-1');
+    expect(headCalls.slice(4)).toEqual([
+      'history-04',
+      'history-05',
+      'history-06',
+      'history-07',
+    ]);
+    expect(new Set(headCalls).size).toBe(8);
+    expect(retry.tasks.size).toBe(0);
+
+    // Project-specific first-share recovery bypasses the broad round budget.
+    await pull.materializeMissingProjects('ws-1', 'history-79');
+    expect(headCalls.at(-1)).toBe('history-79');
+
+    // The stable safety floor eventually visits every broad candidate instead
+    // of repeatedly spending its budget on the first catalog page.
+    for (let round = 2; round < 20; round += 1) {
+      await pull.materializeMissingProjects('ws-1');
+    }
+    expect(new Set(headCalls).size).toBe(80);
+    expect(retry.tasks.size).toBe(0);
+  });
+
+  it('isolates broad rotation cursors by workspace and recovery mode', async () => {
+    const projects = Array.from({ length: 8 }, (_, index) => ({
+      projectId: `history-${index}`,
+      ownerMemberId: 'wm-owner',
+    }));
+    let activeWorkspaceId = 'ws-1';
+    const headCalls: string[] = [];
+    const deps = makeDeps({
+      getWorkspaceIdentity: async () => ({
+        workspaceId: activeWorkspaceId,
+        resourceTeamId: `team-${activeWorkspaceId}`,
+        workspaceMemberId: 'wm-member',
+      }),
+      getLocalBinding: () => ({
+        workspaceId: activeWorkspaceId,
+        visibility: 'team',
+      }),
+      listSharedProjects: async () => projects,
+      hasMaterializedProject: () => false,
+      publishedHead: async (target) => {
+        headCalls.push(`${target.workspaceId}:${target.projectId}`);
+        return null;
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+    expect(headCalls).toEqual([
+      'ws-1:history-0',
+      'ws-1:history-1',
+      'ws-1:history-2',
+      'ws-1:history-3',
+    ]);
+
+    // Full reconnect owns an independent position from the missing-only floor.
+    await pull.catchUpPublishedHeads('ws-1');
+    expect(headCalls.slice(4)).toEqual([
+      'ws-1:history-0',
+      'ws-1:history-1',
+      'ws-1:history-2',
+      'ws-1:history-3',
+    ]);
+
+    activeWorkspaceId = 'ws-2';
+    await pull.materializeMissingProjects('ws-2');
+    expect(headCalls.slice(8)).toEqual([
+      'ws-2:history-0',
+      'ws-2:history-1',
+      'ws-2:history-2',
+      'ws-2:history-3',
+    ]);
+
+    activeWorkspaceId = 'ws-1';
+    await pull.materializeMissingProjects('ws-1');
+    expect(headCalls.slice(12)).toEqual([
+      'ws-1:history-4',
+      'ws-1:history-5',
+      'ws-1:history-6',
+      'ws-1:history-7',
+    ]);
+  });
+
+  it('continues broad rotation when the catalog changes and a candidate materializes', async () => {
+    let projects = Array.from({ length: 9 }, (_, index) => ({
+      projectId: `history-${index}`,
+      ownerMemberId: 'wm-owner',
+    }));
+    const materialized = new Set<string>();
+    const headCalls: string[] = [];
+    const deps = makeDeps({
+      listSharedProjects: async () => projects,
+      hasMaterializedProject: (projectId) => materialized.has(projectId),
+      publishedHead: async (target) => {
+        headCalls.push(target.projectId);
+        return null;
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+    expect(headCalls).toEqual([
+      'history-0',
+      'history-1',
+      'history-2',
+      'history-3',
+    ]);
+
+    projects = projects.filter((candidate) => candidate.projectId !== 'history-3');
+    materialized.add('history-4');
+    await pull.materializeMissingProjects('ws-1');
+
+    expect(headCalls.slice(4)).toEqual([
+      'history-5',
+      'history-6',
+      'history-7',
+      'history-8',
+    ]);
+  });
+
+  it('yields broad recovery after the current remote head when foreground work arrives', async () => {
+    const retry = makeRetryScheduler();
+    let releaseHead!: () => void;
+    let headStarted!: () => void;
+    const headGate = new Promise<void>((resolve) => {
+      releaseHead = resolve;
+    });
+    const headStart = new Promise<void>((resolve) => {
+      headStarted = resolve;
+    });
+    const headCalls: string[] = [];
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      listSharedProjects: async () => [
+        { projectId: 'history-a', ownerMemberId: 'wm-owner' },
+        { projectId: 'history-b', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async (target) => {
+        headCalls.push(target.projectId);
+        if (target.projectId === 'history-a') {
+          headStarted();
+          await headGate;
+        }
+        return 3;
+      },
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.catchUpPublishedHeads('ws-1');
+    await headStart;
+    const event = pull.handleContentChanged({
+      projectId: 'live-project',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('live-project'),
+    );
+    releaseHead();
+    await Promise.all([broad, event]);
+
+    expect(headCalls).toEqual(['history-a']);
+    expect(deps.pullCalls).toEqual(['live-project']);
+    pull.dispose();
+  });
+
+  it('does not turn broad missing-project failures into permanent per-project retry timers', async () => {
+    const retry = makeRetryScheduler();
+    const projects = Array.from({ length: 8 }, (_, index) => ({
       projectId: `history-${index}`,
       ownerMemberId: 'wm-owner',
     }));
@@ -1165,19 +1373,26 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 
     await pull.materializeMissingProjects('ws-1');
 
-    expect(deps.pullCalls).toHaveLength(80);
-    expect(headCalls).toHaveLength(80);
+    expect(deps.pullCalls).toHaveLength(4);
+    expect(headCalls).toHaveLength(4);
     expect(retry.tasks.size).toBe(0);
 
-    // The unchanged low-frequency safety floor must neither read 80 heads nor
-    // redownload 80 unavailable projects while their exact scopes cool down.
+    // The next heartbeat rotates to the second bounded batch.
     await pull.materializeMissingProjects('ws-1');
-    expect(deps.pullCalls).toHaveLength(80);
-    expect(headCalls).toHaveLength(80);
+    expect(deps.pullCalls).toHaveLength(8);
+    expect(headCalls).toHaveLength(8);
+    expect(retry.tasks.size).toBe(0);
+
+    // Once the exact scopes cool down, the low-frequency safety floor neither
+    // reads their heads nor allocates one retry timer per unavailable project.
+    await pull.materializeMissingProjects('ws-1');
+    expect(deps.pullCalls).toHaveLength(8);
+    expect(headCalls).toHaveLength(8);
     expect(onCatchUp).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: 'completed',
+      headChecks: 0,
       heads: 0,
-      suppressed: 80,
+      suppressed: 8,
       complete: false,
     }));
 
@@ -1188,7 +1403,7 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
       workspaceId: 'ws-1',
       version: 3,
     });
-    expect(deps.pullCalls).toHaveLength(81);
+    expect(deps.pullCalls).toHaveLength(9);
     expect(deps.pullCalls.at(-1)).toBe('history-0');
     expect(retry.tasks.size).toBe(0);
 
@@ -1198,27 +1413,18 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     recoverable.add('history-1');
     publishedVersions.set('history-1', 4);
     await pull.materializeMissingProjects('ws-1');
-    expect(deps.pullCalls).toHaveLength(81);
-    expect(headCalls).toHaveLength(80);
+    expect(deps.pullCalls).toHaveLength(9);
+    expect(headCalls).toHaveLength(8);
     expect(retry.tasks.size).toBe(0);
 
     // The next low-frequency floor retries the remaining transient failures
     // after cooldown, still without allocating one timer per project.
     clock = 15_001;
     await pull.materializeMissingProjects('ws-1');
-    expect(deps.pullCalls).toHaveLength(160);
-    expect(headCalls).toHaveLength(159);
+    expect(deps.pullCalls).toHaveLength(13);
+    expect(headCalls).toHaveLength(12);
     expect(deps.pullCalls).toContain('history-1');
     expect(retry.tasks.size).toBe(0);
-
-    // A successful broad pull clears the old suppression record. If its local
-    // materialization later disappears, the same head may be recovered
-    // immediately instead of waiting for a stale cooldown.
-    materialized.delete('history-1');
-    await pull.materializeMissingProjects('ws-1');
-    expect(deps.pullCalls).toHaveLength(161);
-    expect(headCalls).toHaveLength(160);
-    expect(deps.pullCalls.at(-1)).toBe('history-1');
   });
 
   it('stops a broad sweep before its next project when the live event coalesces with its current project', async () => {

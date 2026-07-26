@@ -5,6 +5,7 @@ import type {
   WorkspaceCollabContext,
   WorkspaceInvalidationSsePayload,
 } from '@open-design/contracts';
+import { createProactiveContentPull } from '../src/collab/proactive-content-pull.js';
 import { createWorkspaceInvalidationPoller } from '../src/collab/workspace-invalidation-poller.js';
 
 // Minimal team context — `isTeamContext` only reads `workspaceType`/`teamId`,
@@ -199,6 +200,93 @@ describe('workspace invalidation poller', () => {
       { workspaceId: 'ws-1', projectIds: ['p1'] },
       { workspaceId: 'ws-1', projectIds: ['p1'] },
     ]);
+  });
+
+  it('uses stable recovery ticks to continue bounded full-head rotation after reconnect', async () => {
+    let now = 0;
+    const sharedProjects = Array.from({ length: 10 }, (_, index) => ({
+      projectId: `p${index}`,
+      ownerMemberId: 'wm-owner',
+    }));
+    const headCalls: string[] = [];
+    const proactivePull = createProactiveContentPull({
+      getLocalBinding: () => ({ workspaceId: 'ws-1', visibility: 'team' }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: 'ws-1',
+        resourceTeamId: 'team-1',
+        workspaceMemberId: 'wm-1',
+      }),
+      resolveSharedProjectOwner: async () => 'wm-owner',
+      listSharedProjects: async () => sharedProjects,
+      hasMaterializedProject: () => true,
+      publishedHead: async (target) => {
+        headCalls.push(target.projectId);
+        return null;
+      },
+      pullSharedProject: async () => ({ status: 'pulled', version: null }),
+    });
+    const h = harness({
+      projects: sharedProjects.map((candidate) =>
+        project(candidate.projectId, {
+          ownerMemberId: candidate.ownerMemberId,
+        })),
+      recoveryFloorIntervalMs: 30_000,
+      now: () => now,
+      onTeamProjectsObserved: ({ workspaceId }) =>
+        proactivePull.advanceRecoveryFloor(workspaceId),
+    });
+
+    // Hub connect/reconnect starts one bounded full batch.
+    await proactivePull.catchUpPublishedHeads('ws-1');
+    expect(headCalls).toEqual(['p0', 'p1', 'p2', 'p3']);
+
+    // The existing poller cadence, rather than a new timer, advances the same
+    // full cursor through stale existing projects.
+    await h.poller.pollOnce();
+    await vi.waitFor(() => expect(headCalls).toHaveLength(8));
+    expect(headCalls.slice(4)).toEqual(['p4', 'p5', 'p6', 'p7']);
+
+    now = 30_000;
+    await h.poller.pollOnce();
+    await vi.waitFor(() => expect(headCalls).toHaveLength(12));
+    expect(headCalls.slice(8, 10)).toEqual(['p8', 'p9']);
+    expect(new Set(headCalls.slice(0, 10))).toEqual(
+      new Set(sharedProjects.map((candidate) => candidate.projectId)),
+    );
+    proactivePull.dispose();
+  });
+
+  it('materializes an absent local project through the bounded full recovery floor', async () => {
+    const pullCalls: string[] = [];
+    const proactivePull = createProactiveContentPull({
+      getLocalBinding: () => null,
+      getWorkspaceIdentity: async () => ({
+        workspaceId: 'ws-1',
+        resourceTeamId: 'team-1',
+        workspaceMemberId: 'wm-1',
+      }),
+      resolveSharedProjectOwner: async () => 'wm-owner',
+      listSharedProjects: async () => [
+        { projectId: 'missing-project', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 1,
+      pullSharedProject: async (target) => {
+        pullCalls.push(target.projectId);
+        return { status: 'pulled', version: 1 };
+      },
+    });
+    const h = harness({
+      projects: [
+        project('missing-project', { ownerMemberId: 'wm-owner' }),
+      ],
+      onTeamProjectsObserved: ({ workspaceId }) =>
+        proactivePull.advanceRecoveryFloor(workspaceId),
+    });
+
+    await h.poller.pollOnce();
+    await vi.waitFor(() => expect(pullCalls).toEqual(['missing-project']));
+    proactivePull.dispose();
   });
 
   it('does not run the recovery floor off-team or after a failed catalog read', async () => {
