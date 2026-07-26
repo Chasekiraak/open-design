@@ -346,6 +346,200 @@ describe('RecentProjectsStrip', () => {
     expect(coverSignal?.aborted).toBe(true);
   });
 
+  it('bounds a large cover scan and aborts it before opening a foreground project', async () => {
+    const activeSignals = new Set<AbortSignal>();
+    const startedSignals: AbortSignal[] = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      startedSignals.push(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            activeSignals.delete(signal);
+            resolve([]);
+          },
+          { once: true },
+        );
+      });
+    });
+    const onOpen = vi.fn(() => {
+      expect(activeSignals.size).toBe(0);
+      expect(startedSignals.every((signal) => signal.aborted)).toBe(true);
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalled());
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+
+    expect(onOpen).toHaveBeenCalledWith('project-1');
+    expect(activeSignals.size).toBe(0);
+    await act(async () => {});
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes the bounded cover scan when a shared-project foreground open fails', async () => {
+    const activeSignals = new Set<AbortSignal>();
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            activeSignals.delete(signal);
+            resolve([]);
+          },
+          { once: true },
+        );
+      });
+    });
+    let finishOpen!: (opened: boolean) => void;
+    const onOpen = vi.fn(() => new Promise<boolean>((resolve) => {
+      finishOpen = resolve;
+    }));
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+    expect(activeSignals.size).toBe(0);
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    act(() => finishOpen(false));
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(4));
+    expect(activeSignals.size).toBe(2);
+  });
+
+  it('keeps HTML cover probes inside the same bounded queue and aborts them before open', async () => {
+    vi.mocked(fetchProjectFiles).mockImplementation(async (projectId) => [{
+      name: 'index.html',
+      path: 'index.html',
+      kind: 'html',
+      mtime: Number(projectId.replace('project-', '')),
+      size: 1,
+      mime: 'text/html',
+    }]);
+    const activeCoverSignals = new Set<AbortSignal>();
+    const coverFetch = vi.fn<typeof fetch>((input, init) => {
+      if (String(input).includes('/api/workspace/context')) {
+        return Promise.resolve(new Response(JSON.stringify({ context: null }), {
+          headers: { 'content-type': 'application/json' },
+        }));
+      }
+      const signal = init?.signal;
+      if (!signal) throw new Error('HTML cover probe must be cancellable');
+      activeCoverSignals.add(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          activeCoverSignals.delete(signal);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', coverFetch);
+    const onOpen = vi.fn(() => {
+      expect(activeCoverSignals.size).toBe(0);
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(activeCoverSignals.size).toBeGreaterThan(0));
+    expect(coverFetch.mock.calls.filter(([input]) => String(input).includes('/api/projects/')))
+      .toHaveLength(2);
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+
+    expect(onOpen).toHaveBeenCalledWith('project-1');
+    expect(activeCoverSignals.size).toBe(0);
+    await act(async () => {});
+    expect(coverFetch.mock.calls.filter(([input]) => String(input).includes('/api/projects/')))
+      .toHaveLength(2);
+  });
+
+  it('does not start queued work while cancelling a saturated priority replacement', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    const activeSignals = new Set<AbortSignal>();
+    const pending: Array<{
+      projectId: string;
+      finish: (files?: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+    }> = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      return new Promise((resolve) => {
+        const finish = (files: Awaited<ReturnType<typeof fetchProjectFiles>> = []) => {
+          activeSignals.delete(signal);
+          resolve(files);
+        };
+        pending.push({ projectId, finish });
+        signal.addEventListener('abort', () => finish(), { once: true });
+      });
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(5)}
+        limit={1000}
+        onOpen={() => {
+          expect(activeSignals.size).toBe(0);
+        }}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-5',
+        workspaceId: 'ws-1',
+      });
+    });
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    act(() => pending.find(({ projectId }) => projectId === 'project-1')!.finish());
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(fetchProjectFiles).mock.calls[2]?.[0]).toBe('project-5');
+
+    fireEvent.click(screen.getByTitle('Project 2'));
+
+    expect(activeSignals.size).toBe(0);
+    await act(async () => {});
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the StrictMode replay request abortable after the first request settles late', async () => {
     const requests: Array<{
       resolve: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
@@ -643,7 +837,10 @@ describe('RecentProjectsStrip', () => {
       expect(deckCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
       expect(htmlCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
     });
-    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-deck/files/index.html?v=400');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-deck/files/index.html?v=400',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/project-html/files/index.html?v=200',
       expect.objectContaining({ cache: 'no-store', method: 'HEAD' }),
@@ -669,7 +866,7 @@ describe('RecentProjectsStrip', () => {
     );
 
     await waitFor(() => {
-      const htmlThumb = container.querySelector('.recent-projects__card-thumb-html');
+      const htmlThumb = container.querySelector('.recent-projects__card-thumb');
       expect(htmlThumb?.querySelector('iframe')).toBeNull();
       expect(htmlThumb?.querySelector('.recent-projects__card-glyph')?.textContent).toBe('W');
       expect(warn).toHaveBeenCalledWith(

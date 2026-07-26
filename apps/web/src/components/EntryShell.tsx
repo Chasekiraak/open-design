@@ -751,10 +751,10 @@ export function EntryShell({
   // project record) so it can open read-only — the member is not the owner, so
   // the useProjectCollab single-writer path keeps it read-only.
   const [pullingProjectId, setPullingProjectId] = useState<string | null>(null);
-  async function handleOpenAllProjects(id: string): Promise<void> {
+  async function handleOpenAllProjects(id: string): Promise<boolean> {
     if (localProjectIds.has(id) || contentReadyProjectIdsRef.current.has(id)) {
       await Promise.resolve(onOpenProject(id));
-      return;
+      return true;
     }
     const scopeKey = contentReadyScopeKeyRef.current;
     const hydration = scopeKey
@@ -764,25 +764,26 @@ export function EntryShell({
       const hydrated = await hydration;
       if (hydrated) {
         await Promise.resolve(onOpenProject(id));
-        return;
+        return true;
       }
-      if (contentReadyScopeKeyRef.current !== scopeKey) return;
+      if (contentReadyScopeKeyRef.current !== scopeKey) return false;
     }
     // The pull materializes the whole project before it can open; surface it
     // on the card (spinner overlay) and swallow re-clicks meanwhile —
     // otherwise the first click reads as dead for the entire download.
-    if (pullingProjectId) return;
+    if (pullingProjectId) return false;
     setPullingProjectId(id);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(id)}/collab/pull`, { method: 'POST' });
-      if (!response.ok) return;
+      if (!response.ok) return false;
       await Promise.resolve(onProjectsRefresh?.());
     } catch {
-      return;
+      return false;
     } finally {
       setPullingProjectId(null);
     }
     await Promise.resolve(onOpenProject(id));
+    return true;
   }
   // Resolve the effective light/dark theme so the rail's account-menu theme toggle
   // flips to the opposite of what's actually shown (system → resolved).
@@ -1606,7 +1607,7 @@ export function EntryShell({
                     onProjectUnshared={markProjectUnshared}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     openingProjectId={pullingProjectId}
-                    onOpen={(id) => void handleOpenAllProjects(id)}
+                    onOpen={handleOpenAllProjects}
                     onViewAll={() => {}}
                     onDelete={onDeleteProject}
                     onRename={onRenameProject}
