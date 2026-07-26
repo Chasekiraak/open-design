@@ -4297,6 +4297,7 @@ export function ProjectView({
               // null the same as an active retryable state and keep the row
               // eligible for future refresh/reattach. Only authoritative
               // terminal statuses seal completedReattachRunsRef.
+              let shouldRefreshConversationAfterCleanup = true;
               if (genericDisconnect) {
                 const attempts = (genericDisconnectRetriesRef.current.get(runId) ?? 0) + 1;
                 if (attempts >= MAX_TRANSIENT_RETRIES) {
@@ -4313,15 +4314,12 @@ export function ProjectView({
                     cancelController,
                   );
                   const backoffTimer = scheduleProjectTimeout(() => {
-                    const currentBackoffUntil =
-                      genericDisconnectBackoffUntilRef.current.get(runId) ?? 0;
-                    if (currentBackoffUntil <= Date.now()) {
-                      genericDisconnectBackoffUntilRef.current.delete(runId);
-                    }
+                    genericDisconnectBackoffUntilRef.current.delete(runId);
                     setRecoveryTick((t) => t + 1);
                   }, 3000);
                   const latestRunStatus = await fetchChatRunStatus(runId).catch(() => null);
                   if (!latestRunStatus || isActiveRunStatus(latestRunStatus.status)) {
+                    shouldRefreshConversationAfterCleanup = false;
                   } else if (latestRunStatus.status === 'succeeded') {
                     if (
                       shouldPublishRunFinishedEvent
@@ -4419,7 +4417,9 @@ export function ProjectView({
               clearCurrentRunStreamingMarker(reattachConversationId, controller, cancelController);
               if (!skipFinalPersistNow) persistNow({ telemetryFinalized: true });
               if (retryFullReplayAfterCleanup) setRecoveryTick((t) => t + 1);
-              scheduleConversationMessageRefresh(reattachConversationId);
+              if (shouldRefreshConversationAfterCleanup) {
+                scheduleConversationMessageRefresh(reattachConversationId);
+              }
             },
           },
           onRunStatus: (runStatus) => {
@@ -5699,11 +5699,7 @@ export function ProjectView({
                 genericDisconnectRetriesRef.current.set(runIdForGenericDisconnect, attempts);
                 genericDisconnectBackoffUntilRef.current.set(runIdForGenericDisconnect, backoffUntil);
                 const backoffTimer = scheduleProjectTimeout(() => {
-                  const currentBackoffUntil =
-                    genericDisconnectBackoffUntilRef.current.get(runIdForGenericDisconnect) ?? 0;
-                  if (currentBackoffUntil <= Date.now()) {
-                    genericDisconnectBackoffUntilRef.current.delete(runIdForGenericDisconnect);
-                  }
+                  genericDisconnectBackoffUntilRef.current.delete(runIdForGenericDisconnect);
                   setRecoveryTick((t) => t + 1);
                 }, 3000);
                 const latestRunStatus = await fetchChatRunStatus(runIdForGenericDisconnect).catch(() => null);
