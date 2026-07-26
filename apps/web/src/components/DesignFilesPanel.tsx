@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { VisuallyHidden } from '@open-design/components';
 import { useAnalytics } from '../analytics/provider';
 import { trackFileManagerClick } from '../analytics/events';
 import { useT } from '../i18n';
@@ -20,7 +19,6 @@ import { getPluginFolderCandidates } from './design-files/pluginFolders';
 import { FileSyncBadge } from '../collab/FileSyncBadge';
 import { Icon } from './Icon';
 import { LiveArtifactBadges } from './LiveArtifactBadges';
-import { Skeleton } from './Loading';
 import { RemixIcon } from './RemixIcon';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
@@ -38,10 +36,9 @@ interface Props {
   viewerOnly?: boolean;
   /**
    * True while a non-owner member's local mirror has not yet caught up to the
-   * project's published head — the file-list read below is honest (it reads
-   * local disk directly), but an empty result here can mean either "nothing
-   * was ever shared" or "the pull just hasn't landed yet". Swaps the empty
-   * state for a syncing notice so the two cannot look identical.
+   * project's published head. Existing files belong to the last complete
+   * local materialization and remain useful while the next version downloads;
+   * only an empty local result swaps the creation CTAs for a syncing notice.
    */
   downloadPending?: boolean;
   // Basename of the project's working directory when the user has chosen a
@@ -668,16 +665,6 @@ export function DesignFilesPanel({
   }
 
   function renderFileRow(f: ProjectFile, category: FileCategory) {
-    // A member's local mirror has not (yet, provably) caught up to the
-    // published head (`downloadPending`, project-wide — see the prop's doc
-    // comment: the daemon's `pull` materializes the whole tree in one shot,
-    // so there is no per-file "this one landed" signal to key off). Every
-    // row currently in `files` came from a plain local-disk read, so its
-    // content could be stale or mid-overwrite by the in-flight pull — render
-    // a shimmering placeholder instead of the real name/size/time and drop
-    // every interactive affordance (open, select, rename, menu) rather than
-    // promise a file is safe to open when it is not yet confirmed synced.
-    if (downloadPending) return renderPendingFileRow(f);
     const isSelected = selected.has(f.name);
     const isHovered = hover === f.name;
     const renameState = renaming?.name === f.name ? renaming : null;
@@ -814,71 +801,6 @@ export function DesignFilesPanel({
     );
   }
 
-  // Skeleton stand-in for a list-row file whose content is not confirmed
-  // synced (see the `downloadPending` branch in `renderFileRow` above).
-  // Structurally mirrors the real row's 6-column grid (check / icon / name /
-  // size / time / menu) so the list doesn't reflow once files resolve, but
-  // every cell is inert: no button, no tabIndex, no onClick — the row itself
-  // carries `aria-disabled` + `aria-busy` and the `df-row-pending` class
-  // (cursor: not-allowed on hover; see design-files.css). Reuses the shared
-  // `.skeleton-shimmer` sweep (composio.css) instead of inventing a new
-  // loading treatment.
-  function renderPendingFileRow(f: ProjectFile) {
-    return (
-      <div
-        key={f.name}
-        data-testid={`design-file-row-${f.name}`}
-        className="df-row df-file-row df-row-pending"
-        aria-busy="true"
-        aria-disabled="true"
-      >
-        <span className="df-row-check" aria-hidden />
-        <span className="df-row-icon df-row-icon-pending skeleton-shimmer" aria-hidden />
-        <div className="df-row-name-wrap">
-          <Skeleton height={13} width="58%" />
-          <Skeleton height={10} width="30%" />
-        </div>
-        <span className="df-row-size">
-          <Skeleton height={11} width={34} />
-        </span>
-        <span className="df-row-time">
-          <Skeleton height={11} width={46} />
-        </span>
-        <span className="df-row-menu df-row-menu-placeholder" aria-hidden />
-        <VisuallyHidden>{t('designFiles.syncing')}</VisuallyHidden>
-      </div>
-    );
-  }
-
-  // Skeleton stand-in for a card-grid file (HTML page or image) whose
-  // content is not confirmed synced — the card-grid counterpart of
-  // `renderPendingFileRow` above. `image: true` skips the meta strip
-  // (image cards are bare thumbnails, no name/kind/time line) and uses a
-  // portrait-friendlier placeholder ratio instead of the 16/9 page ratio.
-  function renderPendingCard(f: ProjectFile, { image }: { image: boolean }) {
-    return (
-      <div
-        key={f.name}
-        data-testid={`design-file-row-${f.name}`}
-        className={`df-card df-card-pending${image ? ' df-card--image' : ''}`}
-        aria-busy="true"
-        aria-disabled="true"
-      >
-        <div className="df-card-thumb df-card-thumb-pending skeleton-shimmer" aria-hidden />
-        {image ? null : (
-          <div className="df-card-meta">
-            <div className="df-card-meta-text">
-              <Skeleton height={13} width="70%" />
-              <Skeleton height={11} width="40%" />
-            </div>
-            <span className="df-row-menu df-row-menu-placeholder" aria-hidden />
-          </div>
-        )}
-        <VisuallyHidden>{t('designFiles.syncing')}</VisuallyHidden>
-      </div>
-    );
-  }
-
   // HTML pages render as thumbnail cards (live page preview + meta strip)
   // instead of compact list rows — the #5517 reference card grid. The grid IS
   // the preview surface, so a single click on the thumb opens the page in a
@@ -886,7 +808,6 @@ export function DesignFilesPanel({
   // editors (read-only viewers open instead), and the ⋯ menu carries
   // open / rename / copy-path / download / delete.
   function renderPageCard(f: ProjectFile, category: FileCategory) {
-    if (downloadPending) return renderPendingCard(f, { image: false });
     const isSelected = selected.has(f.name);
     const renameState = renaming?.name === f.name ? renaming : null;
     const displayName = currentDir === '' ? f.name : f.name.slice(currentDir.length + 1);
@@ -1016,7 +937,6 @@ export function DesignFilesPanel({
   // (rename/delete live there) floats top-right, both hover-revealed. A single
   // click on the picture opens the image in a workspace tab.
   function renderImageCard(f: ProjectFile, _category: FileCategory) {
-    if (downloadPending) return renderPendingCard(f, { image: true });
     const isSelected = selected.has(f.name);
     const openLabel = `${t('designFiles.previewOpen')} ${f.name}`;
     return (

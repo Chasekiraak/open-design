@@ -1398,6 +1398,30 @@ describe('FileWorkspace launcher tab creation', () => {
     ]);
   });
 
+  it('shows project sync progress on the Design Files root tab without hiding materialized files', () => {
+    render(
+      <FileWorkspace
+        projectId="project-1"
+        projectKind="prototype"
+        files={[workspaceFile('notes.txt')]}
+        liveArtifacts={[]}
+        onRefreshFiles={vi.fn()}
+        isDeck={false}
+        viewerOnly
+        fileSyncBadge="downloading"
+        tabsState={{ tabs: [], active: DESIGN_FILES_TAB }}
+        onTabsStateChange={vi.fn()}
+      />,
+    );
+
+    const rootTab = screen.getByTestId('design-files-tab');
+    expect(rootTab.title).toContain('Downloading from the team');
+    expect(rootTab.getAttribute('aria-label')).toContain('Downloading from the team');
+    expect(rootTab.querySelector('svg')).toBeTruthy();
+    expect(screen.getByText('notes.txt')).toBeTruthy();
+    expect(screen.queryByTestId('design-files-syncing')).toBeNull();
+  });
+
   it('opens Design Files from the browser snapshot toast action instead of the manifest file', async () => {
     const onTabsStateChange = vi.fn();
     const browserTab = {
