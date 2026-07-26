@@ -70,20 +70,96 @@ describe('observed active team workspace snapshot', () => {
     });
   });
 
+  it('keeps the identity generation stable across a transient null that recovers to A', async () => {
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = provider.lastKnownSnapshot!();
+
+    current = null;
+    await provider.current({});
+    expect(provider.lastKnown!()).toBeNull();
+    expect(provider.lastKnownSnapshot!()).toEqual({
+      context: null,
+      generation: captured.generation,
+    });
+
+    current = activeIdentity;
+    await provider.current({});
+    expect(provider.lastKnownSnapshot!()).toEqual(captured);
+  });
+
+  it('keeps a persistent null unavailable so promotion still fails closed', async () => {
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = provider.lastKnownSnapshot!();
+
+    current = null;
+    await provider.current({});
+
+    expect(resolveAuthorizedActiveTeamWorkspaceSnapshot(
+      { workspaceId: 'workspace-1', generation: 0 },
+      provider.lastKnownSnapshot!(),
+    )).toEqual({
+      workspaceId: null,
+      generation: captured.generation,
+    });
+  });
+
+  it('increments identity generation when authoritative current changes from A to B', async () => {
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = provider.lastKnownSnapshot!();
+
+    current = { ...activeIdentity, workspaceId: 'workspace-2' };
+    await provider.current({});
+
+    expect(provider.lastKnownSnapshot!()).toMatchObject({
+      context: { workspaceId: 'workspace-2' },
+      generation: captured.generation + 1,
+    });
+  });
+
   it('increments identity generation for member and lifecycle drift', async () => {
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = provider.lastKnownSnapshot!();
+    current = { ...activeIdentity, memberStatus: 'removed' };
+    await provider.current({});
+    current = {
+      ...activeIdentity,
+      lifecycleState: 'locked',
+    };
+    await provider.current({});
+
+    expect(provider.lastKnownSnapshot!()).toMatchObject({
+      generation: captured.generation + 2,
+    });
+  });
+
+  it('increments identity generation when a dev provider explicitly clears context', async () => {
     const provider = withLastKnownWorkspaceContext(
       createDevWorkspaceContextProvider(activeIdentity),
     );
     await provider.current({});
     const captured = provider.lastKnownSnapshot!();
-    provider.set!({ ...activeIdentity, memberStatus: 'removed' });
-    provider.set!({
-      ...activeIdentity,
-      lifecycleState: 'locked',
-    });
 
-    expect(provider.lastKnownSnapshot!()).toMatchObject({
-      generation: captured.generation + 2,
+    provider.set!(null);
+
+    expect(provider.lastKnownSnapshot!()).toEqual({
+      context: null,
+      generation: captured.generation + 1,
     });
   });
 });

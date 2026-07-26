@@ -2177,6 +2177,65 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     expect(store.projects.get('authorized-fast')?.name).toBe('Staged project');
   });
 
+  it('logs the project, version, and non-sensitive snapshot reason when promotion fails', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-log-'));
+    tempDirs.push(root);
+    const liveDir = path.join(root, 'project');
+    const stageDir = path.join(root, '.project.od-pull-stage-test');
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), '<title>Staged project</title>');
+    let snapshot = {
+      workspaceId: pullScope.workspaceId as string | null,
+      generation: 7,
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const api = await startSyncServer(fixedShareContextProvider(true), {
+        projectStore: fakeProjectStore(),
+        resolvePullDir: () => liveDir,
+        resolveSharedProject: resolvePulledSharedProject,
+        authorizedTeamProjectPull: {
+          journalDir: path.join(root, '.journals'),
+          getActiveWorkspaceSnapshot: () => snapshot,
+          stage: vi.fn(async () => ({
+            stageDir,
+            identity: { dev: '1', ino: '2' },
+            receipt: authorizedReceipt('authorized-log', 5),
+            cleanup: vi.fn(async () => undefined),
+          })),
+          promote: vi.fn(async () => {
+            snapshot = { workspaceId: null, generation: 7 };
+            throw new Error('active workspace changed while the team mirror was staged');
+          }),
+        },
+      });
+
+      await expect(invokeThroughProactivePull(
+        api.handle,
+        'authorized-log',
+        pullScope,
+        5,
+      )).resolves.toEqual({ status: 'register_failed' });
+
+      expect(warn).toHaveBeenCalledWith(
+        '[od] failed to promote authorized team project',
+        {
+          projectId: 'authorized-log',
+          version: 5,
+          reason: 'workspace-unavailable',
+          snapshot: {
+            workspaceAvailable: false,
+            workspaceMatches: false,
+            generationMatches: true,
+          },
+          errorName: 'Error',
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('never accepts an authorized-stage-shaped HTTP body', async () => {
     const stage = vi.fn();
     const adapterPull = vi.fn(async () => ({ version: 5 }));

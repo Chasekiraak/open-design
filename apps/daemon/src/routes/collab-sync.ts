@@ -1127,7 +1127,35 @@ export function registerCollabSyncRoutes(
           });
           localRecordChanged = result.localRecordChanged;
         } catch (error) {
-          console.warn('[od] failed to promote authorized team project:', error);
+          const observedSnapshot =
+            authorizedPull.getActiveWorkspaceSnapshot();
+          const workspaceAvailable = observedSnapshot.workspaceId !== null;
+          const workspaceMatches =
+            observedSnapshot.workspaceId === scope.workspaceId;
+          const generationMatches =
+            observedSnapshot.generation === activeSnapshot.generation;
+          const versionStillExpected =
+            authorizedStageInvocation.isStillExpected();
+          const reason = !workspaceAvailable
+            ? 'workspace-unavailable'
+            : !workspaceMatches
+              ? 'workspace-changed'
+              : !generationMatches
+                ? 'workspace-generation-changed'
+                : !versionStillExpected
+                  ? 'version-superseded'
+                  : 'promotion-failed';
+          console.warn('[od] failed to promote authorized team project', {
+            projectId,
+            version: expectedVersion,
+            reason,
+            snapshot: {
+              workspaceAvailable,
+              workspaceMatches,
+              generationMatches,
+            },
+            errorName: error instanceof Error ? error.name : typeof error,
+          });
           return complete({ status: 'register_failed' });
         } finally {
           try {

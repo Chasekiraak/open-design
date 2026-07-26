@@ -79,6 +79,15 @@ export interface WorkspaceContextProvider {
  * NOT scoped per-workspace-id: a caller must compare `lastKnown().workspaceId`
  * against the workspace it cares about and treat a mismatch as "no opinion",
  * exactly like a cache miss.
+ *
+ * Authorization generations have a narrower meaning than raw availability.
+ * Vela maps both a transient timeout and a real signed-out response to `null`,
+ * so treating every null as a new identity turns A -> transient null -> A into
+ * a false workspace switch. The raw context still becomes null (and therefore
+ * fails closed while unavailable), but generation advances only when a
+ * non-null authoritative identity differs. A later successful A read restores
+ * availability without fabricating drift. Dev/demo `set(null)` remains an
+ * explicit authoritative clear and does advance the generation.
  */
 export function withLastKnownWorkspaceContext(
   provider: WorkspaceContextProvider,
@@ -86,7 +95,12 @@ export function withLastKnownWorkspaceContext(
   let lastKnown: WorkspaceCollabContext | null = null;
   let lastIdentityKey: string | null | undefined;
   let generation = 0;
-  const observe = (context: WorkspaceCollabContext | null): void => {
+  const observe = (
+    context: WorkspaceCollabContext | null,
+    nullIsAuthoritative: boolean,
+  ): void => {
+    lastKnown = context;
+    if (context === null && !nullIsAuthoritative) return;
     const identityKey = context
       ? JSON.stringify([
           context.workspaceId,
@@ -100,13 +114,12 @@ export function withLastKnownWorkspaceContext(
       generation += 1;
       lastIdentityKey = identityKey;
     }
-    lastKnown = context;
   };
   return {
     ...provider,
     async current(req: WorkspaceContextRequest): Promise<WorkspaceCollabContext | null> {
       const context = await provider.current(req);
-      observe(context);
+      observe(context, false);
       return context;
     },
     // Dev/demo provider only (see `set?` above): a direct override is also a
@@ -115,7 +128,7 @@ export function withLastKnownWorkspaceContext(
     ...(provider.set
       ? {
           set: (context: WorkspaceCollabContext | null) => {
-            observe(context);
+            observe(context, true);
             provider.set!(context);
           },
         }

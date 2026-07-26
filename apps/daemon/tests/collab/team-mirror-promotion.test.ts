@@ -2,12 +2,15 @@ import { lstat, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import {
   promoteAuthorizedTeamProjectStage,
   recoverAuthorizedTeamProjectPromotions,
   type TeamMirrorPromotionJournalRecord,
 } from '../../src/collab/team-mirror-promotion.js';
+import { resolveAuthorizedActiveTeamWorkspaceSnapshot } from '../../src/collab/active-workspace-selection.js';
+import { withLastKnownWorkspaceContext } from '../../src/collab/workspace-context.js';
 import { teamProjectMaterializationSupersedes } from '../../src/collab/team-mirror-materializer.js';
 import type { AuthorizedTeamProjectPullReceipt } from '../../src/collab/authorized-team-project-pull.js';
 import { projectResourceIdFor } from '../../src/integrations/vela-team-projects.js';
@@ -20,6 +23,25 @@ const resourceId = projectResourceIdFor('project-1', {
   lifecycleState: 'active',
   workspaceType: 'team',
 });
+const activeIdentity = {
+  workspaceId: 'workspace-1',
+  teamId: 'workspace-1',
+  workspaceMemberId: 'viewer-1',
+  workspaceType: 'team',
+  memberStatus: 'active',
+  lifecycleState: 'active',
+  role: 'member',
+  billingState: 'active',
+  planId: null,
+  providerMode: 'platform_credits',
+  seatSummary: { seatLimit: 5, usedSeats: 2, availableSeats: 3 },
+  permissions: {
+    canManageMembers: false,
+    canManageBilling: false,
+    canShareProjects: true,
+    canWriteSyncedFiles: true,
+  },
+} as WorkspaceCollabContext;
 
 async function fixture(live = true) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'od-team-promote-'));
@@ -70,6 +92,79 @@ afterEach(async () => {
 });
 
 describe('authorized team mirror promotion', () => {
+  it('promotes after a transient A to null to A observation without generation drift', async () => {
+    const fx = await fixture();
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = resolveAuthorizedActiveTeamWorkspaceSnapshot(
+      { workspaceId: 'workspace-1', generation: 0 },
+      provider.lastKnownSnapshot!(),
+    );
+
+    current = null;
+    await provider.current({});
+    current = activeIdentity;
+    await provider.current({});
+
+    await expect(promoteAuthorizedTeamProjectStage({
+      receipt: receipt(),
+      liveDir: fx.liveDir,
+      stageDir: fx.stageDir,
+      expectedStageIdentity: fx.stageIdentity,
+      journalDir: fx.journalDir,
+      activeWorkspaceGeneration: captured.generation,
+      getActiveWorkspaceSnapshot: () =>
+        resolveAuthorizedActiveTeamWorkspaceSnapshot(
+          { workspaceId: 'workspace-1', generation: 0 },
+          provider.lastKnownSnapshot!(),
+        ),
+      expectedWorkspaceId: 'workspace-1',
+      isExpectedVersion: () => true,
+      validateReceipt: () => undefined,
+      commit: () => ({ localRecordChanged: true }),
+    })).resolves.toEqual({ localRecordChanged: true });
+
+    expect(await readFile(path.join(fx.liveDir, 'index.html'), 'utf8')).toBe('new');
+  });
+
+  it('rejects promotion while the authoritative context remains unavailable', async () => {
+    const fx = await fixture();
+    let current: WorkspaceCollabContext | null = activeIdentity;
+    const provider = withLastKnownWorkspaceContext({
+      current: async () => current,
+    });
+    await provider.current({});
+    const captured = resolveAuthorizedActiveTeamWorkspaceSnapshot(
+      { workspaceId: 'workspace-1', generation: 0 },
+      provider.lastKnownSnapshot!(),
+    );
+    current = null;
+    await provider.current({});
+
+    await expect(promoteAuthorizedTeamProjectStage({
+      receipt: receipt(),
+      liveDir: fx.liveDir,
+      stageDir: fx.stageDir,
+      expectedStageIdentity: fx.stageIdentity,
+      journalDir: fx.journalDir,
+      activeWorkspaceGeneration: captured.generation,
+      getActiveWorkspaceSnapshot: () =>
+        resolveAuthorizedActiveTeamWorkspaceSnapshot(
+          { workspaceId: 'workspace-1', generation: 0 },
+          provider.lastKnownSnapshot!(),
+        ),
+      expectedWorkspaceId: 'workspace-1',
+      isExpectedVersion: () => true,
+      validateReceipt: () => undefined,
+      commit: () => ({ localRecordChanged: true }),
+    })).rejects.toThrow('active workspace changed');
+
+    expect(await readFile(path.join(fx.liveDir, 'index.html'), 'utf8')).toBe('old');
+  });
+
   it('atomically promotes the stage before committing SQLite metadata+cursor', async () => {
     const fx = await fixture();
     const commit = vi.fn(() => {
