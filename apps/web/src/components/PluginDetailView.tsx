@@ -15,7 +15,7 @@ import type {
   PluginConnectorRef,
 } from '@open-design/contracts';
 import { applyPlugin } from '../state/projects';
-import { navigate } from '../router';
+import { goBack, navigate } from '../router';
 import { useI18n } from '../i18n';
 import { localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
 import { useAnalytics } from '../analytics/provider';
@@ -160,7 +160,7 @@ export function PluginDetailView(props: Props) {
       element: 'back',
       plugin_id: props.pluginId,
     });
-    navigate({ kind: 'marketplace' });
+    goBack({ kind: 'home', view: 'plugins' });
   };
 
   useEffect(() => {

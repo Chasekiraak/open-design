@@ -13,6 +13,7 @@ vi.mock('../../src/analytics/provider', async (importOriginal) => {
 });
 
 vi.mock('../../src/router', () => ({
+  goBack: vi.fn(),
   navigate: vi.fn(),
 }));
 
