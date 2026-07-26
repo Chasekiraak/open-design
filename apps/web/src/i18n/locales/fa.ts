@@ -937,6 +937,7 @@ export const fa: Dict = {
   'homeHero.footer.noMatches': 'موردی یافت نشد',
   'homeHero.moreShortcuts': 'بیشتر',
   'homeHero.railAria': 'یک دسته پروژه یا میانبر شروع را انتخاب کنید',
+  'homeHero.productCatalogCount': '{n} خروجی طراحی را کاوش کنید',
   'homeHero.subTypeAria': 'یک زیرنوع را انتخاب کنید',
   'homeHero.subTypeMore': 'بیشتر',
   'homeHero.confirmReplaceTitle': 'دستور فعلی جایگزین شود؟',

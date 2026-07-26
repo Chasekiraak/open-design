@@ -937,6 +937,7 @@ export const th: Dict = {
   'homeHero.footer.noMatches': 'ไม่พบรายการที่ตรงกัน',
   'homeHero.moreShortcuts': 'เพิ่มเติม',
   'homeHero.railAria': 'เลือกหมวดหมู่โปรเจกต์หรือทางลัดเริ่มต้น',
+  'homeHero.productCatalogCount': 'สำรวจผลงานออกแบบ {n} ประเภท',
   'homeHero.subTypeAria': 'เลือกประเภทย่อย',
   'homeHero.subTypeMore': 'เพิ่มเติม',
   'homeHero.confirmReplaceTitle': 'แทนที่ prompt ปัจจุบันหรือไม่?',

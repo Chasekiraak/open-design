@@ -937,6 +937,7 @@ export const de: Dict = {
   'homeHero.footer.noMatches': 'Keine Treffer',
   'homeHero.moreShortcuts': 'Mehr',
   'homeHero.railAria': 'Wähle eine Projektkategorie oder einen Starter-Shortcut',
+  'homeHero.productCatalogCount': '{n} Design-Ergebnisse entdecken',
   'homeHero.subTypeAria': 'Wähle einen Untertyp',
   'homeHero.subTypeMore': 'Mehr',
   'homeHero.confirmReplaceTitle': 'Aktuellen Prompt ersetzen?',

@@ -937,6 +937,7 @@ export const id: Dict = {
   'homeHero.footer.noMatches': 'Tidak ada yang cocok',
   'homeHero.moreShortcuts': 'Lainnya',
   'homeHero.railAria': 'Pilih kategori project atau pintasan starter',
+  'homeHero.productCatalogCount': 'Jelajahi {n} hasil desain',
   'homeHero.subTypeAria': 'Pilih sub-tipe',
   'homeHero.subTypeMore': 'Lainnya',
   'homeHero.confirmReplaceTitle': 'Ganti prompt saat ini?',

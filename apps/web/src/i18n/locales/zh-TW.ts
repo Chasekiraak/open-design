@@ -951,6 +951,7 @@ export const zhTW: Dict = {
   "homeHero.footer.noMatches": "无匹配结果",
   "homeHero.moreShortcuts": "更多",
   "homeHero.railAria": "選擇專案類別或入門捷徑",
+  "homeHero.productCatalogCount": "探索 {n} 種設計產物",
   "homeHero.subTypeAria": "選擇子類型",
   "homeHero.subTypeMore": "更多",
   "homeHero.confirmReplaceTitle": "取代目前的提示詞？",

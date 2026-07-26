@@ -937,6 +937,7 @@ export const ja: Dict = {
   'homeHero.footer.noMatches': '一致なし',
   'homeHero.moreShortcuts': 'その他',
   'homeHero.railAria': 'プロジェクトカテゴリーまたはスターターショートカットを選択',
+  'homeHero.productCatalogCount': '{n} 種類のデザイン成果物を探索',
   'homeHero.subTypeAria': 'サブタイプを選択',
   'homeHero.subTypeMore': 'その他',
   'homeHero.confirmReplaceTitle': '現在のプロンプトを置き換えますか？',

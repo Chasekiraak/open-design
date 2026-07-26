@@ -937,6 +937,7 @@ export const ru: Dict = {
   'homeHero.footer.noMatches': 'Нет совпадений',
   'homeHero.moreShortcuts': 'Еще',
   'homeHero.railAria': 'Выберите категорию проекта или быстрый старт',
+  'homeHero.productCatalogCount': 'Откройте {n} видов дизайн-результатов',
   'homeHero.subTypeAria': 'Выберите подтип',
   'homeHero.subTypeMore': 'Ещё',
   'homeHero.confirmReplaceTitle': 'Заменить текущий запрос?',

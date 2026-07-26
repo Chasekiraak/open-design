@@ -937,6 +937,7 @@ export const ar: Dict = {
   'homeHero.footer.noMatches': 'لا توجد تطابقات',
   'homeHero.moreShortcuts': 'المزيد',
   'homeHero.railAria': 'اختر فئة مشروع أو اختصار بداية',
+  'homeHero.productCatalogCount': 'استكشف {n} مخرجات تصميم',
   'homeHero.subTypeAria': 'اختر نوعًا فرعيًا',
   'homeHero.subTypeMore': 'المزيد',
   'homeHero.confirmReplaceTitle': 'استبدال الموجّه الحالي؟',

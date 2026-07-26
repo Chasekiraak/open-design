@@ -937,6 +937,7 @@ export const pl: Dict = {
   'homeHero.footer.noMatches': 'Brak dopasowań',
   'homeHero.moreShortcuts': 'Więcej',
   'homeHero.railAria': 'Wybierz kategorię projektu lub skrót startowy',
+  'homeHero.productCatalogCount': 'Poznaj {n} rezultatów projektowych',
   'homeHero.subTypeAria': 'Wybierz podtyp',
   'homeHero.subTypeMore': 'Więcej',
   'homeHero.confirmReplaceTitle': 'Zastąpić bieżący prompt?',

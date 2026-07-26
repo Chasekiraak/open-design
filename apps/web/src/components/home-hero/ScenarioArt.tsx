@@ -13,11 +13,14 @@
 import type { ReactElement, ReactNode } from 'react';
 import { Icon, type IconName } from '../Icon';
 
-const INK = 'var(--text-muted)';
-const ACCENT = 'var(--accent)';
+// The rail gives each output family a restrained semantic tone. Keep the
+// illustration itself token-driven so those tones also work in the temporary
+// first-run card deck, without introducing SVG-specific colour values.
+const INK = 'var(--scenario-art-ink, var(--text-muted))';
+const ACCENT = 'var(--scenario-art-accent, var(--accent))';
 // Opaque fill used to occlude shapes stacked behind another (slide/frame peeks)
 // so overlapping outlines don't show through. Tracks the card-art surface.
-const SURFACE = 'var(--bg-panel)';
+const SURFACE = 'var(--scenario-art-surface, var(--bg-panel))';
 
 function Frame({ children }: { children: ReactNode }) {
   return (

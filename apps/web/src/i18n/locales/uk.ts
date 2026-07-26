@@ -937,6 +937,7 @@ export const uk: Dict = {
   'homeHero.footer.noMatches': 'Немає збігів',
   'homeHero.moreShortcuts': 'Більше',
   'homeHero.railAria': 'Виберіть категорію проєкту або стартовий ярлик',
+  'homeHero.productCatalogCount': 'Перегляньте {n} дизайн-результатів',
   'homeHero.subTypeAria': 'Виберіть підтип',
   'homeHero.subTypeMore': 'Ще',
   'homeHero.confirmReplaceTitle': 'Замінити поточний запит?',

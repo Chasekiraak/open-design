@@ -3477,6 +3477,97 @@ button.home-hero__capability-word:focus-visible {
   min-height: 138px;
   margin: 2px auto 0;
 }
+.home-hero__catalog-deck {
+  position: absolute;
+  z-index: 3;
+  inset: 2px 12px 12px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+  transform-origin: 50% 50%;
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 320ms var(--ease-out);
+}
+.home-hero__catalog-deck.is-stacked {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.home-hero__catalog-deck.is-expanded {
+  opacity: 0;
+  transform: translateY(-2px) scale(0.995);
+  transition-delay: 430ms, 430ms;
+}
+.home-hero__catalog-deck-count {
+  position: absolute;
+  z-index: 6;
+  top: 8px;
+  left: 50%;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--material-thick) 88%, var(--bg-panel));
+  box-shadow: var(--shadow-xs);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.home-hero__catalog-deck-stack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 654px;
+  height: 126px;
+}
+.home-hero__catalog-deck-card.home-hero__scenario-card.home-hero__type-tab {
+  position: absolute;
+  top: 0;
+  left: 249px;
+  width: 156px;
+  min-width: 156px;
+  margin: 0;
+  pointer-events: none;
+  transition:
+    transform 620ms cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 520ms var(--ease-out),
+    border-color 520ms var(--ease-out);
+  will-change: transform;
+}
+.home-hero__catalog-deck-card[data-catalog-card-index='0'] {
+  z-index: 4;
+  transform: translate(-18px, 6px) rotate(-4deg) scale(0.98);
+}
+.home-hero__catalog-deck-card[data-catalog-card-index='1'] {
+  z-index: 3;
+  transform: translate(-6px, 2px) rotate(-1.5deg) scale(0.985);
+}
+.home-hero__catalog-deck-card[data-catalog-card-index='2'] {
+  z-index: 2;
+  transform: translate(6px, -2px) rotate(1.5deg) scale(0.99);
+}
+.home-hero__catalog-deck-card[data-catalog-card-index='3'] {
+  z-index: 1;
+  transform: translate(18px, -6px) rotate(4deg) scale(0.995);
+}
+.home-hero__catalog-deck.is-expanded .home-hero__catalog-deck-card {
+  box-shadow: var(--shadow-xs);
+}
+.home-hero__catalog-deck.is-expanded .home-hero__catalog-deck-card[data-catalog-card-index='0'] {
+  transform: translate(-249px, 0) rotate(0deg) scale(1);
+}
+.home-hero__catalog-deck.is-expanded .home-hero__catalog-deck-card[data-catalog-card-index='1'] {
+  transform: translate(-83px, 0) rotate(0deg) scale(1);
+}
+.home-hero__catalog-deck.is-expanded .home-hero__catalog-deck-card[data-catalog-card-index='2'] {
+  transform: translate(83px, 0) rotate(0deg) scale(1);
+}
+.home-hero__catalog-deck.is-expanded .home-hero__catalog-deck-card[data-catalog-card-index='3'] {
+  transform: translate(249px, 0) rotate(0deg) scale(1);
+}
 .home-hero__type-tabs.home-hero__scenario-cards {
   width: 100%;
   flex-wrap: nowrap;
@@ -3489,6 +3580,45 @@ button.home-hero__capability-word:focus-visible {
   overflow-y: visible;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+}
+.home-hero__scenario-cards-wrap--catalog-hidden .home-hero__scenario-cards,
+.home-hero__scenario-cards-wrap--catalog-stacked .home-hero__scenario-cards {
+  pointer-events: none;
+}
+.home-hero__scenario-cards-wrap--catalog-hidden .home-hero__scenario-cards > .home-hero__scenario-card,
+.home-hero__scenario-cards-wrap--catalog-stacked .home-hero__scenario-cards > .home-hero__scenario-card {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+}
+.home-hero__scenario-cards-wrap--catalog-expanded .home-hero__scenario-cards {
+  pointer-events: none;
+}
+.home-hero__scenario-cards-wrap--catalog-expanded .home-hero__scenario-cards > .home-hero__scenario-card {
+  animation: home-hero-catalog-card-enter 480ms var(--ease-out) var(--catalog-intro-delay, 0ms) both;
+  will-change: transform, opacity;
+}
+.home-hero__scenario-card[data-catalog-card-index='0'] { --catalog-intro-delay: 0ms; }
+.home-hero__scenario-card[data-catalog-card-index='1'] { --catalog-intro-delay: 34ms; }
+.home-hero__scenario-card[data-catalog-card-index='2'] { --catalog-intro-delay: 68ms; }
+.home-hero__scenario-card[data-catalog-card-index='3'] { --catalog-intro-delay: 102ms; }
+.home-hero__scenario-card[data-catalog-card-index='4'] { --catalog-intro-delay: 152ms; }
+.home-hero__scenario-card[data-catalog-card-index='5'] { --catalog-intro-delay: 188ms; }
+.home-hero__scenario-card[data-catalog-card-index='6'] { --catalog-intro-delay: 224ms; }
+.home-hero__scenario-card[data-catalog-card-index='7'] { --catalog-intro-delay: 260ms; }
+.home-hero__scenario-card[data-catalog-card-index='8'] { --catalog-intro-delay: 296ms; }
+.home-hero__scenario-card[data-catalog-card-index='9'] { --catalog-intro-delay: 332ms; }
+.home-hero__scenario-card[data-catalog-card-index='10'] { --catalog-intro-delay: 368ms; }
+.home-hero__scenario-card[data-catalog-card-index='11'] { --catalog-intro-delay: 404ms; }
+.home-hero__scenario-card[data-catalog-card-index='12'] { --catalog-intro-delay: 440ms; }
+@keyframes home-hero-catalog-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Edge hover zones: hovering an edge auto-scrolls the rail in that direction so
@@ -3551,6 +3681,10 @@ button.home-hero__capability-word:focus-visible {
 }
 
 .home-hero__scenario-card.home-hero__type-tab {
+  --scenario-art-accent: var(--accent);
+  --scenario-art-ink: color-mix(in srgb, var(--text-muted) 90%, var(--scenario-art-accent));
+  --scenario-art-surface: color-mix(in srgb, var(--bg-panel) 92%, var(--scenario-art-accent));
+  --scenario-art-tint: color-mix(in srgb, var(--accent-tint) 78%, var(--bg-panel));
   position: relative;
   flex: 0 0 156px;
   flex-direction: column;
@@ -3563,6 +3697,22 @@ button.home-hero__capability-word:focus-visible {
   background: var(--bg-panel);
   text-align: left;
   overflow: hidden;
+}
+.home-hero__scenario-card[data-scenario-tone='blue'] {
+  --scenario-art-accent: var(--blue);
+  --scenario-art-tint: color-mix(in srgb, var(--blue-bg) 72%, var(--bg-panel));
+}
+.home-hero__scenario-card[data-scenario-tone='green'] {
+  --scenario-art-accent: var(--green);
+  --scenario-art-tint: color-mix(in srgb, var(--green-bg) 74%, var(--bg-panel));
+}
+.home-hero__scenario-card[data-scenario-tone='amber'] {
+  --scenario-art-accent: var(--amber);
+  --scenario-art-tint: color-mix(in srgb, var(--amber-bg) 76%, var(--bg-panel));
+}
+.home-hero__scenario-card[data-scenario-tone='red'] {
+  --scenario-art-accent: var(--red);
+  --scenario-art-tint: color-mix(in srgb, var(--red-bg) 76%, var(--bg-panel));
 }
 .home-hero__scenario-card.home-hero__type-tab:hover:not(:disabled) {
   transform: translateY(-2px);
@@ -3625,17 +3775,32 @@ button.home-hero__capability-word:focus-visible {
   }
 }
 .home-hero__scenario-card-art {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   height: 74px;
-  color: var(--accent);
-  background: radial-gradient(
-    120% 120% at 30% 20%,
-    color-mix(in srgb, var(--accent-tint) 78%, var(--bg-panel)),
-    var(--bg-subtle)
-  );
+  color: var(--scenario-art-accent);
+  background:
+    radial-gradient(68% 90% at 88% 10%, color-mix(in srgb, var(--scenario-art-accent) 15%, transparent), transparent 72%),
+    linear-gradient(135deg, var(--scenario-art-tint), var(--bg-subtle));
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+.home-hero__scenario-card-art::before {
+  position: absolute;
+  top: 12px;
+  right: 13px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, var(--scenario-art-accent) 24%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--scenario-art-accent) 7%, transparent);
+  content: '';
+}
+.home-hero__scenario-card-art > * {
+  position: relative;
+  z-index: 1;
 }
 /* Illustrative intent thumbnail (ScenarioArt). A small hover lift on the art
    keeps the card feeling responsive now that the hint no longer animates. */
@@ -3728,6 +3893,22 @@ button.home-hero__capability-word:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .home-hero__catalog-deck {
+    display: none;
+  }
+  .home-hero__scenario-cards-wrap--catalog-hidden .home-hero__scenario-cards,
+  .home-hero__scenario-cards-wrap--catalog-stacked .home-hero__scenario-cards,
+  .home-hero__scenario-cards-wrap--catalog-expanded .home-hero__scenario-cards {
+    pointer-events: auto;
+  }
+  .home-hero__scenario-cards-wrap--catalog-hidden .home-hero__scenario-cards > .home-hero__scenario-card,
+  .home-hero__scenario-cards-wrap--catalog-stacked .home-hero__scenario-cards > .home-hero__scenario-card,
+  .home-hero__scenario-cards-wrap--catalog-expanded .home-hero__scenario-cards > .home-hero__scenario-card {
+    opacity: 1;
+    transform: none;
+    animation: none;
+    will-change: auto;
+  }
   .home-hero__scenario-card.home-hero__type-tab,
   .home-hero__scenario-art-svg,
   .home-hero__capability-word,

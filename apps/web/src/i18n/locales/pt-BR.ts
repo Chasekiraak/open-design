@@ -937,6 +937,7 @@ export const ptBR: Dict = {
   'homeHero.footer.noMatches': 'Nenhuma correspondência',
   'homeHero.moreShortcuts': 'Mais',
   'homeHero.railAria': 'Escolha uma categoria de projeto ou atalho inicial',
+  'homeHero.productCatalogCount': 'Explore {n} resultados de design',
   'homeHero.subTypeAria': 'Escolha um subtipo',
   'homeHero.subTypeMore': 'Mais',
   'homeHero.confirmReplaceTitle': 'Substituir o prompt atual?',

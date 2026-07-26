@@ -322,6 +322,7 @@ const EMPTY_WORKSPACE_ITEMS: WorkspaceContextItem[] = [];
 const HOME_TEMPLATE_RECOMMENDATION_SEEN_KEY = 'open-design:home-template-recommendation:v1';
 const HOME_DESIGN_SYSTEM_GUIDE_SEEN_KEY = 'open-design:home-design-system-guide:v1';
 const HOME_RETURNING_DESIGN_SYSTEM_GUIDE_SEEN_KEY = 'open-design:home-returning-design-system-guide:v1';
+const HOME_PRODUCT_CATALOG_INTRO_SEEN_KEY = 'open-design:home-product-catalog-intro:v1';
 const DESIGN_SYSTEM_RELEVANT_TASK_IDS = new Set([
   'prototype',
   'landing-page',
@@ -383,6 +384,27 @@ function markHomeReturningDesignSystemGuideSeen(): void {
     // Persistence is only used to make the contextual nudge one-time.
   }
 }
+
+function hasSeenHomeProductCatalogIntro(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(HOME_PRODUCT_CATALOG_INTRO_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markHomeProductCatalogIntroSeen(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HOME_PRODUCT_CATALOG_INTRO_SEEN_KEY, '1');
+  } catch {
+    // The intro may repeat after a remount when storage is unavailable, but
+    // never blocks access to the real catalog.
+  }
+}
+
+type ProductCatalogIntroPhase = 'hidden' | 'stacked' | 'expanded' | 'complete';
 
 export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   {
@@ -494,6 +516,15 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [showReturningDesignSystemGuide, setShowReturningDesignSystemGuide] = useState(false);
   const [showFirstRunDesignSystemAttention, setShowFirstRunDesignSystemAttention] = useState(false);
   const [designSystemGuidePlacement, setDesignSystemGuidePlacement] = useState<'above' | 'below'>('below');
+  // The first Home visit starts with a small, decorative four-card deck. The
+  // real rail never changes its layout: it is only faded and translated, so
+  // scrolling and hit targets stay stable while the deck opens.
+  const productCatalogIntroArmedRef = useRef(
+    firstRunGuide === true && !hasSeenHomeProductCatalogIntro(),
+  );
+  const [productCatalogIntroPhase, setProductCatalogIntroPhase] = useState<ProductCatalogIntroPhase>(() => (
+    productCatalogIntroArmedRef.current ? 'hidden' : 'complete'
+  ));
   const homeHeroRef = useRef<HTMLElement | null>(null);
   const designSystemEntryRef = useRef<HTMLDivElement | null>(null);
   // Two-flash attention pulse on the send button; armed via the
@@ -580,6 +611,46 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     }, HERO_CAPABILITY_CAROUSEL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [heroCapabilities.length, heroCapabilityCarouselRunning]);
+
+  useEffect(() => {
+    if (firstRunGuide !== true) {
+      setProductCatalogIntroPhase('complete');
+      return undefined;
+    }
+
+    // `firstRunGuide` arrives after project loading for some entries. Arm only
+    // once, and retain that in a ref so React development Strict Mode does not
+    // see the just-written storage marker and cancel the same animation.
+    if (!productCatalogIntroArmedRef.current) {
+      productCatalogIntroArmedRef.current = !hasSeenHomeProductCatalogIntro();
+    }
+    if (!productCatalogIntroArmedRef.current) {
+      setProductCatalogIntroPhase('complete');
+      return undefined;
+    }
+
+    // Keep the composer as the first thing a new visitor sees, then introduce
+    // the catalog as a compact deck before it opens into all available output
+    // types. Mark it immediately so navigation/HMR cannot replay it mid-flow.
+    setProductCatalogIntroPhase('hidden');
+    markHomeProductCatalogIntroSeen();
+    const stackedTimer = window.setTimeout(() => {
+      setProductCatalogIntroPhase('stacked');
+    }, 320);
+    const expandedTimer = window.setTimeout(() => {
+      setProductCatalogIntroPhase('expanded');
+    }, 960);
+    const completeTimer = window.setTimeout(() => {
+      productCatalogIntroArmedRef.current = false;
+      setProductCatalogIntroPhase('complete');
+    }, 1_900);
+
+    return () => {
+      window.clearTimeout(stackedTimer);
+      window.clearTimeout(expandedTimer);
+      window.clearTimeout(completeTimer);
+    };
+  }, [firstRunGuide]);
 
   const dismissTemplateRecommendation = useCallback(() => {
     if (!showTemplateRecommendation) return;
@@ -2531,6 +2602,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
           onHoverChip={setPreviewTemplateId}
           recommendedChipId={showTemplateRecommendation ? templateRecommendation.primaryChipId : null}
           secondaryRecommendedChipId={showTemplateRecommendation ? templateRecommendation.secondaryChipId : null}
+          catalogIntroPhase={productCatalogIntroPhase}
           variant="tabs"
         />
       </section>
@@ -3834,7 +3906,81 @@ interface RailGroupProps {
    * additionally carries the compact “For you” label for orientation. */
   recommendedChipId?: string | null;
   secondaryRecommendedChipId?: string | null;
+  /** First-run only: a decorative deck opens into the real output catalog. */
+  catalogIntroPhase?: ProductCatalogIntroPhase;
   children?: ReactNode;
+}
+
+type ScenarioTone = 'blue' | 'green' | 'amber' | 'red' | 'neutral';
+
+function scenarioToneForChip(chipId: string): ScenarioTone {
+  switch (chipId) {
+    case 'prototype':
+    case 'web-clone':
+    case 'live-artifact':
+      return 'blue';
+    case 'landing-page':
+    case 'mobile':
+      return 'green';
+    case 'deck':
+    case 'document':
+    case 'audio':
+      return 'amber';
+    case 'image':
+    case 'video':
+    case 'hyperframes':
+    case 'webgl':
+      return 'red';
+    default:
+      return 'neutral';
+  }
+}
+
+function ProductCatalogDeck({
+  chips,
+  phase,
+  t,
+}: {
+  chips: readonly HomeHeroChip[];
+  phase: Exclude<ProductCatalogIntroPhase, 'complete'>;
+  t: ReturnType<typeof useT>;
+}) {
+  return (
+    <div
+      className={`home-hero__catalog-deck is-${phase}`}
+      data-testid="home-hero-product-catalog-deck"
+      aria-hidden="true"
+    >
+      <span className="home-hero__catalog-deck-count">
+        {t('homeHero.productCatalogCount', { n: chips.length })}
+      </span>
+      <div className="home-hero__catalog-deck-stack">
+        {chips.slice(0, 4).map((chip, index) => {
+          const description = homeHeroChipDescription(chip.id, t);
+          return (
+            <div
+              key={chip.id}
+              className="home-hero__catalog-deck-card home-hero__scenario-card home-hero__type-tab"
+              data-catalog-card-index={index}
+              data-scenario-tone={scenarioToneForChip(chip.id)}
+            >
+              <span className="home-hero__scenario-card-art">
+                <ScenarioArt chipId={chip.id} fallbackIcon={chip.icon} />
+              </span>
+              <span className="home-hero__scenario-card-body">
+                <span className="home-hero__scenario-card-title">
+                  {homeHeroChipLabel(chip.id, t)}
+                </span>
+                {description ? (
+                  <span className="home-hero__scenario-card-desc">{description}</span>
+                ) : null}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function RailGroup({
@@ -3850,6 +3996,7 @@ function RailGroup({
   onHoverChip,
   recommendedChipId = null,
   secondaryRecommendedChipId = null,
+  catalogIntroPhase = 'complete',
   children,
 }: RailGroupProps) {
   const t = useT();
@@ -3868,7 +4015,7 @@ function RailGroup({
   // legacy rail variant scrollRef stays unattached and the hook is inert.
   const edgeScroll = useEdgeAutoScroll(chips.length);
 
-  const cards = chips.map((chip) => {
+  const cards = chips.map((chip, index) => {
     const isActive = activeChipId === chip.id;
     const isPending = pendingChipId === chip.id;
     const disabled = pluginsLoading || isPending || pendingPluginId !== null;
@@ -3892,6 +4039,8 @@ function RailGroup({
           type="button"
           className={cardCls.join(' ')}
           data-chip-id={chip.id}
+          data-catalog-card-index={index}
+          data-scenario-tone={scenarioToneForChip(chip.id)}
           data-testid={`home-hero-rail-${chip.id}`}
           onClick={() => onPickChip(chip)}
           onMouseEnter={() => onHoverChip?.(chip.id)}
@@ -3948,9 +4097,12 @@ function RailGroup({
   if (isTabs) {
     return (
       <div
-        className="home-hero__scenario-cards-wrap"
+        className={`home-hero__scenario-cards-wrap home-hero__scenario-cards-wrap--catalog-${catalogIntroPhase}`}
         onMouseLeave={() => onHoverChip?.(null)}
       >
+        {group === 'create' && catalogIntroPhase !== 'complete' ? (
+          <ProductCatalogDeck chips={chips} phase={catalogIntroPhase} t={t} />
+        ) : null}
         <div
           ref={edgeScroll.scrollRef}
           className={`home-hero__type-tabs home-hero__type-tabs--${group} home-hero__scenario-cards`}

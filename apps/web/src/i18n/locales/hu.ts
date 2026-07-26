@@ -937,6 +937,7 @@ export const hu: Dict = {
   'homeHero.footer.noMatches': 'Nincs találat',
   'homeHero.moreShortcuts': 'Továbbiak',
   'homeHero.railAria': 'Válassz projektkategóriát vagy kezdő gyorsindítót',
+  'homeHero.productCatalogCount': 'Fedezz fel {n} tervezési kimenetet',
   'homeHero.subTypeAria': 'Válassz altípust',
   'homeHero.subTypeMore': 'Több',
   'homeHero.confirmReplaceTitle': 'Lecseréled a jelenlegi promptot?',

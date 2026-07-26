@@ -28,6 +28,7 @@ afterEach(() => {
   window.localStorage.removeItem('open-design:home-template-recommendation:v1');
   window.localStorage.removeItem('open-design:home-design-system-guide:v1');
   window.localStorage.removeItem('open-design:home-returning-design-system-guide:v1');
+  window.localStorage.removeItem('open-design:home-product-catalog-intro:v1');
 });
 
 function makePlugin(
@@ -164,6 +165,36 @@ describe('HomeHero intent rail', () => {
       });
       expect(icon).not.toHaveClass('is-first-run-guide');
       expect(window.localStorage.getItem('open-design:home-design-system-guide:v1')).toBe('1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens a four-card first-run deck into the full output catalog', () => {
+    vi.useFakeTimers();
+    try {
+      renderHero({ firstRunGuide: true, onDesignSystemChange: vi.fn() });
+
+      const deck = screen.getByTestId('home-hero-product-catalog-deck');
+      expect(deck).toHaveClass('is-hidden');
+      expect(deck.querySelectorAll('.home-hero__catalog-deck-card')).toHaveLength(4);
+      expect(screen.getAllByTestId(/^home-hero-rail-/)).toHaveLength(13);
+
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      expect(deck).toHaveClass('is-stacked');
+
+      act(() => {
+        vi.advanceTimersByTime(640);
+      });
+      expect(deck).toHaveClass('is-expanded');
+
+      act(() => {
+        vi.advanceTimersByTime(940);
+      });
+      expect(screen.queryByTestId('home-hero-product-catalog-deck')).toBeNull();
+      expect(window.localStorage.getItem('open-design:home-product-catalog-intro:v1')).toBe('1');
     } finally {
       vi.useRealTimers();
     }

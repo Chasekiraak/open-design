@@ -937,6 +937,7 @@ export const ko: Dict = {
   'homeHero.footer.noMatches': '일치 항목 없음',
   'homeHero.moreShortcuts': '더보기',
   'homeHero.railAria': '프로젝트 카테고리 또는 시작 단축키 선택',
+  'homeHero.productCatalogCount': '{n}가지 디자인 결과물 둘러보기',
   'homeHero.subTypeAria': '하위 유형 선택',
   'homeHero.subTypeMore': '더 보기',
   'homeHero.confirmReplaceTitle': '현재 프롬프트를 바꿀까요?',

@@ -937,6 +937,7 @@ export const esES: Dict = {
   'homeHero.footer.noMatches': 'Sin coincidencias',
   'homeHero.moreShortcuts': 'Más',
   'homeHero.railAria': 'Elige una categoría de proyecto o un atajo inicial',
+  'homeHero.productCatalogCount': 'Explora {n} resultados de diseño',
   'homeHero.subTypeAria': 'Elige un subtipo',
   'homeHero.subTypeMore': 'Más',
   'homeHero.confirmReplaceTitle': '¿Reemplazar el prompt actual?',

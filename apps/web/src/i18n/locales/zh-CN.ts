@@ -949,6 +949,7 @@ export const zhCN: Dict = {
   "homeHero.footer.noMatches": "无匹配结果",
   "homeHero.moreShortcuts": "更多",
   "homeHero.railAria": "选择项目类别或启动入口",
+  "homeHero.productCatalogCount": "探索 {n} 种设计产物",
   "homeHero.subTypeAria": "选择子类型",
   "homeHero.subTypeMore": "更多",
   "homeHero.confirmReplaceTitle": "替换当前 Prompt？",

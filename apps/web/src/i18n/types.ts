@@ -1331,6 +1331,7 @@ export interface Dict {
   'homeHero.footer.noMatches': string;
   'homeHero.moreShortcuts': string;
   'homeHero.railAria': string;
+  'homeHero.productCatalogCount': string;
   'homeHero.subTypeAria': string;
   'homeHero.subTypeMore': string;
   'homeHero.confirmReplaceTitle': string;
