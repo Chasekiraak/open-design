@@ -238,17 +238,20 @@ export function teamConsoleUrl(
  *   - team, never subscribed → `dashboard?billing=checkout` (first-checkout
  *     dialog); team, already subscribed → `dashboard?billing=plan`
  *     (change-plan dialog). See `teamConsoleUrl` for why B needs the split.
+ *   - a resolved workspace without `canManageBilling` → null. Billing is
+ *     owner-only, so admin/member surfaces hide the action rather than linking
+ *     to an operation B will reject.
  *
- * Callers that must ALWAYS produce a URL (dialog CTAs) pass `fallbackProfile`
- * and receive the profile-keyed personal plans deep link when no console URL
- * is known (signed out / context not landed); callers that instead hide the
- * affordance get null.
+ * Dialog callers pass `fallbackProfile` and receive the profile-keyed personal
+ * plans deep link when no workspace context exists after loading. An existing
+ * workspace without billing permission still returns null; callers hide the
+ * affordance.
  */
 export function workspaceUpgradeUrl(
   context: WorkspaceCollabContext | null | undefined,
   billing: WorkspaceBillingSummary | null | undefined,
   options: { fallbackProfile: string | null | undefined },
-): string;
+): string | null;
 export function workspaceUpgradeUrl(
   context: WorkspaceCollabContext | null | undefined,
   billing: WorkspaceBillingSummary | null | undefined,
@@ -258,6 +261,12 @@ export function workspaceUpgradeUrl(
   billing: WorkspaceBillingSummary | null | undefined,
   options?: { fallbackProfile: string | null | undefined },
 ): string | null {
+  // Team billing is owner-only. Keep the permission check in the shared
+  // resolver so every upgrade surface (including dialogs that pass a profile
+  // fallback) fails closed for admins/members instead of accidentally linking
+  // them to an action B will reject. A missing context still uses the fallback
+  // because there is no workspace identity to authorize yet.
+  if (context && context.permissions?.canManageBilling !== true) return null;
   const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
   if (settingsUrl) {
     return context?.workspaceType === 'team'

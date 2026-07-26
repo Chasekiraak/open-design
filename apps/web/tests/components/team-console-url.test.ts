@@ -145,6 +145,27 @@ describe('workspaceUpgradeUrl', () => {
     );
   });
 
+  it.each(['admin', 'member'] as const)(
+    'fails closed for a %s without workspace billing permission',
+    (role) => {
+      const context: WorkspaceCollabContext = {
+        ...baseContext,
+        role,
+        permissions: {
+          ...baseContext.permissions,
+          canManageBilling: false,
+        },
+      };
+
+      expect(workspaceUpgradeUrl(context, billingSummary('team_pro'))).toBeNull();
+      expect(
+        workspaceUpgradeUrl(context, billingSummary('team_pro'), {
+          fallbackProfile: 'feature-test',
+        }),
+      ).toBeNull();
+    },
+  );
+
   it('returns null without a console URL so entry points hide the affordance', () => {
     const context: WorkspaceCollabContext = { ...baseContext };
     delete context.workspaceSettingsUrl;

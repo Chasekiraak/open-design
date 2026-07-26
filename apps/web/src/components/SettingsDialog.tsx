@@ -1614,7 +1614,10 @@ export function SettingsDialog({
   // gate now guards the deep-link (`initialSection='workspace'`) path — it must
   // stay, otherwise a deep link would hand workspace settings to a viewer the
   // permission bits exclude.
-  const { context: workspaceContext } = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
   // recvpZPzGJL7o7: the local-CLI card's balance came ONLY from vela's
   // account-scoped sources (`amrCardStatus.account.balanceUsd`, then the
   // `/api/integrations/vela/wallet` snapshot) — the same account-scoped
@@ -1631,10 +1634,13 @@ export function SettingsDialog({
   // shares (see its docblock in `EntryNavRail.tsx`): personal workspace →
   // B's wallet pricing modal (`view=plans`, recvpYEiH019cD); team → the
   // checkout vs change-plan dashboard dialog by subscription state
-  // (recvpSQKna0LwR). The profile fallback keeps the buttons alive when no
-  // console URL is known (signed out, or the context read has not landed).
-  const amrUpgradeUrl = (profile: string | null | undefined): string =>
-    workspaceUpgradeUrl(workspaceContext, workspaceBilling, { fallbackProfile: profile });
+  // (recvpSQKna0LwR). The profile fallback keeps the buttons alive after a
+  // signed-out/no-context read; while that read is still loading, hide them so
+  // an owner-only action cannot flash briefly for an admin/member.
+  const amrUpgradeUrl = (profile: string | null | undefined): string | null =>
+    workspaceContextLoading
+      ? null
+      : workspaceUpgradeUrl(workspaceContext, workspaceBilling, { fallbackProfile: profile });
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(true);
   // Scroll the right-hand content pane back to the top whenever the user
@@ -3988,14 +3994,17 @@ export function SettingsDialog({
                       : undefined
                   }
                   onDisabledOptionUpgrade={
-                    selected.id === 'amr'
-                      ? () =>
+                    selected.id === 'amr' &&
+                    !workspaceContextLoading &&
+                    (!workspaceContext ||
+                      workspaceContext.permissions?.canManageBilling === true)
+                      ? () => {
+                          const upgradeUrl = amrUpgradeUrl(amrCardStatus?.profile);
+                          if (!upgradeUrl) return;
                           void openExternalUrl(
-                            attributedAmrSettingsUrl(
-                              amrUpgradeUrl(amrCardStatus?.profile),
-                              'settings_amr_upgrade',
-                            ),
-                          )
+                            attributedAmrSettingsUrl(upgradeUrl, 'settings_amr_upgrade'),
+                          );
+                        }
                       : undefined
                   }
                 />
@@ -4783,16 +4792,18 @@ export function SettingsDialog({
                                           type="button"
                                           className="agent-card-amr-upgrade"
                                           data-testid="settings-agent-card-amr-upgrade"
-                                          onClick={() =>
+                                          onClick={() => {
+                                            const upgradeUrl = amrUpgradeUrl(
+                                              amrCardStatus?.profile,
+                                            );
+                                            if (!upgradeUrl) return;
                                             void openExternalUrl(
                                               attributedAmrSettingsUrl(
-                                                amrUpgradeUrl(
-                                                  amrCardStatus?.profile,
-                                                ),
+                                                upgradeUrl,
                                                 'settings_amr_upgrade',
                                               ),
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('settings.amrUpgrade')}
                                         </button>

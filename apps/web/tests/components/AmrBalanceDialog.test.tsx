@@ -51,6 +51,7 @@ describe('AmrBalanceDialog', () => {
             workspaceType: 'team',
             planId: null,
             billingState: 'free',
+            permissions: { canManageBilling: true },
             workspaceSettingsUrl: 'https://open-design.ai/console/settings?workspaceId=ws-1',
           },
         }), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -104,6 +105,7 @@ describe('AmrBalanceDialog', () => {
             workspaceType: 'team',
             planId: 'team_pro',
             billingState: 'active',
+            permissions: { canManageBilling: true },
             workspaceSettingsUrl: 'https://open-design.ai/console/settings?workspaceId=ws-1',
           },
         }), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -159,6 +161,7 @@ describe('AmrBalanceDialog', () => {
             workspaceType: 'personal',
             planId: null,
             billingState: 'free',
+            permissions: { canManageBilling: true },
             workspaceSettingsUrl: 'https://open-design.ai/console/settings?workspaceId=ws-p',
           },
         }), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -197,6 +200,54 @@ describe('AmrBalanceDialog', () => {
     });
   });
 
+  it.each(['admin', 'member'] as const)(
+    'hides the upgrade CTA for a team %s without billing permission',
+    async (role) => {
+      vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes('/api/workspace/context')) {
+          return Promise.resolve(new Response(JSON.stringify({
+            context: {
+              workspaceId: 'ws-1',
+              workspaceType: 'team',
+              role,
+              planId: 'team_pro',
+              billingState: 'active',
+              permissions: { canManageBilling: false },
+              workspaceSettingsUrl: 'https://open-design.ai/console/settings?workspaceId=ws-1',
+            },
+          }), { status: 200, headers: { 'content-type': 'application/json' } }));
+        }
+        if (url.includes('/api/workspace/billing')) {
+          return Promise.resolve(new Response(JSON.stringify({
+            summary: { workspaceId: 'ws-1', membershipTier: 'team_pro' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } }));
+        }
+        return Promise.reject(new Error(`unexpected fetch ${url}`));
+      });
+
+      render(
+        <AmrBalanceDialog
+          reason="insufficient"
+          balanceUsd="0.00"
+          profile="prod"
+          entrySource="chat_balance_gate_upgrade"
+          metricsConsent={false}
+          installationId={null}
+          onClose={vi.fn()}
+          onResolved={vi.fn()}
+        />,
+      );
+
+      // The first context read starts in loading state. Do not flash a
+      // clickable personal fallback before the owner-only permission arrives.
+      expect(screen.queryByTestId('amr-balance-dialog-plans')).toBeNull();
+      await waitFor(() => {
+        expect(screen.queryByTestId('amr-balance-dialog-plans')).toBeNull();
+      });
+    },
+  );
+
   // No workspace console URL (context read has not landed / signed out): the
   // CTA must still go somewhere, not become a dead end — and it must land on
   // the pricing modal (`view=plans`), not the bare wallet page, otherwise the
@@ -219,7 +270,7 @@ describe('AmrBalanceDialog', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('amr-balance-dialog-plans'));
+    fireEvent.click(await screen.findByTestId('amr-balance-dialog-plans'));
 
     const target = new URL(String(open.mock.calls.at(-1)?.[0]));
     expect(target.pathname).toBe('/amr/wallet');

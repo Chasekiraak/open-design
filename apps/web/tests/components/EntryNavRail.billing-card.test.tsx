@@ -127,6 +127,93 @@ describe('account menu billing card — plan label (#146)', () => {
   });
 });
 
+describe('account menu billing card — workspace-aware upgrade routing', () => {
+  it.each([
+    {
+      name: 'personal owner',
+      context: {
+        workspaceType: 'personal',
+        billingState: 'free',
+        planId: null,
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: { membershipTier: '', subscriptionStatus: '' } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/wallet',
+      param: ['view', 'plans'],
+    },
+    {
+      name: 'free team owner',
+      context: {
+        workspaceType: 'team',
+        billingState: 'free',
+        planId: null,
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: { membershipTier: '', subscriptionStatus: '' } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/dashboard',
+      param: ['billing', 'checkout'],
+    },
+    {
+      name: 'paid team owner',
+      context: {
+        workspaceType: 'team',
+        billingState: 'active',
+        planId: 'team_plus',
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: {
+        membershipTier: 'team_plus',
+        subscriptionStatus: 'active',
+      } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/dashboard',
+      param: ['billing', 'plan'],
+    },
+  ])(
+    'routes a $name through the matching Vela dialog',
+    ({ context: contextOverrides, billing: billingOverrides, path, param }) => {
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+      renderRail({
+        context: context({
+          ...contextOverrides,
+          permissions: {
+            canInviteMembers: true,
+            canManageBilling: true,
+            canViewWorkspaceSettings: true,
+          },
+          workspaceSettingsUrl:
+            'https://web.example.com/console/settings?workspaceId=ws-new',
+        } as Partial<WorkspaceCollabContext>),
+        billing: billing(billingOverrides),
+      });
+
+      fireEvent.click(billingCard().getByRole('button', { name: '升级' }));
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      const target = new URL(String(openSpy.mock.calls[0]![0]));
+      expect(target.pathname).toBe(path);
+      expect(target.searchParams.get(param[0]!)).toBe(param[1]);
+      expect(target.searchParams.get('workspaceId')).toBe('ws-new');
+    },
+  );
+
+  it.each(['admin', 'member'] as const)(
+    'hides the upgrade action for a %s without billing permission',
+    (role) => {
+      renderRail({
+        context: context({
+          role,
+          permissions: {
+            canInviteMembers: true,
+            canManageBilling: false,
+            canViewWorkspaceSettings: true,
+          },
+          workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-new',
+        } as Partial<WorkspaceCollabContext>),
+        billing: billing(),
+      });
+
+      expect(billingCard().queryByRole('button', { name: '升级' })).toBeNull();
+    },
+  );
+});
+
 describe('account menu billing card — 积分 row opens the web wallet (#62)', () => {
   // Product ruling: clicking 积分 must jump straight to B's wallet page for the
   // usage detail — there is NO intermediate credits popover in the client

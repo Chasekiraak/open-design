@@ -102,15 +102,20 @@ export function AmrBalanceDialog({
   // the wrong dialog — or an error-state one: routing a personal workspace
   // onto the team `billing=checkout` deep link opened the Upgrade-to-Team
   // dialog with "Team plan unavailable" / a 3-seat minimum (recvpYEiH019cD,
-  // failed acceptance round). The profile fallback keeps the CTA alive when
-  // no console URL is known (signed out / context not landed) — same
+  // failed acceptance round). The profile fallback keeps the CTA alive after
+  // a signed-out/no-context read (but not while that read is pending) — same
   // `view=plans` deep link every other Upgrade affordance uses (ChatPane,
   // AvatarMenu, InlineModelSwitcher).
-  const { context: workspaceContext } = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
   const workspaceBilling = useWorkspaceBilling();
-  const upgradeUrl = workspaceUpgradeUrl(workspaceContext, workspaceBilling, {
-    fallbackProfile: profile,
-  });
+  const upgradeUrl = workspaceContextLoading
+    ? null
+    : workspaceUpgradeUrl(workspaceContext, workspaceBilling, {
+        fallbackProfile: profile,
+      });
   const resolvedRef = useRef(false);
   const resolveOnce = () => {
     if (resolvedRef.current) return;
@@ -143,6 +148,7 @@ export function AmrBalanceDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchingWallet]);
   const openUpgrade = () => {
+    if (!upgradeUrl) return;
     setWatchingWallet(true);
     // Same attribution handshake as the other Open Design Cloud handoffs
     // (ChatPane recharge, AvatarMenu upgrade): record the amr_entry, forward
@@ -229,7 +235,7 @@ export function AmrBalanceDialog({
               if (loginStatus?.loggedIn === true) resolveOnce();
             }}
           />
-        ) : (
+        ) : upgradeUrl ? (
           <Button
             variant="primary"
             className={styles.cta}
@@ -238,7 +244,7 @@ export function AmrBalanceDialog({
           >
             {t('chat.amrBalanceGate.plansCta')}
           </Button>
-        )}
+        ) : null}
         <Button variant="ghost" className={styles.later} onClick={onClose}>
           {t('chat.amrBalanceGate.laterCta')}
         </Button>
