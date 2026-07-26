@@ -98,9 +98,16 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 
     expect(onTiming.mock.calls.map(([event]) => event.phase)).toEqual([
       'queued',
+      'guard-started',
+      'guard-completed',
       'invoke',
       'completed',
     ]);
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'guard-completed',
+      projectId: 'proj-1',
+      status: 'target',
+    }));
     expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
       phase: 'invoke',
       projectId: 'proj-1',
@@ -860,7 +867,7 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(retry.tasks.size).toBe(0);
   });
 
-  it('still materializes visible projects while one targeted first share is absent from the catalog', async () => {
+  it('does not scan unrelated projects while a targeted first share is absent', async () => {
     const retry = makeRetryScheduler();
     const deps = makeDeps({
       getLocalBinding: () => null,
@@ -878,12 +885,12 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 
     await pull.materializeMissingProjects('ws-1', 'still-propagating');
 
-    expect(deps.pullCalls).toEqual(['visible-project']);
+    expect(deps.pullCalls).toEqual([]);
     expect(retry.delays).toEqual([1_000]);
     expect(retry.tasks.size).toBe(1);
   });
 
-  it('prioritizes the targeted first share ahead of unrelated missing projects', async () => {
+  it('limits targeted recovery to the requested first share', async () => {
     const deps = makeDeps({
       getLocalBinding: () => null,
       listSharedProjects: async () => [
@@ -897,7 +904,86 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 
     await pull.materializeMissingProjects('ws-1', 'fresh-share');
 
-    expect(deps.pullCalls).toEqual(['fresh-share', 'unrelated-history']);
+    expect(deps.pullCalls).toEqual(['fresh-share']);
+  });
+
+  it('starts a first-share event recovery while broad missing-only is blocked', async () => {
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'unrelated-history', ownerMemberId: 'wm-owner' },
+        { projectId: 'fresh-share', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+      resolveSharedProjectOwner: async () => null,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'unrelated-history') await historyGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const broad = pull.materializeMissingProjects('ws-1');
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toEqual(['unrelated-history']),
+    );
+    const targeted = pull.handleContentChanged({
+      projectId: 'fresh-share',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('fresh-share'),
+    );
+    releaseHistory();
+    await Promise.all([broad, targeted]);
+  });
+
+  it('runs a normal owner-resolved event ahead of a pending full rerun', async () => {
+    let releaseHistory!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const deps = makeDeps({
+      getLocalBinding: () => ({
+        workspaceId: 'ws-1',
+        visibility: 'team',
+      }),
+      listSharedProjects: async () => [
+        { projectId: 'unrelated-history', ownerMemberId: 'wm-owner' },
+      ],
+      publishedHead: async () => 3,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (target.projectId === 'unrelated-history') await historyGate;
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    const full = pull.catchUpPublishedHeads('ws-1');
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toEqual(['unrelated-history']),
+    );
+    const pendingFull = pull.catchUpPublishedHeads('ws-1');
+    const event = pull.handleContentChanged({
+      projectId: 'fresh-event',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+
+    await vi.waitFor(() =>
+      expect(deps.pullCalls).toContain('fresh-event'),
+    );
+    releaseHistory();
+    await Promise.all([full, pendingFull, event]);
   });
 
   it('keeps concurrent first-share catalog retries independent', async () => {
@@ -929,7 +1015,7 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     releaseCatalog();
     await Promise.all([first, second]);
 
-    expect(reads).toBe(2);
+    expect(reads).toBe(1);
     expect(retry.delays).toEqual([1_000, 1_000]);
     expect(retry.tasks.size).toBe(2);
   });
@@ -996,8 +1082,8 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     releaseOldCatalog();
     await Promise.all([oldSweep, newSweep]);
 
-    expect(retry.delays).toEqual([1_000, 1_000]);
-    expect(retry.cleared).toHaveLength(1);
+    expect(retry.delays).toEqual([1_000]);
+    expect(retry.cleared).toHaveLength(0);
     expect(retry.tasks.size).toBe(1);
   });
 
@@ -1147,6 +1233,7 @@ describe('proactive content pull retry coordinator', () => {
       expect(onCatchUp).toHaveBeenCalledWith(expect.objectContaining({
         phase: 'retry-exhausted',
         mode: 'missing-only',
+        lane: 'targeted',
         projectId: 'proj-1',
         attempt: 5,
       }));
@@ -1253,6 +1340,7 @@ describe('proactive content pull retry coordinator', () => {
     expect(onCatchUp).toHaveBeenCalledWith(expect.objectContaining({
       phase: 'retry-exhausted',
       mode: 'missing-only',
+      lane: 'targeted',
       workspaceId: 'ws-1',
       projectId: 'proj-1',
       attempt: 5,
@@ -1272,6 +1360,7 @@ describe('proactive content pull retry coordinator', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: 'retry-scheduled',
       mode: 'missing-only',
+      lane: 'targeted',
       workspaceId: 'ws-1',
       projectId: 'proj-1',
       attempt: 1,

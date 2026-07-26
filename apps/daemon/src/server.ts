@@ -3563,7 +3563,7 @@ export async function startServer({
         event.phase === 'retry-exhausted'
       ) {
         console.info(
-          `[od] shared-project content catch-up ${event.phase} mode=${event.mode} ` +
+          `[od] shared-project content catch-up ${event.phase} mode=${event.mode} lane=${event.lane} ` +
             `workspaceId=${event.workspaceId ?? 'unknown'} ` +
             `projectId=${event.projectId ?? 'all'} attempt=${event.attempt ?? event.failures ?? 0} ` +
             `delayMs=${event.delayMs ?? 0}`,
@@ -3572,18 +3572,18 @@ export async function startServer({
       }
       if (event.phase === 'skipped') {
         console.info(
-          `[od] shared-project content catch-up skipped mode=${event.mode} reason=${event.reason ?? 'unknown'}`,
+          `[od] shared-project content catch-up skipped mode=${event.mode} lane=${event.lane} reason=${event.reason ?? 'unknown'}`,
         );
         return;
       }
       if (event.phase === 'started') {
         console.info(
-          `[od] shared-project content catch-up started mode=${event.mode} workspaceId=${event.workspaceId ?? 'unknown'}`,
+          `[od] shared-project content catch-up started mode=${event.mode} lane=${event.lane} workspaceId=${event.workspaceId ?? 'unknown'}`,
         );
         return;
       }
       console.info(
-        `[od] shared-project content catch-up completed mode=${event.mode} ` +
+        `[od] shared-project content catch-up completed mode=${event.mode} lane=${event.lane} ` +
           `workspaceId=${event.workspaceId ?? 'unknown'} scanned=${event.scanned ?? 0} ` +
           `candidates=${event.candidates ?? 0} heads=${event.heads ?? 0} complete=${event.complete === true}`,
       );

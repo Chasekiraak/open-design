@@ -104,7 +104,12 @@ export interface ProactiveContentPullDeps {
   onPulled?: (target: ProactiveContentPullTarget, version: number) => void | Promise<void>;
   /** Opt-in, secret-free timing observer. It must not affect pull behavior. */
   onTiming?: (event: {
-    phase: 'queued' | 'invoke' | 'completed';
+    phase:
+      | 'queued'
+      | 'guard-started'
+      | 'guard-completed'
+      | 'invoke'
+      | 'completed';
     projectId: string;
     version?: number;
     receivedAtMs?: number;
@@ -120,6 +125,7 @@ export interface ProactiveContentPullDeps {
       | 'retry-scheduled'
       | 'retry-exhausted';
     mode: 'full' | 'missing-only';
+    lane: 'broad' | 'targeted';
     workspaceId?: string;
     projectId?: string;
     scanned?: number;
@@ -262,6 +268,16 @@ export function createProactiveContentPull(
    * one newly-shared project may lag without consuming or overwriting another
    * project's backoff state. */
   const catalogProjectRetries = new Map<string, CatalogProjectRetry>();
+  /** Project-specific first-share recovery must never wait behind the broad
+   * missing-project sweep. One lane per project keeps simultaneous new shares
+   * independent while `projectPulls` still dedupes disk writes. */
+  const targetedCatalogRecoveries = new Map<string, Promise<void>>();
+  /** Concurrent first-share events in one workspace share the same catalog
+   * snapshot read, but never share or serialize their per-project pulls. */
+  const targetedCatalogReads = new Map<
+    string,
+    Promise<readonly ProactiveContentPullProjectRef[]>
+  >();
   const scheduler = deps.scheduler ?? {
     setTimeout: (
       callback: () => void | Promise<void>,
@@ -338,6 +354,23 @@ export function createProactiveContentPull(
     if (version == null) return true;
     return outcome.version >= version;
   };
+
+  function readTargetedCatalog(
+    workspaceId: string,
+  ): Promise<readonly ProactiveContentPullProjectRef[]> {
+    const existing = targetedCatalogReads.get(workspaceId);
+    if (existing) return existing;
+    const read = Promise.resolve().then(() =>
+      deps.listSharedProjects!(workspaceId));
+    targetedCatalogReads.set(workspaceId, read);
+    const clear = () => {
+      if (targetedCatalogReads.get(workspaceId) === read) {
+        targetedCatalogReads.delete(workspaceId);
+      }
+    };
+    void read.then(clear, clear);
+    return read;
+  }
 
   async function shouldPull(
     event: ProactiveContentPullEvent,
@@ -817,7 +850,26 @@ export function createProactiveContentPull(
     try {
       const provisionalKey = provisionalIntentKey(event);
       if (!provisionalKey) return true;
+      reportTiming({
+        phase: 'guard-started',
+        projectId: event.projectId!,
+        ...(event.version != null ? { version: event.version } : {}),
+        ...(event.profileReceivedAtMs != null
+          ? { receivedAtMs: event.profileReceivedAtMs }
+          : {}),
+        atMs: Date.now(),
+      });
       const decision = await shouldPull(event, ownerHint);
+      reportTiming({
+        phase: 'guard-completed',
+        projectId: event.projectId!,
+        ...(event.version != null ? { version: event.version } : {}),
+        ...(event.profileReceivedAtMs != null
+          ? { receivedAtMs: event.profileReceivedAtMs }
+          : {}),
+        atMs: Date.now(),
+        status: decision.kind === 'target' ? 'target' : decision.reason,
+      });
       if (decision.kind === 'skip') {
         if (
           decision.reason === 'owner-missing' &&
@@ -947,13 +999,20 @@ export function createProactiveContentPull(
     mode: 'full' | 'missing-only',
     expectedWorkspaceId?: string,
     expectedProjectIds: ReadonlySet<string> = new Set(),
+    targetedOnly = false,
   ): Promise<CatchUpSweepOutcome> {
+    const lane = targetedOnly ? 'targeted' : 'broad';
     if (
       !deps.listSharedProjects ||
       !deps.publishedHead ||
       (mode === 'missing-only' && !deps.hasMaterializedProject)
     ) {
-      deps.onCatchUp?.({ phase: 'skipped', mode, reason: 'unavailable' });
+      deps.onCatchUp?.({
+        phase: 'skipped',
+        mode,
+        lane,
+        reason: 'unavailable',
+      });
       return {
         retryLane: false,
         retryProjectIds: [],
@@ -965,7 +1024,12 @@ export function createProactiveContentPull(
       return null;
     });
     if (!identity) {
-      deps.onCatchUp?.({ phase: 'skipped', mode, reason: 'no-active-team' });
+      deps.onCatchUp?.({
+        phase: 'skipped',
+        mode,
+        lane,
+        reason: 'no-active-team',
+      });
       return {
         retryLane: false,
         retryProjectIds: [],
@@ -976,6 +1040,7 @@ export function createProactiveContentPull(
       deps.onCatchUp?.({
         phase: 'skipped',
         mode,
+        lane,
         workspaceId: identity.workspaceId,
         reason: 'scope-mismatch',
       });
@@ -987,16 +1052,19 @@ export function createProactiveContentPull(
     }
 
     const { workspaceId } = identity;
-    deps.onCatchUp?.({ phase: 'started', mode, workspaceId });
+    deps.onCatchUp?.({ phase: 'started', mode, lane, workspaceId });
 
     let projects: readonly ProactiveContentPullProjectRef[];
     try {
-      projects = await deps.listSharedProjects(workspaceId);
+      projects = await (targetedOnly
+        ? readTargetedCatalog(workspaceId)
+        : deps.listSharedProjects(workspaceId));
     } catch (error) {
       deps.onError?.(error);
       deps.onCatchUp?.({
         phase: 'completed',
         mode,
+        lane,
         workspaceId,
         scanned: 0,
         candidates: 0,
@@ -1030,7 +1098,10 @@ export function createProactiveContentPull(
       project: ProactiveContentPullProjectRef;
       forcePull: boolean;
     }> = [];
-    for (const project of projects) {
+    const projectsToInspect = targetedOnly
+      ? projects.filter((project) => expectedProjectIds.has(project.projectId))
+      : projects;
+    for (const project of projectsToInspect) {
       if (project.ownerMemberId === identity.workspaceMemberId) continue;
       if (mode === 'missing-only') {
         let materialized: boolean;
@@ -1108,6 +1179,7 @@ export function createProactiveContentPull(
     deps.onCatchUp?.({
       phase: 'completed',
       mode,
+      lane,
       workspaceId,
       scanned: projects.length,
       candidates: candidates.length,
@@ -1138,6 +1210,7 @@ export function createProactiveContentPull(
       deps.onCatchUp?.({
         phase: 'retry-exhausted',
         mode,
+        lane: 'broad',
         ...(expectedWorkspaceId ? { workspaceId: expectedWorkspaceId } : {}),
         failures: lane.retryFailures,
         attempt: lane.retryFailures,
@@ -1149,6 +1222,7 @@ export function createProactiveContentPull(
     deps.onCatchUp?.({
       phase: 'retry-scheduled',
       mode,
+      lane: 'broad',
       ...(expectedWorkspaceId ? { workspaceId: expectedWorkspaceId } : {}),
       failures: lane.retryFailures,
       attempt: lane.retryFailures,
@@ -1219,6 +1293,7 @@ export function createProactiveContentPull(
       deps.onCatchUp?.({
         phase: 'retry-exhausted',
         mode: 'missing-only',
+        lane: 'targeted',
         workspaceId,
         projectId,
         failures: retry.failures,
@@ -1231,6 +1306,7 @@ export function createProactiveContentPull(
     deps.onCatchUp?.({
       phase: 'retry-scheduled',
       mode: 'missing-only',
+      lane: 'targeted',
       workspaceId,
       projectId,
       failures: retry.failures,
@@ -1267,12 +1343,57 @@ export function createProactiveContentPull(
         timer: null,
       });
     }
-    await requestCatchUp(
-      'missing-only',
-      workspaceId,
-      new Set([projectId]),
-      source,
-    );
+    let targeted = targetedCatalogRecoveries.get(key);
+    if (!targeted) {
+      targeted = (async () => {
+        const outcome = await runCatchUpSweep(
+          'missing-only',
+          workspaceId,
+          new Set([projectId]),
+          true,
+        );
+        if (outcome.retryProjectIds.length > 0) {
+          const currentIdentity = await deps.getWorkspaceIdentity().catch(
+            (error) => {
+              deps.onError?.(error);
+              return null;
+            },
+          );
+          if (
+            !currentIdentity ||
+            currentIdentity.workspaceId !== outcome.retryWorkspaceId
+          ) {
+            return;
+          }
+        }
+        for (const retryProjectId of outcome.retryProjectIds) {
+          if (outcome.retryWorkspaceId) {
+            scheduleCatalogProjectRetry(
+              outcome.retryWorkspaceId,
+              retryProjectId,
+            );
+          }
+        }
+      })();
+      targetedCatalogRecoveries.set(key, targeted);
+      void targeted.then(
+        () => {
+          if (targetedCatalogRecoveries.get(key) === targeted) {
+            targetedCatalogRecoveries.delete(key);
+          }
+        },
+        () => {
+          if (targetedCatalogRecoveries.get(key) === targeted) {
+            targetedCatalogRecoveries.delete(key);
+          }
+        },
+      );
+    }
+    await targeted;
+    const retry = catalogProjectRetries.get(key);
+    if (retry?.timer == null) {
+      catalogProjectRetries.delete(key);
+    }
   }
 
   async function requestCatchUp(
@@ -1386,6 +1507,8 @@ export function createProactiveContentPull(
       for (const retry of [...catalogProjectRetries.values()]) {
         clearCatalogProjectRetry(retry.workspaceId, retry.projectId);
       }
+      targetedCatalogRecoveries.clear();
+      targetedCatalogReads.clear();
     },
   };
 }

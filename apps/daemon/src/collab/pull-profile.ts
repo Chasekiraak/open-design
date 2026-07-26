@@ -12,6 +12,8 @@ const VELA_PULL_PHASES = new Set([
 export type SharedProjectPullTimingPhase =
   | 'event-received'
   | 'queued'
+  | 'guard-started'
+  | 'guard-completed'
   | 'invoke'
   | 'completed'
   | 'route-started'
