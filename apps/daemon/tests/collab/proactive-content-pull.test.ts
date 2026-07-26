@@ -1051,6 +1051,102 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 });
 
 describe('proactive content pull retry coordinator', () => {
+  it.each(['missing', 'error'] as const)(
+    'transfers an identity-%s retry into bounded catalog recovery when owner propagation becomes the blocker',
+    async (initialIdentityFailure) => {
+      const retry = makeRetryScheduler();
+      let identityReads = 0;
+      const onCatchUp = vi.fn();
+      const deps = makeDeps({
+        getLocalBinding: () => null,
+        getWorkspaceIdentity: async () => {
+          identityReads += 1;
+          if (identityReads === 1) {
+            if (initialIdentityFailure === 'error') {
+              throw new Error('identity unavailable');
+            }
+            return null;
+          }
+          return {
+            workspaceId: 'ws-1',
+            resourceTeamId: 'team-1',
+            workspaceMemberId: 'wm-member',
+          };
+        },
+        resolveSharedProjectOwner: async () => null,
+        listSharedProjects: async () => [],
+        hasMaterializedProject: () => false,
+        publishedHead: async () => 3,
+        onCatchUp,
+      });
+      Object.assign(deps, {
+        scheduler: retry.scheduler,
+        random: () => 1,
+      });
+      const pull = createProactiveContentPull(deps);
+
+      await pull.handleContentChanged(baseEvent);
+      expect(retry.delays).toEqual([1_000]);
+
+      // The generic identity retry now observes owner-missing and transfers to
+      // the dedicated project catalog lane instead of retaining both owners.
+      await retry.runNext();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await retry.runNext();
+      }
+
+      expect(retry.delays).toEqual([
+        1_000,
+        1_000,
+        2_000,
+        4_000,
+        8_000,
+        16_000,
+      ]);
+      expect(retry.tasks.size).toBe(0);
+      expect(onCatchUp).toHaveBeenCalledWith(expect.objectContaining({
+        phase: 'retry-exhausted',
+        mode: 'missing-only',
+        projectId: 'proj-1',
+        attempt: 5,
+      }));
+    },
+  );
+
+  it('clears a same-version provisional timer when an external event starts catalog recovery', async () => {
+    const retry = makeRetryScheduler();
+    let identityReads = 0;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      getWorkspaceIdentity: async () => {
+        identityReads += 1;
+        return identityReads === 1
+          ? null
+          : {
+              workspaceId: 'ws-1',
+              resourceTeamId: 'team-1',
+              workspaceMemberId: 'wm-member',
+            };
+      },
+      resolveSharedProjectOwner: async () => null,
+      listSharedProjects: async () => [],
+      hasMaterializedProject: () => false,
+      publishedHead: async () => 3,
+    });
+    Object.assign(deps, {
+      scheduler: retry.scheduler,
+      random: () => 1,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    await pull.handleContentChanged(baseEvent);
+
+    expect(retry.cleared).toEqual([1]);
+    expect(retry.delays).toEqual([1_000, 1_000]);
+    expect(retry.tasks.size).toBe(1);
+  });
+
   it('retries a first-share content event while the owner catalog row is still propagating', async () => {
     const retry = makeRetryScheduler();
     let ownerReads = 0;

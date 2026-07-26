@@ -551,6 +551,35 @@ export function createProactiveContentPull(
     )?.unref?.();
   }
 
+  async function transitionToCatalogRecovery(
+    intent: PullIntent,
+    decision: PullDecision,
+  ): Promise<boolean> {
+    if (
+      decision.kind !== 'skip' ||
+      decision.reason !== 'owner-missing' ||
+      !decision.retryable ||
+      intent.expectedScopeKey != null ||
+      !intent.event.workspaceId ||
+      !intent.event.projectId ||
+      intents.get(intent.key) !== intent
+    ) {
+      return false;
+    }
+    const { workspaceId, projectId } = intent.event;
+    // Identity/transport retries are intentionally open-ended, but an unbound
+    // first share whose owner row has not propagated gets exactly the bounded
+    // catalog policy. Transfer ownership by removing the provisional intent
+    // before scheduling the project retry; otherwise both timers can survive.
+    clearIntent(intent);
+    await requestCatalogProjectRecovery(
+      workspaceId,
+      projectId,
+      'external',
+    );
+    return true;
+  }
+
   async function attemptIntent(intent: PullIntent): Promise<PullAttempt> {
     try {
       let target = intent.guardedTarget;
@@ -558,6 +587,9 @@ export function createProactiveContentPull(
       if (!target) {
         const decision = await shouldPull(intent.event);
         if (decision.kind === 'skip') {
+          if (await transitionToCatalogRecovery(intent, decision)) {
+            return { kind: 'stopped', staleGuard: true };
+          }
           const establishedScopeGone =
             intent.expectedScopeKey != null &&
             (
@@ -752,6 +784,8 @@ export function createProactiveContentPull(
           event.workspaceId &&
           event.projectId
         ) {
+          const pending = intents.get(provisionalKey);
+          if (pending) clearIntent(pending);
           await requestCatalogProjectRecovery(
             event.workspaceId,
             event.projectId,
