@@ -269,9 +269,11 @@ describe('account menu billing card — scoped USD balance (recvqgaMLxEdZX)', ()
     });
 
     const card = billingCard();
-    expect(card.getByText('余额')).toBeTruthy();
+    expect(card.getByText('额度')).toBeTruthy();
     expect(card.getByText('$9.99')).toBeTruthy();
     expect(card.queryByText('999,330')).toBeNull();
+    expect(card.queryByText('余额')).toBeNull();
+    expect(card.queryByText(/积分/)).toBeNull();
   });
 
   it('keeps a proven zero visible as $0.00', () => {

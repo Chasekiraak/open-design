@@ -464,7 +464,7 @@ describe('InlineModelSwitcher AMR row', () => {
       name: /^Open Design\s+Signed in$/i,
     });
     await waitFor(() => {
-      expect(within(popover).getByText('Balance')).toBeTruthy();
+      expect(within(popover).getByText('Allowance')).toBeTruthy();
       expect(within(popover).getByText('$0.10')).toBeTruthy();
     });
   });
