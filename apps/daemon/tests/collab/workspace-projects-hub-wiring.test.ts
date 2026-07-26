@@ -286,4 +286,45 @@ describe('server.ts wiring (source boundary)', () => {
     expect(body).toContain('const after = authorizedActiveWorkspaceSnapshot()');
     expect(body).toContain('after.generation !== before.generation');
   });
+
+  it('recognizes an authorized remote mirror from exact version and a real live directory, not a local project manifest', () => {
+    const helperStart = source.indexOf(
+      'const proactiveTeamProjectMaterializedVersion = (',
+    );
+    const configStart = source.indexOf(
+      'const proactiveContentPull = createProactiveContentPull({',
+      helperStart,
+    );
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(configStart).toBeGreaterThan(helperStart);
+    const helperBody = source.slice(helperStart, configStart);
+    expect(helperBody).toContain('getTeamProjectMaterialization(');
+    expect(helperBody).toContain('target.workspaceId');
+    expect(helperBody).toContain(
+      'teamProjectContentResourceId(target.projectId, target)',
+    );
+    expect(helperBody).toContain(
+      'latestTeamProjectMaterializationVersion(',
+    );
+
+    const probeStart = source.indexOf(
+      'hasMaterializedProject: async (projectId, target) => {',
+      configStart,
+    );
+    const probeEnd = source.indexOf(
+      'materializedVersion: proactiveTeamProjectMaterializedVersion,',
+      probeStart,
+    );
+    expect(probeStart).toBeGreaterThan(configStart);
+    expect(probeEnd).toBeGreaterThan(probeStart);
+    const probeBody = source.slice(probeStart, probeEnd);
+    expect(probeBody).toContain('const project = getProject(db, projectId);');
+    expect(probeBody).toContain(
+      'proactiveTeamProjectMaterializedVersion(target)',
+    );
+    expect(probeBody).toContain('fs.promises.lstat(projectDir)');
+    expect(probeBody).toContain('entry.isDirectory()');
+    expect(probeBody).toContain('!entry.isSymbolicLink()');
+    expect(probeBody).not.toContain('readProjectManifest');
+  });
 });

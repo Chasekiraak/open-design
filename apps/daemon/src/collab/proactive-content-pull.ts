@@ -239,10 +239,13 @@ export interface ProactiveContentPullDeps {
   listSharedProjects?: (
     workspaceId: string,
   ) => Promise<readonly ProactiveContentPullProjectRef[]>;
-  /** Local materialization probe used by the low-frequency catalog floor.
-   *  A missing project is the only candidate that floor may pull; full head
-   *  comparison remains limited to verified first-connect/reconnect hooks. */
-  hasMaterializedProject?: (projectId: string) => boolean | Promise<boolean>;
+  /** Exact-scope local materialization probe. The broad low-frequency floor
+   *  still selects only missing projects; a project-targeted catalog recovery
+   *  may also compare an existing mirror's durable version with remote head. */
+  hasMaterializedProject?: (
+    projectId: string,
+    target: ProactiveContentPullTarget,
+  ) => boolean | Promise<boolean>;
   /** Read one authoritative published head after the single catalog sweep has
    *  selected a recently changed, non-owned project. Calls are sequential to
    *  avoid a reconnect request burst. */
@@ -555,6 +558,19 @@ export function createProactiveContentPull(
     if (outcome.version == null) return false;
     if (version == null) return true;
     return outcome.version >= version;
+  };
+
+  const seedMaterializedVersion = (
+    target: ProactiveContentPullTarget,
+  ): number | null => {
+    const version = Number(deps.materializedVersion?.(target) ?? NaN);
+    if (!Number.isSafeInteger(version) || version < 0) return null;
+    const scopeKey = pullScopeKey(target);
+    const cursor = pulledVersions.get(scopeKey);
+    if (cursor == null || version > cursor) {
+      pulledVersions.set(scopeKey, version);
+    }
+    return version;
   };
 
   function readTargetedCatalog(
@@ -991,11 +1007,12 @@ export function createProactiveContentPull(
           // durable version cursor that missing-only intentionally ignores.
           if (intent.skipNextForceProbe) {
             delete intent.skipNextForceProbe;
-          } else if (await deps.hasMaterializedProject(projectId)) {
+          } else if (await deps.hasMaterializedProject(projectId, target)) {
             // The outer missing-only probe can go stale while owner/scope/head
             // checks run. Seeing bytes now only withdraws the forced-download
             // requirement; the version cursor still has to cover the head.
             intent.force = false;
+            seedMaterializedVersion(target);
           } else {
             const completedDuringProbe = successfulCompletions.get(scopeKey);
             if (
@@ -1266,8 +1283,9 @@ export function createProactiveContentPull(
           completionGenerations.get(key) ?? 0;
         try {
           forceProbeAlreadyRan = true;
-          if (await deps.hasMaterializedProject(target.projectId)) {
+          if (await deps.hasMaterializedProject(target.projectId, target)) {
             effectiveForce = false;
+            seedMaterializedVersion(target);
           } else {
             const completedDuringProbe = successfulCompletions.get(key);
             if (
@@ -1520,6 +1538,13 @@ export function createProactiveContentPull(
       : projects;
     for (const project of projectsToInspect) {
       if (project.ownerMemberId === identity.workspaceMemberId) continue;
+      const target: ProactiveContentPullTarget = {
+        projectId: project.projectId,
+        workspaceId,
+        resourceTeamId: identity.resourceTeamId,
+        viewerMemberId: identity.workspaceMemberId,
+        ownerMemberId: project.ownerMemberId,
+      };
       // Full recovery still has to heal a missing local tree. Mark its
       // candidates as force-capable and let processContentChanged perform the
       // race-closing materialization probe once, after the authoritative head
@@ -1531,7 +1556,10 @@ export function createProactiveContentPull(
       if (mode === 'missing-only') {
         let materialized: boolean;
         try {
-          materialized = await deps.hasMaterializedProject!(project.projectId);
+          materialized = await deps.hasMaterializedProject!(
+            project.projectId,
+            target,
+          );
         } catch (error) {
           deps.onError?.(error);
           complete = false;
@@ -1547,7 +1575,7 @@ export function createProactiveContentPull(
           preemptedByForeground = true;
           break;
         }
-        if (mode === 'missing-only' && materialized) continue;
+        if (mode === 'missing-only' && materialized && !targetedOnly) continue;
         forcePull = !materialized;
       }
       candidates.push({ project, forcePull });

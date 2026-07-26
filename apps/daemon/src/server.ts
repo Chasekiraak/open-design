@@ -703,6 +703,7 @@ import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
 import {
   activeTeamWorkspaceIdentity,
   createProactiveContentPull,
+  type ProactiveContentPullTarget,
 } from './collab/proactive-content-pull.js';
 import {
   emitSharedProjectPullTiming,
@@ -722,7 +723,6 @@ import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { createShouldPublish } from './collab/should-publish.js';
 import { recoverPersistedTeamShareOwnership } from './collab/persisted-team-share.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
-import { readProjectManifest } from './project-locations.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
   createTeamResourceShareService,
@@ -3537,6 +3537,26 @@ export async function startServer({
   // collab/proactive-content-pull.ts for the guard boundary (never pull a
   // project this member owns; an unbound first share requires an exact
   // event-workspace/active-workspace match; dedupe by hub version).
+  const proactiveTeamProjectMaterializedVersion = (
+    target: ProactiveContentPullTarget,
+  ) => {
+    const authorized = getTeamProjectMaterialization(
+      db,
+      target.workspaceId,
+      target.projectId,
+    );
+    const version = latestTeamProjectMaterializationVersion(
+      authorized,
+      teamResourceVersions.get(
+        target.workspaceId,
+        'project-content',
+        teamProjectContentResourceId(target.projectId, target),
+      ),
+      target.projectId,
+      target,
+    );
+    return version == null ? null : String(version);
+  };
   const proactiveContentPull = createProactiveContentPull({
     getLocalBinding: (projectId) => {
       const row = getWorkspaceProjectByProjectId(db, projectId) as
@@ -3585,35 +3605,31 @@ export async function startServer({
           ownerMemberId: project.ownerMemberId,
         }));
     },
-    hasMaterializedProject: async (projectId) => {
+    hasMaterializedProject: async (projectId, target) => {
       const project = getProject(db, projectId);
       if (!project) return false;
+      // Authorized Vela mirrors contain the shared project files, not the
+      // local-only `.open-design/project.json`. Their exact-scope receipt is
+      // the durable version proof; the live directory proves the promoted
+      // namespace still exists. Both are required so a deleted tree heals,
+      // while another workspace/owner's receipt can never satisfy this pull.
+      if (proactiveTeamProjectMaterializedVersion(target) == null) {
+        return false;
+      }
       const projectDir = resolveProjectShareDir(
         PROJECTS_DIR,
         projectId,
         project,
         resolveProjectDir,
       );
-      return (await readProjectManifest(projectDir)) != null;
-    },
-    materializedVersion: (target) => {
-      const authorized = getTeamProjectMaterialization(
-        db,
-        target.workspaceId,
-        target.projectId,
+      const entry = await fs.promises.lstat(projectDir).catch(() => null);
+      return Boolean(
+        entry &&
+        entry.isDirectory() &&
+        !entry.isSymbolicLink(),
       );
-      const version = latestTeamProjectMaterializationVersion(
-        authorized,
-        teamResourceVersions.get(
-          target.workspaceId,
-          'project-content',
-          teamProjectContentResourceId(target.projectId, target),
-        ),
-        target.projectId,
-        target,
-      );
-      return version == null ? null : String(version);
     },
+    materializedVersion: proactiveTeamProjectMaterializedVersion,
     // The resource is owner-scoped; the same captured team/owner principal is
     // used by the shared pull below. The member session remains the transport
     // credential, while Vela validates the active workspace server-side.

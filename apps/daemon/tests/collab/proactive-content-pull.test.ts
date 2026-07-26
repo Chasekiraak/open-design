@@ -2147,6 +2147,222 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
 
     expect(deps.pullCalls).toEqual(['proj-1']);
   });
+
+  it('does not repeat an authorized remote mirror that has exact receipt and live bytes but no local project manifest', async () => {
+    let projectRowExists = false;
+    let liveDirectoryExists = false;
+    let receipt:
+      | {
+          workspaceId: string;
+          resourceTeamId: string;
+          viewerMemberId: string;
+          ownerMemberId: string;
+          version: number;
+        }
+      | null = null;
+    const materializedVersion = (target: ProactiveContentPullTarget) =>
+      receipt &&
+      receipt.workspaceId === target.workspaceId &&
+      receipt.resourceTeamId === target.resourceTeamId &&
+      receipt.viewerMemberId === target.viewerMemberId &&
+      receipt.ownerMemberId === target.ownerMemberId
+        ? String(receipt.version)
+        : null;
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      // Authorized mirrors intentionally contain shared files, not the local
+      // `.open-design/project.json`. Presence must use the guarded target's
+      // exact receipt plus the promoted live directory instead.
+      hasMaterializedProject: (
+        _projectId,
+        target: ProactiveContentPullTarget,
+      ) =>
+        Boolean(
+          projectRowExists &&
+          liveDirectoryExists &&
+          materializedVersion(target) != null,
+        ),
+      materializedVersion,
+      publishedHead: async () => 3,
+      pullSharedProject: async (target, expectedVersion) => {
+        deps.pullCalls.push(target.projectId);
+        projectRowExists = true;
+        liveDirectoryExists = true;
+        receipt = {
+          workspaceId: target.workspaceId,
+          resourceTeamId: target.resourceTeamId,
+          viewerMemberId: target.viewerMemberId,
+          ownerMemberId: target.ownerMemberId,
+          version: expectedVersion ?? 3,
+        };
+        return { status: 'pulled', version: expectedVersion ?? 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('repairs a missing live directory even when its exact receipt equals head', async () => {
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      materializedVersion: () => '3',
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  const mismatchedReceiptCases: Array<[
+    string,
+    {
+      workspaceId: string;
+      resourceTeamId: string;
+      viewerMemberId: string;
+      ownerMemberId: string;
+      version: number;
+    } | null,
+  ]> = [
+    ['missing receipt', null],
+    [
+      'wrong workspace receipt',
+      {
+        workspaceId: 'ws-other',
+        resourceTeamId: 'team-1',
+        viewerMemberId: 'wm-member',
+        ownerMemberId: 'wm-owner',
+        version: 3,
+      },
+    ],
+    [
+      'wrong owner receipt',
+      {
+        workspaceId: 'ws-1',
+        resourceTeamId: 'team-1',
+        viewerMemberId: 'wm-member',
+        ownerMemberId: 'wm-other-owner',
+        version: 3,
+      },
+    ],
+    [
+      'wrong resource team receipt',
+      {
+        workspaceId: 'ws-1',
+        resourceTeamId: 'team-other',
+        viewerMemberId: 'wm-member',
+        ownerMemberId: 'wm-owner',
+        version: 3,
+      },
+    ],
+    [
+      'wrong viewer receipt',
+      {
+        workspaceId: 'ws-1',
+        resourceTeamId: 'team-1',
+        viewerMemberId: 'wm-other-viewer',
+        ownerMemberId: 'wm-owner',
+        version: 3,
+      },
+    ],
+  ];
+
+  it.each(mismatchedReceiptCases)(
+    'forces targeted recovery for %s',
+    async (_label, receipt) => {
+      const materializedVersion = (target: ProactiveContentPullTarget) =>
+        receipt &&
+        receipt.workspaceId === target.workspaceId &&
+        receipt.resourceTeamId === target.resourceTeamId &&
+        receipt.viewerMemberId === target.viewerMemberId &&
+        receipt.ownerMemberId === target.ownerMemberId
+          ? String(receipt.version)
+          : null;
+      const deps = makeDeps({
+        getLocalBinding: () => null,
+        listSharedProjects: async () => [
+          { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+        ],
+        hasMaterializedProject: (
+          _projectId,
+          target: ProactiveContentPullTarget,
+        ) => Boolean(materializedVersion(target) != null),
+        materializedVersion,
+        publishedHead: async () => 3,
+      });
+      const pull = createProactiveContentPull(deps);
+
+      await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+      expect(deps.pullCalls).toEqual(['proj-1']);
+    },
+  );
+
+  it('pulls a targeted mirror whose exact materialized version is below head', async () => {
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => true,
+      materializedVersion: () => '2',
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
+
+  it('does not repeat an exact materialized head during a cold full-heal pass', async () => {
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: (
+        _projectId,
+        _target: ProactiveContentPullTarget,
+      ) => true,
+      materializedVersion: () => '3',
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.advanceRecoveryFloor('ws-1');
+
+    expect(deps.pullCalls).toEqual([]);
+  });
+
+  it('still materializes an initial first share with no project row, live directory, or receipt', async () => {
+    const deps = makeDeps({
+      getLocalBinding: () => null,
+      listSharedProjects: async () => [
+        { projectId: 'proj-1', ownerMemberId: 'wm-owner' },
+      ],
+      hasMaterializedProject: () => false,
+      materializedVersion: () => null,
+      publishedHead: async () => 3,
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
+
+    expect(deps.pullCalls).toEqual(['proj-1']);
+  });
 });
 
 describe('proactive content pull retry coordinator', () => {
