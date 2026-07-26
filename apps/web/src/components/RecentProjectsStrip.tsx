@@ -36,7 +36,6 @@ import { useWorkspaceInvalidation } from '../collab/workspace-events';
  *  'team' = the全部项目 grid where every card is a team-shared project. */
 export type SpaceKind = 'recent' | 'drafts' | 'team';
 import {
-  HtmlProjectCoverFrame,
   coverFromProjectFile,
   projectCoverUrl,
   selectProjectFileCover,
@@ -55,7 +54,9 @@ interface Props {
    *  omits this and keeps the compact "最近项目 / 查看全部" header. */
   heading?: string;
   description?: string;
-  onOpen: (id: string) => void;
+  /** Return false when opening failed and the grid stayed mounted, so aborted
+   * background cover work can resume after the foreground attempt finishes. */
+  onOpen: (id: string) => boolean | void | Promise<boolean | void>;
   onViewAll?: () => void;
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicate?: (id: string) => Promise<void> | void;
@@ -159,8 +160,122 @@ const deckCoverCache = new Map<string, string>();
 const deckCoverInflight = new Map<string, Promise<string>>();
 const DEFAULT_RECENT_PROJECT_LIMIT = 6;
 const WIDE_RECENT_PROJECT_LIMIT = 7;
+// Card covers are background decoration. Browsers commonly allow only six
+// concurrent connections per origin, so an unbounded All Projects scan can
+// occupy every slot and queue the project file list/preview the user just
+// opened. Two cover probes keep the grid moving while reserving capacity for
+// foreground reads.
+const MAX_BACKGROUND_COVER_REQUESTS = 2;
 // 7 * 180px cards + 6 * 12px gaps, matching recent-projects.css.
 const WIDE_RECENT_PROJECT_MIN_ROW_WIDTH = 1332;
+
+type BackgroundTask<T> = {
+  controller: AbortController;
+  run: () => Promise<T>;
+  resolve: (value: T | undefined) => void;
+  reject: (reason: unknown) => void;
+  started: boolean;
+  released: boolean;
+  settled: boolean;
+};
+
+class BackgroundTaskQueue {
+  private active = 0;
+  private readonly pending: BackgroundTask<unknown>[] = [];
+  private pauseDepth = 0;
+
+  constructor(private readonly concurrency: number) {}
+
+  schedule<T>(
+    controller: AbortController,
+    run: () => Promise<T>,
+    priority = false,
+  ): Promise<T | undefined> {
+    return new Promise<T | undefined>((resolve, reject) => {
+      const task: BackgroundTask<T> = {
+        controller,
+        run,
+        resolve,
+        reject,
+        started: false,
+        released: false,
+        settled: false,
+      };
+      const abort = () => {
+        if (task.settled) return;
+        task.settled = true;
+        task.resolve(undefined);
+        this.release(task);
+        this.drain();
+      };
+      controller.signal.addEventListener('abort', abort, { once: true });
+      // Store listener cleanup on the promise path without expanding the
+      // queue's public contract. A settled task's one-shot abort listener is
+      // harmless, but removing it avoids retaining component closures.
+      task.run = async () => {
+        try {
+          return await run();
+        } finally {
+          controller.signal.removeEventListener('abort', abort);
+        }
+      };
+      if (priority) {
+        this.pending.unshift(task as BackgroundTask<unknown>);
+      } else {
+        this.pending.push(task as BackgroundTask<unknown>);
+      }
+      this.drain();
+    });
+  }
+
+  withoutDraining(run: () => void): void {
+    this.pauseDepth += 1;
+    try {
+      run();
+    } finally {
+      this.pauseDepth -= 1;
+      this.drain();
+    }
+  }
+
+  private release<T>(task: BackgroundTask<T>): void {
+    if (task.started && !task.released) {
+      task.released = true;
+      this.active -= 1;
+      return;
+    }
+    if (!task.started) {
+      const index = this.pending.indexOf(task as BackgroundTask<unknown>);
+      if (index >= 0) this.pending.splice(index, 1);
+    }
+  }
+
+  private drain(): void {
+    if (this.pauseDepth > 0) return;
+    while (this.active < this.concurrency && this.pending.length > 0) {
+      const task = this.pending.shift()!;
+      if (task.settled || task.controller.signal.aborted) continue;
+      task.started = true;
+      this.active += 1;
+      void task.run().then(
+        (value) => {
+          if (task.settled) return;
+          task.settled = true;
+          task.resolve(value);
+          this.release(task);
+          this.drain();
+        },
+        (error) => {
+          if (task.settled) return;
+          task.settled = true;
+          task.reject(error);
+          this.release(task);
+          this.drain();
+        },
+      );
+    }
+  }
+}
 
 export function RecentProjectsStrip({
   projects,
@@ -427,6 +542,11 @@ export function RecentProjectsStrip({
   const coverGenerationRef = useRef(new Map<string, number>());
   const activeRef = useRef(isActive);
   activeRef.current = isActive;
+  const coverQueueRef = useRef<BackgroundTaskQueue | null>(null);
+  if (!coverQueueRef.current) {
+    coverQueueRef.current = new BackgroundTaskQueue(MAX_BACKGROUND_COVER_REQUESTS);
+  }
+  const coverQueue = coverQueueRef.current;
   const coverInFlightRef = useRef(
     new Map<string, {
       controller: AbortController;
@@ -450,7 +570,39 @@ export function RecentProjectsStrip({
     if (designSystemProject) {
       return (await findDesignSystemCover(project.id, files, signal)) ?? null;
     }
-    return selectProjectFileCover(files);
+    const cover = selectProjectFileCover(files);
+    if (cover?.kind !== 'html') return cover;
+
+    const src = projectCoverUrl(project.id, cover.name, cover.mtime);
+    const diagnostic = `${project.id}:${cover.name}`;
+    if (project.metadata?.kind === 'deck') {
+      try {
+        await loadDeckCover(src, signal);
+        return signal.aborted ? null : cover;
+      } catch (err) {
+        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+        console.warn('[project-cover] failed to load HTML cover:', diagnostic, err);
+        return null;
+      }
+    }
+
+    try {
+      const response = await fetch(src, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal,
+      });
+      if (signal.aborted) return null;
+      if (response.ok || response.status === 304) return cover;
+      console.warn(
+        `[project-cover] HTML cover unavailable (${response.status} ${response.statusText}):`,
+        diagnostic,
+      );
+    } catch (err) {
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+      console.warn('[project-cover] failed to verify HTML cover:', diagnostic, err);
+    }
+    return null;
   }, []);
 
   const requestProjectCover = useCallback((
@@ -460,13 +612,17 @@ export function RecentProjectsStrip({
     if (!activeRef.current) return Promise.resolve();
     const existing = coverInFlightRef.current.get(project.id);
     if (existing && !options.force) return existing.promise;
-    existing?.controller.abort();
     const generation = (coverGenerationRef.current.get(project.id) ?? 0) + 1;
     coverGenerationRef.current.set(project.id, generation);
     const controller = new AbortController();
-    const promise = loadProjectCover(project, controller.signal)
+    const promise = coverQueue.schedule(
+      controller,
+      () => loadProjectCover(project, controller.signal),
+      options.force,
+    )
       .then((cover) => {
         if (controller.signal.aborted) return;
+        if (cover === undefined) return;
         if (coverGenerationRef.current.get(project.id) !== generation) return;
         if (!visibleProjectsRef.current.has(project.id)) return;
         setCoverByProject((current) => ({ ...current, [project.id]: cover }));
@@ -481,21 +637,37 @@ export function RecentProjectsStrip({
         }
       });
     coverInFlightRef.current.set(project.id, { controller, generation, promise });
+    // Install the replacement first so a force-refresh enters the front of the
+    // queue before aborting its stale predecessor releases a slot.
+    existing?.controller.abort();
     return promise;
-  }, [loadProjectCover]);
+  }, [coverQueue, loadProjectCover]);
+
+  const abortBackgroundCoverRequests = useCallback(() => {
+    coverQueue.withoutDraining(() => {
+      for (const request of coverInFlightRef.current.values()) {
+        request.controller.abort();
+      }
+    });
+    coverInFlightRef.current.clear();
+  }, [coverQueue]);
+
+  const resumeBackgroundCoverRequests = useCallback(() => {
+    if (!activeRef.current) return;
+    for (const project of visibleProjectsRef.current.values()) {
+      void requestProjectCover(project);
+    }
+  }, [requestProjectCover]);
 
   useEffect(() => {
     return () => {
       // Cover probes are background-only. Do not let them survive navigation
       // away from Home and occupy the connections needed by the reopened
       // project's file list and preview source.
-      for (const request of coverInFlightRef.current.values()) {
-        request.controller.abort();
-      }
-      coverInFlightRef.current.clear();
+      abortBackgroundCoverRequests();
       coverGenerationRef.current.clear();
     };
-  }, []);
+  }, [abortBackgroundCoverRequests]);
 
   const refreshProjectCover = useCallback((projectId: string) => {
     const project = visibleProjectsRef.current.get(projectId);
@@ -531,18 +703,18 @@ export function RecentProjectsStrip({
   useEffect(() => {
     const visibleIds = new Set(visibleProjects.map(({ project }) => project.id));
     if (!isActive) {
-      for (const request of coverInFlightRef.current.values()) {
-        request.controller.abort();
-      }
-      coverInFlightRef.current.clear();
+      abortBackgroundCoverRequests();
       return;
     }
-    for (const [projectId, request] of coverInFlightRef.current) {
-      if (visibleIds.has(projectId)) continue;
-      request.controller.abort();
-      coverInFlightRef.current.delete(projectId);
-      coverGenerationRef.current.delete(projectId);
-    }
+    const staleRequests = [...coverInFlightRef.current.entries()]
+      .filter(([projectId]) => !visibleIds.has(projectId));
+    coverQueue.withoutDraining(() => {
+      for (const [projectId, request] of staleRequests) {
+        request.controller.abort();
+        coverInFlightRef.current.delete(projectId);
+        coverGenerationRef.current.delete(projectId);
+      }
+    });
     if (visibleProjects.length === 0) {
       setCoverByProject({});
       return;
@@ -559,7 +731,7 @@ export function RecentProjectsStrip({
     // Intentionally keyed on the id set (coverFetchKey), not visibleProjects,
     // so re-renders that don't change which projects are shown don't re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverFetchKey, isActive, requestProjectCover]);
+  }, [abortBackgroundCoverRequests, coverFetchKey, coverQueue, isActive, requestProjectCover]);
 
   // First-run home shouldn't reserve space for an empty "Recent
   // projects" rail — the dashed empty box just adds visual noise
@@ -1077,7 +1249,26 @@ export function RecentProjectsStrip({
                     return;
                   }
                   if (opening) return;
-                  onOpen(project.id);
+                  // Release every background cover slot before the project view
+                  // starts its foreground files/content reads. Waiting for the
+                  // entry shell to unmount is too late: navigation itself needs
+                  // those same browser connections.
+                  abortBackgroundCoverRequests();
+                  try {
+                    const result = onOpen(project.id);
+                    if (result && typeof result === 'object' && 'then' in result) {
+                      void Promise.resolve(result).then(
+                        (opened) => {
+                          if (opened === false) resumeBackgroundCoverRequests();
+                        },
+                        () => resumeBackgroundCoverRequests(),
+                      );
+                    } else if (result === false) {
+                      resumeBackgroundCoverRequests();
+                    }
+                  } catch {
+                    resumeBackgroundCoverRequests();
+                  }
                 }}
                 aria-busy={opening ? true : undefined}
                 title={project.name}
@@ -1512,22 +1703,51 @@ function RecentProjectHtmlThumb({
   deckCoverOnly: boolean;
 }) {
   // Plain HTML goes through the shared cover frame (#5762): it HEAD-probes the
-  // cover URL first and falls back to the initial glyph — plus a
-  // `[project-cover]` warning — when the entry file has gone missing, instead
-  // of leaving a blank iframe on the card. `DesignsTab` renders the same way.
+  // cover URL in the parent cover queue first and falls back to the initial
+  // glyph when the entry file has gone missing. Keeping verification in that
+  // queue is what prevents an All Projects grid from launching one HEAD per
+  // card at once.
   if (!deckCoverOnly) {
     return (
-      <HtmlProjectCoverFrame
+      <VerifiedHtmlCoverFrame
         src={src}
         initial={initial}
-        iframeClassName="recent-projects__thumb-iframe"
-        glyphClassName="recent-projects__card-glyph"
         diagnostic={diagnostic}
       />
     );
   }
 
   return <DeckCoverThumb src={src} />;
+}
+
+function VerifiedHtmlCoverFrame({
+  src,
+  initial,
+  diagnostic,
+}: {
+  src: string;
+  initial: string;
+  diagnostic: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) {
+    return <span className="recent-projects__card-glyph">{initial}</span>;
+  }
+  return (
+    <iframe
+      className="recent-projects__thumb-iframe"
+      src={src}
+      title=""
+      loading="lazy"
+      sandbox="allow-scripts"
+      tabIndex={-1}
+      onError={() => {
+        console.warn('[project-cover] failed to load HTML cover:', diagnostic);
+        setFailed(true);
+      }}
+    />
+  );
 }
 
 function DeckCoverThumb({ src }: { src: string }) {
@@ -1597,9 +1817,16 @@ function DeckCoverThumb({ src }: { src: string }) {
   );
 }
 
-async function loadDeckCover(src: string): Promise<string> {
+async function loadDeckCover(src: string, signal?: AbortSignal): Promise<string> {
   const cached = deckCoverCache.get(src);
   if (cached) return cached;
+  if (signal) {
+    const response = await fetch(src, { signal });
+    if (!response.ok) throw new Error(`Failed to load project cover: ${response.status}`);
+    const parsed = deckPreviewSrcDoc(await response.text());
+    if (!signal.aborted) deckCoverCache.set(src, parsed);
+    return parsed;
+  }
   const existing = deckCoverInflight.get(src);
   if (existing) return existing;
   const run = fetch(src)
