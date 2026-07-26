@@ -3669,7 +3669,8 @@ export async function startServer({
       console.info(
         `[od] shared-project content catch-up completed mode=${event.mode} lane=${event.lane} ` +
           `workspaceId=${event.workspaceId ?? 'unknown'} scanned=${event.scanned ?? 0} ` +
-          `candidates=${event.candidates ?? 0} heads=${event.heads ?? 0} complete=${event.complete === true}`,
+          `candidates=${event.candidates ?? 0} heads=${event.heads ?? 0} ` +
+          `suppressed=${event.suppressed ?? 0} complete=${event.complete === true}`,
       );
     },
   });
@@ -3822,7 +3823,11 @@ export async function startServer({
           // signal the web, AND run a real `workspace_projects`
           // reconciliation pass — see `collab/workspace-projects-reconciler.ts`.
           handleHubTeamProjectsChanged(emitTeamProjectsChangedDeduped, reconcileWorkspaceProjectsFromRemote);
-          if (event.workspaceId) {
+          // Hub catalog writes carry the affected project id on current Vela
+          // deployments, so keep the latency-sensitive recovery targeted. An
+          // older/unscoped event still refreshes and reconciles the catalog;
+          // the poller's 15s missing-project sweep remains its safety floor.
+          if (event.workspaceId && event.projectId) {
             void proactiveContentPull.materializeMissingProjects(
               event.workspaceId,
               event.projectId,

@@ -279,6 +279,7 @@ export interface ProactiveContentPullDeps {
     scanned?: number;
     candidates?: number;
     heads?: number;
+    suppressed?: number;
     complete?: boolean;
     failures?: number;
     attempt?: number;
@@ -296,6 +297,8 @@ export interface ProactiveContentPullDeps {
   };
   /** Injectable entropy for equal-jitter retry delays. */
   random?: () => number;
+  /** Injectable wall clock for deterministic broad-head cooldown tests. */
+  now?: () => number;
 }
 
 export interface ProactiveContentPull {
@@ -351,6 +354,9 @@ interface PullIntent {
   key: string;
   event: ProactiveContentPullEvent;
   force: boolean;
+  /** Live/targeted work owns open-ended transport retries. Broad recovery is
+   * one-shot per published head and waits for a newer event or safety floor. */
+  persistentRetry: boolean;
   desiredVersion?: number;
   expectedScopeKey?: string;
   guardedTarget?: ProactiveContentPullTarget;
@@ -364,6 +370,12 @@ interface PullIntent {
    * continue backing off after this reaches zero, but may no longer starve
    * broad reconnect recovery. A newer event refreshes the budget. */
   foregroundRetryBudget?: number;
+}
+
+interface SuppressedBroadHead {
+  version: number;
+  failures: number;
+  retryAt: number;
 }
 
 interface CatalogProjectRetry {
@@ -408,6 +420,8 @@ type PullDecision =
 
 const MAX_CATALOG_PROPAGATION_RETRIES = 5;
 const FOREGROUND_CATCH_UP_QUIET_MS = 250;
+const BROAD_HEAD_RETRY_BASE_MS = 15_000;
+const BROAD_HEAD_RETRY_MAX_MS = 5 * 60_000;
 
 export function createProactiveContentPull(
   deps: ProactiveContentPullDeps,
@@ -446,6 +460,7 @@ export function createProactiveContentPull(
       clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
   const random = deps.random ?? Math.random;
+  const now = deps.now ?? Date.now;
   let disposed = false;
   let foregroundGeneration = 0;
   let foregroundEventsInFlight = 0;
@@ -475,6 +490,10 @@ export function createProactiveContentPull(
     string,
     { generation: number; outcome: SuccessfulPullOutcome }
   >();
+  /** A broad sweep must not turn every historical unavailable project into a
+   * permanent retry timer. Cool down only the exact guarded scope + head; a
+   * later safety-floor pass, newer head, or targeted/live request retries. */
+  const suppressedBroadHeads = new Map<string, SuppressedBroadHead>();
   /**
    * Full reconnect recovery may spend a long time walking historical heads.
    * Keep the missing-only safety floor on its own single-flight lane so a
@@ -779,12 +798,14 @@ export function createProactiveContentPull(
     key: string,
     event: ProactiveContentPullEvent,
     force: boolean,
+    persistentRetry: boolean,
     target?: ProactiveContentPullTarget,
   ): PullIntent {
     return {
       key,
       event: { ...event },
       force,
+      persistentRetry,
       ...(event.version != null ? { desiredVersion: event.version } : {}),
       ...(target
         ? {
@@ -824,6 +845,7 @@ export function createProactiveContentPull(
     source: PullIntent,
   ): boolean {
     transferIntentForeground(source, target);
+    target.persistentRetry ||= source.persistentRetry;
     const changed = mergeIntentUpdate(target, source.event, source.force);
     target.failures = Math.max(target.failures, source.failures);
     return changed;
@@ -833,6 +855,13 @@ export function createProactiveContentPull(
     const ceiling = Math.min(30_000, 1_000 * (2 ** Math.max(0, failures - 1)));
     const jitter = Math.min(1, Math.max(0, random()));
     return Math.round((ceiling / 2) + ((ceiling / 2) * jitter));
+  }
+
+  function broadHeadRetryDelay(failures: number): number {
+    return Math.min(
+      BROAD_HEAD_RETRY_MAX_MS,
+      BROAD_HEAD_RETRY_BASE_MS * (2 ** Math.max(0, failures - 1)),
+    );
   }
 
   function scheduleRetry(intent: PullIntent): void {
@@ -1072,11 +1101,31 @@ export function createProactiveContentPull(
         continue;
       }
       if (result.kind === 'satisfied' || result.kind === 'stopped') {
+        suppressedBroadHeads.delete(intent.expectedScopeKey ?? intent.key);
         clearIntent(intent);
         return true;
       }
       if (result.kind === 'retry-now' || intent.revision !== revision) {
         continue;
+      }
+      if (!intent.persistentRetry) {
+        if (
+          intent.expectedScopeKey &&
+          Number.isSafeInteger(intent.desiredVersion) &&
+          intent.desiredVersion != null
+        ) {
+          const previous = suppressedBroadHeads.get(intent.expectedScopeKey);
+          const failures = previous?.version === intent.desiredVersion
+            ? previous.failures + 1
+            : 1;
+          suppressedBroadHeads.set(intent.expectedScopeKey, {
+            version: intent.desiredVersion,
+            failures,
+            retryAt: now() + broadHeadRetryDelay(failures),
+          });
+        }
+        clearIntent(intent);
+        return false;
       }
       scheduleRetry(intent);
       return false;
@@ -1121,6 +1170,7 @@ export function createProactiveContentPull(
     ownerHint?: string,
     force = false,
     foreground = false,
+    persistentRetry = true,
   ): Promise<boolean> {
     try {
       const provisionalKey = provisionalIntentKey(event);
@@ -1163,14 +1213,21 @@ export function createProactiveContentPull(
           return false;
         }
         if (!decision.retryable) return true;
+        if (!persistentRetry) return false;
         let pending = intents.get(provisionalKey);
         if (!pending) {
-          pending = createIntent(provisionalKey, event, force);
+          pending = createIntent(
+            provisionalKey,
+            event,
+            force,
+            persistentRetry,
+          );
           intents.set(provisionalKey, pending);
           if (foreground) markIntentForeground(pending);
           scheduleRetry(pending);
           return false;
         }
+        pending.persistentRetry ||= persistentRetry;
         if (foreground) markIntentForeground(pending);
         const wake = mergeIntentUpdate(pending, event, force);
         if (wake) {
@@ -1182,6 +1239,7 @@ export function createProactiveContentPull(
 
       const { target } = decision;
       const key = pullScopeKey(target);
+      if (persistentRetry) suppressedBroadHeads.delete(key);
       let effectiveForce = force;
       let forceProbeAlreadyRan = false;
       if (force && deps.hasMaterializedProject) {
@@ -1240,7 +1298,13 @@ export function createProactiveContentPull(
         }
       }
       if (!intent) {
-        intent = createIntent(key, event, effectiveForce, target);
+        intent = createIntent(
+          key,
+          event,
+          effectiveForce,
+          persistentRetry,
+          target,
+        );
         if (effectiveForce && forceProbeAlreadyRan) {
           intent.skipNextForceProbe = true;
         }
@@ -1248,6 +1312,7 @@ export function createProactiveContentPull(
         if (foreground) markIntentForeground(intent);
         return await driveIntent(intent);
       }
+      intent.persistentRetry ||= persistentRetry;
       if (force && !effectiveForce) {
         intent.force = false;
         delete intent.skipNextForceProbe;
@@ -1366,6 +1431,7 @@ export function createProactiveContentPull(
     let complete = true;
     let retrySweep = false;
     let preemptedByForeground = false;
+    let suppressed = 0;
     const visibleProjectIds = new Set(projects.map((project) => project.projectId));
     const retryProjectIds: string[] = [];
     for (const expectedProjectId of expectedProjectIds) {
@@ -1451,6 +1517,20 @@ export function createProactiveContentPull(
         viewerMemberId: identity.workspaceMemberId,
         ownerMemberId: project.ownerMemberId,
       };
+      const persistentRetry = targetedOnly || foreground;
+      const suppressedHead = suppressedBroadHeads.get(pullScopeKey(target));
+      if (
+        !persistentRetry &&
+        suppressedHead &&
+        now() < suppressedHead.retryAt
+      ) {
+        // The exact scope is still inside its bounded failure cooldown. Avoid
+        // even the per-project head CLI here: a newer head may wait until the
+        // next safety floor, while targeted/live events continue to bypass.
+        suppressed += 1;
+        complete = false;
+        continue;
+      }
       const persistedVersion = Number(
         deps.materializedVersion?.(target) ?? NaN,
       );
@@ -1480,6 +1560,7 @@ export function createProactiveContentPull(
         project.ownerMemberId,
         forcePull,
         foreground,
+        persistentRetry,
       )) {
         complete = false;
       }
@@ -1492,6 +1573,7 @@ export function createProactiveContentPull(
       scanned: projects.length,
       candidates: candidates.length,
       heads,
+      suppressed,
       complete,
     });
     return {
@@ -1956,6 +2038,7 @@ export function createProactiveContentPull(
       foregroundCatalogRetries.clear();
       targetedCatalogRecoveries.clear();
       targetedCatalogReads.clear();
+      suppressedBroadHeads.clear();
     },
   };
 }

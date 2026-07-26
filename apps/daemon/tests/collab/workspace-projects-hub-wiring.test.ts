@@ -177,17 +177,26 @@ describe('server.ts wiring (source boundary)', () => {
     expect(caseNames).toEqual(['team-projects-changed']);
   });
 
-  it('passes the changed project id into first-share missing-project recovery', () => {
+  it('only starts hub missing-project recovery for a targeted project id', () => {
     const switchBody = extractOnEventSwitchBody();
     const teamProjectsCase = switchBody
       .split(/(?=case '[a-z-]+':)/g)
       .find((chunk) => chunk.startsWith("case 'team-projects-changed':"));
 
     expect(teamProjectsCase).toContain(
+      'if (event.workspaceId && event.projectId) {',
+    );
+    expect(teamProjectsCase).toContain(
       'proactiveContentPull.materializeMissingProjects(\n' +
         '              event.workspaceId,\n' +
         '              event.projectId,\n' +
         '            );',
+    );
+  });
+
+  it('logs broad-head cooldown deferrals in catch-up completion diagnostics', () => {
+    expect(source).toContain(
+      '`suppressed=${event.suppressed ?? 0} complete=${event.complete === true}`',
     );
   });
 

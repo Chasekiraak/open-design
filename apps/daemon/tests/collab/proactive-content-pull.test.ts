@@ -1125,6 +1125,102 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     ]);
   });
 
+  it('does not turn broad missing-project failures into permanent per-project retry timers', async () => {
+    const retry = makeRetryScheduler();
+    const projects = Array.from({ length: 80 }, (_, index) => ({
+      projectId: `history-${index}`,
+      ownerMemberId: 'wm-owner',
+    }));
+    const publishedVersions = new Map(
+      projects.map((project) => [project.projectId, 3]),
+    );
+    const recoverable = new Set<string>();
+    const materialized = new Set<string>();
+    const headCalls: string[] = [];
+    const onCatchUp = vi.fn();
+    let clock = 0;
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      now: () => clock,
+      onCatchUp,
+      listSharedProjects: async () => projects,
+      hasMaterializedProject: (projectId) => materialized.has(projectId),
+      publishedHead: async (target) => {
+        headCalls.push(target.projectId);
+        return publishedVersions.get(target.projectId) ?? null;
+      },
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (!recoverable.has(target.projectId)) {
+          return { status: 'register_failed' };
+        }
+        materialized.add(target.projectId);
+        return {
+          status: 'pulled',
+          version: publishedVersions.get(target.projectId) ?? null,
+        };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.materializeMissingProjects('ws-1');
+
+    expect(deps.pullCalls).toHaveLength(80);
+    expect(headCalls).toHaveLength(80);
+    expect(retry.tasks.size).toBe(0);
+
+    // The unchanged low-frequency safety floor must neither read 80 heads nor
+    // redownload 80 unavailable projects while their exact scopes cool down.
+    await pull.materializeMissingProjects('ws-1');
+    expect(deps.pullCalls).toHaveLength(80);
+    expect(headCalls).toHaveLength(80);
+    expect(onCatchUp).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'completed',
+      heads: 0,
+      suppressed: 80,
+      complete: false,
+    }));
+
+    // A targeted/live event bypasses the floor cooldown for the same head.
+    recoverable.add('history-0');
+    await pull.handleContentChanged({
+      projectId: 'history-0',
+      workspaceId: 'ws-1',
+      version: 3,
+    });
+    expect(deps.pullCalls).toHaveLength(81);
+    expect(deps.pullCalls.at(-1)).toBe('history-0');
+    expect(retry.tasks.size).toBe(0);
+
+    // A newer head discovered only by the low-frequency floor may wait for
+    // the bounded cooldown; unlike targeted/live work it does not spawn an
+    // extra head CLI during the cooldown window.
+    recoverable.add('history-1');
+    publishedVersions.set('history-1', 4);
+    await pull.materializeMissingProjects('ws-1');
+    expect(deps.pullCalls).toHaveLength(81);
+    expect(headCalls).toHaveLength(80);
+    expect(retry.tasks.size).toBe(0);
+
+    // The next low-frequency floor retries the remaining transient failures
+    // after cooldown, still without allocating one timer per project.
+    clock = 15_001;
+    await pull.materializeMissingProjects('ws-1');
+    expect(deps.pullCalls).toHaveLength(160);
+    expect(headCalls).toHaveLength(159);
+    expect(deps.pullCalls).toContain('history-1');
+    expect(retry.tasks.size).toBe(0);
+
+    // A successful broad pull clears the old suppression record. If its local
+    // materialization later disappears, the same head may be recovered
+    // immediately instead of waiting for a stale cooldown.
+    materialized.delete('history-1');
+    await pull.materializeMissingProjects('ws-1');
+    expect(deps.pullCalls).toHaveLength(161);
+    expect(headCalls).toHaveLength(160);
+    expect(deps.pullCalls.at(-1)).toBe('history-1');
+  });
+
   it('stops a broad sweep before its next project when the live event coalesces with its current project', async () => {
     const retry = makeRetryScheduler();
     let releaseHistory!: () => void;
@@ -2603,7 +2699,7 @@ describe('proactive content pull retry coordinator', () => {
     });
     const pull = createProactiveContentPull(deps);
 
-    await pull.materializeMissingProjects('ws-1');
+    await pull.materializeMissingProjects('ws-1', 'proj-1');
     materialized = true;
     await retry.runNext();
 
