@@ -1665,8 +1665,14 @@ export function ProjectView({
   // Read by `renderPreferredChatPanelWidth` instead of closing over
   // `workspaceFocused` directly, so that callback's identity (and therefore
   // the ResizeObserver effect keyed on it, below) doesn't need to depend on
-  // focus state — see the ref-sync effect near that callback for why.
+  // focus state — see the render-phase mirror below for why.
   const workspaceFocusedRef = useRef(workspaceFocused);
+  // Keep this render-phase mirror synchronous with the state that determines
+  // the committed `.split-focus` class. A child layout effect (and, in the
+  // browser, ResizeObserver delivery before passive effects) can run before a
+  // parent effect, so effect-based synchronization still exposes one stale
+  // frame where the old three-column widths can be written back inline.
+  workspaceFocusedRef.current = workspaceFocused;
   // Mirrors `workspaceFocused` but lags behind it while collapsing, so the
   // chat pane stays mounted/visible until the `.split` width transition
   // actually finishes — see the sync effect near the ResizeObserver below.
@@ -7930,11 +7936,8 @@ export function ProjectView({
   // every focus toggle forced a synchronous `clientWidth` reflow + style
   // rewrite in the same commit as the collapse/expand — a second, more
   // subtle jitter source layered on top of the grid hard-cut this file's
-  // change fixes. `workspaceFocusedRef` (kept fresh below) gives the callback
+  // change fixes. `workspaceFocusedRef` (kept fresh during render) gives the callback
   // body the current value without making it a dependency.
-  useEffect(() => {
-    workspaceFocusedRef.current = workspaceFocused;
-  }, [workspaceFocused]);
 
   const applyChatPanelWidth = useCallback((
     width: number,
