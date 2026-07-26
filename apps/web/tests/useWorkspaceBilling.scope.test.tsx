@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetCoalescedGet } from '../src/lib/coalesced-get';
 import {
+  lastResolvedWorkspaceContext,
   notifyWorkspaceContextRefresh,
   resetWorkspaceContextCache,
   useWorkspaceBilling,
@@ -126,6 +127,87 @@ describe('useWorkspaceBilling explicit scope', () => {
 
     expect(billingCalls).toEqual([
       '/api/workspace/billing?scope=workspace&workspaceId=workspace-a',
+      '/api/workspace/billing?scope=workspace&workspaceId=workspace-b',
+    ]);
+  });
+
+  it('keeps B when the initial A context response arrives after the explicit switch', async () => {
+    let resolveWorkspaceAContext!: (response: Response) => void;
+    const workspaceAContextResponse = new Promise<Response>((resolve) => {
+      resolveWorkspaceAContext = resolve;
+    });
+    let contextCalls = 0;
+    const billingCalls: string[] = [];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          contextCalls += 1;
+          if (contextCalls === 1) return workspaceAContextResponse;
+          if (contextCalls === 2) {
+            return new Response(JSON.stringify({ context: teamContext('workspace-b') }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls.push(url);
+          const workspaceId = new URL(url, 'http://open-design.test').searchParams.get(
+            'workspaceId',
+          );
+          if (workspaceId === 'workspace-a' || workspaceId === 'workspace-b') {
+            return new Response(
+              JSON.stringify(
+                billingResponse(
+                  workspaceId,
+                  workspaceId === 'workspace-a' ? '1.25' : '8.50',
+                ),
+              ),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(contextCalls).toBe(1));
+
+    await act(async () => {
+      notifyWorkspaceContextRefresh();
+    });
+    await waitFor(() => {
+      expect(hook.result.current?.workspaceBalance).toMatchObject({
+        workspaceId: 'workspace-b',
+        balanceUsd: '8.50',
+      });
+    });
+
+    await act(async () => {
+      resolveWorkspaceAContext(
+        new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      await workspaceAContextResponse;
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current?.workspaceBalance).toMatchObject({
+        workspaceId: 'workspace-b',
+        balanceUsd: '8.50',
+      });
+    });
+    expect(lastResolvedWorkspaceContext()?.workspaceId).toBe('workspace-b');
+    expect(billingCalls).toEqual([
       '/api/workspace/billing?scope=workspace&workspaceId=workspace-b',
     ]);
   });

@@ -74,11 +74,16 @@ export function useWorkspaceContext(): WorkspaceContextState {
     loading: cachedWorkspaceContext === null,
   }));
   const mountedRef = useRef(true);
+  // A forced workspace switch can overtake an older ambient read. Keep request
+  // ordering local to each hook instance so the late answer cannot redefine
+  // either this hook's state or the module cache that seeds future mounts.
+  const requestEpochRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      requestEpochRef.current += 1;
     };
   }, []);
 
@@ -108,6 +113,7 @@ export function useWorkspaceContext(): WorkspaceContextState {
    * pattern is unsafe here.
    */
   const loadContext = useCallback(async (options: { markLoading?: boolean } = {}) => {
+    const requestEpoch = ++requestEpochRef.current;
     if (options.markLoading && mountedRef.current) {
       setState((prev) =>
         prev.context === null && !prev.loading ? { ...prev, loading: true } : prev,
@@ -127,17 +133,19 @@ export function useWorkspaceContext(): WorkspaceContextState {
       const body = options.markLoading
         ? await forceCoalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, fetchContext)
         : await coalescedGet(WORKSPACE_CONTEXT_COALESCE_KEY, fetchContext);
+      if (!mountedRef.current || requestEpochRef.current !== requestEpoch) return;
       // A successful read is the only thing that redefines "signed in": persist it
       // (including an explicit null for a genuinely signed-out response) so the
       // next remount seeds from the truth, not a stale value.
       cachedWorkspaceContext = body.context ?? null;
-      if (mountedRef.current) setState({ context: cachedWorkspaceContext, loading: false });
+      setState({ context: cachedWorkspaceContext, loading: false });
     } catch {
+      if (!mountedRef.current || requestEpochRef.current !== requestEpoch) return;
       // Transient failure (offline, momentary daemon/hub hiccup): keep the
       // last-known context instead of flashing the signed-out state. A never-
       // signed-in / personal user has a null cache, so this still shows the local
       // state for them.
-      if (mountedRef.current) setState({ context: cachedWorkspaceContext, loading: false });
+      setState({ context: cachedWorkspaceContext, loading: false });
     }
   }, []);
 

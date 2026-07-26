@@ -1684,18 +1684,6 @@ export function SettingsDialog({
     onAmrLoginStatusChange?.(amrCardStatus);
   }, [amrCardStatus, onAmrLoginStatusChange]);
 
-  const formatAmrWalletBalance = useCallback((balanceUsd: string | null | undefined) => {
-    if (!balanceUsd) return null;
-    const amount = Number(balanceUsd);
-    if (!Number.isFinite(amount)) return `$${balanceUsd}`;
-    return new Intl.NumberFormat(locale, {
-      currency: 'USD',
-      maximumFractionDigits: 2,
-      minimumFractionDigits: 2,
-      style: 'currency',
-    }).format(amount);
-  }, [locale]);
-
   const refreshAmrWalletSnapshot = useCallback(async (options: { refresh?: boolean } = {}) => {
     setAmrWalletReady(false);
     const next = await fetchAmrWalletSnapshot(options);
@@ -4548,7 +4536,7 @@ export function SettingsDialog({
                               : null;
                           const amrWalletBalance =
                             amrWalletVisible && amrWalletSnapshot?.status === 'available'
-                              ? formatAmrWalletBalance(amrWalletSnapshot.balanceUsd)
+                              ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
                               : null;
                           // recvpZPzGJL7o7: `amrStatusBalance` and `amrWalletBalance`
                           // are both vela ACCOUNT-scoped reads. A team balance

@@ -343,6 +343,7 @@ function renderSettingsDialog(
     daemonLive?: boolean;
     onRefreshAgents?: OnRefreshAgents;
     initialSection?: SettingsSection;
+    locale?: Parameters<typeof I18nProvider>[0]['initial'];
     appVersionInfo?: AppVersionInfo | null;
     providerModelsCache?: Record<string, ProviderModelOption[]>;
     welcome?: boolean;
@@ -358,7 +359,7 @@ function renderSettingsDialog(
   const onClose = vi.fn();
   const onRefreshAgents = options.onRefreshAgents ?? vi.fn<OnRefreshAgents>();
 
-  const view = render(
+  const dialog = (
     <SettingsDialog
       initial={{ ...baseConfig, ...initial }}
       agents={options.agents ?? availableAgents}
@@ -373,7 +374,12 @@ function renderSettingsDialog(
       onClose={onClose}
       onResetOnboarding={options.onResetOnboarding}
       onRefreshAgents={onRefreshAgents}
-    />,
+    />
+  );
+  const view = render(
+    options.locale
+      ? <I18nProvider initial={options.locale}>{dialog}</I18nProvider>
+      : dialog,
   );
 
   return {
@@ -3749,7 +3755,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(benefits?.contains(planBadge)).toBe(false);
   });
 
-  it('loads the Settings AMR wallet fallback balance without a manual card refresh button', async () => {
+  it('loads the Settings AMR wallet fallback balance in canonical USD format without a manual card refresh button', async () => {
     let walletCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -3802,12 +3808,13 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     renderSettingsDialog(
       { mode: 'daemon', agentId: 'amr' },
-      { agents: [amrAgent] },
+      { agents: [amrAgent], locale: 'de' },
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /Lokale CLI.*1 installiert/i }));
 
     expect(await screen.findByText('$1.00')).toBeTruthy();
+    expect(screen.queryByText(/1,00/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Refresh AMR wallet balance' })).toBeNull();
     expect(walletCalls).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/integrations/vela/wallet', {
