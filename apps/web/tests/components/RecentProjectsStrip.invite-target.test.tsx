@@ -49,6 +49,7 @@ function teamContext(availableSeats: number): WorkspaceCollabContext {
     },
     permissions: {
       canInviteMembers: true,
+      canManageBilling: true,
       canShareProjects: true,
       canManageSharedResources: true,
     },
@@ -106,16 +107,13 @@ describe('RecentProjectsStrip invite target (recvqgbyLNk4eE)', () => {
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('routes an unknown team seat state to Vela instead of a permissive local form', () => {
+  it('fails closed while the team seat state is unknown', () => {
     workspaceState.context = teamContextWithUnknownSeats();
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     renderTeamProjects();
 
-    fireEvent.click(screen.getByRole('button', { name: /Invite teammates|邀请同事/ }));
-
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Invite teammates|邀请同事/ }),
+    ).toBeNull();
   });
 
   it('hides the invite entry when neither local capacity nor a safe Vela URL exists', () => {
@@ -130,32 +128,64 @@ describe('RecentProjectsStrip invite target (recvqgbyLNk4eE)', () => {
     ).toBeNull();
   });
 
-  it.each(['owner', 'admin'] as const)(
-    'routes a Team %s without direct invite capability through Vela',
-    (role) => {
-      const context = teamContext(3);
-      workspaceState.context = {
-        ...context,
-        role,
-        permissions: { ...context.permissions, canInviteMembers: false },
-      } as WorkspaceCollabContext;
-      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-      renderTeamProjects();
+  it('routes a full Team owner with billing capability through Vela', () => {
+    const context = teamContext(0);
+    workspaceState.context = {
+      ...context,
+      permissions: { ...context.permissions, canInviteMembers: false },
+    } as WorkspaceCollabContext;
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderTeamProjects();
 
-      fireEvent.click(screen.getByRole('button', { name: /Invite teammates|邀请同事/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Invite teammates|邀请同事/ }));
 
-      expect(openSpy).toHaveBeenCalledTimes(1);
-      expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
-      expect(screen.queryByRole('dialog')).toBeNull();
-    },
-  );
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('does not expose billing recovery to a Team admin without direct invite capability', () => {
+    const context = teamContext(3);
+    workspaceState.context = {
+      ...context,
+      role: 'admin',
+      permissions: {
+        ...context.permissions,
+        canInviteMembers: false,
+        canManageBilling: false,
+      },
+    } as WorkspaceCollabContext;
+    renderTeamProjects();
+
+    expect(
+      screen.queryByRole('button', { name: /Invite teammates|邀请同事/ }),
+    ).toBeNull();
+  });
+
+  it('does not expose seat expansion to a full Team admin', () => {
+    const context = teamContext(0);
+    workspaceState.context = {
+      ...context,
+      role: 'admin',
+      permissions: { ...context.permissions, canManageBilling: false },
+    } as WorkspaceCollabContext;
+    renderTeamProjects();
+
+    expect(
+      screen.queryByRole('button', { name: /Invite teammates|邀请同事/ }),
+    ).toBeNull();
+  });
 
   it('does not expose the invite entry to a Team member', () => {
     const context = teamContext(3);
     workspaceState.context = {
       ...context,
       role: 'member',
-      permissions: { ...context.permissions, canInviteMembers: false },
+      permissions: {
+        ...context.permissions,
+        canInviteMembers: true,
+        canManageBilling: true,
+      },
     } as WorkspaceCollabContext;
     renderTeamProjects();
 

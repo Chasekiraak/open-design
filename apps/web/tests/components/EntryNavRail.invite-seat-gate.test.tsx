@@ -27,7 +27,11 @@ function freeContext(): WorkspaceCollabContext {
     billingState: 'free',
     planId: null,
     seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: true },
-    permissions: { canInviteMembers: true, canViewWorkspaceSettings: true },
+    permissions: {
+      canInviteMembers: true,
+      canManageBilling: true,
+      canViewWorkspaceSettings: true,
+    },
     workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-personal',
   } as unknown as WorkspaceCollabContext;
 }
@@ -48,7 +52,11 @@ function teamContext(availableSeats: number): WorkspaceCollabContext {
       availableSeats,
       isSeatFull: availableSeats <= 0,
     },
-    permissions: { canInviteMembers: true, canViewWorkspaceSettings: true },
+    permissions: {
+      canInviteMembers: true,
+      canManageBilling: true,
+      canViewWorkspaceSettings: true,
+    },
     workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-team',
   } as unknown as WorkspaceCollabContext;
 }
@@ -137,16 +145,11 @@ describe('EntryNavRail workspace-switcher invite target (recvqgbyLNk4eE)', () =>
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('routes an unknown team seat state to Vela instead of a permissive local form', () => {
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+  it('fails closed while the team seat state is unknown', () => {
     renderRail(teamContextWithUnknownSeats());
 
     fireEvent.click(screen.getByTestId('workspace-switcher'));
-    fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
-
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(menu().queryByRole('menuitem', { name: /邀请同事/ })).toBeNull();
   });
 
   it('hides the invite entry when neither local capacity nor a safe Vela URL exists', () => {
@@ -179,32 +182,75 @@ describe('EntryNavRail workspace-switcher invite target (recvqgbyLNk4eE)', () =>
     expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
   });
 
-  it.each(['owner', 'admin'] as const)(
-    'routes a Team %s without direct invite capability through Vela',
-    (role) => {
-      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-      const context = teamContext(3);
-      renderRail({
-        ...context,
-        role,
-        permissions: { ...context.permissions, canInviteMembers: false },
-      } as WorkspaceCollabContext);
+  it('routes a paid Personal workspace with direct invite capability through Vela', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderRail({
+      ...freeContext(),
+      billingState: 'active',
+      planId: 'pro',
+    } as WorkspaceCollabContext);
 
-      fireEvent.click(screen.getByTestId('workspace-switcher'));
-      fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+    fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
 
-      expect(openSpy).toHaveBeenCalledTimes(1);
-      expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
-      expect(screen.queryByRole('dialog')).toBeNull();
-    },
-  );
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+  });
+
+  it('routes a Team owner with billing capability through Vela when direct invite is unavailable', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const context = teamContext(0);
+    renderRail({
+      ...context,
+      permissions: { ...context.permissions, canInviteMembers: false },
+    } as WorkspaceCollabContext);
+
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+    fireEvent.click(menu().getByRole('menuitem', { name: /邀请同事/ }));
+
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(String(openSpy.mock.calls[0]![0])).toContain('invite=auto');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('does not expose billing recovery to a Team admin without direct invite capability', () => {
+    const context = teamContext(3);
+    renderRail({
+      ...context,
+      role: 'admin',
+      permissions: {
+        ...context.permissions,
+        canInviteMembers: false,
+        canManageBilling: false,
+      },
+    } as WorkspaceCollabContext);
+
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+    expect(menu().queryByRole('menuitem', { name: /邀请同事/ })).toBeNull();
+  });
+
+  it('does not expose seat expansion to a full Team admin', () => {
+    const context = teamContext(0);
+    renderRail({
+      ...context,
+      role: 'admin',
+      permissions: { ...context.permissions, canManageBilling: false },
+    } as WorkspaceCollabContext);
+
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+    expect(menu().queryByRole('menuitem', { name: /邀请同事/ })).toBeNull();
+  });
 
   it('does not expose the invite entry to a Team member', () => {
     const context = teamContext(3);
     renderRail({
       ...context,
       role: 'member',
-      permissions: { ...context.permissions, canInviteMembers: false },
+      permissions: {
+        ...context.permissions,
+        canInviteMembers: true,
+        canManageBilling: true,
+      },
     } as WorkspaceCollabContext);
 
     fireEvent.click(screen.getByTestId('workspace-switcher'));
