@@ -6,6 +6,137 @@ import {
 } from '../src/collab/vela-cli-team-projects.js';
 
 describe('Vela CLI team-project catalog adapter', () => {
+  it('gets one project through the exact workspace-scoped command', async () => {
+    const calls: Array<{
+      args: string[];
+      workspaceId: string | undefined;
+    }> = [];
+    const catalog = createVelaCliTeamProjectCatalog({
+      getWorkspaceId: () => 'team-active',
+      run: async (args, workspaceId) => {
+        calls.push({ args, workspaceId });
+        return JSON.stringify({
+          projectId: 'p1',
+          ownerMemberId: 'wm-owner',
+          displayName: 'Electric Studio 2',
+          syncState: 'synced',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-02T00:00:00.000Z',
+        });
+      },
+    });
+
+    await expect(catalog.get('p1', 'team-captured')).resolves.toMatchObject({
+      projectId: 'p1',
+      ownerMemberId: 'wm-owner',
+      name: 'Electric Studio 2',
+    });
+    expect(calls).toEqual([
+      {
+        args: ['get', 'p1', '--json'],
+        workspaceId: 'team-captured',
+      },
+    ]);
+  });
+
+  it('returns null for an authoritative not-found without listing', async () => {
+    const calls: string[][] = [];
+    const catalog = createVelaCliTeamProjectCatalog({
+      run: async (args) => {
+        calls.push(args);
+        throw new Error(
+          'get team project: API request failed with status 404: team_project_not_found',
+        );
+      },
+    });
+
+    await expect(catalog.get('missing', 'team-1')).resolves.toBeNull();
+    expect(calls).toEqual([['get', 'missing', '--json']]);
+  });
+
+  it('caches exact-command capability fallback but not authorization failures', async () => {
+    const capabilityCalls: string[][] = [];
+    const capabilityCatalog = createVelaCliTeamProjectCatalog({
+      supportsTeamProjects: () => true,
+      run: async (args) => {
+        capabilityCalls.push(args);
+        if (args[0] === 'get') {
+          throw new Error('unknown command "get" for "team-projects"');
+        }
+        return JSON.stringify({
+          projects: [
+            {
+              projectId: 'p1',
+              ownerMemberId: 'wm-owner',
+              syncState: 'synced',
+              createdAt: '2026-07-01T00:00:00.000Z',
+              updatedAt: '2026-07-01T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+    });
+
+    await expect(capabilityCatalog.get('p1', 'team-1')).resolves.toMatchObject({
+      projectId: 'p1',
+    });
+    await expect(capabilityCatalog.get('p1', 'team-1')).resolves.toMatchObject({
+      projectId: 'p1',
+    });
+    expect(capabilityCalls).toEqual([
+      ['get', 'p1', '--json'],
+      ['list'],
+      ['list'],
+    ]);
+
+    for (const message of [
+      'get team project: API request failed with status 401: unauthenticated',
+      'get team project: API request failed with status 403: workspace_forbidden',
+      'get team project: API request failed with status 500',
+      'connect ECONNRESET',
+    ]) {
+      let calls = 0;
+      const catalog = createVelaCliTeamProjectCatalog({
+        run: async () => {
+          calls += 1;
+          throw new Error(message);
+        },
+      });
+      await expect(catalog.get('p1', 'team-1')).rejects.toThrow(message);
+      await expect(catalog.get('p1', 'team-1')).rejects.toThrow(message);
+      expect(calls).toBe(2);
+    }
+  });
+
+  it('treats only a code-less API 404 as an old endpoint capability miss', async () => {
+    const calls: string[][] = [];
+    const catalog = createVelaCliTeamProjectCatalog({
+      supportsTeamProjects: () => true,
+      run: async (args) => {
+        calls.push(args);
+        if (args[0] === 'get') {
+          throw new Error('get team project: API request failed with status 404');
+        }
+        return JSON.stringify({
+          projects: [
+            {
+              projectId: 'p1',
+              ownerMemberId: 'wm-owner',
+              syncState: 'synced',
+              createdAt: '2026-07-01T00:00:00.000Z',
+              updatedAt: '2026-07-01T00:00:00.000Z',
+            },
+          ],
+        });
+      },
+    });
+
+    await expect(catalog.get('p1', 'team-1')).resolves.toMatchObject({
+      projectId: 'p1',
+    });
+    expect(calls).toEqual([['get', 'p1', '--json'], ['list']]);
+  });
+
   it('uses an explicitly captured workspace for an authoritative list', async () => {
     const catalog = createVelaCliTeamProjectCatalog({
       supportsTeamProjects: () => true,

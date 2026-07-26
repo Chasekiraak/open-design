@@ -3078,8 +3078,9 @@ export async function startServer({
   // load; this one survives process restarts, so a freshly started daemon whose
   // team catalog is unchanged serves the first paint from disk after a digest
   // GET instead of a full catalog round-trip. Only the DISPLAY path is wrapped —
-  // `teamProjectsLister` itself stays raw so the pull gate and comment/presence
-  // relays keep observing an unshare immediately.
+  // `teamProjectsLister` itself stays raw for display refreshes; the pull gate
+  // below uses the exact uncached catalog lookup so it observes an unshare
+  // immediately without downloading the whole workspace catalog.
   const teamProjectsCatalogSnapshot = createPersistentSyncCache({
     face: 'catalog',
     fetch: teamProjectsLister,
@@ -3094,8 +3095,8 @@ export async function startServer({
   // can never serve another workspace's list and a workspace switch is an
   // automatic miss. Deliberately NOT used by resolveSharedProject below: the
   // pull gate and comment/presence relays must observe an unshare immediately,
-  // so those stay on the uncached lister. A just-shared/unshared project shows
-  // up in this list within the TTL.
+  // so those use the uncached exact lookup. A just-shared/unshared project
+  // shows up in this list within the TTL.
   const teamProjectsDisplayCache = (() => {
     // Stale-while-revalidate: after the first load every call returns the last
     // known list immediately and only kicks a background refresh once the value
@@ -3103,8 +3104,8 @@ export async function startServer({
     // remote round-trip and freshness catches up one request later. Keyed on the
     // active workspace id (a switch is an automatic miss); concurrent callers
     // coalesce on the in-flight fetch. Stays off the revocation path —
-    // resolveSharedProject below is uncached so the pull gate and comment/
-    // presence relays observe an unshare immediately.
+    // resolveSharedProject below uses an uncached exact lookup so the pull gate
+    // and comment/presence relays observe an unshare immediately.
     const freshMs = 3000;
     let entry:
       | {
@@ -3266,10 +3267,12 @@ export async function startServer({
     projectId: string,
     scope?: TeamMirrorPullScope | null,
   ) => {
-    const list = await withoutLocallyUnsharedProjects(
-      await teamProjectsLister(scope?.workspaceId),
-    );
-    return list.find((entry) => entry.projectId === projectId) ?? null;
+    const project = velaCliTeamProjectCatalog
+      ? await velaCliTeamProjectCatalog.get(projectId, scope?.workspaceId)
+      : (await teamProjectsLister(scope?.workspaceId))
+          .find((entry) => entry.projectId === projectId) ?? null;
+    if (!project) return null;
+    return (await withoutLocallyUnsharedProjects([project]))[0] ?? null;
   };
   // Owner lookup is a display concern (the "shared project" banner, comment
   // author names, the publish trigger) and the owner changes only when a project
