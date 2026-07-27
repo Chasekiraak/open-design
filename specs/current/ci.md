@@ -27,6 +27,13 @@ may skip only for a merge-queue plan whose certain-tier evaluation claims zero
 validation effects. PR, manual-hot, forced-full, and escalated queue plans keep
 all broad workspace validation.
 
+`scripts/scopes.ts` remains an install-independent preinstall entrypoint.
+`scripts/guard.ts` is the postinstall policy-floor entrypoint and composes its
+shared mechanism and scope contracts from `scripts/lib/guard/`. The
+`scripts library architecture` guard keeps those layers acyclic, prevents
+scope startup from reaching guard or third-party dependencies, and keeps CLI
+process control out of the library closure.
+
 The error cost is asymmetric by tier. A wrong `medium` rule under-arms a PR
 run and gets caught by the merge queue's stricter threshold — cost: one queue
 bounce. A wrong `certain` rule lets an invalid change reach `main` with no
@@ -183,7 +190,7 @@ and model selector. Any empty, unresolved, mixed, unknown, or out-of-surface
 change falls back to the full four-domain matrix and records the reason in
 `trace.uiP0Shadow`.
 
-Guard: `UI P0 shadow contract` (`scripts/check-ui-p0-shadow.ts`). It pins the
+Guard: `UI P0 shadow contract` (`scripts/lib/guard/scope.ts`). It pins the
 applied full matrix, the candidate group set, representative in-bound
 resolution, and full fallback for shared daemon, runtime-composition, web, and
 unresolved inputs. The shadow must accumulate successful paired runs before it

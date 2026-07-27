@@ -1,9 +1,9 @@
-import { uiP0CiMatrix } from "../e2e/lib/playwright/suites.ts";
+import { uiP0CiMatrix } from "../../../e2e/lib/playwright/suites.ts";
 import {
   DAEMON_RUNTIME_DEFINITION_EXACT,
   DAEMON_RUNTIME_DEFINITION_PREFIXES,
   evaluateUiP0Shadow,
-} from "./scopes.ts";
+} from "../../scopes.ts";
 
 const fullMatrixNames = [
   "entry-settings",

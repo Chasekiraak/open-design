@@ -7,7 +7,6 @@ import { checkCertainExemptConsumption } from "./check-certain-exempt-consumptio
 import { checkCrossAppImports } from "./check-cross-app-imports.ts";
 import { checkPackagedLeafBoundary } from "./check-packaged-leaf-boundary.ts";
 import { checkTsNocheckImports } from "./check-ts-nocheck-imports.ts";
-import { checkUiP0ShadowContract } from "./check-ui-p0-shadow.ts";
 import { checkDesignSystemManifests } from "./check-design-system-manifests.ts";
 import { checkDesignSystemPackageQuality } from "./check-design-system-package-quality.ts";
 import { checkDesignSystemComponentFixtureReport } from "./check-components-fixtures.ts";
@@ -25,6 +24,9 @@ import {
 } from "./check-tokens-fixture-sync.ts";
 import { checkCraftReferences } from "./lint-craft-references.ts";
 import { collectCssHardcodedColorMatches, cssWideAndSpecialColorKeywords, realNamedColors } from "./style-policy.ts";
+import { checkScriptsLibraryArchitecture } from "./lib/guard/architecture.ts";
+import { runGuardChecks, type GuardCheck } from "./lib/guard/core.ts";
+import { checkUiP0ShadowContract } from "./lib/guard/scope.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const allowedE2eScripts = new Set([
@@ -32,11 +34,6 @@ const allowedE2eScripts = new Set([
   "e2e/scripts/release-smoke.ts",
   "e2e/scripts/visual-report.ts",
 ]);
-
-type GuardCheck = {
-  name: string;
-  run: () => Promise<boolean>;
-};
 
 function toRepositoryPath(filePath: string): string {
   return path.relative(repoRoot, filePath).split(path.sep).join("/");
@@ -1336,6 +1333,7 @@ const checks: GuardCheck[] = [
   { name: "@ts-nocheck import resolution", run: checkTsNocheckImports },
   { name: "test layout", run: checkTestLayout },
   { name: "scripts test-free", run: checkScriptsTestFree },
+  { name: "scripts library architecture", run: checkScriptsLibraryArchitecture },
   { name: "e2e layout", run: checkE2eLayout },
   { name: "web test layout", run: checkWebTestLayout },
   { name: "web import isolation", run: checkWebImportIsolation },
@@ -1357,21 +1355,6 @@ const checks: GuardCheck[] = [
   { name: "design system component manifest extraction", run: checkComponentsManifestExtraction },
 ];
 
-async function runChecks(): Promise<boolean> {
-  const results: boolean[] = [];
-  for (const check of checks) {
-    try {
-      results.push(await check.run());
-    } catch (error) {
-      console.error(`Guard check failed unexpectedly: ${check.name}`);
-      console.error(error);
-      results.push(false);
-    }
-  }
-
-  return results.every(Boolean);
-}
-
 const isMain = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 if (isMain) {
   // `--list-checks` is the machine-readable registry of guard check names; the
@@ -1379,7 +1362,7 @@ if (isMain) {
   // against it so a renamed or deleted guard fails CI.
   if (process.argv[2] === "--list-checks") {
     for (const check of checks) console.log(check.name);
-  } else if (!(await runChecks())) {
+  } else if (!(await runGuardChecks(checks, { repoRoot }))) {
     process.exitCode = 1;
   }
 }

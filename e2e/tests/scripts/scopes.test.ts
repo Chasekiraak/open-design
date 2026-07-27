@@ -812,7 +812,7 @@ test("runtime-definition shadow fails closed for mixed, unknown, empty, and unre
 
 test("UI P0 shadow guard pins full applied coverage and closed fallbacks", async () => {
   const { uiP0ShadowContractErrors } = await import(
-    "../../../scripts/check-ui-p0-shadow.ts"
+    "../../../scripts/lib/guard/scope.ts"
   );
   assert.deepEqual(uiP0ShadowContractErrors(), []);
 });
