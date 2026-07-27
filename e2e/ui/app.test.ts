@@ -514,7 +514,14 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
   await page.getByTestId('board-mode-toggle').click();
   await page.getByTestId('comment-panel-toggle').click();
   const frame = artifactPreviewFrame(page);
-  await frame.locator('[data-od-id="hero-title"]').click();
+  const heroTitle = frame.locator('[data-od-id="hero-title"]');
+  await expect(heroTitle).toBeVisible();
+  // PR #5899 merge-queue CI exposed that opening the comments panel can leave
+  // the preview auto-fit/resize loop moving long enough for Playwright to keep
+  // reporting this already-visible iframe element as "not stable". This test is
+  // covering comment attachment plumbing, so bypass actionability after the
+  // target is proven visible.
+  await heroTitle.click({ force: true });
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
