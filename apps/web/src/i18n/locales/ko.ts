@@ -70,7 +70,7 @@ export const ko: Dict = {
   'chat.amrError.authMessage': 'Open Design Cloud 계정이 아직 인증되지 않았습니다. 인증하면 이 작업이 자동으로 재시도됩니다.',
   'chat.amrError.balanceMessage': 'Open Design Cloud 잔액이 부족합니다. 충전하여 이 작업을 계속 진행하세요.',
   'chat.amrError.authorizeCta': '인증하고 재시도',
-  'chat.amrError.rechargeCta': 'Open Design Cloud 충전',
+  'chat.amrError.rechargeCta': '충전',
   'chat.amrBalanceGate.title': '업그레이드하고 계속 만들기',
   'chat.amrBalanceGate.message': '크레딧이 부족합니다(현재 {balance}). 요금제 업그레이드 또는 충전 후 바로 시작할 수 있습니다.',
   'chat.amrBalanceGate.benefitsTitle': 'Open Design Cloud이 제공하는 것',

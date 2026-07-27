@@ -70,7 +70,7 @@ export const ar: Dict = {
   'chat.amrError.authMessage': 'حساب Open Design Cloud الخاص بك لم يتم تفويضه بعد. فوِّضه وستُعاد محاولة هذه المهمة تلقائيًا.',
   'chat.amrError.balanceMessage': 'نفد رصيد Open Design Cloud الخاص بك. اشحن للاستمرار في هذه المهمة.',
   'chat.amrError.authorizeCta': 'تفويض وإعادة المحاولة',
-  'chat.amrError.rechargeCta': 'شحن Open Design Cloud',
+  'chat.amrError.rechargeCta': 'شحن',
   'chat.amrBalanceGate.title': 'قم بالترقية وواصل الإبداع',
   'chat.amrBalanceGate.message': 'الرصيد غير كافٍ (المتبقي {balance}). قم بترقية الباقة أو الشحن وستبدأ المهمة فورًا.',
   'chat.amrBalanceGate.benefitsTitle': 'ما يقدّمه لك Open Design Cloud',

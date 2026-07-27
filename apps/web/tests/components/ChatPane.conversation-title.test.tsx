@@ -171,7 +171,14 @@ describe('ChatPane session switcher', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('chat.amrError.rechargeCta'));
+    const rechargeAction = screen.getByText('chat.amrError.rechargeCta');
+    const retryAction = screen.getByText('promptTemplates.retry');
+    expect(rechargeAction.parentElement).toBe(retryAction.parentElement);
+    expect(
+      rechargeAction.parentElement?.closest('[data-user-action-footer="true"]'),
+    ).toBeTruthy();
+
+    fireEvent.click(rechargeAction);
 
     const [walletUrl, target, features] = openSpy.mock.calls[0] ?? [];
     expect(target).toBe('_blank');

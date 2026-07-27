@@ -70,7 +70,7 @@ export const uk: Dict = {
   'chat.amrError.authMessage': 'Ваш обліковий запис Open Design Cloud ще не авторизовано. Авторизуйте, і це виконання буде повторено автоматично.',
   'chat.amrError.balanceMessage': 'Баланс Open Design Cloud вичерпано. Поповніть, щоб продовжити це виконання.',
   'chat.amrError.authorizeCta': 'Авторизувати та повторити',
-  'chat.amrError.rechargeCta': 'Поповнити Open Design Cloud',
+  'chat.amrError.rechargeCta': 'Поповнити',
   'chat.amrBalanceGate.title': 'Покращте тариф і продовжуйте творити',
   'chat.amrBalanceGate.message': 'Недостатньо кредитів (залишилось {balance}). Покращте тариф або поповніть баланс — і завдання одразу запуститься.',
   'chat.amrBalanceGate.benefitsTitle': 'Що дає Open Design Cloud',

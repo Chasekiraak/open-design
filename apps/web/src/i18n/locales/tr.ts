@@ -70,7 +70,7 @@ export const tr: Dict = {
   'chat.amrError.authMessage': 'Open Design Cloud hesabınız henüz yetkilendirilmedi. Yetkilendirin ve bu çalıştırma otomatik olarak yeniden denensin.',
   'chat.amrError.balanceMessage': 'Open Design Cloud bakiyeniz bitti. Çalıştırmaya devam etmek için bakiye yükleyin.',
   'chat.amrError.authorizeCta': 'Yetkilendir ve yeniden dene',
-  'chat.amrError.rechargeCta': 'Open Design Cloud bakiyesi yükle',
+  'chat.amrError.rechargeCta': 'Bakiye yükle',
   'chat.amrBalanceGate.title': 'Yükseltin, üretmeye devam edin',
   'chat.amrBalanceGate.message': 'Kredi yetersiz (kalan {balance}). Planınızı yükseltin veya bakiye yükleyin, görev hemen başlayabilir.',
   'chat.amrBalanceGate.benefitsTitle': 'Open Design Cloud size neler sunar',

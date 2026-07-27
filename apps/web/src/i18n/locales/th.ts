@@ -70,7 +70,7 @@ export const th: Dict = {
   'chat.amrError.authMessage': 'บัญชี Open Design Cloud ของคุณยังไม่ได้รับอนุญาต ให้สิทธิ์แล้วงานนี้จะถูกลองใหม่โดยอัตโนมัติ',
   'chat.amrError.balanceMessage': 'ยอดเงิน Open Design Cloud ของคุณหมดแล้ว เติมเงินเพื่อดำเนินงานนี้ต่อ',
   'chat.amrError.authorizeCta': 'ให้สิทธิ์และลองใหม่',
-  'chat.amrError.rechargeCta': 'เติมเงิน Open Design Cloud',
+  'chat.amrError.rechargeCta': 'เติมเงิน',
   'chat.amrBalanceGate.title': 'อัปเกรดแล้วสร้างสรรค์ต่อ',
   'chat.amrBalanceGate.message': 'เครดิตไม่พอ (คงเหลือ {balance}) อัปเกรดแพ็กเกจหรือเติมเงินแล้วงานจะเริ่มได้ทันที',
   'chat.amrBalanceGate.benefitsTitle': 'สิ่งที่คุณได้รับจาก Open Design Cloud',

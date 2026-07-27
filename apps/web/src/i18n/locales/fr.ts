@@ -70,7 +70,7 @@ export const fr: Dict = {
   'chat.amrError.authMessage': 'Votre compte Open Design Cloud n\'est pas encore autorisé. Autorisez-le et cette exécution sera relancée automatiquement.',
   'chat.amrError.balanceMessage': 'Votre solde Open Design Cloud est épuisé. Rechargez pour poursuivre cette exécution.',
   'chat.amrError.authorizeCta': 'Autoriser et relancer',
-  'chat.amrError.rechargeCta': 'Recharger Open Design Cloud',
+  'chat.amrError.rechargeCta': 'Recharger',
   'chat.amrBalanceGate.title': 'Mettez à niveau pour continuer à créer',
   'chat.amrBalanceGate.message': 'Crédits insuffisants ({balance} restant). Passez à une offre supérieure ou rechargez, et la tâche pourra démarrer aussitôt.',
   'chat.amrBalanceGate.benefitsTitle': 'Ce que vous offre Open Design Cloud',

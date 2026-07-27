@@ -70,7 +70,7 @@ export const id: Dict = {
   'chat.amrError.authMessage': 'Akun Open Design Cloud Anda belum diotorisasi. Otorisasi sekarang dan proses ini akan dicoba ulang otomatis.',
   'chat.amrError.balanceMessage': 'Saldo Open Design Cloud Anda habis. Isi ulang untuk melanjutkan proses ini.',
   'chat.amrError.authorizeCta': 'Otorisasi & coba lagi',
-  'chat.amrError.rechargeCta': 'Isi ulang Open Design Cloud',
+  'chat.amrError.rechargeCta': 'Isi ulang',
   'chat.amrBalanceGate.title': 'Tingkatkan paket dan terus berkarya',
   'chat.amrBalanceGate.message': 'Kredit tidak cukup (tersisa {balance}). Tingkatkan paket atau isi ulang, dan tugas bisa langsung dimulai.',
   'chat.amrBalanceGate.benefitsTitle': 'Yang Anda dapatkan dengan Open Design Cloud',

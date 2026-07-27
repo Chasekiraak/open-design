@@ -70,7 +70,7 @@ export const fa: Dict = {
   'chat.amrError.authMessage': 'حساب Open Design Cloud شما هنوز مجاز نشده است. آن را مجاز کنید تا این اجرا به‌طور خودکار دوباره انجام شود.',
   'chat.amrError.balanceMessage': 'موجودی Open Design Cloud شما تمام شده است. برای ادامه این اجرا شارژ کنید.',
   'chat.amrError.authorizeCta': 'اعطای دسترسی و تلاش مجدد',
-  'chat.amrError.rechargeCta': 'شارژ Open Design Cloud',
+  'chat.amrError.rechargeCta': 'شارژ',
   'chat.amrBalanceGate.title': 'ارتقا دهید و به خلق ادامه دهید',
   'chat.amrBalanceGate.message': 'اعتبار کافی نیست (باقی‌مانده {balance}). پس از ارتقای طرح یا شارژ، وظیفه بلافاصله شروع می‌شود.',
   'chat.amrBalanceGate.benefitsTitle': 'آنچه Open Design Cloud به شما می‌دهد',

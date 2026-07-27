@@ -73,7 +73,7 @@ export const zhCN: Dict = {
   "chat.amrError.balanceMessage":
     "Open Design Cloud 额度不足。充值后可继续运行当前任务。",
   "chat.amrError.authorizeCta": "授权并重试",
-  "chat.amrError.rechargeCta": "为 Open Design Cloud 充值",
+  "chat.amrError.rechargeCta": "充值",
   "chat.amrBalanceGate.title": "升级套餐，继续创作",
   "chat.amrBalanceGate.message": "额度不足（当前 {balance}），升级套餐或充值后，任务马上就能开始。",
   "chat.amrBalanceGate.benefitsTitle": "Open Design Cloud 为你提供",

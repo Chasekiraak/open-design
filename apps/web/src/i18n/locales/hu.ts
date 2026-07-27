@@ -70,7 +70,7 @@ export const hu: Dict = {
   'chat.amrError.authMessage': 'Az Open Design Cloud-fiókod még nincs engedélyezve. Engedélyezd, és ez a futtatás automatikusan újraindul.',
   'chat.amrError.balanceMessage': 'Az Open Design Cloud-egyenleged elfogyott. Tölts fel a futtatás folytatásához.',
   'chat.amrError.authorizeCta': 'Engedélyezés és újrapróbálkozás',
-  'chat.amrError.rechargeCta': 'Open Design Cloud feltöltése',
+  'chat.amrError.rechargeCta': 'Feltöltés',
   'chat.amrBalanceGate.title': 'Válts csomagot és alkoss tovább',
   'chat.amrBalanceGate.message': 'Nincs elég keret (jelenleg {balance}). Csomagváltás vagy feltöltés után a feladat azonnal indulhat.',
   'chat.amrBalanceGate.benefitsTitle': 'Amit az Open Design Cloud nyújt',

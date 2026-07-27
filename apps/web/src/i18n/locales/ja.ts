@@ -70,7 +70,7 @@ export const ja: Dict = {
   'chat.amrError.authMessage': 'Open Design Cloud アカウントがまだ認可されていません。認可するとこのタスクは自動で再試行されます。',
   'chat.amrError.balanceMessage': 'Open Design Cloud の残高が不足しています。チャージしてこのタスクを続行してください。',
   'chat.amrError.authorizeCta': '認可して再試行',
-  'chat.amrError.rechargeCta': 'Open Design Cloud にチャージ',
+  'chat.amrError.rechargeCta': 'チャージ',
   'chat.amrBalanceGate.title': 'アップグレードして創作を続ける',
   'chat.amrBalanceGate.message': 'クレジットが不足しています（残高 {balance}）。プランのアップグレードまたはチャージ後、すぐに開始できます。',
   'chat.amrBalanceGate.benefitsTitle': 'Open Design Cloud で得られるもの',

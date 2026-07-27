@@ -70,7 +70,7 @@ export const de: Dict = {
   'chat.amrError.authMessage': 'Dein Open Design Cloud-Konto ist noch nicht autorisiert. Autorisiere es, und dieser Lauf wird automatisch wiederholt.',
   'chat.amrError.balanceMessage': 'Dein Open Design Cloud-Guthaben ist aufgebraucht. Lade auf, um diesen Lauf fortzusetzen.',
   'chat.amrError.authorizeCta': 'Autorisieren und wiederholen',
-  'chat.amrError.rechargeCta': 'Open Design Cloud aufladen',
+  'chat.amrError.rechargeCta': 'Aufladen',
   'chat.amrBalanceGate.title': 'Upgraden und weiter gestalten',
   'chat.amrBalanceGate.message': 'Guthaben reicht nicht aus (aktuell {balance}). Nach Plan-Upgrade oder Aufladung kann die Aufgabe sofort starten.',
   'chat.amrBalanceGate.benefitsTitle': 'Das bietet dir Open Design Cloud',
