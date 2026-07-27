@@ -41,6 +41,7 @@ import { isUnmaterializedSharedPlaceholder } from '../collab/shared-project-plac
 import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
+import { redactSecrets } from '../redact.js';
 
 /** The fields register-on-pull reads out of a pulled project's manifest. */
 export interface PulledProjectManifest {
@@ -158,6 +159,17 @@ export interface RegisterCollabSyncRoutesDeps {
   ) => void;
   /** Persist the actual version after either HTTP or proactive pull lands. */
   writeMaterializedVersion?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    version: number,
+  ) => void | Promise<void>;
+  /**
+   * Tell the proactive coordinator that the fallback HTTP/legacy lane
+   * durably landed this exact scope + version. This runs only after the
+   * cursor commit, so consumers may settle a queued same-head retry without
+   * trusting an in-memory claim that is ahead of disk.
+   */
+  onLegacyPullMaterialized?: (
     projectId: string,
     scope: TeamMirrorPullScope,
     version: number,
@@ -292,6 +304,36 @@ interface PublicFilePublication {
 }
 
 const publicFilePublications = new Map<string, PublicFilePublication>();
+const MAX_ERROR_LOG_FIELD_LENGTH = 2_048;
+
+function redactedErrorLogText(value: unknown): string {
+  const text = value instanceof Error
+    ? value.message || value.name
+    : String(value);
+  return redactSecrets(text).slice(0, MAX_ERROR_LOG_FIELD_LENGTH);
+}
+
+function errorLogFields(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  errorCause?: string;
+} {
+  const errorName = redactSecrets(
+    error instanceof Error ? error.name : typeof error,
+  ).slice(0, MAX_ERROR_LOG_FIELD_LENGTH);
+  const errorMessage = redactedErrorLogText(error);
+  const cause =
+    error && typeof error === 'object' && 'cause' in error
+      ? (error as { cause?: unknown }).cause
+      : undefined;
+  return {
+    errorName,
+    errorMessage,
+    ...(cause == null
+      ? {}
+      : { errorCause: redactedErrorLogText(cause) }),
+  };
+}
 
 function cleanPulledProjectName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -1243,7 +1285,11 @@ export function registerCollabSyncRoutes(
           capabilityUnavailable ? 'capability-unavailable' : 'failed',
         );
         if (!capabilityUnavailable) {
-          console.warn('[od] authorized proactive team pull failed closed:', error);
+          console.warn('[od] authorized proactive team pull failed closed:', {
+            projectId,
+            version: expectedVersion,
+            ...errorLogFields(error),
+          });
           return complete({ status: 'register_failed' });
         }
         // Old CLIs can materialize successfully while returning no version.
@@ -1320,7 +1366,11 @@ export function registerCollabSyncRoutes(
             onPostCommitCleanupError: (error) => {
               console.warn(
                 '[od] authorized team project committed; deferred promotion cleanup:',
-                error,
+                {
+                  projectId,
+                  version: expectedVersion,
+                  ...errorLogFields(error),
+                },
               );
             },
           });
@@ -1357,14 +1407,18 @@ export function registerCollabSyncRoutes(
               workspaceMatches,
               generationMatches,
             },
-            errorName: error instanceof Error ? error.name : typeof error,
+            ...errorLogFields(error),
           });
           return complete({ status: 'register_failed' });
         } finally {
           try {
             await staged.cleanup();
           } catch (error) {
-            console.warn('[od] failed to clean authorized team project stage:', error);
+            console.warn('[od] failed to clean authorized team project stage:', {
+              projectId,
+              version: expectedVersion,
+              ...errorLogFields(error),
+            });
           }
         }
         notifyFilesChanged?.(projectId);
@@ -1565,6 +1619,25 @@ export function registerCollabSyncRoutes(
             version: materializedVersion,
             atMs: Date.now(),
           });
+          try {
+            await deps.onLegacyPullMaterialized?.(
+              projectId,
+              scope,
+              materializedVersion,
+            );
+          } catch (error) {
+            // The bytes, mirror binding, and durable cursor are already
+            // committed. Coordinator notification is recoverable from that
+            // cursor on its next retry and must never turn success into 502.
+            console.warn(
+              '[od] failed to notify proactive coordinator of legacy team pull:',
+              {
+                projectId,
+                version: materializedVersion,
+                ...errorLogFields(error),
+              },
+            );
+          }
         } catch (error) {
           console.warn('[od] failed to persist pulled team project version:', error);
           return complete({ status: 'register_failed' });
@@ -1635,31 +1708,51 @@ export function registerCollabSyncRoutes(
       scope?.viewerMemberId ?? null,
       scope?.ownerMemberId ?? null,
     ]);
-    const key = JSON.stringify([
-      mutationKey,
-      authorizedStageInvocation === undefined
-        ? 'legacy'
-        : isBoundProactivePullInvocation(
-            authorizedStageInvocation,
-            {
-              projectId,
-              workspaceId: scope?.workspaceId ?? '',
-              resourceTeamId: scope?.resourceTeamId ?? '',
-              viewerMemberId: scope?.viewerMemberId ?? '',
-              ownerMemberId: scope?.ownerMemberId ?? '',
-            },
-            expectedVersion,
-          )
-          ? 'authorized-stage'
-          : 'invalid-stage',
-    ]);
+    const hasInvalidAuthorizedInvocation =
+      authorizedStageInvocation !== undefined &&
+      !isAuthorizedProactivePullInvocation(
+        authorizedStageInvocation,
+        {
+          projectId,
+          workspaceId: scope?.workspaceId ?? '',
+          resourceTeamId: scope?.resourceTeamId ?? '',
+          viewerMemberId: scope?.viewerMemberId ?? '',
+          ownerMemberId: scope?.ownerMemberId ?? '',
+        },
+        expectedVersion,
+      );
+    // Valid legacy and authorized callers share one exact-scope mutation key:
+    // both replace the same live project tree. Invalid/stale authorized
+    // invocations stay isolated so they can only fail closed, never borrow a
+    // successful legacy result.
+    const key = hasInvalidAuthorizedInvocation
+      ? JSON.stringify([mutationKey, 'invalid-stage'])
+      : mutationKey;
     const existing = pullsInFlight.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (!authorizedStageInvocation) return existing;
+      return existing.then((outcome) =>
+        isAuthorizedProactivePullInvocation(
+          authorizedStageInvocation,
+          {
+            projectId,
+            workspaceId: scope?.workspaceId ?? '',
+            resourceTeamId: scope?.resourceTeamId ?? '',
+            viewerMemberId: scope?.viewerMemberId ?? '',
+            ownerMemberId: scope?.ownerMemberId ?? '',
+          },
+          expectedVersion,
+        )
+          ? outcome
+          : { status: 'register_failed' },
+      );
+    }
     const transferToken = scope
       ? deps.beginContentTransfer?.(projectId, scope, expectedVersion)
       : undefined;
     const previous = projectPullTails.get(projectId) ?? Promise.resolve();
-    const run = (async () => {
+    let run!: Promise<CollabSyncPullOutcome>;
+    run = (async () => {
       let outcome: CollabSyncPullOutcome | null = null;
       try {
         await previous.catch(() => undefined);
@@ -1683,7 +1776,9 @@ export function registerCollabSyncRoutes(
               : expectedVersion,
           );
         }
-        pullsInFlight.delete(key);
+        if (pullsInFlight.get(key) === run) {
+          pullsInFlight.delete(key);
+        }
       }
     })();
     const tail = run.then(

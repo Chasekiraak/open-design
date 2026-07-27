@@ -3494,6 +3494,11 @@ export async function startServer({
         });
       },
     });
+  let observeLegacyTeamProjectPull = async (
+    _projectId: string,
+    _scope: TeamMirrorPullScope,
+    _version: number,
+  ): Promise<void> => {};
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     readContentTransferState: (projectId, scope) =>
@@ -3574,6 +3579,8 @@ export async function startServer({
         teamProjectContentResourceId(projectId, scope),
         String(version),
       ),
+    onLegacyPullMaterialized: (projectId, scope, version) =>
+      observeLegacyTeamProjectPull(projectId, scope, version),
     resolveSharedProject,
     resolveSharedProjectOwner,
     // Non-destructive revocation flag for a pulled team mirror: the pull gate
@@ -3818,6 +3825,11 @@ export async function startServer({
       );
     },
   });
+  observeLegacyTeamProjectPull = (projectId, scope, version) =>
+    proactiveContentPull.observeMaterialized(
+      { projectId, ...scope },
+      version,
+    );
   // Stale-while-revalidate the member directory keyed on the active workspace.
   // The web shell re-reads members on every navigation (and several mounted
   // consumers fetch it at once); the underlying collab-cloud read is ~1.5s, so

@@ -2522,6 +2522,333 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       .toBe('new');
   });
 
+  it('coalesces an authorized stage and legacy POST for the same scope and version', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-cross-lane-pull-'));
+    tempDirs.push(root);
+    const projectId = 'cross-lane-pull';
+    const liveDir = path.join(root, projectId);
+    const stageDir = path.join(root, `.${projectId}.od-pull-stage-test`);
+    await mkdir(liveDir);
+    await writeFile(path.join(liveDir, 'index.html'), '<title>Version four</title>');
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), '<title>Version five</title>');
+    let releaseStage!: () => void;
+    const stageGate = new Promise<void>((resolve) => {
+      releaseStage = resolve;
+    });
+    const stage = vi.fn(async () => {
+      await stageGate;
+      const identity = await lstat(stageDir);
+      return {
+        stageDir,
+        identity: {
+          dev: String(identity.dev),
+          ino: String(identity.ino),
+        },
+        receipt: authorizedReceipt(projectId, 5),
+        cleanup: vi.fn(async () => undefined),
+      };
+    });
+    const promote = vi.fn((
+      input: PromoteAuthorizedTeamProjectStageInput<{
+        localRecordChanged: boolean;
+      }>,
+    ) => promoteAuthorizedTeamProjectStage(input));
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: () => liveDir,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote,
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const proactive = createProactiveContentPull({
+      getLocalBinding: () => ({
+        workspaceId: pullScope.workspaceId,
+        visibility: 'team',
+      }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: pullScope.workspaceId,
+        resourceTeamId: pullScope.resourceTeamId,
+        workspaceMemberId: pullScope.viewerMemberId,
+      }),
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      pullSharedProject: (target, version) =>
+        api.handle.pullSharedProject(
+          target.projectId,
+          pullScope,
+          target.authorizationWitness,
+          version,
+          target.authorizedStageInvocation,
+        ),
+    });
+
+    try {
+      const authorized = proactive.handleContentChanged({
+        projectId,
+        workspaceId: pullScope.workspaceId,
+        version: 5,
+      });
+      await vi.waitFor(() => expect(stage).toHaveBeenCalledTimes(1));
+      const legacy = api.json(`/api/projects/${projectId}/collab/pull`, {
+        method: 'POST',
+        headers: {
+          'x-od-workspace-id': pullScope.workspaceId,
+          'x-od-workspace-member-id': pullScope.viewerMemberId,
+          'x-od-workspace-role': 'member',
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      releaseStage();
+
+      const [, legacyResponse] = await Promise.all([authorized, legacy]);
+      expect(legacyResponse.status).toBe(200);
+      expect(legacyResponse.body.version).toBe(5);
+    } finally {
+      proactive.dispose();
+    }
+
+    expect(stage).toHaveBeenCalledTimes(1);
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(adapterPull).not.toHaveBeenCalled();
+  });
+
+  it('fails a joined authorized waiter closed when it becomes stale before legacy completion', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-cross-lane-stale-'));
+    tempDirs.push(root);
+    const projectId = 'cross-lane-stale';
+    const liveDir = path.join(root, projectId);
+    await mkdir(liveDir);
+    await writeFile(path.join(liveDir, 'index.html'), '<title>Version five</title>');
+    let releaseLegacy!: () => void;
+    const legacyGate = new Promise<void>((resolve) => {
+      releaseLegacy = resolve;
+    });
+    let reportLegacyStarted!: () => void;
+    const legacyStarted = new Promise<void>((resolve) => {
+      reportLegacyStarted = resolve;
+    });
+    const adapterPull = vi.fn(async () => {
+      reportLegacyStarted();
+      await legacyGate;
+      return { version: 5 };
+    });
+    const stage = vi.fn();
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: () => liveDir,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const onPulled = vi.fn();
+    let reportAuthorizedJoined!: () => void;
+    const authorizedJoined = new Promise<void>((resolve) => {
+      reportAuthorizedJoined = resolve;
+    });
+    const proactive = createProactiveContentPull({
+      getLocalBinding: () => ({
+        workspaceId: pullScope.workspaceId,
+        visibility: 'team',
+      }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: pullScope.workspaceId,
+        resourceTeamId: pullScope.resourceTeamId,
+        workspaceMemberId: pullScope.viewerMemberId,
+      }),
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      pullSharedProject: (target, version) => {
+        reportAuthorizedJoined();
+        return api.handle.pullSharedProject(
+          target.projectId,
+          pullScope,
+          target.authorizationWitness,
+          version,
+          target.authorizedStageInvocation,
+        );
+      },
+      onPulled,
+    });
+
+    const legacy = api.json(`/api/projects/${projectId}/collab/pull`, {
+      method: 'POST',
+      headers: {
+        'x-od-workspace-id': pullScope.workspaceId,
+        'x-od-workspace-member-id': pullScope.viewerMemberId,
+        'x-od-workspace-role': 'member',
+      },
+    });
+    await legacyStarted;
+    const authorized = proactive.handleContentChanged({
+      projectId,
+      workspaceId: pullScope.workspaceId,
+      version: 5,
+    });
+    await authorizedJoined;
+    proactive.dispose();
+    releaseLegacy();
+
+    const [legacyResponse] = await Promise.all([legacy, authorized]);
+    expect(legacyResponse.status).toBe(200);
+    expect(stage).not.toHaveBeenCalled();
+    expect(adapterPull).toHaveBeenCalledTimes(1);
+    expect(onPulled).not.toHaveBeenCalled();
+  });
+
+  it('adopts a durable legacy success before a queued authorized retry', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'od-cross-lane-retry-'));
+    tempDirs.push(root);
+    const projectId = 'cross-lane-retry';
+    const liveDir = path.join(root, projectId);
+    const stageDir = path.join(root, `.${projectId}.od-pull-stage-test`);
+    await mkdir(stageDir);
+    await writeFile(path.join(stageDir, 'index.html'), '<title>Version five</title>');
+    let durableVersion = 4;
+    const stage = vi.fn(async () => ({
+      stageDir,
+      identity: { dev: '1', ino: '2' },
+      receipt: authorizedReceipt(projectId, 5),
+      cleanup: vi.fn(async () => undefined),
+    }));
+    const promote = vi.fn(async () => {
+      throw new Error('promotion journal unavailable');
+    });
+    const adapterPull = vi.fn(async () => ({ version: 5 }));
+    const retryCallbacks: Array<() => void | Promise<void>> = [];
+    let observeLegacyPull = async (
+      _observedProjectId: string,
+      _observedScope: TeamMirrorPullScope,
+      _version: number,
+    ): Promise<void> => {};
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      projectStore: fakeProjectStore(),
+      resolvePullDir: () => liveDir,
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      resolveSharedProject: resolvePulledSharedProject,
+      readMaterializedVersion: () => durableVersion,
+      writeMaterializedVersion: async (_id, _scope, version) => {
+        durableVersion = version;
+      },
+      onLegacyPullMaterialized: (observedProjectId, observedScope, version) =>
+        observeLegacyPull(observedProjectId, observedScope, version),
+      authorizedTeamProjectPull: {
+        journalDir: path.join(root, '.journals'),
+        getActiveWorkspaceSnapshot: () => ({
+          workspaceId: pullScope.workspaceId,
+          generation: 1,
+        }),
+        stage,
+        promote,
+      },
+    }, {
+      adapter: {
+        publish: vi.fn(async () => ({ version: 5 })),
+        pull: adapterPull,
+        syncLatest: vi.fn(async () => ({ version: 5 })),
+      },
+    });
+    const proactive = createProactiveContentPull({
+      getLocalBinding: () => ({
+        workspaceId: pullScope.workspaceId,
+        visibility: 'team',
+      }),
+      getWorkspaceIdentity: async () => ({
+        workspaceId: pullScope.workspaceId,
+        resourceTeamId: pullScope.resourceTeamId,
+        workspaceMemberId: pullScope.viewerMemberId,
+      }),
+      resolveSharedProjectOwner: async () => pullScope.ownerMemberId,
+      pullSharedProject: (target, version) =>
+        api.handle.pullSharedProject(
+          target.projectId,
+          pullScope,
+          target.authorizationWitness,
+          version,
+          target.authorizedStageInvocation,
+        ),
+      materializedVersion: () => String(durableVersion),
+      scheduler: {
+        setTimeout: (callback) => {
+          retryCallbacks.push(callback);
+          return callback;
+        },
+        clearTimeout: (handle) => {
+          const index = retryCallbacks.indexOf(
+            handle as () => void | Promise<void>,
+          );
+          if (index >= 0) retryCallbacks.splice(index, 1);
+        },
+      },
+    });
+    observeLegacyPull = (observedProjectId, observedScope, version) =>
+      proactive.observeMaterialized(
+        { projectId: observedProjectId, ...observedScope },
+        version,
+      );
+
+    try {
+      await proactive.handleContentChanged({
+        projectId,
+        workspaceId: pullScope.workspaceId,
+        version: 5,
+      });
+      expect(stage).toHaveBeenCalledTimes(1);
+      expect(promote).toHaveBeenCalledTimes(1);
+      expect(retryCallbacks).toHaveLength(1);
+      const queuedRetry = retryCallbacks[0];
+
+      const legacy = await api.json(`/api/projects/${projectId}/collab/pull`, {
+        method: 'POST',
+        headers: {
+          'x-od-workspace-id': pullScope.workspaceId,
+          'x-od-workspace-member-id': pullScope.viewerMemberId,
+          'x-od-workspace-role': 'member',
+        },
+      });
+      expect(legacy.status).toBe(200);
+      expect(durableVersion).toBe(5);
+      expect(retryCallbacks).toHaveLength(0);
+
+      // Even a timer callback that was already dequeued by the event loop must
+      // see the intent was settled by the durable legacy commit.
+      await queuedRetry?.();
+    } finally {
+      proactive.dispose();
+    }
+
+    expect(adapterPull).toHaveBeenCalledTimes(1);
+    expect(stage).toHaveBeenCalledTimes(1);
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(durableVersion).toBe(5);
+  });
+
   it('commits a staged receipt through a transient A to null to A context gap', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-transient-route-'));
     tempDirs.push(root);
@@ -2617,7 +2944,7 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
     }
   });
 
-  it('logs the project, version, and non-sensitive snapshot reason when promotion fails', async () => {
+  it('logs the project, version, redacted message/cause, and snapshot reason when promotion fails', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'od-authorized-log-'));
     tempDirs.push(root);
     const liveDir = path.join(root, 'project');
@@ -2645,7 +2972,14 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
           })),
           promote: vi.fn(async () => {
             snapshot = { workspaceId: null, generation: 7 };
-            throw new Error('active workspace changed while the team mirror was staged');
+            throw new Error(
+              'active workspace changed while Bearer abcdefghijklmnopqrstuvwxyz',
+              {
+                cause: new Error(
+                  'journal rename failed for sk-live-abcdefghijklmnopqrstuvwxyz',
+                ),
+              },
+            );
           }),
         },
       });
@@ -2669,6 +3003,10 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
             generationMatches: true,
           },
           errorName: 'Error',
+          errorMessage:
+            'active workspace changed while Bearer [REDACTED:bearer_token]',
+          errorCause:
+            'journal rename failed for [REDACTED:sk_key]',
         },
       );
     } finally {
