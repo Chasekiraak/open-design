@@ -77,6 +77,7 @@ import {
   enforceWorkspaceResourceMutation,
   headerValue,
   isWorkspaceResourceLocked as isWorkspaceLocked,
+  requestCanMutateWorkspaceResource,
   workspaceResourceAccess,
   workspaceResourceContext as workspaceProjectContext,
   workspaceResourceContextFromRequest as workspaceProjectContextFromRequest,
@@ -244,15 +245,50 @@ function projectAccess(
  * this instance rather than a bespoke copy so its semantics can never drift
  * from rename/delete/duplicate/writeFiles/comments.
  */
+/** The `withLastKnownMembership` cross-check seam, adapted from a workspace
+ *  context provider. Shared by the rejecting gate and the non-rejecting
+ *  write-authority check below so the two can never disagree about whose
+ *  membership opinion wins. */
+function lastKnownWorkspaceMembership(
+  workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
+): GetLastKnownWorkspaceMembership | undefined {
+  if (!workspaceContext) return undefined;
+  return () => {
+    const known = workspaceContext.lastKnown?.() ?? null;
+    return known ? { workspaceId: known.workspaceId, memberStatus: known.memberStatus } : null;
+  };
+}
+
+/**
+ * The non-rejecting counterpart of `createEnforceWorkspaceProjectMutation`,
+ * for a read route that would otherwise write as a side effect. See
+ * `requestCanMutateWorkspaceResource` for why a READ must answer this question
+ * without ever answering it with a 401/403.
+ */
+export function createWorkspaceProjectWriteAuthorityCheck(
+  workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
+) {
+  const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
+  return function requestCanWriteWorkspaceProject(
+    req: any,
+    getWorkspaceProject: (db: unknown, workspaceId: string, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
+    db: unknown,
+    projectId: string,
+  ): boolean {
+    return requestCanMutateWorkspaceResource(
+      req,
+      getWorkspaceProject,
+      db,
+      projectId,
+      getLastKnownWorkspaceMembership,
+    );
+  };
+}
+
 export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
-  const getLastKnownWorkspaceMembership: GetLastKnownWorkspaceMembership | undefined = workspaceContext
-    ? () => {
-        const known = workspaceContext.lastKnown?.() ?? null;
-        return known ? { workspaceId: known.workspaceId, memberStatus: known.memberStatus } : null;
-      }
-    : undefined;
+  const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
   return function enforceWorkspaceProjectMutation(
     req: any,
     res: Response,
@@ -3884,6 +3920,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
   const { upload } = ctx.uploads;
   const { fs } = ctx.node;
   const enforceWorkspaceProjectMutation = createEnforceWorkspaceProjectMutation(ctx.workspaceContext);
+  const requestCanWriteWorkspaceProject = createWorkspaceProjectWriteAuthorityCheck(ctx.workspaceContext);
   const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { listFiles, listProjectFolders, createProjectFolder, deleteProjectFolder, searchProjectFiles, readProjectFile, resolveProjectDir, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, sanitizePath, ensureProject } = ctx.projectFiles;
   const { buildDocumentPreview } = ctx.documents;
@@ -4924,7 +4961,16 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         if (err?.code !== 'ENOENT') throw err;
       }
       let versions = await listProjectFileVersions(PROJECTS_DIR, project.id, historyFileName, project.metadata);
-      if (workingFileContent !== null && versions.length === 0) {
+      // Bootstrapping a baseline version is a WRITE, so it belongs only to a
+      // caller with write authority over this project. A readonly member
+      // reading a mirror of someone else's shared project gets the truthful
+      // empty history instead — the owner's real history can never be here
+      // (`.file-versions` is excluded from member mirrors), so synthesizing
+      // one would only manufacture history that never existed, inside a
+      // project the member is told they cannot modify. The read itself is
+      // never refused: browsing history stays open (飞书 recvq56vFjQKfT).
+      if (workingFileContent !== null && versions.length === 0
+        && requestCanWriteWorkspaceProject(req, getWorkspaceProject, db, project.id)) {
         const initial = await ensureCurrentProjectFileVersion(
           PROJECTS_DIR,
           project.id,

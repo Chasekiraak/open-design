@@ -2040,12 +2040,26 @@ function projectFileVersionsUrl(projectId: string, name: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/files/${safePath}/versions`;
 }
 
+/**
+ * `workspaceContext` is not an authorization argument here — this GET is never
+ * refused. It tells the daemon whose read this is, so a readonly member's read
+ * of someone else's shared project stops bootstrapping a baseline version into
+ * a project they cannot write (see `requestCanMutateWorkspaceResource` in
+ * `apps/daemon/src/collab/workspace-resource-mutation.ts`). Without the
+ * headers the daemon has no identity on this path and falls back to
+ * bootstrapping, which is what made a member's mirror show one synthetic
+ * "Version 1" instead of the owner's real history.
+ */
 export async function fetchProjectFileVersions(
   projectId: string,
   name: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ProjectFileVersionsResponse | null> {
   try {
-    const resp = await fetch(projectFileVersionsUrl(projectId, name), { cache: 'no-store' });
+    const resp = await fetch(projectFileVersionsUrl(projectId, name), {
+      cache: 'no-store',
+      ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
+    });
     if (!resp.ok) return null;
     return (await resp.json()) as ProjectFileVersionsResponse;
   } catch {

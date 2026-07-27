@@ -3122,7 +3122,7 @@ function FileVersionManagerModal({
   const loadVersions = useCallback(async (preferredId?: string | null) => {
     setLoading(true);
     setError(null);
-    const result = await fetchProjectFileVersions(projectId, file.name);
+    const result = await fetchProjectFileVersions(projectId, file.name, workspaceContext);
     if (!result) {
       setError(tRef.current('fileViewer.versions.loadFailed'));
       setLoading(false);
@@ -3143,7 +3143,7 @@ function FileVersionManagerModal({
       null;
     setSelectedId(nextSelected?.id ?? null);
     setLoading(false);
-  }, [currentSource, file.name, projectId]);
+  }, [currentSource, file.name, projectId, workspaceContext]);
 
   useEffect(() => {
     void loadVersions();

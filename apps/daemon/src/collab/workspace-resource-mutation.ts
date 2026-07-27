@@ -282,6 +282,50 @@ export type BoundWorkspaceResourceMutationGate = (
   capability: WorkspaceResourceMutationCapability,
 ) => boolean;
 
+/**
+ * Whether `req` proves write authority over `resourceId` — the same decision
+ * `enforceWorkspaceResourceMutation` makes, without turning the answer into an
+ * HTTP error.
+ *
+ * For a READ route that writes as a side effect. The version-history GET
+ * bootstraps a baseline version whenever a file has no manifest yet
+ * (`ensureCurrentProjectFileVersion`), and on a member's mirror of someone
+ * else's shared project that write is doubly wrong: it writes into a project
+ * whose own banner says the member cannot modify it, and the version it
+ * creates then presents itself as the owner's history even though the owner's
+ * real history can never be there — `.file-versions` is in
+ * `MEMBER_MIRROR_EXCLUDED_ENTRIES`, so a mirror never receives it. Measured
+ * live (2026-07-27): owner 4 versions, member's panel 1, timestamped at the
+ * moment the member opened the panel.
+ *
+ * The read itself stays open. Browsing history is a read action and the entry
+ * point is deliberately un-gated (飞书 recvq56vFjQKfT); this answers only
+ * "may this read leave a write behind?", never "may this caller read?".
+ *
+ * Fail-open on absent or unrecognized identity, which is where it deliberately
+ * DIVERGES from `enforceWorkspaceResourceMutation`: that gate 401s a headerless
+ * caller on a bound resource, because a mutation must prove membership. Here
+ * the same absence must NOT suppress the bootstrap, or every legacy client,
+ * `od` CLI invocation, and signed-out read would silently lose version history
+ * for no security gain — the suppressed write is local-only either way
+ * (`.file-versions` never publishes). Only an authenticated "this member
+ * cannot write here" suppresses it.
+ */
+export function requestCanMutateWorkspaceResource(
+  req: any,
+  getWorkspaceResource: (db: unknown, workspaceId: string, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  db: unknown,
+  resourceId: string,
+  getLastKnownMembership?: GetLastKnownWorkspaceMembership,
+): boolean {
+  const requestCtx = workspaceResourceContextFromRequest(req);
+  if (requestCtx === null || requestCtx === 'missing') return true;
+  const ctx = withLastKnownMembership(requestCtx, getLastKnownMembership);
+  const row = getWorkspaceResource(db, ctx.workspaceId, resourceId);
+  if (!row) return true;
+  return workspaceResourceAccess(row, ctx).canMutate;
+}
+
 export function enforceWorkspaceResourceMutation(
   resourceType: string,
   req: any,
