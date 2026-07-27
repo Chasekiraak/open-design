@@ -42,7 +42,6 @@ function renderRail() {
         onViewChange={() => {}}
         onNewProject={() => {}}
         open
-        onClose={() => {}}
         context={teamContext()}
         billing={null}
       />
