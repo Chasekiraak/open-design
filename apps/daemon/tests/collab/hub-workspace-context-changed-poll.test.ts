@@ -3,7 +3,26 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleHubWorkspaceContextChanged } from '../../src/server.js';
+import {
+  handleHubVerifiedConnection,
+  handleHubWorkspaceContextChanged,
+} from '../../src/server.js';
+
+describe('handleHubVerifiedConnection', () => {
+  it('catches up billing on the first workspace-verified connection', () => {
+    const catchUpPublishedHeads = vi.fn(async () => undefined);
+    const catchUpWorkspaceBilling = vi.fn();
+
+    handleHubVerifiedConnection(
+      'workspace-1',
+      catchUpPublishedHeads,
+      catchUpWorkspaceBilling,
+    );
+
+    expect(catchUpPublishedHeads).toHaveBeenCalledWith('workspace-1');
+    expect(catchUpWorkspaceBilling).toHaveBeenCalledWith('workspace-1');
+  });
+});
 
 // Regression coverage for the fix wiring the hub's real `workspace-context-changed`
 // push (`startHubEventsSubscriber`'s `onEvent` in server.ts) to an immediate

@@ -234,6 +234,8 @@ export interface HubEventsSubscriberOptions {
 export interface HubEventsSubscriber {
   stop(): void;
   connected(): boolean;
+  /** Re-resolve the endpoint immediately after active-workspace identity changes. */
+  refreshEndpoint(): void;
 }
 
 export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): HubEventsSubscriber {
@@ -248,6 +250,7 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
   let backoffMs = backoffMinMs;
   let abortController: AbortController | null = null;
   let wakeSleep: (() => void) | null = null;
+  let endpointGeneration = 0;
   const handledSourceGapEpochs = new Set<string>();
 
   const setConnected = (next: boolean) => {
@@ -440,21 +443,35 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
 
   void (async () => {
     while (!stopped) {
+      const generation = endpointGeneration;
       try {
         const endpoint = await options.resolveEndpoint();
         if (stopped) break;
+        // A workspace switch may land while endpoint resolution is in flight.
+        // Never open the now-stale scope; resolve again from current identity.
+        if (generation !== endpointGeneration) continue;
         if (!endpoint) {
           // Signed out / no team workspace — idle at max backoff, keep probing.
           await sleep(backoffMaxMs);
           continue;
         }
         await consumeStream(endpoint);
+        if (generation !== endpointGeneration) {
+          backoffMs = backoffMinMs;
+          continue;
+        }
         // Server closed cleanly (deploy/restart) — reconnect promptly.
         backoffMs = backoffMinMs;
       } catch (error) {
-        if (!stopped) options.onError?.(error);
+        // Deliberately aborting the old workspace stream is not a transport
+        // failure and must not surface a misleading reconnect warning.
+        if (!stopped && generation === endpointGeneration) options.onError?.(error);
       }
       if (stopped) break;
+      if (generation !== endpointGeneration) {
+        backoffMs = backoffMinMs;
+        continue;
+      }
       await sleep(backoffMs);
       backoffMs = Math.min(backoffMs * 2, backoffMaxMs);
     }
@@ -467,5 +484,11 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
       wakeSleep?.();
     },
     connected: () => isConnected,
+    refreshEndpoint() {
+      if (stopped) return;
+      endpointGeneration += 1;
+      abortController?.abort();
+      wakeSleep?.();
+    },
   };
 }

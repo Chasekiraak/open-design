@@ -10,6 +10,7 @@ export interface ActiveWorkspaceSelectionStore {
   snapshot(): { workspaceId: string | null; generation: number };
   set(workspaceId: string): Promise<void>;
   clear(): Promise<void>;
+  subscribe(listener: (workspaceId: string | null) => void): () => void;
 }
 
 interface AuthorizationWorkspaceContextSnapshot {
@@ -52,6 +53,7 @@ export function createActiveWorkspaceSelectionStore(
   const filePath = path.join(dataDir, 'workspace-selection.json');
   let cached: string | null | undefined;
   let generation = 0;
+  const listeners = new Set<(workspaceId: string | null) => void>();
 
   const read = (): string | null => {
     if (cached !== undefined) return cached;
@@ -65,6 +67,16 @@ export function createActiveWorkspaceSelectionStore(
       cached = null;
     }
     return cached;
+  };
+
+  const notify = (workspaceId: string | null) => {
+    for (const listener of listeners) {
+      try {
+        listener(workspaceId);
+      } catch {
+        // Selection persistence must not fail because one observer did.
+      }
+    }
   };
 
   return {
@@ -83,11 +95,19 @@ export function createActiveWorkspaceSelectionStore(
         JSON.stringify({ workspaceId: next }, null, 2),
         'utf8',
       );
+      notify(next);
     },
     async clear() {
       cached = null;
       generation += 1;
       await fs.promises.rm(filePath, { force: true });
+      notify(null);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 }

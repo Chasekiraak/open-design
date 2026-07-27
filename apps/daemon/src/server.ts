@@ -1260,6 +1260,22 @@ export function handleHubWorkspaceContextChanged(
   void pollWorkspaceInvalidation().catch(() => undefined);
 }
 
+/**
+ * A verified hub connection is itself a freshness boundary, including the
+ * daemon's very first connection. Published content and billing may already
+ * have changed before the subscriber came online, so both scopes catch up
+ * immediately instead of waiting for a later reconnect or poll tick.
+ */
+export function handleHubVerifiedConnection(
+  workspaceId: string | undefined,
+  catchUpPublishedHeads: (workspaceId: string) => Promise<void>,
+  catchUpWorkspaceBilling: (workspaceId: string) => void,
+): void {
+  if (!workspaceId) return;
+  void catchUpPublishedHeads(workspaceId).catch(() => undefined);
+  catchUpWorkspaceBilling(workspaceId);
+}
+
 // Windows ENAMETOOLONG mitigation constants
 const CMD_BAT_RE = /\.(cmd|bat)$/i;
 const PROMPT_TEMP_FILE = () =>
@@ -3893,9 +3909,13 @@ export async function startServer({
       console.info(
         `[od] hub events workspace verified workspaceId=${workspaceId ?? 'unknown'} reconnect=${reconnect}`,
       );
-      if (workspaceId) {
-        void proactiveContentPull.catchUpPublishedHeads(workspaceId);
-      }
+      handleHubVerifiedConnection(
+        workspaceId,
+        (verifiedWorkspaceId) =>
+          proactiveContentPull.catchUpPublishedHeads(verifiedWorkspaceId),
+        (verifiedWorkspaceId) =>
+          workspaceBillingRuntime.reconnect(verifiedWorkspaceId),
+      );
     },
     onDrop: ({ reason, eventName, expectedWorkspaceId, actualWorkspaceId }) => {
       console.warn(
@@ -4080,7 +4100,6 @@ export async function startServer({
       // Close the disconnect gap: one catch-up cycle over the same reads the
       // pollers watch, plus a comment pull for open projects.
       void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
-      workspaceBillingRuntime.reconnect();
       void collabCloud?.pollOnce().catch(() => undefined);
       // Same catch-up principle for the design-system/skill resource
       // reconciler: a missed 'team-resources-changed' push during the
@@ -4101,6 +4120,9 @@ export async function startServer({
     onError: (error) => {
       console.warn('[od] hub events channel error (will reconnect):', String(error));
     },
+  });
+  const unsubscribeHubEventsEndpointRefresh = activeWorkspace.subscribe(() => {
+    hubEventsSubscriber.refreshEndpoint();
   });
 
   registerTeamResourceRoutes(app, { teamResources: collab.teamResources });
@@ -11149,6 +11171,7 @@ export async function startServer({
       orbitService.stop();
       routineService?.stop();
       workspaceInvalidationPoller.stop();
+      unsubscribeHubEventsEndpointRefresh();
       hubEventsSubscriber.stop();
       workspaceBillingRuntime.dispose();
       proactiveContentPull.dispose();

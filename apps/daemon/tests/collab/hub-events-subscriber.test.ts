@@ -25,6 +25,26 @@ function sseResponse(frames: string[], opts: { holdOpen?: boolean } = {}) {
   return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+function abortableSseResponse(
+  frames: string[],
+  signal: AbortSignal | null | undefined,
+  onAbort: () => void,
+) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(encoder.encode(frame));
+      const abort = () => {
+        onAbort();
+        controller.close();
+      };
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
 const READY = 'event: ready\ndata: {"workspaceId":"w1"}\n\n';
 const HEARTBEAT = 'event: heartbeat\ndata: {}\n\n';
 const COMMENT_EVENT =
@@ -294,6 +314,64 @@ describe('startHubEventsSubscriber', () => {
     subscriber.stop();
     expect(fetches).toBeGreaterThanOrEqual(2);
     expect(connections).toEqual([false, true]);
+  });
+
+  it('immediately re-resolves and reconnects when the active workspace changes', async () => {
+    let activeWorkspaceId = 'w1';
+    const resolvedScopes: string[] = [];
+    const connectedScopes: string[] = [];
+    const abortedScopes: string[] = [];
+    const errors: unknown[] = [];
+    let resolveFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let resolveSecond!: () => void;
+    const second = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => {
+        const workspaceId = activeWorkspaceId;
+        resolvedScopes.push(workspaceId);
+        return {
+          url: 'https://hub/events',
+          headers: { 'x-vela-workspace-id': workspaceId },
+          workspaceId,
+        };
+      },
+      onEvent: () => undefined,
+      onConnect: ({ workspaceId }) => {
+        if (!workspaceId) return;
+        connectedScopes.push(workspaceId);
+        if (workspaceId === 'w1') resolveFirst();
+        if (workspaceId === 'w2') resolveSecond();
+      },
+      onError: (error) => errors.push(error),
+      backoffMinMs: 1_000_000,
+      backoffMaxMs: 1_000_000,
+      fetchImpl: async (_url, init) => {
+        const workspaceId = String(
+          (init?.headers as Record<string, string>)?.['x-vela-workspace-id'],
+        );
+        return abortableSseResponse(
+          [`event: ready\ndata: {"workspaceId":"${workspaceId}"}\n\n`],
+          init?.signal,
+          () => abortedScopes.push(workspaceId),
+        );
+      },
+    });
+
+    await first;
+    activeWorkspaceId = 'w2';
+    subscriber.refreshEndpoint();
+    await second;
+
+    expect(resolvedScopes.slice(0, 2)).toEqual(['w1', 'w2']);
+    expect(connectedScopes).toEqual(['w1', 'w2']);
+    expect(abortedScopes).toContain('w1');
+    expect(errors).toEqual([]);
   });
 
   it('does not verify or dispatch a workspace event before the ready frame', async () => {
