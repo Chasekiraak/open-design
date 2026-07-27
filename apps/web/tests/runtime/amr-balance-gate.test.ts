@@ -220,6 +220,7 @@ describe('checkAmrBalanceGate', () => {
     const result = await checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
     });
     expect(result.kind).toBe('soft');
     if (result.kind === 'soft') {
@@ -227,7 +228,7 @@ describe('checkAmrBalanceGate', () => {
     }
   });
 
-  it('fails open for an unavailable team workspace balance without using account zero', async () => {
+  it('fails closed for an unavailable team workspace balance without using account zero', async () => {
     const emptyAccount = snapshot({ balanceUsd: '0' });
     mockedFetch.mockResolvedValueOnce(emptyAccount).mockResolvedValueOnce(emptyAccount);
     vi.stubGlobal(
@@ -239,8 +240,36 @@ describe('checkAmrBalanceGate', () => {
       checkAmrBalanceGate({
         workspaceType: 'team',
         workspaceId: 'ws-team-a',
+        workspaceMemberId: 'wm-a',
       }),
-    ).resolves.toEqual({ kind: 'allow' });
+    ).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('rejects a response from an older workspace-member epoch', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'ws-team-a',
+            workspaceMemberId: 'wm-old',
+            balanceUsd: '50',
+            expiresAt: null,
+            updatedAt: '2026-07-26T00:00:00.000Z',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )),
+    );
+
+    await expect(checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-new',
+    })).resolves.toEqual({ kind: 'unavailable' });
   });
 
   it('keeps concurrent team A/B checks keyed by explicit workspace id', async () => {
@@ -278,10 +307,12 @@ describe('checkAmrBalanceGate', () => {
     const teamA = checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
     });
     const teamB = checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-b',
+      workspaceMemberId: 'wm-b',
     });
 
     await expect(teamB).resolves.toEqual({ kind: 'allow' });

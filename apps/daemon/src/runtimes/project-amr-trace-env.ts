@@ -8,11 +8,11 @@ type SqliteDb = Parameters<typeof getWorkspaceProjectByProjectId>[0];
 export class ProjectWorkspaceScopeUnavailableError extends Error {
   constructor(
     readonly projectId: string,
-    readonly workspaceId: string,
+    readonly workspaceId: string | null,
   ) {
     super(
       `Cannot authorize project ${projectId}: its persisted workspace ` +
-        `${workspaceId} is unavailable for the signed-in member`,
+        `${workspaceId ?? 'binding'} is unavailable for the signed-in member`,
     );
     this.name = 'ProjectWorkspaceScopeUnavailableError';
   }
@@ -59,20 +59,21 @@ export async function openDesignAmrTraceEnvForProject(
   let workspaceId: string | null = null;
   if (projectId) {
     const binding = getWorkspaceProjectByProjectId(db, projectId);
-    if (binding) {
-      const directory = await deps.fetchWorkspaceDirectory().catch(
-        (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
-      );
-      const scope = resolveProjectWorkspaceScope({
-        projectId,
-        binding,
-        directory,
-      });
-      if (scope.kind === 'unavailable') {
-        throw new ProjectWorkspaceScopeUnavailableError(projectId, scope.workspaceId);
-      }
-      if (scope.kind === 'team') workspaceId = scope.workspaceId;
+    if (!binding) {
+      throw new ProjectWorkspaceScopeUnavailableError(projectId, null);
     }
+    const directory = await deps.fetchWorkspaceDirectory().catch(
+      (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+    );
+    const scope = resolveProjectWorkspaceScope({
+      projectId,
+      binding,
+      directory,
+    });
+    if (scope.kind === 'unbound' || scope.kind === 'unavailable') {
+      throw new ProjectWorkspaceScopeUnavailableError(projectId, scope.workspaceId);
+    }
+    if (scope.kind === 'team') workspaceId = scope.workspaceId;
   }
   return openDesignAmrTraceEnv({
     ...traceInput,

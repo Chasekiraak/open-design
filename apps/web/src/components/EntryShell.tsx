@@ -1054,6 +1054,7 @@ export function EntryShell({
           ? {
               workspaceType: workspaceContext.workspaceType,
               workspaceId: workspaceContext.workspaceId,
+              workspaceMemberId: workspaceContext.workspaceMemberId,
             }
           : undefined,
       );
@@ -1078,10 +1079,12 @@ export function EntryShell({
             ? {
                 workspaceType: workspaceContext.workspaceType,
                 workspaceId: workspaceContext.workspaceId,
+                workspaceMemberId: workspaceContext.workspaceMemberId,
               }
             : undefined,
         );
       }
+      if (gate.kind === 'unavailable') return 'blocked' as const;
       if (gate.kind === 'soft') {
         // Hold THIS submit while the reminder waits for a decision; 'proceed'
         // resumes the same create-and-run below, so HomeView's normal accept

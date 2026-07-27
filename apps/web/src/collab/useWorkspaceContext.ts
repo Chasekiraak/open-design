@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   TeamProject,
   WorkspaceBillingResponse,
+  WorkspaceBillingSnapshot,
   WorkspaceBillingSummary,
   WorkspaceCollabContext,
   WorkspaceContextResponse,
@@ -21,6 +22,13 @@ import { useWorkspaceInvalidation } from './workspace-events';
 export interface WorkspaceContextState {
   context: WorkspaceCollabContext | null;
   loading: boolean;
+  /**
+   * `unsupported` is an old daemon with no workspace endpoint and retains the
+   * legal pre-workspace/headerless behavior. `unavailable` means a modern
+   * workspace answer is unknown; write paths must fail closed instead of
+   * treating that outage as an anonymous identity.
+   */
+  failure?: 'unsupported' | 'unavailable';
 }
 
 /** Coalescing key for `GET /api/workspace/context`; shared so an identity
@@ -36,18 +44,19 @@ const WORKSPACE_CONTEXT_COALESCE_KEY = 'workspace-context';
 let cachedWorkspaceContext: WorkspaceContextState['context'] = null;
 let workspaceContextRevision = 0;
 let volatileWorkspaceRuntimeClientId: string | null = null;
-let workspaceRuntimeGeneration = 0n;
-let lastWorkspaceRuntimeInterestKey: string | null = null;
-let lastWorkspaceRuntimeInterestGeneration = '0';
+let workspaceRuntimeInterestSequence = 0n;
+const workspaceRuntimeInterests = new Map<
+  string,
+  { clientId: string; generation: string }
+>();
 
 /** Test seam: clear the module-level context cache between tests. */
 export function resetWorkspaceContextCache(): void {
   cachedWorkspaceContext = null;
   workspaceContextRevision = 0;
   volatileWorkspaceRuntimeClientId = null;
-  workspaceRuntimeGeneration = 0n;
-  lastWorkspaceRuntimeInterestKey = null;
-  lastWorkspaceRuntimeInterestGeneration = '0';
+  workspaceRuntimeInterestSequence = 0n;
+  workspaceRuntimeInterests.clear();
 }
 
 function workspaceRuntimeClientId(): string {
@@ -63,14 +72,19 @@ function workspaceRuntimeClientId(): string {
   return generated;
 }
 
-function workspaceRuntimeGenerationFor(interestKey: string): string {
-  if (lastWorkspaceRuntimeInterestKey === interestKey) {
-    return lastWorkspaceRuntimeInterestGeneration;
-  }
-  workspaceRuntimeGeneration += 1n;
-  lastWorkspaceRuntimeInterestKey = interestKey;
-  lastWorkspaceRuntimeInterestGeneration = workspaceRuntimeGeneration.toString();
-  return lastWorkspaceRuntimeInterestGeneration;
+function workspaceRuntimeInterestFor(
+  interestKey: string,
+): { clientId: string; generation: string } {
+  const existing = workspaceRuntimeInterests.get(interestKey);
+  if (existing) return existing;
+  workspaceRuntimeInterestSequence += 1n;
+  const interest = {
+    clientId:
+      `${workspaceRuntimeClientId()}:billing:${workspaceRuntimeInterestSequence}`,
+    generation: '1',
+  };
+  workspaceRuntimeInterests.set(interestKey, interest);
+  return interest;
 }
 
 /**
@@ -156,7 +170,13 @@ export function useWorkspaceContext(): WorkspaceContextState {
     try {
       const fetchContext = async () => {
         const res = await fetch('/api/workspace/context', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`workspace-context ${res.status}`);
+        if (!res.ok) {
+          const error = new Error(`workspace-context ${res.status}`) as Error & {
+            status?: number;
+          };
+          error.status = res.status;
+          throw error;
+        }
         return (await res.json()) as WorkspaceContextResponse;
       };
       // Coalesced: every mounted consumer of this hook (and every focus/pageshow
@@ -177,13 +197,20 @@ export function useWorkspaceContext(): WorkspaceContextState {
       }
       cachedWorkspaceContext = nextContext;
       setState({ context: cachedWorkspaceContext, loading: false });
-    } catch {
+    } catch (error) {
       if (!mountedRef.current || requestEpochRef.current !== requestEpoch) return;
       // Transient failure (offline, momentary daemon/hub hiccup): keep the
       // last-known context instead of flashing the signed-out state. A never-
       // signed-in / personal user has a null cache, so this still shows the local
       // state for them.
-      setState({ context: cachedWorkspaceContext, loading: false });
+      setState({
+        context: cachedWorkspaceContext,
+        loading: false,
+        failure:
+          (error as { status?: unknown })?.status === 404
+            ? 'unsupported'
+            : 'unavailable',
+      });
     }
   }, []);
 
@@ -356,9 +383,9 @@ export function useWorkspaceBillingResponse(explicitScope?: {
         explicitScope?.revision ?? workspaceContextRevision
       }`
     : null;
-  const billingRuntimeGeneration =
+  const billingRuntimeInterest =
     billingRequestKey && context?.workspaceType === 'team'
-      ? workspaceRuntimeGenerationFor(billingRequestKey)
+      ? workspaceRuntimeInterestFor(billingRequestKey)
       : null;
   const [state, setState] = useState<{
     scopeKey: string;
@@ -409,8 +436,10 @@ export function useWorkspaceBillingResponse(explicitScope?: {
         const runtimeHeaders =
           context?.workspaceType === 'team'
             ? {
-                'x-od-workspace-runtime-client-id': workspaceRuntimeClientId(),
-                'x-od-workspace-runtime-generation': billingRuntimeGeneration ?? '0',
+                'x-od-workspace-runtime-client-id':
+                  billingRuntimeInterest?.clientId ?? '',
+                'x-od-workspace-runtime-generation':
+                  billingRuntimeInterest?.generation ?? '0',
               }
             : undefined;
         const res = await fetch(billingUrl, {
@@ -484,7 +513,7 @@ export function useWorkspaceBillingResponse(explicitScope?: {
     }
   }, [
     billingRequestKey,
-    billingRuntimeGeneration,
+    billingRuntimeInterest,
     billingScopeKey,
     billingUrl,
     context?.workspaceType,
@@ -645,6 +674,40 @@ export function workspaceBillingBalanceUsd(
   }
   const balance = workspaceBalance.balanceUsd.trim();
   return balance || null;
+}
+
+/**
+ * Return the exact workspace/member snapshot authorized for this context.
+ * Account summaries and a snapshot for another membership epoch are never
+ * accepted as workspace plan authority.
+ */
+export function workspaceBillingSnapshotForContext(
+  response: WorkspaceBillingResponse | null | undefined,
+  context: WorkspaceCollabContext | null | undefined,
+): WorkspaceBillingSnapshot | null {
+  if (!response || !context || context.workspaceType !== 'team') return null;
+  const snapshot = response.workspaceSnapshot;
+  if (
+    !snapshot ||
+    snapshot.billingScopeVersion !== 2 ||
+    snapshot.workspaceId !== context.workspaceId ||
+    snapshot.workspaceMemberId !== context.workspaceMemberId
+  ) {
+    return null;
+  }
+  const runtime = response.workspaceRuntime;
+  if (
+    runtime &&
+    (
+      runtime.workspaceId !== context.workspaceId ||
+      runtime.workspaceMemberId !== context.workspaceMemberId ||
+      runtime.status === 'error' ||
+      runtime.status === 'access-revoked'
+    )
+  ) {
+    return null;
+  }
+  return snapshot;
 }
 
 const WORKSPACE_BILLING_POLL_MS = 30_000;

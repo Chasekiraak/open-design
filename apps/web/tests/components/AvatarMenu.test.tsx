@@ -88,6 +88,33 @@ function workspaceContextResponse(context: WorkspaceCollabContext | null) {
   });
 }
 
+function workspaceSnapshot(
+  workspaceId: string,
+  workspaceMemberId: string,
+  planId: string,
+  balanceUsd: string,
+) {
+  return {
+    schemaVersion: 1,
+    workspaceId,
+    workspaceMemberId,
+    billingScopeVersion: 2,
+    billing: {
+      billingState: 'active',
+      planId,
+    },
+    wallet: {
+      balanceUsd,
+      expiresAt: null,
+      updatedAt: '2026-07-27T00:00:00.000Z',
+    },
+    revisions: {
+      billing: 'billing-1',
+      wallet: 'wallet-1',
+    },
+  };
+}
+
 const codexAgent: AgentInfo = {
   id: 'codex',
   name: 'Codex CLI',
@@ -426,7 +453,7 @@ describe('AvatarMenu', () => {
   });
 
   it('fails closed for a locked model when the project scope is unavailable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url === '/api/integrations/vela/status') {
         return new Response(JSON.stringify({
@@ -447,7 +474,8 @@ describe('AvatarMenu', () => {
         }));
       }
       return new Response('{}', { status: 202 });
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
     openExternalUrlMock.mockResolvedValue(true);
 
     const { onAgentModelChange } = renderMenu({
@@ -481,7 +509,16 @@ describe('AvatarMenu', () => {
     });
 
     openMenu();
-    await screen.findByText('Plus');
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/integrations/vela/status',
+        expect.anything(),
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Plus')).toBeNull();
     const list = screen.getByTestId('avatar-model-list');
     const locked = within(list).getByRole('radio', { name: /Paid model/i });
     expect(locked.getAttribute('aria-disabled')).toBe('true');
@@ -503,7 +540,7 @@ describe('AvatarMenu', () => {
   });
 
   it('does not borrow account money for an unbound project', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (input.toString() === '/api/integrations/vela/status') {
         return new Response(JSON.stringify({
           loggedIn: true,
@@ -518,7 +555,8 @@ describe('AvatarMenu', () => {
         });
       }
       return new Response('{}', { status: 202 });
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     renderMenu({
       config: { ...baseConfig, agentId: 'amr' },
@@ -541,7 +579,16 @@ describe('AvatarMenu', () => {
     });
 
     openMenu();
-    await screen.findByText('Plus');
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/integrations/vela/status',
+        expect.anything(),
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Plus')).toBeNull();
     expect(screen.queryByText('$247.51')).toBeNull();
     expect(screen.queryByRole('button', {
       name: /settings\.amrBalance/,
@@ -553,14 +600,37 @@ describe('AvatarMenu', () => {
 
   it('routes a locked model only when the exact project member can upgrade', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (input.toString() === '/api/integrations/vela/status') {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
         return new Response(JSON.stringify({
           loggedIn: true,
           loginInFlight: false,
           profile: 'feature-test',
           user: { id: 'u1', email: 'a@b.c' },
-          account: { plan: 'plus', balanceUsd: '9.12' },
+          account: { plan: 'max', balanceUsd: '9.12' },
           configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=workspace-a') {
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'workspace-a',
+            workspaceMemberId: 'member-a',
+            balanceUsd: '9.12',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+          workspaceSnapshot: workspaceSnapshot(
+            'workspace-a',
+            'member-a',
+            'team_pro',
+            '9.12',
+          ),
         }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -720,6 +790,12 @@ describe('AvatarMenu', () => {
               expiresAt: null,
               updatedAt: '2026-07-26T00:00:00.000Z',
             },
+            workspaceSnapshot: workspaceSnapshot(
+              'ws-team',
+              'wm-1',
+              'team_pro',
+              '7.8912',
+            ),
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -747,6 +823,8 @@ describe('AvatarMenu', () => {
     const dialog = openMenu();
     expect(await within(dialog).findByText('$7.89')).toBeTruthy();
     expect(within(dialog).queryByText('$247.51')).toBeNull();
+    expect(within(dialog).getByText('Pro')).toBeTruthy();
+    expect(within(dialog).queryByText('Plus')).toBeNull();
   });
 
   it('shows and opens only the daemon-authoritative project wallet while ambient navigation is elsewhere', async () => {
@@ -784,6 +862,12 @@ describe('AvatarMenu', () => {
             expiresAt: null,
             updatedAt: '2026-07-27T00:00:00.000Z',
           },
+          workspaceSnapshot: workspaceSnapshot(
+            'workspace-a',
+            'member-a',
+            'team_max',
+            balance,
+          ),
         }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -800,6 +884,12 @@ describe('AvatarMenu', () => {
             expiresAt: null,
             updatedAt: '2026-07-27T00:00:00.000Z',
           },
+          workspaceSnapshot: workspaceSnapshot(
+            'workspace-b',
+            'member-b',
+            'team_plus',
+            '7.89',
+          ),
         }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -831,6 +921,11 @@ describe('AvatarMenu', () => {
             workspaceId: 'workspace-a',
             workspaceMemberId: 'member-a',
             teamId: 'workspace-a',
+            role: 'owner',
+            permissions: {
+              ...teamMemberWorkspaceContext().permissions,
+              canManageBilling: true,
+            },
           }) as WorkspaceCollabContext & { workspaceType: 'team' },
         },
       },
@@ -842,6 +937,11 @@ describe('AvatarMenu', () => {
     });
     expect(within(dialog).queryByText('$7.89')).toBeNull();
     expect(within(dialog).queryByText('$247.51')).toBeNull();
+    expect(within(dialog).getByText('Max')).toBeTruthy();
+    expect(within(dialog).queryByText('Plus')).toBeNull();
+    expect(within(dialog).queryByRole('link', {
+      name: 'settings.amrUpgrade',
+    })).toBeNull();
     fireEvent.click(wallet);
 
     await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledTimes(1));

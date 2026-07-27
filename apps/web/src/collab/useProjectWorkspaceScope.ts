@@ -12,6 +12,7 @@ const PROJECT_SCOPE_RETRY_MS = 5_000;
 export interface ProjectWorkspaceScopeState {
   loading: boolean;
   scope: ProjectWorkspaceScope | null;
+  failure?: 'unsupported' | 'forbidden' | 'unavailable';
 }
 
 export function projectWorkspaceContext(
@@ -26,6 +27,23 @@ export function projectWorkspaceScopeReady(
   scope: ProjectWorkspaceScope | null | undefined,
 ): boolean {
   return scope?.kind === 'unbound' || scope?.kind === 'personal' || scope?.kind === 'team';
+}
+
+/** AMR must resolve an explicit personal/team billing principal. Unbound,
+ * revoked, loading and directory-outage states all fail closed. */
+export function projectWorkspaceScopeAuthorizesAmr(
+  scope: ProjectWorkspaceScope | null | undefined,
+): boolean {
+  return scope?.kind === 'personal' || scope?.kind === 'team';
+}
+
+class ProjectWorkspaceScopeFetchError extends Error {
+  constructor(
+    readonly failure: NonNullable<ProjectWorkspaceScopeState['failure']>,
+  ) {
+    super(`project workspace scope ${failure}`);
+    this.name = 'ProjectWorkspaceScopeFetchError';
+  }
 }
 
 function validScopeForProject(
@@ -53,7 +71,15 @@ async function fetchProjectWorkspaceScope(
     `/api/projects/${encodeURIComponent(projectId)}/workspace-scope`,
     { cache: 'no-store', signal },
   );
-  if (!response.ok) throw new Error(`project workspace scope ${response.status}`);
+  if (!response.ok) {
+    throw new ProjectWorkspaceScopeFetchError(
+      response.status === 404
+        ? 'unsupported'
+        : response.status === 403
+          ? 'forbidden'
+          : 'unavailable',
+    );
+  }
   const body = (await response.json()) as ProjectWorkspaceScopeResponse;
   if (!body.scope || !validScopeForProject(body.scope, projectId)) {
     throw new Error('project workspace scope identity mismatch');
@@ -135,14 +161,23 @@ export function useProjectWorkspaceScope(projectId: string): ProjectWorkspaceSco
         if (scope.kind === 'unavailable') {
           retryTimer = setTimeout(() => void load(), PROJECT_SCOPE_RETRY_MS);
         }
-      } catch {
+      } catch (error) {
         if (controller.signal.aborted || epoch !== epochRef.current) return;
+        const failure =
+          error instanceof ProjectWorkspaceScopeFetchError
+            ? error.failure
+            : 'unavailable';
         setState({
           loading: false,
           scope: null,
           resolvedRevision: refreshRevision,
+          failure,
         });
-        retryTimer = setTimeout(() => void load(), PROJECT_SCOPE_RETRY_MS);
+        // An old daemon has no endpoint to recover on a timer. Identity-change
+        // and page lifecycle invalidations still revalidate after an upgrade.
+        if (failure !== 'unsupported') {
+          retryTimer = setTimeout(() => void load(), PROJECT_SCOPE_RETRY_MS);
+        }
       }
     };
 
@@ -158,9 +193,13 @@ export function useProjectWorkspaceScope(projectId: string): ProjectWorkspaceSco
   // transition frame: it could briefly enable B's composer with A's wallet.
   if (
     state.resolvedRevision !== refreshRevision ||
-    state.scope?.projectId !== projectId
+    (state.scope !== null && state.scope.projectId !== projectId)
   ) {
     return { loading: true, scope: null };
   }
-  return { loading: state.loading, scope: state.scope };
+  return {
+    loading: state.loading,
+    scope: state.scope,
+    ...(state.failure ? { failure: state.failure } : {}),
+  };
 }

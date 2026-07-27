@@ -29,6 +29,7 @@ import {
   useWorkspaceBillingResponse,
   useWorkspaceContext,
   workspaceBillingBalanceUsd,
+  workspaceBillingSnapshotForContext,
 } from '../collab/useWorkspaceContext';
 import {
   projectWorkspaceContext,
@@ -64,6 +65,13 @@ interface Props {
 
 function displayAgentName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
   return agent.id === 'amr' ? 'Open Design' : agent.name;
+}
+
+function displayAmrPlan(plan: string | null | undefined): string | null {
+  const normalized = plan?.trim().replace(/^team[_-]/i, '') ?? '';
+  return normalized
+    ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
+    : null;
 }
 
 /**
@@ -268,12 +276,22 @@ export function AvatarMenu({
       cancelled = true;
     };
   }, [open, amrAvailable, workspaceContext?.workspaceType]);
-  const amrPlanTrimmed = amrAccount?.loggedIn
-    ? amrAccount.account?.plan?.trim() || ''
-    : '';
-  const amrPlanDisplay = amrPlanTrimmed
-    ? amrPlanTrimmed.charAt(0).toUpperCase() + amrPlanTrimmed.slice(1)
-    : null;
+  const exactWorkspaceSnapshot = workspaceBillingSnapshotForContext(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
+  const scopedPlanId =
+    workspaceContext?.workspaceType === 'team'
+      ? exactWorkspaceSnapshot?.billing.planId?.trim() || null
+      : workspaceContext?.workspaceType === 'personal'
+        ? workspaceBillingResponse?.summary?.membershipTier?.trim() || null
+        : null;
+  const amrPlanId = projectWorkspaceScope
+    ? scopedPlanId
+    : scopedPlanId ?? (amrAccount?.loggedIn
+      ? amrAccount.account?.plan?.trim() || null
+      : null);
+  const amrPlanDisplay = displayAmrPlan(amrPlanId);
   const scopedWorkspaceBalance = formatVelaBalanceUsd(
     workspaceBillingBalanceUsd(workspaceBillingResponse, workspaceContext),
   );
@@ -285,11 +303,13 @@ export function AvatarMenu({
     financialScopeResolved
     ? workspaceContext?.workspaceType === 'team'
       ? scopedWorkspaceBalance
-      : scopedWorkspaceBalance ??
-        formatVelaBalanceUsd(amrAccount.account?.balanceUsd) ??
-        (amrWalletSnapshot?.status === 'available'
-          ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
-          : null)
+      : projectWorkspaceScope
+        ? scopedWorkspaceBalance
+        : scopedWorkspaceBalance ??
+          formatVelaBalanceUsd(amrAccount.account?.balanceUsd) ??
+          (amrWalletSnapshot?.status === 'available'
+            ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
+            : null)
     : null;
   const amrResolvedProfile = amrAccount?.profile ?? amrProfile;
   const financialWorkspaceId =
@@ -309,7 +329,7 @@ export function AvatarMenu({
   // path.
   const amrCanUpgrade =
     !!amrAccount?.loggedIn &&
-    canUpgradeVelaPlan(amrAccount.account?.plan) &&
+    canUpgradeVelaPlan(amrPlanId?.replace(/^team[_-]/i, '')) &&
     Boolean(workspaceContext?.permissions?.canManageBilling) &&
     amrPlansUrl !== null;
   const openAmrTarget = (

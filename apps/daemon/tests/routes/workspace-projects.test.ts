@@ -205,6 +205,44 @@ describe('workspace project routes', () => {
     expect(allB.projects.map((item) => item.id)).not.toContain(projectId);
   });
 
+  it('rejects partial or revoked workspace-aware creates without leaving an unbound project', async () => {
+    const suffix = Date.now();
+    const partialId = `workspace-create-partial-${suffix}`;
+    const partial = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-od-workspace-id': `${workspaceId}-partial`,
+      },
+      body: JSON.stringify({
+        id: partialId,
+        name: 'Must not become unbound',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(partial.status).toBe(400);
+    expect(await fetch(`${baseUrl}/api/projects/${partialId}`).then((response) => response.status))
+      .toBe(404);
+
+    const revokedId = `workspace-create-revoked-${suffix}`;
+    const revoked = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: workspaceHeaders(`${workspaceId}-revoked`, 'member-revoked', {
+        'x-od-workspace-member-status': 'removed',
+      }),
+      body: JSON.stringify({
+        id: revokedId,
+        name: 'Must fail closed',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(revoked.status).toBe(403);
+    expect(await fetch(`${baseUrl}/api/projects/${revokedId}`).then((response) => response.status))
+      .toBe(404);
+  });
+
   it('keeps the persisted workspace binding on the project detail read model', async () => {
     const suffix = Date.now();
     const projectId = `workspace-detail-scope-${suffix}`;

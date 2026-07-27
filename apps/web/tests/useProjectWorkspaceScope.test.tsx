@@ -2,8 +2,12 @@
 
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProjectWorkspaceScopeResponse } from '@open-design/contracts';
 
-import { useProjectWorkspaceScope } from '../src/collab/useProjectWorkspaceScope';
+import {
+  projectWorkspaceScopeAuthorizesAmr,
+  useProjectWorkspaceScope,
+} from '../src/collab/useProjectWorkspaceScope';
 import { WORKSPACE_CONTEXT_REFRESH_EVENT } from '../src/collab/useWorkspaceContext';
 
 function deferred<T>() {
@@ -14,7 +18,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function teamScope(projectId: string, workspaceId: string, memberId: string) {
+function teamScope(
+  projectId: string,
+  workspaceId: string,
+  memberId: string,
+): ProjectWorkspaceScopeResponse {
   return {
     scope: {
       kind: 'team',
@@ -58,6 +66,74 @@ describe('useProjectWorkspaceScope', () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it('distinguishes old-daemon, revoked and directory-outage failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('project-old-daemon')) return new Response('{}', { status: 404 });
+      if (url.includes('project-revoked')) return new Response('{}', { status: 403 });
+      if (url.includes('project-outage')) return new Response('{}', { status: 503 });
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    const oldDaemon = renderHook(() =>
+      useProjectWorkspaceScope('project-old-daemon'),
+    );
+    await waitFor(() => {
+      expect(oldDaemon.result.current).toEqual({
+        loading: false,
+        scope: null,
+        failure: 'unsupported',
+      });
+    });
+    oldDaemon.unmount();
+
+    const revoked = renderHook(() =>
+      useProjectWorkspaceScope('project-revoked'),
+    );
+    await waitFor(() => {
+      expect(revoked.result.current).toEqual({
+        loading: false,
+        scope: null,
+        failure: 'forbidden',
+      });
+    });
+    revoked.unmount();
+
+    const outage = renderHook(() =>
+      useProjectWorkspaceScope('project-outage'),
+    );
+    await waitFor(() => {
+      expect(outage.result.current).toEqual({
+        loading: false,
+        scope: null,
+        failure: 'unavailable',
+      });
+    });
+    outage.unmount();
+  });
+
+  it('authorizes AMR only for explicit personal or team scopes', () => {
+    expect(projectWorkspaceScopeAuthorizesAmr(null)).toBe(false);
+    expect(projectWorkspaceScopeAuthorizesAmr({
+      kind: 'unbound',
+      projectId: 'project-a',
+      workspaceId: null,
+      context: null,
+    })).toBe(false);
+    expect(projectWorkspaceScopeAuthorizesAmr({
+      kind: 'unavailable',
+      projectId: 'project-a',
+      workspaceId: 'workspace-a',
+      visibility: 'personal',
+      context: null,
+    })).toBe(false);
+    expect(
+      projectWorkspaceScopeAuthorizesAmr(
+        teamScope('project-a', 'workspace-a', 'member-a').scope,
+      ),
+    ).toBe(true);
   });
 
   it('drops a late response from the previously open project', async () => {

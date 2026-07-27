@@ -225,7 +225,7 @@ import { useProjectCollab } from '../collab/useProjectCollab';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
 import {
   projectWorkspaceContext,
-  projectWorkspaceScopeReady,
+  projectWorkspaceScopeAuthorizesAmr,
   useProjectWorkspaceScope,
 } from '../collab/useProjectWorkspaceScope';
 import { CollabProvider, type CollabContextValue } from '../collab/collab-context';
@@ -1447,9 +1447,11 @@ export function ProjectView({
   const projectRunWorkspaceContext = projectWorkspaceContext(
     projectWorkspaceScopeState.scope,
   );
-  const projectRunWorkspaceScopeReady = projectWorkspaceScopeReady(
-    projectWorkspaceScopeState.scope,
-  );
+  const projectRunRequiresWorkspaceScope =
+    config.mode === 'daemon' && config.agentId === 'amr';
+  const projectRunWorkspaceScopeReady =
+    !projectRunRequiresWorkspaceScope ||
+    projectWorkspaceScopeAuthorizesAmr(projectWorkspaceScopeState.scope);
   // Onboarding first-generation funnel (spec §11.1). Consume the pending entry
   // (set by the Home recommendation) exactly once on mount; the refs guard the
   // two lifecycle events so each fires only for the genuine first send / first
@@ -5143,9 +5145,10 @@ export function ProjectView({
         attachments.length === 0 &&
         commentAttachments.length === 0
       ) return false;
-      // A bound project must resolve its own persisted workspace membership
-      // before any run can start. Never borrow the ambient navigation
-      // workspace while the exact project scope is loading or unavailable.
+      // AMR must resolve this project's persisted billing principal before a
+      // run can start. Local CLI and BYOK runtimes do not consume the Vela
+      // wallet, so old daemons without this endpoint and directory outages
+      // must not disable those runtimes.
       if (!projectRunWorkspaceScopeReady) return false;
       const effectiveAttachments = mergeChatAttachments(
         attachments,
@@ -5216,6 +5219,8 @@ export function ProjectView({
               ? {
                   workspaceType: projectRunWorkspaceContext.workspaceType,
                   workspaceId: projectRunWorkspaceContext.workspaceId,
+                  workspaceMemberId:
+                    projectRunWorkspaceContext.workspaceMemberId,
                 }
               : undefined,
           );
@@ -5258,6 +5263,10 @@ export function ProjectView({
               snapshot: gate.snapshot,
               conversationId: gateConversationId,
             });
+            parkBlockedSend();
+            return false;
+          }
+          if (gate.kind === 'unavailable') {
             parkBlockedSend();
             return false;
           }

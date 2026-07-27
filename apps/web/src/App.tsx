@@ -125,6 +125,7 @@ import {
   listTemplates,
   deleteTemplate,
   patchProject,
+  resolvedWorkspaceContextForWrite,
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
 import type {
@@ -626,10 +627,16 @@ function AppInner() {
   const iframeKeepAlivePool = useIframeKeepAlivePool();
   const clientType = useMemo(() => detectClientType(), []);
   useModalWindowDragGuard();
-  const { context: workspaceContext, loading: workspaceContextLoading } = useWorkspaceContext();
+  const workspaceContextState = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = workspaceContextState;
   const workspaceBilling = useWorkspaceBilling();
   const workspaceContextRef = useRef<WorkspaceCollabContext | null>(null);
+  const workspaceContextStateRef = useRef(workspaceContextState);
   workspaceContextRef.current = workspaceContext;
+  workspaceContextStateRef.current = workspaceContextState;
   const listCurrentWorkspaceProjects = useCallback(
     (options?: { throwOnError?: boolean; workspaceView?: WorkspaceProjectListView }) => {
       const context = workspaceContextRef.current;
@@ -1983,7 +1990,9 @@ function AppInner() {
             ? { appliedPluginSnapshotId: input.appliedPluginSnapshotId }
             : {}),
           ...(input.pluginInputs ? { pluginInputs: input.pluginInputs } : {}),
-          workspaceContext: workspaceContextRef.current,
+          workspaceContext: resolvedWorkspaceContextForWrite(
+            workspaceContextStateRef.current,
+          ),
         });
       } catch (err) {
         const errorCode =

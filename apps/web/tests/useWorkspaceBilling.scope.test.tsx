@@ -230,6 +230,108 @@ describe('useWorkspaceBilling explicit scope', () => {
     expect(billingCalls.length - beforeAliases).toBe(1);
   });
 
+  it('keeps ambient B and explicit project A as independent daemon interests', async () => {
+    const projectA = teamContext('workspace-a');
+    let ambientBalance = '1.25';
+    const acceptedByClient = new Map<
+      string,
+      { generation: bigint; workspaceId: string }
+    >();
+    const observedClientIds = new Map<string, string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(
+            JSON.stringify({ context: teamContext('workspace-b') }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          const workspaceId = new URL(
+            url,
+            'http://open-design.test',
+          ).searchParams.get('workspaceId')!;
+          const headers = new Headers(init?.headers);
+          const clientId =
+            headers.get('x-od-workspace-runtime-client-id') ?? '';
+          const generation = BigInt(
+            headers.get('x-od-workspace-runtime-generation') ?? '0',
+          );
+          const current = acceptedByClient.get(clientId);
+          if (
+            current &&
+            (
+              generation < current.generation ||
+              (
+                generation === current.generation &&
+                current.workspaceId !== workspaceId
+              )
+            )
+          ) {
+            return new Response(
+              JSON.stringify({ error: 'stale_generation' }),
+              { status: 409, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          acceptedByClient.set(clientId, { generation, workspaceId });
+          observedClientIds.set(workspaceId, clientId);
+          return new Response(
+            JSON.stringify(billingResponse(
+              workspaceId,
+              workspaceId === 'workspace-b' ? ambientBalance : '8.50',
+            )),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => ({
+      ambient: useWorkspaceBillingResponse(),
+      project: useWorkspaceBillingResponse({
+        context: projectA,
+        loading: false,
+        revision: 'project-a',
+      }),
+    }));
+    await waitFor(() => {
+      expect(hook.result.current.ambient?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+      expect(hook.result.current.project?.workspaceBalance?.balanceUsd).toBe(
+        '8.50',
+      );
+    });
+    expect(observedClientIds.get('workspace-a')).toBeTruthy();
+    expect(observedClientIds.get('workspace-b')).toBeTruthy();
+    expect(observedClientIds.get('workspace-a')).not.toBe(
+      observedClientIds.get('workspace-b'),
+    );
+
+    ambientBalance = '3.75';
+    act(() => {
+      for (const source of MockWorkspaceEventSource.instances) {
+        source.dispatch('wallet-balance-changed', {
+          type: 'wallet-balance-changed',
+          workspaceId: 'workspace-b',
+          workspaceMemberId: 'member-workspace-b',
+          revision: 'wallet-b-2',
+        });
+      }
+    });
+    await waitFor(() => {
+      expect(hook.result.current.ambient?.workspaceBalance?.balanceUsd).toBe(
+        '3.75',
+      );
+    });
+    expect(hook.result.current.project?.workspaceBalance?.balanceUsd).toBe(
+      '8.50',
+    );
+  });
+
   it('rejects a late response from the first A after switching A to B to A', async () => {
     let currentContext = teamContext('workspace-a');
     let billingACalls = 0;
@@ -485,10 +587,8 @@ describe('useWorkspaceBilling explicit scope', () => {
     ]);
     expect(runtimeHeaders).toHaveLength(2);
     expect(runtimeHeaders[0]!.clientId).not.toBe('');
-    expect(runtimeHeaders[1]!.clientId).toBe(runtimeHeaders[0]!.clientId);
-    expect(BigInt(runtimeHeaders[1]!.generation)).toBeGreaterThan(
-      BigInt(runtimeHeaders[0]!.generation),
-    );
+    expect(runtimeHeaders[1]!.clientId).not.toBe(runtimeHeaders[0]!.clientId);
+    expect(runtimeHeaders.map((header) => header.generation)).toEqual(['1', '1']);
   });
 
   it('gives each renderer page lifecycle an independent runtime client id', async () => {

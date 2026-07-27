@@ -42,6 +42,7 @@ import {
   listPlugins,
   listPluginsFresh,
   patchProject,
+  resolvedWorkspaceContextForWrite,
   renderPluginBriefTemplate,
   resolvePluginQueryFallback,
 } from '../state/projects';
@@ -405,7 +406,8 @@ export function HomeView({
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceContextState = useWorkspaceContext();
+  const { context: workspaceContext } = workspaceContextState;
   // Team-wide catalog from the resource hub via the daemon; empty off-team / when
   // the hub is unconfigured. Only the creator attribution is derived here — the
   // shared/not-shared answer arrives as `isSharedProject` from EntryShell, which
@@ -1466,6 +1468,7 @@ export function HomeView({
         // agent title arrives — see the matching note in
         // EntryShell.startBlankProjectFromRail.
         metadata: { kind: 'other', nameSource: 'generated' },
+        workspaceContext: resolvedWorkspaceContextForWrite(workspaceContextState),
       });
       onOpenProject(project.id);
     } catch {
@@ -2469,6 +2472,7 @@ export function HomeView({
                   name: 'Imported from Figma',
                   skillId: null,
                   designSystemId: null,
+                  workspaceContext: resolvedWorkspaceContextForWrite(workspaceContextState),
                 });
                 return project.id;
               } catch {
@@ -2491,6 +2495,7 @@ export function HomeView({
                     skillId: null,
                     designSystemId: null,
                     pendingPrompt: reshapePrompt,
+                    workspaceContext: resolvedWorkspaceContextForWrite(workspaceContextState),
                   });
                   setFigmaModalOpen(false);
                   onOpenProject(project.id);

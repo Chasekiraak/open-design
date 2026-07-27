@@ -44,6 +44,25 @@ export type { PluginShareAction } from '@open-design/contracts';
 
 export type WorkspaceProjectListView = 'all' | 'recent' | 'drafts' | 'team';
 
+export type WorkspaceContextForWrite = {
+  context: WorkspaceCollabContext | null;
+  loading: boolean;
+  failure?: 'unsupported' | 'unavailable';
+};
+
+/**
+ * Preserve headerless old-daemon/anonymous compatibility, but never collapse
+ * an unresolved or unavailable modern workspace authority into "anonymous".
+ */
+export function resolvedWorkspaceContextForWrite(
+  state: WorkspaceContextForWrite,
+): WorkspaceCollabContext | null {
+  if (state.loading || state.failure === 'unavailable') {
+    throw new Error('Workspace context is unavailable. Try again when workspace sync finishes.');
+  }
+  return state.context;
+}
+
 export function workspaceProjectHeaders(context: WorkspaceCollabContext): HeadersInit {
   return {
     'x-od-workspace-id': context.workspaceId,

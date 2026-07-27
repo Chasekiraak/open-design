@@ -41,6 +41,36 @@ describe('openDesignAmrTraceEnvForProject', () => {
     expect(fetchWorkspaceDirectory).not.toHaveBeenCalled();
   });
 
+  it('fails closed instead of charging the account wallet for an unbound AMR project', async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-unbound-scope-'));
+    const db = openDatabase(tempDir);
+    const now = Date.now();
+    insertProject(db, {
+      id: 'project-unbound',
+      name: 'Unbound project',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const fetchWorkspaceDirectory = vi.fn(async () => ({
+      ok: true as const,
+      items: [],
+    }));
+
+    await expect(openDesignAmrTraceEnvForProject(db, {
+      agentId: 'amr',
+      runId: 'run-unbound',
+      runAttempt: 0,
+      projectId: 'project-unbound',
+    }, {
+      fetchWorkspaceDirectory,
+    })).rejects.toEqual(expect.objectContaining({
+      name: ProjectWorkspaceScopeUnavailableError.name,
+      projectId: 'project-unbound',
+      workspaceId: null,
+    }));
+    expect(fetchWorkspaceDirectory).not.toHaveBeenCalled();
+  });
+
   it('carries the real SQLite team binding into the final AMR spawn environment', async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-project-scope-'));
     const db = openDatabase(tempDir);

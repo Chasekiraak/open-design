@@ -50,10 +50,15 @@ const workspaceScopeMocks = vi.hoisted(() => ({
   projectScope: {
     loading: false,
     scope: {
-      kind: 'unbound' as const,
+      kind: 'personal' as const,
       projectId: 'project-1',
-      workspaceId: null,
-      context: null,
+      workspaceId: 'workspace-personal',
+      visibility: 'personal' as const,
+      context: {
+        workspaceId: 'workspace-personal',
+        workspaceMemberId: 'member-personal',
+        workspaceType: 'personal',
+      } as WorkspaceCollabContext & { workspaceType: 'personal' },
     },
   } as ProjectWorkspaceScopeState,
 }));
@@ -93,6 +98,9 @@ vi.mock('../../src/collab/useProjectWorkspaceScope', () => ({
       : null,
   projectWorkspaceScopeReady: (scope: ProjectWorkspaceScopeState['scope']) =>
     scope?.kind === 'unbound' || scope?.kind === 'personal' || scope?.kind === 'team',
+  projectWorkspaceScopeAuthorizesAmr: (
+    scope: ProjectWorkspaceScopeState['scope'],
+  ) => scope?.kind === 'personal' || scope?.kind === 'team',
 }));
 
 vi.mock('../../src/providers/daemon', () => ({
@@ -646,10 +654,15 @@ describe('ProjectView conversation run isolation', () => {
     workspaceScopeMocks.projectScope = {
       loading: false,
       scope: {
-        kind: 'unbound',
+        kind: 'personal',
         projectId: project.id,
-        workspaceId: null,
-        context: null,
+        workspaceId: 'workspace-personal',
+        visibility: 'personal',
+        context: {
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
+          workspaceType: 'personal',
+        } as WorkspaceCollabContext & { workspaceType: 'personal' },
       },
     };
     resolveConversationBMessages = null;
@@ -739,6 +752,82 @@ describe('ProjectView conversation run isolation', () => {
         locale: 'zh-CN',
       }),
     );
+  });
+
+  it.each([
+    ['an old daemon', 'unsupported' as const],
+    ['a revoked scope response', 'forbidden' as const],
+    ['a workspace-directory outage', 'unavailable' as const],
+  ])('keeps non-AMR runs available with %s', async (_label, failure) => {
+    conversationAMessages = [];
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: null,
+      failure,
+    };
+
+    renderProjectView();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('send-message')).toHaveProperty(
+        'disabled',
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('send-message'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    [
+      'an unbound project',
+      {
+        loading: false,
+        scope: {
+          kind: 'unbound' as const,
+          projectId: project.id,
+          workspaceId: null,
+          context: null,
+        },
+      },
+    ],
+    [
+      'an old daemon',
+      { loading: false, scope: null, failure: 'unsupported' as const },
+    ],
+    [
+      'a workspace-directory outage',
+      { loading: false, scope: null, failure: 'unavailable' as const },
+    ],
+  ])('fails closed for AMR with %s', async (_label, projectScope) => {
+    conversationAMessages = [];
+    workspaceScopeMocks.projectScope = projectScope;
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      project,
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    expect(screen.getByTestId('send-message')).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByTestId('send-message'));
+    expect(streamViaDaemon).not.toHaveBeenCalled();
   });
 
   it('uses the project-bound workspace instead of the ambient workspace for run authorization', async () => {

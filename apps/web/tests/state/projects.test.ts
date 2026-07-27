@@ -16,6 +16,7 @@ import {
   patchProject,
   pickLocalFolderPath,
   publishGeneratedPluginToGitHub,
+  resolvedWorkspaceContextForWrite,
 } from '../../src/state/projects';
 import {
   buildWorkspacePermissions,
@@ -258,6 +259,61 @@ describe('createProject', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+  });
+
+  it('attaches the resolved workspace and member identity to project creation', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'scoped-project' },
+        conversationId: 'scoped-conversation',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createProject({
+      name: 'Scoped project',
+      skillId: null,
+      designSystemId: null,
+      workspaceContext: teamWorkspaceContext(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-team',
+          'x-od-workspace-member-id': 'wm-1',
+          'x-od-workspace-type': 'team',
+        }),
+      }),
+    );
+  });
+
+  it('fails closed while modern workspace authority is unresolved or unavailable', () => {
+    expect(() => resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: true,
+    })).toThrow('Workspace context is unavailable');
+
+    expect(() => resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+      failure: 'unavailable',
+    })).toThrow('Workspace context is unavailable');
+  });
+
+  it('preserves explicit anonymous and old-daemon headerless compatibility', () => {
+    expect(resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+    })).toBeNull();
+    expect(resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+      failure: 'unsupported',
+    })).toBeNull();
   });
 });
 

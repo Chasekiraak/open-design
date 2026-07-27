@@ -87,6 +87,10 @@ import {
 } from '../../collab/workspace-resource-mutation.js';
 import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
 import { resolveProjectWorkspaceScope } from '../../collab/project-workspace-scope.js';
+import {
+  bindCreatedProjectToWorkspace,
+  resolveCreatedProjectWorkspace,
+} from '../../collab/created-project-workspace.js';
 import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
@@ -2725,6 +2729,15 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
 
   app.post('/api/projects', async (req, res) => {
     try {
+      const createWorkspace = resolveCreatedProjectWorkspace(req);
+      if (!createWorkspace.ok) {
+        return sendApiError(
+          res,
+          createWorkspace.status,
+          createWorkspace.code,
+          createWorkspace.message,
+        );
+      }
       const { id, name, projectLocationId, skillId, designSystemId, pendingPrompt, metadata, customInstructions, skipDiscoveryBrief } =
         req.body || {};
       if (typeof id !== 'string' || !isSafeId(id)) {
@@ -2910,25 +2923,12 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         createdAt: now,
         updatedAt: now,
       });
-      const workspaceIdForCreate = headerValue(req, 'x-od-workspace-id');
-      const createWorkspaceContext = workspaceIdForCreate
-        ? workspaceProjectContext(req, workspaceIdForCreate)
-        : null;
-      if (createWorkspaceContext && createWorkspaceContext.memberStatus === 'active') {
-        ensureWorkspaceProject(db, {
-          projectId: id,
-          workspaceId: createWorkspaceContext.workspaceId,
-          visibility: 'personal',
-          resourceState: 'active',
-          createdByWorkspaceMemberId: createWorkspaceContext.workspaceMemberId,
-          updatedByWorkspaceMemberId: createWorkspaceContext.workspaceMemberId,
-          syncState: 'local_only',
-          resourceHubResourceId: null,
-          cloudTombstonedAt: null,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
+      bindCreatedProjectToWorkspace(
+        (input) => ensureWorkspaceProject(db, input),
+        createWorkspace.context,
+        id,
+        now,
+      );
       const explicitPlugin =
         typeof req.body?.pluginId === 'string' && req.body.pluginId.trim().length > 0
           ? true
