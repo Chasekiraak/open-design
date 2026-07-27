@@ -1569,6 +1569,11 @@ export function EntryShell({
                   seedHomeComposerPrompt(prompt);
                   changeView('home');
                 }}
+                // The gallery card's full details modal routes Use through the
+                // same Home hand-off the plugin library uses, so the plugin
+                // becomes the composer's active driver instead of only seeding
+                // prompt text.
+                onUsePlugin={usePluginFromLibrary}
               />
             ) : null}
             {/* Team destinations — the entry shell owns the nav frame only; each

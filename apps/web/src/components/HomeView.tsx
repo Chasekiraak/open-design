@@ -102,6 +102,12 @@ import {
   type HomePromptHandoff,
 } from './home-hero/plugin-authoring';
 import { PluginDetailsModal } from './PluginDetailsModal';
+import {
+  buildCommunityTemplates,
+  copyTemplatePrompt,
+  isPromptArtifact,
+  TemplatePreviewModal,
+} from './CommunityTemplatePreview';
 import { SkillDetailsModal } from './SkillDetailsModal';
 import type { PluginLoopSubmit } from './PluginLoopHome';
 import { localizePluginTitle } from './plugins-home/localization';
@@ -593,6 +599,26 @@ export function HomeView({
   const [elevenLabsVoicesLoaded, setElevenLabsVoicesLoaded] = useState(false);
   const [elevenLabsVoicesError, setElevenLabsVoicesError] = useState<string | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<InstalledPluginRecord | null>(null);
+  // 飞书 recvqxDuYM6Uxk: the creation page's template detail entries (the
+  // active plugin chip, the @-mention hover card's Details) open the
+  // LIGHTWEIGHT community template preview — header title/category + close,
+  // footer category + Remix — for records that project into the template
+  // catalogue. Plugins outside that projection (design systems, utilities)
+  // keep the full PluginDetailsModal. The Community gallery card owns the
+  // full modal now, so the two surfaces are swapped, not duplicated.
+  const detailsTemplate = useMemo(() => {
+    if (!detailsRecord) return null;
+    return (
+      buildCommunityTemplates(plugins, locale, t)
+        .find((template) => template.id === detailsRecord.id) ?? null
+    );
+  }, [detailsRecord, plugins, locale, t]);
+  // Same synchronous single-flight gate the Community remix path uses: the
+  // lightweight preview's Remix kicks off one project create; clicks landing
+  // before React re-renders must all see the lock immediately, so a plain
+  // state flag is not enough (see CommunityView's remixingIdRef note).
+  const templateRemixInFlightRef = useRef(false);
+  const [templateRemixBusy, setTemplateRemixBusy] = useState(false);
   const [detailsSkill, setDetailsSkill] = useState<SkillSummary | null>(null);
   const [pendingReplacement, setPendingReplacement] = useState<PendingReplacement | null>(null);
   // Surface_view fires when the replacement modal becomes visible. Tied
@@ -2411,7 +2437,42 @@ export function HomeView({
       )}
 
       <AnimatePresence>
-        {detailsRecord ? (
+        {detailsRecord && detailsTemplate ? (
+          <TemplatePreviewModal
+            template={detailsTemplate}
+            onClose={() => {
+              // Same dismissal funnel as the full modal below — close button,
+              // Esc-less backdrop mousedown — so the analytics area stays one.
+              trackPluginDetailModalClick(analytics.track, {
+                page_name: 'home',
+                area: 'plugin_detail_modal',
+                element: 'close',
+                plugin_id: detailsRecord.sourceMarketplaceEntryName ?? detailsRecord.id,
+                plugin_type: detailsRecord.marketplaceTrust ?? 'official',
+              });
+              setDetailsRecord(null);
+            }}
+            onUse={() => {
+              // Footer action mirrors the community lightweight preview:
+              // prompt artifacts copy their seed prompt; template artifacts
+              // Remix — here that is the creation page's existing Remix
+              // semantic, duplicating the example as a project — behind a
+              // synchronous single-flight gate (see templateRemixInFlightRef).
+              if (isPromptArtifact(detailsTemplate)) {
+                void copyTemplatePrompt(detailsTemplate);
+                return;
+              }
+              if (templateRemixInFlightRef.current) return;
+              templateRemixInFlightRef.current = true;
+              setTemplateRemixBusy(true);
+              void duplicateExamplePlugin(detailsRecord).finally(() => {
+                templateRemixInFlightRef.current = false;
+                setTemplateRemixBusy(false);
+              });
+            }}
+            busy={templateRemixBusy}
+          />
+        ) : detailsRecord ? (
           <PluginDetailsModal
             record={detailsRecord}
             onClose={() => {
