@@ -14,7 +14,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
@@ -41,10 +41,9 @@ import {
   type LauncherRuntimeDescriptor,
 } from "@open-design/launcher-proto";
 import {
-  DESKTOP_UPDATE_CHANNELS,
+  DESKTOP_UPDATE_ACTIONS,
   DESKTOP_UPDATE_MODES,
   DESKTOP_UPDATE_STATES,
-  SIDECAR_SOURCES,
   type DesktopUpdateAction,
   type DesktopUpdateArtifactSnapshot,
   type DesktopUpdateCacheLifecycleSummary,
@@ -60,108 +59,88 @@ import {
   type DesktopUpdateState,
   type SidecarSource,
 } from "@open-design/sidecar-proto";
-import { releaseChannelFromVersion } from "@open-design/release";
-
 import {
   markInstallerObservationOpenFailed,
   writePendingInstallerObservation,
   type InstallerObservationArtifactType,
   type InstallerObservationHandle,
 } from "./installer-observations.js";
+import {
+  capabilitiesFor,
+  isDesktopUpdateChannel,
+  isSupportedPackageLauncherPlatform,
+  normalizeDownloadRoot,
+  resolveDesktopUpdaterConfig,
+  type DesktopUpdaterConfig,
+  type DesktopUpdaterConfigInput,
+} from "./updater/config.js";
 
-export const DESKTOP_UPDATE_ENV = Object.freeze({
-  ARCH: "OD_UPDATE_ARCH",
-  AUTO_CHECK: "OD_UPDATE_AUTO_CHECK",
-  AUTO_DOWNLOAD: "OD_UPDATE_AUTO_DOWNLOAD",
-  AUTO_OPEN: "OD_UPDATE_AUTO_OPEN",
-  CHECK_BACKOFF_INITIAL_MS: "OD_UPDATE_CHECK_BACKOFF_INITIAL_MS",
-  CHECK_BACKOFF_MAX_MS: "OD_UPDATE_CHECK_BACKOFF_MAX_MS",
-  CHECK_INITIAL_DELAY_MS: "OD_UPDATE_CHECK_INITIAL_DELAY_MS",
-  CHECK_INTERVAL_MS: "OD_UPDATE_CHECK_INTERVAL_MS",
-  CHANNEL: "OD_UPDATE_CHANNEL",
-  CURRENT_VERSION: "OD_UPDATE_CURRENT_VERSION",
-  DOWNLOAD_ROOT: "OD_UPDATE_DOWNLOAD_ROOT",
-  ENABLED: "OD_UPDATE_ENABLED",
-  INSTALLED_VERSION: "OD_UPDATE_INSTALLED_VERSION",
-  METADATA_URL: "OD_UPDATE_METADATA_URL",
-  MODE: "OD_UPDATE_MODE",
-  OPEN_DRY_RUN: "OD_UPDATE_OPEN_DRY_RUN",
-  PLATFORM: "OD_UPDATE_PLATFORM",
-} as const);
+export {
+  DESKTOP_UPDATE_ENV,
+  resolveDesktopUpdaterConfig,
+  type DesktopUpdaterConfig,
+  type DesktopUpdaterConfigInput,
+} from "./updater/config.js";
+export {
+  createDesktopUpdaterScheduler,
+  type DesktopUpdaterScheduler,
+} from "./updater/scheduler.js";
+import {
+  containsPath,
+  createError,
+  isRecord,
+  objectField,
+  readJson,
+  readJsonStrict,
+  stringField,
+  writeJson,
+} from "./updater/support.js";
+import {
+  artifactFileName,
+  checksumMatchesCandidate,
+  compareVersions,
+  fetchJson,
+  hasValidLauncherPayloadContext,
+  releaseKey,
+  releaseMatchesCandidate,
+  releaseVersionForChannel,
+  remoteRequiresReinstall,
+  resolveChecksum,
+  resolveInstalledOuterVersion,
+  selectUpdateCandidateWithFallback,
+  type UpdateCandidate,
+} from "./updater/feed.js";
 
-const DEFAULT_RELEASE_ORIGIN = "https://releases.open-design.ai";
-const OWNERSHIP_SENTINEL = ".open-design-updater-root.json";
-const STORE_METADATA_FILE = "metadata.json";
-const RELEASES_DIR = "releases";
-const STAGING_DIR = "staging";
-const DOWNLOADS_DIR = "downloads";
-const BACK_DIR = ".back";
-const HELPERS_DIR = "helpers";
-const STATE_DIR = "state";
-const CLEANUP_METADATA_FILE = "cleanup.json";
-const LOCK_DIR = "lock";
-const LOCK_OWNER_FILE = "owner.json";
-const UPDATE_ROOT_VERSION = 1;
-const STORE_METADATA_VERSION = 1;
+export { compareVersions, remoteRequiresReinstall, resolveInstalledOuterVersion } from "./updater/feed.js";
+import {
+  BACK_DIR,
+  DOWNLOADS_DIR,
+  HELPERS_DIR,
+  LOCK_OWNER_FILE,
+  RELEASES_DIR,
+  STAGING_DIR,
+  STORE_METADATA_FILE,
+  STORE_METADATA_VERSION,
+  ensureOwnedSubdir,
+  ensureOwnedUpdateRoot,
+  isResolvedChecksumSnapshot,
+  isUpdateStoreMetadata,
+  logStoreError,
+  rebuildOwnedUpdateRootForManualClear,
+  storeShapeError,
+  type DesktopUpdaterStoreLayout,
+  type IncomingRef,
+  type OwnedRoot,
+  type ResolvedChecksumSnapshot,
+  type UpdateReleaseRef,
+  type UpdateStoreMetadata,
+} from "./updater/store.js";
+
 const RELEASE_CLEANUP_DESCRIPTOR_VERSION = 1;
-const BETA_POLL_INTERVAL_MS = 15 * 60 * 1000;
-const STABLE_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const DEFAULT_POLL_INITIAL_DELAY_MS = 5000;
-const DEFAULT_POLL_BACKOFF_INITIAL_MS = 60 * 1000;
-const DEFAULT_POLL_BACKOFF_MAX_MS = 30 * 60 * 1000;
-const MIN_SCHEDULED_POLL_DELAY_MS = 1000;
-const MAC_DEFERRED_INSTALLER_TIMEOUT_MS = 10 * 60 * 1000;
-const WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFERRED_INSTALLER_TIMEOUT_MS = 10 * 60 * 1000;
 const ARTIFACT_DOWNLOAD_MAX_ATTEMPTS = 3;
-const DESKTOP_UPDATE_CHANNEL_VALUES = new Set<string>(Object.values(DESKTOP_UPDATE_CHANNELS));
 const execFileAsync = promisify(execFile);
 const MAC_PAYLOAD_XATTRS_TO_SCRUB = ["com.apple.quarantine", "com.apple.provenance", "com.apple.macl"] as const;
-
-export type DesktopUpdaterConfigInput = {
-  appVersion?: string | null;
-  arch?: string;
-  currentVersion?: string | null;
-  downloadRoot?: string | null;
-  env?: NodeJS.ProcessEnv;
-  launcherLaunchPath?: string | null;
-  launcherRoot?: string | null;
-  launcherPayloadExtractorPath?: string | null;
-  installerObservationRoot?: string | null;
-  launcherRuntimePath?: string | null;
-  mode?: DesktopUpdateMode;
-  namespace?: string | null;
-  platform?: string;
-  runtimeBase?: string | null;
-  source: SidecarSource;
-};
-
-export type DesktopUpdaterConfig = {
-  arch: string;
-  autoCheck: boolean;
-  autoDownload: boolean;
-  autoOpen: boolean;
-  checkBackoffInitialMs: number;
-  checkBackoffMaxMs: number;
-  checkInitialDelayMs: number;
-  checkIntervalMs: number;
-  channel: DesktopUpdateChannel;
-  currentVersion: string;
-  downloadRoot: string;
-  enabled: boolean;
-  installedVersionOverride?: string;
-  installerObservationRoot?: string;
-  launcherLaunchPath?: string;
-  launcherRoot?: string;
-  launcherPayloadExtractorPath?: string;
-  launcherRuntimePath?: string;
-  metadataUrl: string;
-  mode: DesktopUpdateMode;
-  namespace?: string;
-  openDryRun: boolean;
-  platform: string;
-  runtimeBase: string;
-  source: SidecarSource;
-};
 
 export type DesktopUpdaterDeps = {
   extractLauncherPayloadArchive?: (input: LauncherPayloadExtractInput) => Promise<void>;
@@ -184,7 +163,7 @@ export type LauncherPayloadExtractInput = {
   platform: string;
 };
 
-type DesktopUpdaterLogger = Pick<Console, "error" | "warn"> & Partial<Pick<Console, "info">>;
+export type DesktopUpdaterLogger = Pick<Console, "error" | "warn"> & Partial<Pick<Console, "info">>;
 type DetachedProcess = Pick<ReturnType<typeof spawn>, "once" | "unref">;
 type LauncherPayloadCleanupTrigger = "activate" | "manual-clear" | "prepare-existing" | "prepare-promoted";
 type LauncherPayloadCleanupFailure = {
@@ -226,78 +205,13 @@ export type DeferredLaunchResult = {
   helperLogPath?: string;
 };
 
-type UpdateCandidate = {
-  arch: string;
-  artifact: DesktopUpdateArtifactSnapshot;
-  checksum: DesktopUpdateChecksumSnapshot;
-  channel: DesktopUpdateChannel;
-  metadata: Record<string, unknown>;
-  platformKey: string;
-  version: string;
-};
-
-type UpdateReleaseRef = {
-  arch: string;
-  artifact: DesktopUpdateArtifactSnapshot;
-  artifactPath: string;
-  checksum: DesktopUpdateChecksumSnapshot;
-  checksumPath: string;
-  channel: DesktopUpdateChannel;
-  downloadedAt: string;
-  key: string;
-  metadata: Record<string, unknown>;
-  metadataPath: string;
-  platformKey: string;
-  version: string;
-};
-
-type IncomingRef = {
-  arch: string;
-  artifact: DesktopUpdateArtifactSnapshot;
-  channel: DesktopUpdateChannel;
-  cycleId: string;
-  metadata: Record<string, unknown>;
-  platformKey: string;
-  startedAt: string;
-  version: string;
-};
-
-type UpdateStoreMetadata = {
-  active?: UpdateReleaseRef;
-  incoming?: IncomingRef;
-  installFrozen?: boolean;
-  installResult?: DesktopUpdateStatusSnapshot["installResult"];
-  lastCheckedAt?: string;
-  version: typeof STORE_METADATA_VERSION;
-};
-
 type LoadedRelease = {
   path: string;
   ref: UpdateReleaseRef;
 };
 
-type ResolvedChecksumSnapshot = DesktopUpdateChecksumSnapshot & { value: string };
-
-type OwnedRoot =
-  | { layout: DesktopUpdaterStoreLayout; metadataPath: string; ok: true; realRoot: string }
-  | { error: DesktopUpdateErrorSnapshot; ok: false };
-
 type ActionOptions = {
   autoDownload?: boolean;
-};
-
-type DesktopUpdaterStoreLayout = {
-  backRoot: string;
-  cleanupPath: string;
-  downloadsRoot: string;
-  helpersRoot: string;
-  lockRoot: string;
-  metadataPath: string;
-  ownershipSentinelPath: string;
-  releasesRoot: string;
-  root: string;
-  stagingRoot: string;
-  stateRoot: string;
 };
 
 type ReleaseCleanupReason =
@@ -354,872 +268,9 @@ export type DesktopUpdater = {
   subscribe(listener: () => void): () => void;
 };
 
-export type DesktopUpdaterScheduler = {
-  isRunning(): boolean;
-  start(): void;
-  stop(reason?: string): void;
-};
-
-type StartupSilentPayloadUpdateOptions = {
-  isEnabled(): Promise<boolean>;
-  requestQuit(): void;
-};
-
-function isTruthyEnv(value: string | undefined): boolean | null {
-  if (value == null || value.length === 0) return null;
-  if (value === "1" || value === "true" || value === "yes") return true;
-  if (value === "0" || value === "false" || value === "no") return false;
-  throw new Error(`boolean env value must be one of 1/0/true/false/yes/no, got ${value}`);
-}
-
-function normalizeMode(value: string | undefined, fallback: DesktopUpdateMode): DesktopUpdateMode {
-  if (value == null || value.length === 0) return fallback;
-  if (value === DESKTOP_UPDATE_MODES.PACKAGE_LAUNCHER || value === DESKTOP_UPDATE_MODES.JS_INCREMENTAL) return value;
-  throw new Error(`unsupported desktop update mode: ${value}`);
-}
-
-function normalizeChannel(value: string | undefined, fallback: DesktopUpdateChannel): DesktopUpdateChannel {
-  if (value == null || value.length === 0) return fallback;
-  if (isDesktopUpdateChannel(value)) return value;
-  throw new Error(`unsupported desktop update channel: ${value}`);
-}
-
-function isDesktopUpdateChannel(value: unknown): value is DesktopUpdateChannel {
-  return typeof value === "string" && DESKTOP_UPDATE_CHANNEL_VALUES.has(value);
-}
-
-function defaultMetadataUrl(channel: DesktopUpdateChannel): string {
-  return `${DEFAULT_RELEASE_ORIGIN}/${channel}/latest/metadata.json`;
-}
-
-function normalizeDownloadRoot(value: string): string {
-  if (value.includes("\0")) throw new Error("update download root must not contain null bytes");
-  if (!isAbsolute(value)) throw new Error(`update download root must be absolute: ${value}`);
-  return resolve(value);
-}
-
-function normalizeOptionalRoot(value: string | null | undefined, label: string): string | undefined {
-  if (value == null || value.length === 0) return undefined;
-  if (value.includes("\0")) throw new Error(`${label} must not contain null bytes`);
-  if (!isAbsolute(value)) throw new Error(`${label} must be absolute: ${value}`);
-  return resolve(value);
-}
-
-function normalizeOptionalNonEmpty(value: string | null | undefined): string | undefined {
-  if (value == null) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
-}
-
-function durationEnv(value: string | undefined, fallback: number, name: string): number {
-  if (value == null || value.length === 0) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative number of milliseconds`);
-  return parsed;
-}
-
-function positiveDurationEnv(value: string | undefined, fallback: number, name: string): number {
-  const parsed = durationEnv(value, fallback, name);
-  if (parsed === 0) throw new Error(`${name} must be greater than 0 milliseconds`);
-  return parsed;
-}
-
-function defaultPollIntervalMs(channel: DesktopUpdateChannel): number {
-  return channel === DESKTOP_UPDATE_CHANNELS.STABLE ? STABLE_POLL_INTERVAL_MS : BETA_POLL_INTERVAL_MS;
-}
-
-export function resolveDesktopUpdaterConfig(input: DesktopUpdaterConfigInput): DesktopUpdaterConfig {
-  const env = input.env ?? process.env;
-  const mode = normalizeMode(env[DESKTOP_UPDATE_ENV.MODE], input.mode ?? DESKTOP_UPDATE_MODES.PACKAGE_LAUNCHER);
-  const defaultEnabled = input.source === SIDECAR_SOURCES.PACKAGED;
-  const enabled = isTruthyEnv(env[DESKTOP_UPDATE_ENV.ENABLED]) ?? defaultEnabled;
-  const runtimeBase = resolve(input.runtimeBase == null ? process.cwd() : input.runtimeBase);
-  const downloadRoot = normalizeDownloadRoot(
-    env[DESKTOP_UPDATE_ENV.DOWNLOAD_ROOT] ??
-      input.downloadRoot ??
-      join(resolve(runtimeBase), "updates"),
-  );
-  const currentVersion =
-    env[DESKTOP_UPDATE_ENV.CURRENT_VERSION] ??
-    input.currentVersion ??
-    input.appVersion ??
-    "0.0.0";
-  const channel = normalizeChannel(env[DESKTOP_UPDATE_ENV.CHANNEL], defaultChannelForVersion(currentVersion));
-  const installedVersionOverride = normalizeOptionalNonEmpty(env[DESKTOP_UPDATE_ENV.INSTALLED_VERSION]);
-  const installerObservationRoot = normalizeOptionalRoot(input.installerObservationRoot, "installer observation root");
-  const launcherLaunchPath = normalizeOptionalNonEmpty(input.launcherLaunchPath);
-  const launcherRoot = normalizeOptionalRoot(input.launcherRoot, "launcher root");
-  const launcherPayloadExtractorPath = normalizeOptionalRoot(input.launcherPayloadExtractorPath, "launcher payload extractor path");
-  const launcherRuntimePath = normalizeOptionalRoot(input.launcherRuntimePath, "launcher runtime path");
-  const namespace = normalizeOptionalNonEmpty(input.namespace);
-
-  return {
-    arch: env[DESKTOP_UPDATE_ENV.ARCH] ?? input.arch ?? process.arch,
-    autoCheck: isTruthyEnv(env[DESKTOP_UPDATE_ENV.AUTO_CHECK]) ?? enabled,
-    autoDownload: isTruthyEnv(env[DESKTOP_UPDATE_ENV.AUTO_DOWNLOAD]) ?? true,
-    autoOpen: isTruthyEnv(env[DESKTOP_UPDATE_ENV.AUTO_OPEN]) ?? false,
-    checkBackoffInitialMs: positiveDurationEnv(
-      env[DESKTOP_UPDATE_ENV.CHECK_BACKOFF_INITIAL_MS],
-      DEFAULT_POLL_BACKOFF_INITIAL_MS,
-      DESKTOP_UPDATE_ENV.CHECK_BACKOFF_INITIAL_MS,
-    ),
-    checkBackoffMaxMs: positiveDurationEnv(
-      env[DESKTOP_UPDATE_ENV.CHECK_BACKOFF_MAX_MS],
-      DEFAULT_POLL_BACKOFF_MAX_MS,
-      DESKTOP_UPDATE_ENV.CHECK_BACKOFF_MAX_MS,
-    ),
-    checkInitialDelayMs: durationEnv(
-      env[DESKTOP_UPDATE_ENV.CHECK_INITIAL_DELAY_MS],
-      DEFAULT_POLL_INITIAL_DELAY_MS,
-      DESKTOP_UPDATE_ENV.CHECK_INITIAL_DELAY_MS,
-    ),
-    checkIntervalMs: positiveDurationEnv(
-      env[DESKTOP_UPDATE_ENV.CHECK_INTERVAL_MS],
-      defaultPollIntervalMs(channel),
-      DESKTOP_UPDATE_ENV.CHECK_INTERVAL_MS,
-    ),
-    channel,
-    currentVersion,
-    downloadRoot,
-    enabled,
-    ...(installedVersionOverride == null ? {} : { installedVersionOverride }),
-    ...(installerObservationRoot == null ? {} : { installerObservationRoot }),
-    ...(launcherLaunchPath == null ? {} : { launcherLaunchPath }),
-    ...(launcherRoot == null ? {} : { launcherRoot }),
-    ...(launcherPayloadExtractorPath == null ? {} : { launcherPayloadExtractorPath }),
-    ...(launcherRuntimePath == null ? {} : { launcherRuntimePath }),
-    metadataUrl: env[DESKTOP_UPDATE_ENV.METADATA_URL] ?? defaultMetadataUrl(channel),
-    mode,
-    ...(namespace == null ? {} : { namespace }),
-    openDryRun: isTruthyEnv(env[DESKTOP_UPDATE_ENV.OPEN_DRY_RUN]) ?? false,
-    platform: env[DESKTOP_UPDATE_ENV.PLATFORM] ?? input.platform ?? process.platform,
-    runtimeBase,
-    source: input.source,
-  };
-}
-
-function isSupportedPackageLauncherPlatform(platform: string): boolean {
-  return platform === "darwin" || platform === "win32";
-}
-
-function capabilitiesFor(status: { artifactType?: string; mode: DesktopUpdateMode; platform: string; supported: boolean }) {
-  const packageLauncher =
-    status.mode === DESKTOP_UPDATE_MODES.PACKAGE_LAUNCHER &&
-    isSupportedPackageLauncherPlatform(status.platform) &&
-    status.supported;
-  const payloadUpdate = status.artifactType === "payload";
-  const hasSelectedArtifact = status.artifactType != null && status.artifactType.length > 0;
-  const manualInstaller = packageLauncher && (!hasSelectedArtifact || !payloadUpdate);
-  return {
-    canApplyInPlace: packageLauncher && payloadUpdate,
-    canDownload: packageLauncher,
-    canOpenInstaller: manualInstaller,
-    requiresManualInstall: manualInstaller,
-  };
-}
-
-function createError(code: string, message: string, details?: unknown): DesktopUpdateErrorSnapshot {
-  return {
-    code,
-    ...(details === undefined ? {} : { details }),
-    message,
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value != null && !Array.isArray(value);
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | null {
-  const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function numberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function objectField(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
-  const value = record[key];
-  return isRecord(value) ? value : null;
-}
-
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "update";
-}
-
-function extensionForArtifact(name: string | undefined, type: string): string {
-  const ext = name == null ? "" : extname(name).toLowerCase();
-  if (ext === ".7z" || ext === ".dmg" || ext === ".zip" || ext === ".exe" || ext === ".appimage") return ext;
-  if (type === "dmg") return ".dmg";
-  if (type === "zip") return ".zip";
-  if (type === "installer") return ".exe";
-  return ".bin";
-}
-
-function artifactFileName(candidate: UpdateCandidate): string {
-  const ext = extensionForArtifact(candidate.artifact.name, candidate.artifact.type ?? "artifact");
-  return [
-    "open-design",
-    sanitizePathSegment(candidate.version),
-    sanitizePathSegment(candidate.platformKey),
-    sanitizePathSegment(candidate.arch),
-    sanitizePathSegment(candidate.artifact.type ?? "artifact"),
-  ].join("-") + ext;
-}
-
-function releaseKey(candidate: UpdateCandidate, checksum: DesktopUpdateChecksumSnapshot): string {
-  const digest = checksum.value == null ? checksum.url ?? candidate.artifact.url : checksum.value;
-  return [
-    sanitizePathSegment(candidate.version),
-    sanitizePathSegment(candidate.platformKey),
-    sanitizePathSegment(candidate.arch),
-    sanitizePathSegment(createHash("sha256").update(digest).digest("hex").slice(0, 12)),
-  ].join("-");
-}
-
-function releaseMatchesCandidate(
-  saved: UpdateReleaseRef,
-  candidate: UpdateCandidate,
-): boolean {
-  if (saved.channel !== candidate.channel) return false;
-  if (saved.platformKey !== candidate.platformKey) return false;
-  if (saved.arch !== candidate.arch) return false;
-  if (saved.version !== candidate.version) return false;
-  if (saved.artifact.url !== candidate.artifact.url) return false;
-  if (saved.checksum.algorithm !== candidate.checksum.algorithm) return false;
-  if (candidate.checksum.url != null && saved.checksum.url !== candidate.checksum.url) return false;
-  if (candidate.checksum.value != null && saved.checksum.value !== candidate.checksum.value) return false;
-  return true;
-}
-
-function containsPath(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return rel === "" || (rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel));
-}
-
-function resolveDesktopUpdaterStoreLayout(root: string): DesktopUpdaterStoreLayout {
-  const realRoot = resolve(root);
-  const stateRoot = join(realRoot, STATE_DIR);
-  return {
-    backRoot: join(realRoot, BACK_DIR),
-    cleanupPath: join(stateRoot, CLEANUP_METADATA_FILE),
-    downloadsRoot: join(realRoot, DOWNLOADS_DIR),
-    helpersRoot: join(realRoot, HELPERS_DIR),
-    lockRoot: join(stateRoot, LOCK_DIR),
-    metadataPath: join(realRoot, STORE_METADATA_FILE),
-    ownershipSentinelPath: join(realRoot, OWNERSHIP_SENTINEL),
-    releasesRoot: join(realRoot, RELEASES_DIR),
-    root: realRoot,
-    stagingRoot: join(realRoot, STAGING_DIR),
-    stateRoot,
-  };
-}
-
-function rootEntryForPath(layout: DesktopUpdaterStoreLayout, path: string): string {
-  return relative(layout.root, path).split(/[\\/]/)[0] ?? "";
-}
-
-function rootEntriesForLayout(layout: DesktopUpdaterStoreLayout): Set<string> {
-  return new Set([
-    rootEntryForPath(layout, layout.backRoot),
-    rootEntryForPath(layout, layout.downloadsRoot),
-    rootEntryForPath(layout, layout.helpersRoot),
-    rootEntryForPath(layout, layout.ownershipSentinelPath),
-    rootEntryForPath(layout, layout.releasesRoot),
-    rootEntryForPath(layout, layout.stagingRoot),
-    rootEntryForPath(layout, layout.stateRoot),
-    rootEntryForPath(layout, layout.metadataPath),
-  ]);
-}
-
-async function writeJson(path: string, payload: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(tmp, path);
-}
-
-async function readJson<T>(path: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function readJsonStrict<T>(path: string): Promise<T> {
-  return JSON.parse(await readFile(path, "utf8")) as T;
-}
-
-async function directoryIsEmpty(path: string): Promise<boolean> {
-  const entries = await readdir(path);
-  return entries.length === 0;
-}
-
-function storeShapeError(root: string, message: string, details?: unknown): DesktopUpdateErrorSnapshot {
-  return createError("update-store-invalid-shape", message, {
-    root,
-    ...(details === undefined ? {} : { details }),
-  });
-}
-
-function logStoreError(logger: DesktopUpdaterLogger, error: DesktopUpdateErrorSnapshot): void {
-  logger.error("[open-design updater] invalid update store", error);
-}
-
-function isAllowedRootEntry(layout: DesktopUpdaterStoreLayout, name: string): boolean {
-  return rootEntriesForLayout(layout).has(name);
-}
-
-function isUpdateStoreMetadata(value: unknown): value is UpdateStoreMetadata {
-  if (!isRecord(value) || value.version !== STORE_METADATA_VERSION) return false;
-  if (value.active != null && !isUpdateReleaseRef(value.active)) return false;
-  if (value.incoming != null && !isIncomingRef(value.incoming)) return false;
-  if (value.installFrozen != null && typeof value.installFrozen !== "boolean") return false;
-  if (value.installResult != null && !isInstallResult(value.installResult)) return false;
-  if (value.lastCheckedAt != null && typeof value.lastCheckedAt !== "string") return false;
-  return true;
-}
-
-function isArtifactSnapshot(value: unknown): value is DesktopUpdateArtifactSnapshot {
-  if (!isRecord(value)) return false;
-  if (stringField(value, "platformKey") == null) return false;
-  if (stringField(value, "type") == null) return false;
-  if (stringField(value, "url") == null) return false;
-  if (value.name != null && typeof value.name !== "string") return false;
-  if (value.size != null && (typeof value.size !== "number" || !Number.isFinite(value.size))) return false;
-  return true;
-}
-
-function isChecksumSnapshot(value: unknown): value is DesktopUpdateChecksumSnapshot {
-  if (!isRecord(value)) return false;
-  if (value.algorithm !== "sha256" && value.algorithm !== "sha512") return false;
-  if (value.value != null && typeof value.value !== "string") return false;
-  if (value.url != null && typeof value.url !== "string") return false;
-  return true;
-}
-
-function isResolvedChecksumSnapshot(value: unknown): value is ResolvedChecksumSnapshot {
-  return isChecksumSnapshot(value) && typeof value.value === "string" && value.value.length > 0;
-}
-
-function isUpdateReleaseRef(value: unknown): value is UpdateReleaseRef {
-  if (!isRecord(value)) return false;
-  return stringField(value, "arch") != null &&
-    isArtifactSnapshot(value.artifact) &&
-    stringField(value, "artifactPath") != null &&
-    isChecksumSnapshot(value.checksum) &&
-    stringField(value, "checksumPath") != null &&
-    isDesktopUpdateChannel(value.channel) &&
-    stringField(value, "downloadedAt") != null &&
-    stringField(value, "key") != null &&
-    isRecord(value.metadata) &&
-    stringField(value, "metadataPath") != null &&
-    stringField(value, "platformKey") != null &&
-    stringField(value, "version") != null;
-}
-
-function isIncomingRef(value: unknown): value is IncomingRef {
-  if (!isRecord(value)) return false;
-  return stringField(value, "arch") != null &&
-    isArtifactSnapshot(value.artifact) &&
-    isDesktopUpdateChannel(value.channel) &&
-    stringField(value, "cycleId") != null &&
-    isRecord(value.metadata) &&
-    stringField(value, "platformKey") != null &&
-    stringField(value, "startedAt") != null &&
-    stringField(value, "version") != null;
-}
-
-function isInstallResult(value: unknown): value is NonNullable<DesktopUpdateStatusSnapshot["installResult"]> {
-  if (!isRecord(value)) return false;
-  if (stringField(value, "openedAt") == null) return false;
-  if (stringField(value, "path") == null) return false;
-  if (value.activeVersion != null && typeof value.activeVersion !== "string") return false;
-  if (value.artifactPath != null && typeof value.artifactPath !== "string") return false;
-  if (value.dryRun != null && typeof value.dryRun !== "boolean") return false;
-  if (value.helperLogPath != null && typeof value.helperLogPath !== "string") return false;
-  if (value.launcherRuntimePath != null && typeof value.launcherRuntimePath !== "string") return false;
-  if (value.launchPath != null && typeof value.launchPath !== "string") return false;
-  return true;
-}
-
-async function ensureOwnedUpdateRoot(
-  config: DesktopUpdaterConfig,
-  logger: DesktopUpdaterLogger = console,
-): Promise<OwnedRoot> {
-  const root = normalizeDownloadRoot(config.downloadRoot);
-  try {
-    await mkdir(root, { recursive: true });
-    const rootEntry = await lstat(root);
-    if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) {
-      return {
-        ok: false,
-        error: createError("update-root-not-owned", `update root is not an owned directory: ${root}`),
-      };
-    }
-    const realRoot = await realpath(root);
-    const layout = resolveDesktopUpdaterStoreLayout(realRoot);
-    const sentinel = await readJson<{ namespace?: string; version?: number }>(layout.ownershipSentinelPath);
-    if (sentinel != null) {
-      if (sentinel.version !== UPDATE_ROOT_VERSION) {
-        return {
-          ok: false,
-          error: createError("update-root-version-mismatch", `update root has unsupported ownership marker version at ${layout.ownershipSentinelPath}`),
-        };
-      }
-    } else {
-      if (!(await directoryIsEmpty(realRoot))) {
-        return {
-          ok: false,
-          error: createError(
-            "update-root-not-owned",
-            `update root is not empty and has no Open Design updater ownership marker: ${realRoot}`,
-          ),
-        };
-      }
-      await writeJson(layout.ownershipSentinelPath, {
-        createdAt: new Date().toISOString(),
-        owner: "open-design-updater",
-        source: config.source,
-        version: UPDATE_ROOT_VERSION,
-      });
-    }
-
-    const entries = await readdir(realRoot);
-    const unexpected = entries.filter((entry) => !isAllowedRootEntry(layout, entry));
-    if (unexpected.length > 0) {
-      const error = storeShapeError(realRoot, "update store contains unexpected root entries", { unexpected });
-      logStoreError(logger, error);
-      return { ok: false, error };
-    }
-
-    for (const dirName of [RELEASES_DIR, STAGING_DIR, DOWNLOADS_DIR, BACK_DIR, HELPERS_DIR, STATE_DIR]) {
-      const path = join(realRoot, dirName);
-      let entry;
-      try {
-        entry = await lstat(path);
-      } catch {
-        continue;
-      }
-      if (!entry.isDirectory() || entry.isSymbolicLink()) {
-        const error = storeShapeError(realRoot, `update store entry ${dirName} must be a plain directory`, { path });
-        logStoreError(logger, error);
-        return { ok: false, error };
-      }
-      const realDir = await realpath(path);
-      if (!containsPath(realRoot, realDir)) {
-        const error = storeShapeError(realRoot, `update store entry ${dirName} escapes update root`, { path, realDir });
-        logStoreError(logger, error);
-        return { ok: false, error };
-      }
-    }
-
-    try {
-      await access(layout.metadataPath);
-    } catch {
-      const nonSentinelEntries = entries.filter((entry) => entry !== OWNERSHIP_SENTINEL);
-      if (nonSentinelEntries.length > 0) {
-        const error = storeShapeError(realRoot, "update store metadata.json is missing for a non-empty store", {
-          entries: nonSentinelEntries,
-        });
-        logStoreError(logger, error);
-        return { ok: false, error };
-      }
-      await writeJson(layout.metadataPath, { version: STORE_METADATA_VERSION });
-    }
-
-    return { ok: true, layout, metadataPath: layout.metadataPath, realRoot };
-  } catch (error) {
-    return {
-      ok: false,
-      error: createError("update-root-unavailable", error instanceof Error ? error.message : String(error)),
-    };
-  }
-}
-
-/**
- * Manual-clear degradation for a corrupt store: rebuild an update root the
- * updater can PROVE it owns. Proof is the current-generation ownership
- * sentinel — everything else inside an owned root is updater cache by
- * definition and safe to purge. Roots without a sentinel (unowned), with a
- * foreign-generation marker (another updater's store), or failing IO are
- * never touched; the caller surfaces the original store error instead.
- */
-async function rebuildOwnedUpdateRootForManualClear(
-  config: DesktopUpdaterConfig,
-  logger: DesktopUpdaterLogger,
-): Promise<boolean> {
-  try {
-    const root = normalizeDownloadRoot(config.downloadRoot);
-    const rootEntry = await lstat(root);
-    if (!rootEntry.isDirectory() || rootEntry.isSymbolicLink()) return false;
-    const realRoot = await realpath(root);
-    const layout = resolveDesktopUpdaterStoreLayout(realRoot);
-    const sentinel = await readJson<{ version?: number }>(layout.ownershipSentinelPath);
-    if (sentinel == null || sentinel.version !== UPDATE_ROOT_VERSION) return false;
-    for (const entry of await readdir(realRoot)) {
-      if (entry === OWNERSHIP_SENTINEL) continue;
-      await rm(join(realRoot, entry), { force: true, recursive: true });
-    }
-    await writeJson(layout.metadataPath, { version: STORE_METADATA_VERSION });
-    logger.warn("[open-design updater] rebuilt corrupt owned update store for manual clear", { root: realRoot });
-    return true;
-  } catch (error) {
-    logger.warn("[open-design updater] failed to rebuild corrupt update store for manual clear", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
-
-function defaultChannelForVersion(version: string): DesktopUpdateChannel {
-  const channel = releaseChannelFromVersion(version);
-  return channel ?? DESKTOP_UPDATE_CHANNELS.STABLE;
-}
-
-export function compareVersions(a: string, b: string): number {
-  return compareLauncherVersions(a, b);
-}
-
-function metadataChannel(metadata: Record<string, unknown>): DesktopUpdateChannel | null {
-  const channel = stringField(metadata, "channel");
-  return isDesktopUpdateChannel(channel) ? channel : null;
-}
-
-function releaseVersionForChannel(metadata: Record<string, unknown>, channel: DesktopUpdateChannel): string | null {
-  if (channel === DESKTOP_UPDATE_CHANNELS.BETA) return stringField(metadata, "releaseVersion") ?? stringField(metadata, "betaVersion");
-  if (channel === DESKTOP_UPDATE_CHANNELS.BETAS) return stringField(metadata, "releaseVersion");
-  if (channel === DESKTOP_UPDATE_CHANNELS.PRERELEASE) return stringField(metadata, "releaseVersion") ?? stringField(metadata, "prereleaseVersion");
-  if (channel === DESKTOP_UPDATE_CHANNELS.PREVIEW) return stringField(metadata, "releaseVersion") ?? stringField(metadata, "previewVersion");
-  return stringField(metadata, "releaseVersion") ?? stringField(metadata, "stableVersion");
-}
-
-function selectedMacPlatformKey(arch: string): string {
-  return arch === "x64" ? "macIntel" : "mac";
-}
-
-function selectedWinPlatformKey(arch: string): string {
-  if (arch === "x64") return "win";
-  if (arch === "arm64") return "winArm64";
-  if (arch === "ia32") return "winIa32";
-  return `win-${sanitizePathSegment(arch)}`;
-}
-
-function selectedPackageLauncherArtifact(config: DesktopUpdaterConfig, preferPayload = false): {
-  artifactKey: "dmg" | "installer" | "payload";
-  artifactType: "dmg" | "installer" | "payload";
-  description: string;
-  platformKey: string;
-} | null {
-  if (config.platform === "darwin") {
-    const platformKey = selectedMacPlatformKey(config.arch);
-    if (preferPayload) {
-      return {
-        artifactKey: "payload",
-        artifactType: "payload",
-        description: "mac launcher payload",
-        platformKey,
-      };
-    }
-    return {
-      artifactKey: "dmg",
-      artifactType: "dmg",
-      description: "mac DMG",
-      platformKey,
-    };
-  }
-  if (config.platform === "win32") {
-    const platformKey = selectedWinPlatformKey(config.arch);
-    if (preferPayload) {
-      return {
-        artifactKey: "payload",
-        artifactType: "payload",
-        description: "Windows launcher payload",
-        platformKey,
-      };
-    }
-    return {
-      artifactKey: "installer",
-      artifactType: "installer",
-      description: "Windows installer",
-      platformKey,
-    };
-  }
-  return null;
-}
-
 function installerObservationArtifactType(value: string | undefined): InstallerObservationArtifactType | null {
   if (value === "dmg" || value === "installer" || value === "payload") return value;
   return null;
-}
-
-function selectUpdateCandidate(
-  metadata: Record<string, unknown>,
-  config: DesktopUpdaterConfig,
-  preferPayload = false,
-): { candidate: UpdateCandidate; ok: true } | { error: DesktopUpdateErrorSnapshot; ok: false; state: DesktopUpdateState } {
-  if (config.mode === DESKTOP_UPDATE_MODES.JS_INCREMENTAL) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.UNSUPPORTED,
-      error: createError("update-mode-not-implemented", "js-incremental updates are not implemented yet"),
-    };
-  }
-  if (config.mode !== DESKTOP_UPDATE_MODES.PACKAGE_LAUNCHER) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.UNSUPPORTED,
-      error: createError("update-mode-unsupported", `unsupported update mode: ${config.mode}`),
-    };
-  }
-  const artifactSelection = selectedPackageLauncherArtifact(config, preferPayload);
-  if (artifactSelection == null) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.UNSUPPORTED,
-      error: createError("unsupported-platform", "package-launcher updates are currently supported on macOS and Windows only"),
-    };
-  }
-
-  const channel = metadataChannel(metadata);
-  if (channel == null) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError("metadata-channel-unsupported", "release metadata does not include a supported update channel"),
-    };
-  }
-  if (channel !== config.channel) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError(
-        "metadata-channel-mismatch",
-        `release metadata channel ${channel} does not match configured update channel ${config.channel}`,
-      ),
-    };
-  }
-
-  const platforms = objectField(metadata, "platforms");
-  if (platforms == null) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError("metadata-missing-platforms", "release metadata does not include platform artifacts"),
-    };
-  }
-  const platformKey = artifactSelection.platformKey;
-  const platform = objectField(platforms, platformKey);
-  if (platform == null || platform.enabled !== true) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError("no-compatible-artifact", `release metadata does not include an enabled ${platformKey} artifact`),
-    };
-  }
-  const version = releaseVersionForChannel(metadata, config.channel);
-  if (version == null) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError("metadata-missing-version", `release metadata does not include a ${config.channel} update version`),
-    };
-  }
-  const artifacts = objectField(platform, "artifacts");
-  const artifactRecord = artifacts == null ? null : objectField(artifacts, artifactSelection.artifactKey);
-  const url = artifactRecord == null ? null : stringField(artifactRecord, "url");
-  if (artifactRecord == null || url == null) {
-    return {
-      ok: false,
-      state: DESKTOP_UPDATE_STATES.ERROR,
-      error: createError(
-        "no-compatible-artifact",
-        `release metadata does not include a ${artifactSelection.description} artifact for ${platformKey}`,
-      ),
-    };
-  }
-
-  const artifact: DesktopUpdateArtifactSnapshot = {
-    ...(stringField(artifactRecord, "name") == null ? {} : { name: stringField(artifactRecord, "name") as string }),
-    platformKey,
-    ...(numberField(artifactRecord, "size") == null ? {} : { size: numberField(artifactRecord, "size") }),
-    type: artifactSelection.artifactType,
-    url,
-  };
-  const sha256 = stringField(artifactRecord, "sha256") ?? stringField(artifactRecord, "sha256Digest");
-  const sha512 = stringField(artifactRecord, "sha512") ?? stringField(artifactRecord, "sha512Digest");
-  const checksum: DesktopUpdateChecksumSnapshot =
-    sha512 != null
-      ? { algorithm: "sha512", value: sha512 }
-      : {
-          algorithm: "sha256",
-          ...(sha256 == null ? {} : { value: sha256 }),
-          ...(stringField(artifactRecord, "sha256Url") == null ? {} : { url: stringField(artifactRecord, "sha256Url") as string }),
-        };
-
-  return {
-    ok: true,
-    candidate: {
-      arch: stringField(platform, "arch") ?? config.arch,
-      artifact,
-      checksum,
-      channel: config.channel,
-      metadata,
-      platformKey,
-      version,
-    },
-  };
-}
-
-function selectUpdateCandidateWithFallback(
-  metadata: Record<string, unknown>,
-  config: DesktopUpdaterConfig,
-  preferPayload: boolean,
-): { candidate: UpdateCandidate; ok: true } | { error: DesktopUpdateErrorSnapshot; ok: false; state: DesktopUpdateState } {
-  if (!preferPayload) return selectUpdateCandidate(metadata, config);
-  const payload = selectUpdateCandidate(metadata, config, true);
-  if (payload.ok || payload.error.code !== "no-compatible-artifact") return payload;
-  return selectUpdateCandidate(metadata, config);
-}
-
-function controlLauncherVersion(metadata: Record<string, unknown>): Record<string, unknown> | null {
-  const control = objectField(metadata, "control");
-  const launcher = control == null ? null : objectField(control, "launcher");
-  return launcher == null ? null : objectField(launcher, "version");
-}
-
-function controlLauncherVersionMin(metadata: Record<string, unknown>): string | null {
-  const version = controlLauncherVersion(metadata);
-  return version == null ? null : stringField(version, "min");
-}
-
-function controlLauncherVersionUrl(metadata: Record<string, unknown>): string | null {
-  const version = controlLauncherVersion(metadata);
-  return version == null ? null : stringField(version, "url");
-}
-
-/**
- * Resolve the version of the PHYSICALLY INSTALLED outer package. This is
- * distinct from `config.currentVersion`: after a payload update the running
- * version is the payload's, while the installed outer bundle on disk stays at
- * its install-time version and is the thing an installer reinstall replaces.
- * The outer bundle's own `open-design-config.json` is the only fleet-wide
- * source (every packaged generation ships it), anchored by the launcher
- * launch path from `install.json`. Returns null when unreadable.
- */
-export async function resolveInstalledOuterVersion(config: DesktopUpdaterConfig): Promise<string | null> {
-  if (config.installedVersionOverride != null) return config.installedVersionOverride;
-  if (config.launcherLaunchPath == null) return null;
-  const outerConfigPath =
-    config.platform === "darwin"
-      ? join(config.launcherLaunchPath, "Contents", "Resources", "open-design-config.json")
-      : join(dirname(config.launcherLaunchPath), "resources", "open-design-config.json");
-  try {
-    const raw: unknown = JSON.parse(await readFile(outerConfigPath, "utf8"));
-    if (!isRecord(raw)) return null;
-    return stringField(raw, "appVersion");
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Installed-base escape hatch: decide whether the remote release is beyond what
- * this install can adopt as an in-place payload update, forcing a full
- * installer instead. Two orthogonal guardrails, either of which trips →
- * installer:
- *
- *  - `launcher.schema` (ABI axis): the release declares a launcher-contract schema
- *    number this build cannot interpret (`feed.launcher.schema >
- *    LAUNCHER_SCHEMA_VERSION`). This is the reseed boundary — a pure int compare.
- *  - `control.launcher.version.min` (recency axis): the release requires a
- *    physically installed outer package at least this new (`min >
- *    installedOuterVersion`). Payload updates never touch the outer bundle, so
- *    the comparison basis is the installed outer version, NOT the running
- *    version — a broken outer generation must reach the installer path even
- *    when its payload is current. When min is set but the outer version cannot
- *    be read, the gate trips conservatively: local state that cannot be
- *    identified is itself a reinstall signal.
- *
- * Missing/malformed metadata fields are ignored (fail-open) so older feeds keep
- * updating seamlessly. Returns the reinstall requirement for the status
- * snapshot, or null when an in-place payload update is acceptable.
- */
-export function remoteRequiresReinstall(
-  metadata: Record<string, unknown>,
-  config: DesktopUpdaterConfig,
-  installedOuterVersion: string | null,
-): DesktopUpdateReinstallSnapshot | null {
-  const minVersion = controlLauncherVersionMin(metadata);
-  const url = controlLauncherVersionUrl(metadata);
-  const shared = {
-    ...(minVersion == null ? {} : { minVersion }),
-    ...(url == null ? {} : { url }),
-  };
-  const launcher = objectField(metadata, "launcher");
-  const remoteLauncherSchema = launcher == null ? undefined : numberField(launcher, "schema");
-  if (remoteLauncherSchema != null && remoteLauncherSchema > LAUNCHER_SCHEMA_VERSION) {
-    return {
-      ...(installedOuterVersion == null ? {} : { installedVersion: installedOuterVersion }),
-      reason: "launcher-schema",
-      ...shared,
-    };
-  }
-  if (minVersion == null) return null;
-  if (installedOuterVersion == null) {
-    return { reason: "outer-version-unreadable", ...shared };
-  }
-  if (compareVersions(minVersion, installedOuterVersion) > 0) {
-    return { installedVersion: installedOuterVersion, reason: "outer-below-min", ...shared };
-  }
-  return null;
-}
-
-async function fetchJson(fetchImpl: typeof globalThis.fetch, url: string): Promise<Record<string, unknown>> {
-  const response = await fetchImpl(url);
-  if (!response.ok) throw new Error(`metadata request returned HTTP ${response.status}`);
-  const body = await response.json();
-  if (!isRecord(body)) throw new Error("metadata response was not a JSON object");
-  return body;
-}
-
-async function hasValidLauncherPayloadContext(config: DesktopUpdaterConfig): Promise<boolean> {
-  if (config.launcherRoot == null || config.launcherLaunchPath == null || config.launcherRuntimePath == null || config.namespace == null) {
-    return false;
-  }
-  try {
-    await access(config.launcherLaunchPath);
-    const launcherTarget = await lstat(config.launcherLaunchPath);
-    if (launcherTarget.isSymbolicLink() || (!launcherTarget.isFile() && !launcherTarget.isDirectory())) {
-      return false;
-    }
-    const runtime = await readJsonStrict<LauncherRuntimeDescriptor>(config.launcherRuntimePath);
-    validateLauncherRuntimeDescriptor(runtime, { channel: config.channel, namespace: config.namespace });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parseChecksumText(text: string, algorithm: "sha256" | "sha512"): string {
-  const length = algorithm === "sha256" ? 64 : 128;
-  const match = text.match(new RegExp(`\\b[0-9a-fA-F]{${length}}\\b`));
-  if (match == null) throw new Error(`checksum file does not include a ${algorithm} digest`);
-  return match[0].toLowerCase();
-}
-
-async function resolveChecksum(fetchImpl: typeof globalThis.fetch, checksum: DesktopUpdateChecksumSnapshot): Promise<DesktopUpdateChecksumSnapshot> {
-  if (checksum.value != null) return checksum;
-  if (checksum.url == null) throw new Error("artifact checksum is missing");
-  const response = await fetchImpl(checksum.url);
-  if (!response.ok) throw new Error(`checksum request returned HTTP ${response.status}`);
-  return {
-    ...checksum,
-    value: parseChecksumText(await response.text(), checksum.algorithm),
-  };
 }
 
 async function hashFile(path: string, algorithm: "sha256" | "sha512"): Promise<string> {
@@ -1754,22 +805,6 @@ async function cleanupLauncherPayloadRoots(input: {
       trigger,
     });
   }
-}
-
-async function ensureOwnedSubdir(root: string, name: string): Promise<string> {
-  if (name.length === 0 || name.includes("\0") || /[\\/]/.test(name)) {
-    throw new Error(`update subdirectory must be a simple path segment: ${name}`);
-  }
-  const dir = join(root, name);
-  if (!containsPath(root, dir)) throw new Error(`update subdirectory escaped update root: ${dir}`);
-  await mkdir(dir, { recursive: true });
-  const entry = await lstat(dir);
-  if (!entry.isDirectory() || entry.isSymbolicLink()) {
-    throw new Error(`update subdirectory is not an owned directory: ${dir}`);
-  }
-  const realDir = await realpath(dir);
-  if (!containsPath(root, realDir)) throw new Error(`update subdirectory realpath escaped update root: ${realDir}`);
-  return realDir;
 }
 
 function macDeferredInstallerScript(): string {
@@ -2816,13 +1851,6 @@ async function loadActiveRelease(
   return { ok: true, active: { path: artifactPath, ref: active } };
 }
 
-function checksumMatchesCandidate(checksum: ResolvedChecksumSnapshot, candidate: UpdateCandidate): boolean {
-  if (checksum.algorithm !== candidate.checksum.algorithm) return false;
-  if (candidate.checksum.url != null && checksum.url !== candidate.checksum.url) return false;
-  if (candidate.checksum.value != null && checksum.value.toLowerCase() !== candidate.checksum.value.toLowerCase()) return false;
-  return true;
-}
-
 async function loadVerifiedReleaseForCandidate(
   root: OwnedRoot & { ok: true },
   candidate: UpdateCandidate,
@@ -3553,7 +2581,7 @@ export function createDesktopUpdater(
       cwd: config.runtimeBase,
       installerPath: resolvedDownload,
       root: updateRoot,
-      timeoutMs: config.platform === "win32" ? WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS : MAC_DEFERRED_INSTALLER_TIMEOUT_MS,
+      timeoutMs: DEFERRED_INSTALLER_TIMEOUT_MS,
     });
   }
 
@@ -3579,7 +2607,7 @@ export function createDesktopUpdater(
       ...(delegated == null ? {} : { delegated }),
       launchPath,
       root: updateRoot,
-      timeoutMs: config.platform === "win32" ? WINDOWS_DEFERRED_INSTALLER_TIMEOUT_MS : MAC_DEFERRED_INSTALLER_TIMEOUT_MS,
+      timeoutMs: DEFERRED_INSTALLER_TIMEOUT_MS,
     });
     return { ...result, launchPath };
   }
@@ -3805,15 +2833,15 @@ export function createDesktopUpdater(
     downloadUpdate: () => serialized(downloadUpdate),
     handle(action) {
       switch (action) {
-        case "status":
+        case DESKTOP_UPDATE_ACTIONS.STATUS:
           return this.status();
-        case "check":
+        case DESKTOP_UPDATE_ACTIONS.CHECK:
           return this.checkForUpdates();
-        case "clear-cache":
+        case DESKTOP_UPDATE_ACTIONS.CLEAR_CACHE:
           return this.clearCache();
-        case "download":
+        case DESKTOP_UPDATE_ACTIONS.DOWNLOAD:
           return this.downloadUpdate();
-        case "install":
+        case DESKTOP_UPDATE_ACTIONS.INSTALL:
           return this.installUpdate();
       }
     },
@@ -3835,137 +2863,5 @@ export function createDesktopUpdater(
         listeners.delete(listener);
       };
     },
-  };
-}
-
-export function createDesktopUpdaterScheduler(
-  updater: DesktopUpdater,
-  options: {
-    backoffInitialMs: number;
-    backoffMaxMs: number;
-    initialDelayMs: number;
-    intervalMs: number;
-    logger?: DesktopUpdaterLogger;
-    startupSilentPayloadUpdate?: StartupSilentPayloadUpdateOptions;
-  },
-): DesktopUpdaterScheduler {
-  const logger = options.logger ?? console;
-  let running = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let failureCount = 0;
-  let tickRunning = false;
-  let unsubscribe: (() => void) | null = null;
-  let warnedZeroDelay = false;
-  let startupTickPending = true;
-
-  const clearTimer = () => {
-    if (timer == null) return;
-    clearTimeout(timer);
-    timer = null;
-  };
-
-  const stop = (_reason?: string) => {
-    if (!running && timer == null) return;
-    running = false;
-    clearTimer();
-    unsubscribe?.();
-    unsubscribe = null;
-  };
-
-  const normalizeScheduledDelay = (delayMs: number): number => {
-    if (delayMs > 0) return delayMs;
-    if (!warnedZeroDelay) {
-      warnedZeroDelay = true;
-      logger.warn(
-        `[open-design updater] refusing non-positive scheduled poll delay (${delayMs}ms); `
-          + `using ${MIN_SCHEDULED_POLL_DELAY_MS}ms floor`,
-      );
-    }
-    return MIN_SCHEDULED_POLL_DELAY_MS;
-  };
-
-  const nextDelay = (status: DesktopUpdateStatusSnapshot | null): number => {
-    if (status != null && status.state !== DESKTOP_UPDATE_STATES.ERROR && status.error == null) {
-      failureCount = 0;
-      return options.intervalMs;
-    }
-    failureCount += 1;
-    const backoff = options.backoffInitialMs * 2 ** Math.max(0, failureCount - 1);
-    return Math.min(options.backoffMaxMs, backoff);
-  };
-
-  const schedule = (delayMs: number) => {
-    if (!running || timer != null) return;
-    const boundedDelayMs = normalizeScheduledDelay(delayMs);
-    timer = setTimeout(() => {
-      timer = null;
-      void tick();
-    }, boundedDelayMs);
-    timer.unref?.();
-  };
-
-  const tick = async () => {
-    if (!running || tickRunning) return;
-    tickRunning = true;
-    let status: DesktopUpdateStatusSnapshot | null = null;
-    const startupTick = startupTickPending;
-    startupTickPending = false;
-    try {
-      const startupReady = startupTick && options.startupSilentPayloadUpdate != null
-        ? await updater.status()
-        : null;
-      status = await updater.checkForUpdates();
-      if (
-        startupTick
-        && options.startupSilentPayloadUpdate != null
-        && startupReady?.installResult == null
-        && startupReady?.state === DESKTOP_UPDATE_STATES.DOWNLOADED
-        && startupReady.artifact?.type === "payload"
-        && startupReady.capabilities.canApplyInPlace
-        && startupReady.downloadPath != null
-        && startupReady.downloadPath === status.downloadPath
-        && status.installResult == null
-        && status.state === DESKTOP_UPDATE_STATES.DOWNLOADED
-        && status.artifact?.type === "payload"
-        && status.capabilities.canApplyInPlace
-      ) {
-        try {
-          const enabled = await options.startupSilentPayloadUpdate.isEnabled();
-          if (enabled) {
-            status = await updater.installUpdate();
-            if (status.installResult != null) {
-              stop("silent-payload-installed");
-              options.startupSilentPayloadUpdate.requestQuit();
-              return;
-            }
-          }
-        } catch (silentError) {
-          logger.warn("[open-design updater] startup silent payload update failed", silentError);
-        }
-      }
-      if (status.installResult != null) {
-        stop("installer-opened");
-        return;
-      }
-    } catch (error) {
-      logger.warn("[open-design updater] scheduled update check failed", error);
-    } finally {
-      tickRunning = false;
-    }
-    if (running) schedule(nextDelay(status));
-  };
-
-  return {
-    isRunning: () => running,
-    start() {
-      if (running) return;
-      if (updater.snapshot().installResult != null) return;
-      running = true;
-      unsubscribe = updater.subscribe(() => {
-        if (updater.snapshot().installResult != null) stop("installer-opened");
-      });
-      schedule(options.initialDelayMs);
-    },
-    stop,
   };
 }
