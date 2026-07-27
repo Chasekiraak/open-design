@@ -133,6 +133,7 @@ import {
   resolvedWorkspaceContextForWrite,
 } from './state/projects';
 import { useModalWindowDragGuard } from './hooks/useModalWindowDragGuard';
+import { resumeThumbnailLoads, suspendThumbnailLoads } from './lib/thumbnail-load-gate';
 import type {
   PluginShareAction,
   PluginShareProjectOutcome,
@@ -1132,6 +1133,15 @@ function AppInner() {
   // {active:false} if this hasn't run.
   const activeProjectId = route.kind === 'project' ? route.projectId : null;
   const activeFileName = route.kind === 'project' ? route.fileName : null;
+  // While a project route is active, background home-surface thumbnail
+  // documents must not compete with the project's own foreground reads; the
+  // card-click handler suspends the gate synchronously and this effect keeps
+  // it authoritative for every other entry path (deep links, quick switcher)
+  // and resumes it when the user returns home (Batch A §4.2).
+  useEffect(() => {
+    if (route.kind === 'project') suspendThumbnailLoads();
+    else resumeThumbnailLoads();
+  }, [route.kind]);
   // Gate the privacy banner on three things:
   //   1. Daemon config has hydrated (privacyDecisionAt is daemon-owned).
   //   2. The user has not yet made a privacy decision.

@@ -33,6 +33,19 @@ import {
 import { moveWorkspaceProject, workspaceProjectMoveErrorCode } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
+import {
+  THUMBNAIL_OVERSCAN_MARGIN,
+  resumeThumbnailLoads,
+  suspendThumbnailLoads,
+  useThumbnailLoadSlot,
+} from '../lib/thumbnail-load-gate';
+import {
+  getProjectCoverSnapshot,
+  invalidateProjectCoverSnapshots,
+  projectCoverSnapshotKey,
+  setProjectCoverSnapshot,
+} from '../lib/project-cover-cache';
+import { useInView } from './plugins-home/useInView';
 
 /** Which project space this strip renders. Drives the per-card 共享 badge
  *  (hidden in the all-shared team space) and the "{creator}创建" line: 'recent'
@@ -312,6 +325,12 @@ export function RecentProjectsStrip({
   // empty/null off-team, so every card safely falls back to "我创建".
   const { resolve: resolveMember } = useTeamMembers();
   const { context: workspaceContext } = useWorkspaceContext();
+  // Cover snapshots are keyed by workspace so a cached decision can never
+  // leak across workspaces (Batch A §4.2). Read through a ref so the async
+  // workspace-context resolution (null → id shortly after mount) does not
+  // change `requestProjectCover`'s identity and re-trigger a full cover pass.
+  const workspaceIdRef = useRef<string | null>(workspaceContext?.workspaceId ?? null);
+  workspaceIdRef.current = workspaceContext?.workspaceId ?? null;
   const workspaceBilling = useWorkspaceBilling();
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
   // `canShareProjects` alone is a ROLE permission ("could this member share IF
@@ -571,19 +590,25 @@ export function RecentProjectsStrip({
       promise: Promise<void>;
     }>(),
   );
+  // Resolves one project's cover decision. Returns:
+  // - a cover override when the project has a renderable cover,
+  // - `null` as the *authoritative* "this project has no cover" answer
+  //   (safe to snapshot until the project version changes), and
+  // - `undefined` for transient outcomes (abort, network failure) that must
+  //   not be cached or written into state.
   const loadProjectCover = useCallback(async (
     project: Project,
     signal: AbortSignal,
-  ): Promise<ProjectCoverOverride | null> => {
+  ): Promise<ProjectCoverOverride | null | undefined> => {
     const designSystemProject = isDesignSystemProject(project);
     if (project.metadata?.entryFile && !designSystemProject) return null;
     let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
     try {
       files = await fetchProjectFiles(project.id, { signal });
     } catch {
-      return null;
+      return undefined;
     }
-    if (signal.aborted) return null;
+    if (signal.aborted) return undefined;
     if (designSystemProject) {
       return (await findDesignSystemCover(project.id, files, signal)) ?? null;
     }
@@ -595,11 +620,11 @@ export function RecentProjectsStrip({
     if (project.metadata?.kind === 'deck') {
       try {
         await loadDeckCover(src, signal);
-        return signal.aborted ? null : cover;
+        return signal.aborted ? undefined : cover;
       } catch (err) {
-        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return undefined;
         console.warn('[project-cover] failed to load HTML cover:', diagnostic, err);
-        return null;
+        return undefined;
       }
     }
 
@@ -609,17 +634,20 @@ export function RecentProjectsStrip({
         cache: 'no-store',
         signal,
       });
-      if (signal.aborted) return null;
+      if (signal.aborted) return undefined;
       if (response.ok || response.status === 304) return cover;
       console.warn(
         `[project-cover] HTML cover unavailable (${response.status} ${response.statusText}):`,
         diagnostic,
       );
+      // The server answered: the cover file is not readable. That decision is
+      // cacheable; the card renders its glyph until the project changes.
+      return null;
     } catch (err) {
-      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return undefined;
       console.warn('[project-cover] failed to verify HTML cover:', diagnostic, err);
+      return undefined;
     }
-    return null;
   }, []);
 
   const requestProjectCover = useCallback((
@@ -627,6 +655,28 @@ export function RecentProjectsStrip({
     options: { force?: boolean } = {},
   ): Promise<void> => {
     if (!activeRef.current) return Promise.resolve();
+    const snapshotKey = projectCoverSnapshotKey(
+      workspaceIdRef.current,
+      project.id,
+      project.updatedAt,
+    );
+    if (!options.force) {
+      // Serve the last successful decision for this exact workspace/project/
+      // version instead of re-running the files scan + probe on every
+      // remount. Stale versions miss the key; content-ready events
+      // invalidate explicitly (Batch A §4.2).
+      const snapshot = getProjectCoverSnapshot(snapshotKey);
+      if (snapshot !== undefined) {
+        if (visibleProjectsRef.current.has(project.id)) {
+          setCoverByProject((current) =>
+            current[project.id] === snapshot.cover
+              ? current
+              : { ...current, [project.id]: snapshot.cover },
+          );
+        }
+        return Promise.resolve();
+      }
+    }
     const existing = coverInFlightRef.current.get(project.id);
     if (existing && !options.force) return existing.promise;
     const generation = (coverGenerationRef.current.get(project.id) ?? 0) + 1;
@@ -641,6 +691,7 @@ export function RecentProjectsStrip({
         if (controller.signal.aborted) return;
         if (cover === undefined) return;
         if (coverGenerationRef.current.get(project.id) !== generation) return;
+        setProjectCoverSnapshot(snapshotKey, cover);
         if (!visibleProjectsRef.current.has(project.id)) return;
         setCoverByProject((current) => ({ ...current, [project.id]: cover }));
       })
@@ -669,9 +720,25 @@ export function RecentProjectsStrip({
     coverInFlightRef.current.clear();
   }, [coverQueue]);
 
+  // Cards report themselves through a per-card viewport sentinel; only cards
+  // that have actually been near the viewport ever start cover work
+  // (Batch A §4.2). The set is per-mount on purpose: a fresh strip instance
+  // re-discovers visibility, while resolved decisions come from the snapshot
+  // cache.
+  const coverSentinelSeenRef = useRef(new Set<string>());
+  const handleCoverCardVisible = useCallback((projectId: string) => {
+    if (coverSentinelSeenRef.current.has(projectId)) return;
+    coverSentinelSeenRef.current.add(projectId);
+    const project = visibleProjectsRef.current.get(projectId);
+    if (!project) return;
+    void requestProjectCover(project);
+  }, [requestProjectCover]);
+
   const resumeBackgroundCoverRequests = useCallback(() => {
     if (!activeRef.current) return;
+    resumeThumbnailLoads();
     for (const project of visibleProjectsRef.current.values()) {
+      if (!coverSentinelSeenRef.current.has(project.id)) continue;
       void requestProjectCover(project);
     }
   }, [requestProjectCover]);
@@ -687,10 +754,14 @@ export function RecentProjectsStrip({
   }, [abortBackgroundCoverRequests]);
 
   const refreshProjectCover = useCallback((projectId: string) => {
+    // A content-ready event is authoritative: the stored cover decision (any
+    // version) is void even if the card is currently offscreen or unlisted.
+    invalidateProjectCoverSnapshots(projectId);
     const project = visibleProjectsRef.current.get(projectId);
     if (!project) return;
-    // A content-ready event is authoritative and supersedes an older initial
-    // scan that may still be resolving against the pre-pull filesystem.
+    if (!coverSentinelSeenRef.current.has(projectId)) return;
+    // Supersedes an older initial scan that may still be resolving against
+    // the pre-pull filesystem.
     void requestProjectCover(project, { force: true });
   }, [requestProjectCover]);
 
@@ -709,6 +780,7 @@ export function RecentProjectsStrip({
       onActive: () => {
         if (!activeRef.current) return;
         for (const { project } of visibleProjects) {
+          if (!coverSentinelSeenRef.current.has(project.id)) continue;
           if (coverByProject[project.id] == null) {
             void requestProjectCover(project);
           }
@@ -743,6 +815,7 @@ export function RecentProjectsStrip({
         : Object.fromEntries(entries);
     });
     for (const { project } of visibleProjects) {
+      if (!coverSentinelSeenRef.current.has(project.id)) continue;
       void requestProjectCover(project);
     }
     // Intentionally keyed on the id set (coverFetchKey), not visibleProjects,
@@ -1274,8 +1347,12 @@ export function RecentProjectsStrip({
                   // Release every background cover slot before the project view
                   // starts its foreground files/content reads. Waiting for the
                   // entry shell to unmount is too late: navigation itself needs
-                  // those same browser connections.
+                  // those same browser connections. Suspending the thumbnail
+                  // gate also unmounts still-loading preview iframes so their
+                  // document loads stop competing immediately (Batch A §4.2);
+                  // already-loaded frames stay rendered.
                   abortBackgroundCoverRequests();
+                  suspendThumbnailLoads();
                   try {
                     const result = onOpen(project.id);
                     if (result && typeof result === 'object' && 'then' in result) {
@@ -1305,6 +1382,10 @@ export function RecentProjectsStrip({
                   style={cover.style}
                   aria-hidden
                 >
+                  <CoverVisibilitySentinel
+                    projectId={project.id}
+                    onVisible={handleCoverCardVisible}
+                  />
                   {(cover.kind === 'image' || cover.kind === 'logo') && cover.src ? (
                     <img
                       className="recent-projects__thumb-media"
@@ -1757,8 +1838,22 @@ function VerifiedHtmlCoverFrame({
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
+  // The iframe document load is deferred until the card is near the viewport
+  // and one of the shared thumbnail load slots is free, so a large grid
+  // cannot flood the daemon with background document loads (Batch A §4.2).
+  const { ref: inViewRef, inView } = useInView<HTMLSpanElement>({
+    rootMargin: THUMBNAIL_OVERSCAN_MARGIN,
+  });
+  const { canLoad, settle } = useThumbnailLoadSlot(inView && !failed);
   if (failed) {
     return <span className="recent-projects__card-glyph">{initial}</span>;
+  }
+  if (!canLoad) {
+    return (
+      <span ref={inViewRef} className="recent-projects__card-glyph">
+        {initial}
+      </span>
+    );
   }
   return (
     <iframe
@@ -1768,7 +1863,9 @@ function VerifiedHtmlCoverFrame({
       loading="lazy"
       sandbox="allow-scripts"
       tabIndex={-1}
+      onLoad={settle}
       onError={() => {
+        settle();
         console.warn('[project-cover] failed to load HTML cover:', diagnostic);
         setFailed(true);
       }}
@@ -1776,8 +1873,47 @@ function VerifiedHtmlCoverFrame({
   );
 }
 
+// Zero-interaction marker that tells the strip when a card's thumbnail area
+// first comes near the viewport. Cover probes (files scan + HEAD) start only
+// after this fires, so offscreen cards in a 100+ project grid cost nothing
+// until scrolled toward (Batch A §4.2).
+function CoverVisibilitySentinel({
+  projectId,
+  onVisible,
+}: {
+  projectId: string;
+  onVisible: (projectId: string) => void;
+}) {
+  const { ref, inView } = useInView<HTMLSpanElement>({
+    rootMargin: THUMBNAIL_OVERSCAN_MARGIN,
+  });
+  const seenRef = useRef(false);
+  useEffect(() => {
+    if (!inView || seenRef.current) return;
+    seenRef.current = true;
+    onVisible(projectId);
+  }, [inView, onVisible, projectId]);
+  return (
+    <span
+      ref={ref}
+      aria-hidden
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', visibility: 'hidden' }}
+    />
+  );
+}
+
 function DeckCoverThumb({ src }: { src: string }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const { ref: inViewRef, inView } = useInView<HTMLDivElement>({
+    rootMargin: THUMBNAIL_OVERSCAN_MARGIN,
+  });
+  const setFrameRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      frameRef.current = node;
+      inViewRef.current = node;
+    },
+    [inViewRef],
+  );
   const [srcDoc, setSrcDoc] = useState<string | null>(() => deckCoverCache.get(src) ?? null);
   const [scale, setScale] = useState(1);
 
@@ -1789,6 +1925,9 @@ function DeckCoverThumb({ src }: { src: string }) {
       return;
     }
     setSrcDoc(null);
+    // Deck covers fetch the full document text; defer that until the card is
+    // actually near the viewport (Batch A §4.2).
+    if (!inView) return;
     loadDeckCover(src)
       .then((next) => {
         if (!cancelled) setSrcDoc(next);
@@ -1800,7 +1939,7 @@ function DeckCoverThumb({ src }: { src: string }) {
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [src, inView]);
 
   useEffect(() => {
     const node = frameRef.current;
@@ -1822,7 +1961,7 @@ function DeckCoverThumb({ src }: { src: string }) {
 
   return (
     <div
-      ref={frameRef}
+      ref={setFrameRef}
       className="recent-projects__deck-frame"
       style={{ '--recent-deck-scale': scale } as CSSProperties}
       aria-hidden
