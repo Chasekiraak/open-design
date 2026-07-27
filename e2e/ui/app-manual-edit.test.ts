@@ -157,6 +157,71 @@ test('[P0] manual edit mode preserves preview actions after style edits', async 
   await expect(actionMenu.getByRole('menuitem', { name: /Export as PDF/i })).toBeVisible();
 });
 
+test('[P0] manual edit mode preserves the current page in a multi-page mobile app', async ({ page }) => {
+  await routeMockAgents(page);
+  const projectId = await createEmptyProject(page, 'Multi-page mobile edit');
+  await seedHtmlArtifact(page, projectId, 'mobile-app.html', multiPageMobileHtml());
+  await page.goto(`/projects/${projectId}/files/mobile-app.html`);
+  await openDesignFile(page, 'mobile-app.html');
+
+  const preview = artifactPreviewFrame(page);
+  await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Code', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Code', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Preview', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Preview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const prewarmedSrcDoc = page.frameLocator('iframe[data-testid="artifact-preview-frame-srcdoc"]');
+  await expect(prewarmedSrcDoc.getByTestId('mobile-page-home')).toBeAttached();
+
+  await preview.getByRole('button', { name: 'Profile' }).click();
+  await expect(preview.getByTestId('mobile-page-profile')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-home')).toBeHidden();
+
+  await page.getByTestId('manual-edit-mode-toggle').click();
+
+  await expect(page.getByTestId('manual-edit-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect(preview.getByTestId('mobile-page-profile')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-home')).toBeHidden();
+
+  await page.getByTestId('manual-edit-mode-toggle').click();
+  await expect(page.getByTestId('manual-edit-mode-toggle')).toHaveAttribute('aria-pressed', 'false');
+  await expect(preview.getByTestId('mobile-page-profile')).toBeVisible();
+  await preview.getByRole('button', { name: 'Home' }).click();
+  await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-profile')).toBeHidden();
+
+  await page.getByTestId('manual-edit-mode-toggle').click();
+  await expect(page.getByTestId('manual-edit-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await preview.locator('[data-od-id="mobile-page-home"]').evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    }));
+  });
+
+  const selectedHtml = page.locator('.manual-edit-modal label')
+    .filter({ hasText: 'Selected element HTML' })
+    .locator('textarea');
+  await expect(selectedHtml).toBeVisible();
+  const currentHtml = await selectedHtml.inputValue();
+  const editedHtml = currentHtml.replace(
+    'data-page="home"',
+    'data-page="home" data-edit-revision="fresh"',
+  );
+  expect(editedHtml).not.toBe(currentHtml);
+  await selectedHtml.fill(editedHtml);
+  await inspectSaveButton(page).click();
+
+  // Saving rebuilds the srcDoc transport. The consumed Profile snapshot must
+  // not replay over the newer Home navigation when that later load completes.
+  await expectFileSource(page, projectId, 'mobile-app.html', ['data-edit-revision="fresh"']);
+  await expect(preview.locator('[data-edit-revision="fresh"]')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-home')).toBeVisible();
+  await expect(preview.getByTestId('mobile-page-profile')).toBeHidden();
+});
+
 async function selectPreviewElementThroughBridge(
   page: Page,
   frame: ReturnType<Page['frameLocator']>,
@@ -1353,6 +1418,44 @@ function manualEditHtml(): string {
         <img data-od-id="hero-image" data-od-label="Hero image" src="/hero.png" alt="Hero" style="width:64px;height:64px;">
       </section>
     </main>
+  </body>
+</html>`;
+}
+
+function multiPageMobileHtml(): string {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      main { min-height: 480px; padding: 32px; }
+      nav { display: flex; gap: 12px; padding: 16px 32px; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main data-testid="mobile-page-home" data-od-id="mobile-page-home" data-page="home">
+      <h1>Home page</h1>
+    </main>
+    <main data-testid="mobile-page-profile" data-od-id="mobile-page-profile" data-page="profile" hidden>
+      <h1>Profile page</h1>
+    </main>
+    <nav aria-label="Mobile navigation">
+      <button type="button" data-target-page="home">Home</button>
+      <button type="button" data-target-page="profile">Profile</button>
+    </nav>
+    <script>
+      document.querySelectorAll('[data-target-page]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const target = button.getAttribute('data-target-page');
+          document.querySelectorAll('[data-page]').forEach((page) => {
+            page.toggleAttribute('hidden', page.getAttribute('data-page') !== target);
+          });
+        });
+      });
+    </script>
   </body>
 </html>`;
 }

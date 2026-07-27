@@ -28,6 +28,46 @@ describe('FileViewer manual edit regressions', () => {
     });
   }
 
+  async function enterManualEditMode() {
+    const initialFrame = await previewFrame();
+    const postMessageSpy = vi.spyOn(initialFrame.contentWindow!, 'postMessage');
+
+    clickManualTool('manual-edit-mode-toggle');
+
+    const captureRequest = postMessageSpy.mock.calls
+      .map(([value]) => value)
+      .find((value) => (
+        typeof value === 'object' &&
+        value !== null &&
+        (value as { type?: unknown }).type === 'od:preview-runtime-state-capture'
+      )) as { type: string; id: string } | undefined;
+    if (captureRequest) {
+      act(() => {
+        window.dispatchEvent(new MessageEvent('message', {
+          data: {
+            type: 'od:preview-runtime-state-captured',
+            id: captureRequest.id,
+            state: {
+              version: 1,
+              hash: '',
+              htmlAttrs: {},
+              bodyAttrs: {},
+              entries: [],
+            },
+          },
+          source: initialFrame.contentWindow,
+        }));
+      });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByTestId('manual-edit-mode-toggle').getAttribute('aria-pressed')).toBe('true');
+      const activeFrame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+      expect(activeFrame.getAttribute('data-od-active')).toBe('true');
+      expect(activeFrame.getAttribute('data-od-render-mode')).toBe('srcdoc');
+    });
+  }
+
   async function hoverManualEditTarget(target = heroTarget()) {
     const frame = await previewFrame();
     act(() => {
@@ -141,7 +181,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     // No panel auto-pops; the canvas stays clean.
     expect(document.querySelector('.manual-edit-right')).toBeNull();
     expect(screen.queryByText('PAGE')).toBeNull();
@@ -165,7 +205,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await clickManualEditBackground();
 
     expect(screen.getByText('PAGE')).toBeTruthy();
@@ -184,7 +224,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await hoverManualEditTarget();
     // No panel until the affordance is clicked.
     expect(document.querySelector('.manual-edit-right')).toBeNull();
@@ -218,7 +258,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('manual-edit-mode-toggle'));
+    await enterManualEditMode();
     await selectManualEditTarget();
     const baseSizeInput = await findStyleInput(FONT_SIZE_ROW);
     fireEvent.change(baseSizeInput, { target: { value: '18' } });
@@ -261,9 +301,9 @@ describe('FileViewer manual edit regressions', () => {
       // bump so srcDoc-mode previews see fresh HTML after agent edits.
       await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
         expect.stringMatching(/^\/api\/projects\/project-1\/raw\/preview\.html(\?|$)/),
-        {},
+        { cache: 'no-store' },
       ));
-      fireEvent.click(screen.getByTestId('manual-edit-mode-toggle'));
+      await enterManualEditMode();
       await selectManualEditTarget();
       const baseSizeInput = await findStyleInput(FONT_SIZE_ROW);
       fireEvent.change(baseSizeInput, { target: { value: '18' } });
@@ -314,7 +354,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     const baseSizeInput = await findStyleInput(FONT_SIZE_ROW);
 
@@ -344,7 +384,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     const baseSizeInput = await findStyleInput(FONT_SIZE_ROW);
 
@@ -381,7 +421,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     const baseSizeInput = await findStyleInput(FONT_SIZE_ROW);
 
@@ -418,7 +458,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
 
     // The host cannot read a sandboxed iframe's scroll directly; the bridge
@@ -503,7 +543,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     await findStyleInput(FONT_SIZE_ROW);
     // Nothing is dirty before the drag, so no Reset is offered.
@@ -543,7 +583,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     await findStyleInput(FONT_SIZE_ROW);
 
@@ -581,7 +621,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget();
     const frame = await previewFrame();
     act(() => {
@@ -634,7 +674,7 @@ describe('FileViewer manual edit regressions', () => {
       />,
     );
 
-    clickManualTool('manual-edit-mode-toggle');
+    await enterManualEditMode();
     await selectManualEditTarget({
       ...heroTarget(),
       id: 'app-root',
