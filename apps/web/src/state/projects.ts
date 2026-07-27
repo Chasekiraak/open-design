@@ -5,7 +5,7 @@
 // These helpers fail soft (returning null / [] on transport errors) so
 // the UI can stay rendered when the daemon is briefly unreachable.
 
-import { coalescedGet } from '../lib/coalesced-get';
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
 import { API_ERROR_CODES, type ApiErrorCode } from '@open-design/contracts';
 import type {
@@ -611,19 +611,28 @@ export async function listConversations(
   options?: { throwOnError?: boolean },
 ): Promise<Conversation[]> {
   try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+    // Concurrent consumers of one project's conversation list share a single
+    // request per burst (Batch A §4.3); conversation writes below evict.
+    const json = await coalescedGet(
+      `project-conversations:${projectId}`,
+      async () => {
+        const resp = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+        );
+        if (!resp.ok) throw new Error(`conversations ${resp.status}`);
+        return (await resp.json()) as { conversations: Conversation[] };
+      },
     );
-    if (!resp.ok) {
-      if (options?.throwOnError) throw new Error(`conversations ${resp.status}`);
-      return [];
-    }
-    const json = (await resp.json()) as { conversations: Conversation[] };
     return json.conversations ?? [];
   } catch (err) {
     if (options?.throwOnError) throw err;
     return [];
   }
+}
+
+/** Thin invalidation for the shared conversations read after a write. */
+function evictConversationsRead(projectId: string): void {
+  evictCoalescedGet(`project-conversations:${projectId}`);
 }
 
 export async function createConversation(
@@ -667,6 +676,7 @@ export async function createConversation(
     );
     if (!resp.ok) return null;
     const json = (await resp.json()) as { conversation: Conversation };
+    evictConversationsRead(projectId);
     return json.conversation;
   } catch {
     return null;
@@ -689,6 +699,7 @@ export async function patchConversation(
     );
     if (!resp.ok) return null;
     const json = (await resp.json()) as { conversation: Conversation };
+    evictConversationsRead(projectId);
     return json.conversation;
   } catch {
     return null;
@@ -704,6 +715,7 @@ export async function deleteConversation(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}`,
       { method: 'DELETE' },
     );
+    if (resp.ok) evictConversationsRead(projectId);
     return resp.ok;
   } catch {
     return false;
@@ -929,6 +941,8 @@ function newestTabsState(
 }
 
 async function persistTabsToDaemon(projectId: string, state: OpenTabsState): Promise<void> {
+  // Thin invalidation: a write makes any burst-shared read stale.
+  evictCoalescedGet(`project-tabs:${projectId}`);
   await fetch(`/api/projects/${encodeURIComponent(projectId)}/tabs`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -940,11 +954,15 @@ async function persistTabsToDaemon(projectId: string, state: OpenTabsState): Pro
 export async function loadTabs(projectId: string): Promise<OpenTabsState> {
   const cached = readCachedTabs(projectId);
   try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/tabs`,
-    );
-    if (!resp.ok) return cached ?? { tabs: [], active: null };
-    const saved = normalizeTabsState(await resp.json());
+    // Concurrent mounts share one daemon read per burst (Batch A §4.3); the
+    // per-caller cache reconciliation below still runs for every caller.
+    const saved = await coalescedGet(`project-tabs:${projectId}`, async () => {
+      const resp = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/tabs`,
+      );
+      if (!resp.ok) throw new Error(`tabs ${resp.status}`);
+      return normalizeTabsState(await resp.json());
+    });
     const latest = newestTabsState(cached, saved);
     if (cached && latest === cached && (cached.updatedAt ?? 0) > (saved?.updatedAt ?? 0)) {
       void persistTabsToDaemon(projectId, cached).catch(() => {});

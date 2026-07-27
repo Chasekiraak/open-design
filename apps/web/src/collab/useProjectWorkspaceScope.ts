@@ -5,6 +5,10 @@ import type {
   WorkspaceCollabContext,
 } from '@open-design/contracts';
 import { WORKSPACE_CONTEXT_REFRESH_EVENT } from './useWorkspaceContext';
+import {
+  forceSharedCancellableGet,
+  sharedCancellableGet,
+} from '../lib/shared-cancellable-get';
 import { useWorkspaceInvalidation } from './workspace-events';
 
 const PROJECT_SCOPE_RETRY_MS = 5_000;
@@ -66,25 +70,38 @@ function validScopeForProject(
 async function fetchProjectWorkspaceScope(
   projectId: string,
   signal: AbortSignal,
+  options?: { fresh?: boolean },
 ): Promise<ProjectWorkspaceScope> {
-  const response = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/workspace-scope`,
-    { cache: 'no-store', signal },
+  // Every mounted consumer of one project's scope shares a single request
+  // (Batch A §4.3). One consumer unmounting only detaches itself; the shared
+  // read is aborted when nobody is left awaiting it. Identity-change
+  // revalidations pass `fresh` to evict the burst cache first (once per
+  // broadcast burst).
+  const get = options?.fresh ? forceSharedCancellableGet : sharedCancellableGet;
+  return get(
+    `project-workspace-scope:${projectId}`,
+    async (sharedSignal): Promise<ProjectWorkspaceScope> => {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/workspace-scope`,
+        { cache: 'no-store', signal: sharedSignal },
+      );
+      if (!response.ok) {
+        throw new ProjectWorkspaceScopeFetchError(
+          response.status === 404
+            ? 'unsupported'
+            : response.status === 403
+              ? 'forbidden'
+              : 'unavailable',
+        );
+      }
+      const body = (await response.json()) as ProjectWorkspaceScopeResponse;
+      if (!body.scope || !validScopeForProject(body.scope, projectId)) {
+        throw new Error('project workspace scope identity mismatch');
+      }
+      return body.scope;
+    },
+    { signal },
   );
-  if (!response.ok) {
-    throw new ProjectWorkspaceScopeFetchError(
-      response.status === 404
-        ? 'unsupported'
-        : response.status === 403
-          ? 'forbidden'
-          : 'unavailable',
-    );
-  }
-  const body = (await response.json()) as ProjectWorkspaceScopeResponse;
-  if (!body.scope || !validScopeForProject(body.scope, projectId)) {
-    throw new Error('project workspace scope identity mismatch');
-  }
-  return body.scope;
 }
 
 /**
@@ -151,7 +168,12 @@ export function useProjectWorkspaceScope(projectId: string): ProjectWorkspaceSco
         firstAttempt = false;
       }
       try {
-        const scope = await fetchProjectWorkspaceScope(projectId, controller.signal);
+        const scope = await fetchProjectWorkspaceScope(projectId, controller.signal, {
+          // Revision 0 is the initial mount read; anything later is an
+          // explicit revalidation (identity change, reconnect, pageshow,
+          // deferred TTL re-read) and must not be served from the burst cache.
+          fresh: refreshRevision > 0,
+        });
         if (controller.signal.aborted || epoch !== epochRef.current) return;
         setState({
           loading: false,

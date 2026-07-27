@@ -10,6 +10,7 @@ import { resetWorkspaceContextCache } from '../../src/collab/useWorkspaceContext
 import { resetHtmlSourceSnapshotCache } from '../../src/components/html-source-snapshot-cache';
 import { resetProjectCoverSnapshots } from '../../src/lib/project-cover-cache';
 import { resetThumbnailLoadGateForTests } from '../../src/lib/thumbnail-load-gate';
+import { resetSharedCancellableGet } from '../../src/lib/shared-cancellable-get';
 
 beforeEach(() => {
   resetCoalescedGet();
@@ -23,4 +24,5 @@ beforeEach(() => {
   // resolved in one test never satisfy (or budget-starve) the next.
   resetProjectCoverSnapshots();
   resetThumbnailLoadGateForTests();
+  resetSharedCancellableGet();
 });

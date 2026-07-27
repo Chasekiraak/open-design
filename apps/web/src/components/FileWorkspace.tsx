@@ -104,7 +104,6 @@ import {
   type InstalledPluginRecord,
   type LocalizedText,
   type WorkspaceContextItem,
-  type WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
 import {
   notifyTeamProjectsChanged,
@@ -125,6 +124,7 @@ import { designSystemGithubEvidenceState, repoConnectCopy } from './design-syste
 import { APP_CHROME_FILE_ACTIONS_ID } from './AppChromeHeader';
 import { FileViewer, LiveArtifactViewer } from './FileViewer';
 import { Icon, type IconName } from './Icon';
+import { projectIsSharedWithWorkspace } from '../collab/project-shared-status';
 import { FileSyncBadge, type FileSyncBadgeState } from '../collab/FileSyncBadge';
 import { Toast } from './Toast';
 import { TabLauncherMenu } from './workspace/TabLauncherMenu';
@@ -162,27 +162,6 @@ import { AnimatePresence } from 'motion/react';
 import type { ChatMessage } from '../types';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
-
-async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean> {
-  try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/status`);
-    if (response.ok) {
-      const body = (await response.json()) as { syncState?: unknown; ownerMemberId?: unknown };
-      if (typeof body.ownerMemberId === 'string' && body.ownerMemberId.trim()) return true;
-      if (typeof body.syncState === 'string' && body.syncState !== 'local_only') return true;
-    }
-  } catch {
-    // Fall through to the team-project directory below.
-  }
-  try {
-    const response = await fetch('/api/workspace/projects/team');
-    if (!response.ok) return false;
-    const body = (await response.json()) as WorkspaceTeamProjectsResponse;
-    return body.projects.some((project) => project.projectId === projectId);
-  } catch {
-    return false;
-  }
-}
 
 interface Props {
   projectId: string;
