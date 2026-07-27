@@ -8,8 +8,16 @@ import { AvatarMenu } from '../../src/components/AvatarMenu';
 import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
 import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
 
+const { openExternalUrlMock } = vi.hoisted(() => ({
+  openExternalUrlMock: vi.fn<(url: string) => Promise<boolean>>(),
+}));
+
 vi.mock('../../src/i18n', () => ({
   useT: () => (key: string) => key,
+}));
+
+vi.mock('../../src/providers/registry', () => ({
+  openExternalUrl: openExternalUrlMock,
 }));
 
 // recvqfYKutwWlQ: the AMR upgrade entry point must only render for a caller who
@@ -417,13 +425,47 @@ describe('AvatarMenu', () => {
     expect(custom.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('routes plan-gated Open Design models to the plans page instead of selecting them', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
-    const openSpy = vi.fn();
-    vi.stubGlobal('open', openSpy);
+  it('fails closed for a locked model when the project scope is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '247.5087' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext({
+          workspaceId: 'workspace-ambient',
+        }));
+      }
+      return new Response('{}', { status: 202 });
+    }));
+    openExternalUrlMock.mockResolvedValue(true);
 
     const { onAgentModelChange } = renderMenu({
-      config: { ...baseConfig, agentId: 'amr' },
+      config: {
+        ...baseConfig,
+        agentId: 'amr',
+        agentCliEnv: { amr: { OPEN_DESIGN_AMR_PROFILE: 'feature-test' } },
+      },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'unavailable',
+          projectId: 'project-a',
+          workspaceId: 'workspace-a',
+          visibility: 'personal',
+          context: null,
+        },
+      },
       agents: [
         {
           id: 'amr',
@@ -439,6 +481,7 @@ describe('AvatarMenu', () => {
     });
 
     openMenu();
+    await screen.findByText('Plus');
     const list = screen.getByTestId('avatar-model-list');
     const locked = within(list).getByRole('radio', { name: /Paid model/i });
     expect(locked.getAttribute('aria-disabled')).toBe('true');
@@ -446,8 +489,130 @@ describe('AvatarMenu', () => {
     fireEvent.click(locked);
 
     expect(onAgentModelChange).not.toHaveBeenCalled();
-    await waitFor(() => expect(openSpy).toHaveBeenCalled());
-    expect(String(openSpy.mock.calls[0]![0])).toContain('view=plans');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(openExternalUrlMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('$247.51')).toBeNull();
+    expect(screen.queryByRole('link', {
+      name: 'settings.amrUpgrade',
+    })).toBeNull();
+    expect(screen.queryByRole('button', {
+      name: /settings\.amrBalance/,
+    })).toBeNull();
+  });
+
+  it('does not borrow account money for an unbound project', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (input.toString() === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '247.5087' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 202 });
+    }));
+
+    renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'unbound',
+          projectId: 'project-a',
+          workspaceId: null,
+          context: null,
+        },
+      },
+      agents: [{
+        id: 'amr',
+        name: 'Open Design AMR',
+        bin: 'vela',
+        available: true,
+        models: [{ id: 'default', label: 'Default (CLI config)' }],
+      }],
+    });
+
+    openMenu();
+    await screen.findByText('Plus');
+    expect(screen.queryByText('$247.51')).toBeNull();
+    expect(screen.queryByRole('button', {
+      name: /settings\.amrBalance/,
+    })).toBeNull();
+    expect(screen.queryByRole('link', {
+      name: 'settings.amrUpgrade',
+    })).toBeNull();
+  });
+
+  it('routes a locked model only when the exact project member can upgrade', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (input.toString() === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '9.12' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 202 });
+    }));
+    openExternalUrlMock.mockResolvedValue(true);
+    const projectContext = teamMemberWorkspaceContext({
+      workspaceId: 'workspace-a',
+      workspaceMemberId: 'member-a',
+      role: 'owner',
+      permissions: {
+        ...teamMemberWorkspaceContext().permissions,
+        canManageBilling: true,
+      },
+    }) as WorkspaceCollabContext & { workspaceType: 'team' };
+
+    const { onAgentModelChange } = renderMenu({
+      config: {
+        ...baseConfig,
+        agentId: 'amr',
+        agentCliEnv: { amr: { OPEN_DESIGN_AMR_PROFILE: 'feature-test' } },
+      },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'team',
+          projectId: 'project-a',
+          workspaceId: 'workspace-a',
+          visibility: 'personal',
+          context: projectContext,
+        },
+      },
+      agents: [{
+        id: 'amr',
+        name: 'Open Design AMR',
+        bin: 'vela',
+        available: true,
+        models: [{ id: 'paid-model', label: 'Paid model', enabled: false }],
+      }],
+    });
+
+    openMenu();
+    await screen.findByRole('link', { name: 'settings.amrUpgrade' });
+    fireEvent.click(screen.getByRole('radio', { name: /Paid model/i }));
+
+    expect(onAgentModelChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledTimes(1));
+    const target = new URL(openExternalUrlMock.mock.calls[0]![0]);
+    expect(target.searchParams.get('workspaceId')).toBe('workspace-a');
+    expect(target.searchParams.get('view')).toBe('plans');
   });
 
   it('renders the signed-in plan/balance and stamps the avatar upgrade link', async () => {
@@ -475,6 +640,7 @@ describe('AvatarMenu', () => {
       return new Response('{}', { status: 202 });
     });
     vi.stubGlobal('fetch', fetchMock);
+    openExternalUrlMock.mockResolvedValue(true);
 
     renderMenu({
       config: {
@@ -514,10 +680,12 @@ describe('AvatarMenu', () => {
       name: 'settings.amrUpgrade',
     })) as HTMLAnchorElement;
     fireEvent.click(upgrade);
-    const url = new URL(upgrade.href);
+    await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledTimes(1));
+    const url = new URL(openExternalUrlMock.mock.calls[0]![0]);
     expect(url.searchParams.get('view')).toBe('plans');
     expect(url.searchParams.get('od_entry_source')).toBe('avatar_amr_upgrade');
     expect(url.searchParams.get('source')).toBe('open_design');
+    expect(url.searchParams.get('workspaceId')).toBe('ws-personal');
     expect(url.searchParams.get('od_device_id')).toBe('od-install-abc');
   });
 
@@ -581,16 +749,15 @@ describe('AvatarMenu', () => {
     expect(within(dialog).queryByText('$247.51')).toBeNull();
   });
 
-  it('renders and refreshes the project-bound balance while ambient navigation is elsewhere', async () => {
-    let balance = '131.08';
-    vi.stubGlobal('EventSource', MockAvatarEventSource as unknown as typeof EventSource);
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  it('shows and opens only the daemon-authoritative project wallet while ambient navigation is elsewhere', async () => {
+    let balance = '13.421';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url === '/api/integrations/vela/status') {
         return new Response(JSON.stringify({
           loggedIn: true,
           loginInFlight: false,
-          profile: 'test',
+          profile: 'feature-test',
           user: { id: 'u1', email: 'a@b.c' },
           account: { plan: 'plus', balanceUsd: '247.5087' },
           configPath: '/Users/test/.amr/config.json',
@@ -622,8 +789,27 @@ describe('AvatarMenu', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=workspace-b') {
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'workspace-b',
+            workspaceMemberId: 'member-b',
+            balanceUsd: '7.89',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return new Response('{}', { status: 202 });
-    }));
+    });
+    vi.stubGlobal('EventSource', MockAvatarEventSource as unknown as typeof EventSource);
+    vi.stubGlobal('fetch', fetchMock);
+    openExternalUrlMock.mockResolvedValue(true);
 
     renderMenu({
       config: { ...baseConfig, agentId: 'amr' },
@@ -651,10 +837,23 @@ describe('AvatarMenu', () => {
     });
 
     const dialog = openMenu();
-    expect(await within(dialog).findByText('$131.08')).toBeTruthy();
+    const wallet = await within(dialog).findByRole('button', {
+      name: 'settings.amrBalance $13.42',
+    });
+    expect(within(dialog).queryByText('$7.89')).toBeNull();
     expect(within(dialog).queryByText('$247.51')).toBeNull();
+    fireEvent.click(wallet);
 
-    balance = '132.09';
+    await waitFor(() => expect(openExternalUrlMock).toHaveBeenCalledTimes(1));
+    const target = new URL(openExternalUrlMock.mock.calls[0]![0]);
+    expect(target.searchParams.get('workspaceId')).toBe('workspace-a');
+    expect(target.searchParams.get('view')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/workspace/billing?scope=workspace&workspaceId=workspace-b',
+      expect.anything(),
+    );
+
+    balance = '14.22';
     act(() => {
       MockAvatarEventSource.instances[0]!.dispatch('wallet-balance-changed', {
         type: 'wallet-balance-changed',
@@ -663,7 +862,10 @@ describe('AvatarMenu', () => {
         revision: 'wallet-project-a',
       });
     });
-    expect(await within(dialog).findByText('$132.09')).toBeTruthy();
+    // Clicking the wallet closes the popover; reopen before the SSE refresh
+    // assertion so the row is mounted again.
+    const reopened = openMenu();
+    expect(await within(reopened).findByText('$14.22')).toBeTruthy();
   });
 
   it('omits wallet and upgrade links for non-upgradeable plans', async () => {

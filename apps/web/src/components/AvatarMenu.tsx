@@ -19,7 +19,11 @@ import {
   formatVelaBalanceUsd,
   type VelaLoginStatus,
 } from '../providers/daemon';
-import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
+import { openExternalUrl } from '../providers/registry';
+import {
+  amrPlansUrlForWorkspace,
+  amrWalletUrlForWorkspace,
+} from '../runtime/amr-guidance';
 import { isMacPlatform } from '../utils/platform';
 import {
   useWorkspaceBillingResponse,
@@ -273,7 +277,12 @@ export function AvatarMenu({
   const scopedWorkspaceBalance = formatVelaBalanceUsd(
     workspaceBillingBalanceUsd(workspaceBillingResponse, workspaceContext),
   );
-  const amrBalanceLabel = amrAccount?.loggedIn && !workspaceContextLoading
+  const financialScopeResolved =
+    !projectWorkspaceScope || workspaceContext !== null;
+  const amrBalanceLabel =
+    amrAccount?.loggedIn &&
+    !workspaceContextLoading &&
+    financialScopeResolved
     ? workspaceContext?.workspaceType === 'team'
       ? scopedWorkspaceBalance
       : scopedWorkspaceBalance ??
@@ -283,16 +292,32 @@ export function AvatarMenu({
           : null)
     : null;
   const amrResolvedProfile = amrAccount?.profile ?? amrProfile;
+  const financialWorkspaceId =
+    !workspaceContextLoading && workspaceContext?.workspaceId.trim()
+      ? workspaceContext.workspaceId
+      : null;
+  const amrWalletUrl = amrWalletUrlForWorkspace(
+    amrResolvedProfile,
+    financialWorkspaceId,
+  );
+  const amrPlansUrl = amrPlansUrlForWorkspace(
+    amrResolvedProfile,
+    financialWorkspaceId,
+  );
   // Personal workspaces always resolve `canManageBilling` true (the user is
   // their own owner), so this does not affect the personal-workspace upgrade
   // path.
   const amrCanUpgrade =
     !!amrAccount?.loggedIn &&
     canUpgradeVelaPlan(amrAccount.account?.plan) &&
-    Boolean(workspaceContext?.permissions?.canManageBilling);
-  const amrPlansUrl = amrPlansUrlForProfile(amrResolvedProfile);
-  const handleAmrUpgradeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    const attribution = recordAmrEntry(analytics.track, 'avatar_amr_upgrade', new Date(), {
+    Boolean(workspaceContext?.permissions?.canManageBilling) &&
+    amrPlansUrl !== null;
+  const openAmrTarget = (
+    targetUrl: string | null,
+    source: 'avatar_amr_console' | 'avatar_amr_upgrade',
+  ) => {
+    if (!targetUrl) return;
+    const attribution = recordAmrEntry(analytics.track, source, new Date(), {
       metricsConsent: config.telemetry?.metrics === true,
     });
     const deviceId = amrHandoffDeviceId({
@@ -300,28 +325,19 @@ export function AvatarMenu({
       resolvedDeviceId: getResolvedDeviceId(),
       installationId: config.installationId,
     });
-    event.currentTarget.href = attributedAmrUrl(amrPlansUrl, attribution, deviceId);
     setOpen(false);
+    void openExternalUrl(attributedAmrUrl(targetUrl, attribution, deviceId));
+  };
+  const handleAmrUpgradeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (!amrCanUpgrade) return;
+    openAmrTarget(amrPlansUrl, 'avatar_amr_upgrade');
   };
   // Plan-gated models stay visible but are not selectable; clicking one routes
   // to the plans page instead of silently choosing a model the run would reject.
   const openAmrUpgrade = () => {
-    const attribution = recordAmrEntry(
-      analytics.track,
-      'avatar_amr_upgrade',
-      new Date(),
-      { metricsConsent: config.telemetry?.metrics === true },
-    );
-    const deviceId = amrHandoffDeviceId({
-      metricsConsent: config.telemetry?.metrics === true,
-      resolvedDeviceId: getResolvedDeviceId(),
-      installationId: config.installationId,
-    });
-    window.open(
-      attributedAmrUrl(amrPlansUrl, attribution, deviceId),
-      '_blank',
-      'noopener,noreferrer',
-    );
+    if (!amrCanUpgrade) return;
+    openAmrTarget(amrPlansUrl, 'avatar_amr_upgrade');
   };
 
   // Resolve the user's model + reasoning pick for the active agent. Falls
@@ -441,7 +457,31 @@ export function AvatarMenu({
                     </span>
                     <PlanBadge plan={amrPlanDisplay} size="md" />
                   </span>
-                  {amrBalanceLabel ? (
+                </span>
+              </button>
+              {amrBalanceLabel ? (
+                amrWalletUrl ? (
+                  <button
+                    type="button"
+                    className="avatar-amr-row__wallet"
+                    aria-label={`${t('settings.amrBalance')} ${amrBalanceLabel}`}
+                    onClick={() =>
+                      openAmrTarget(amrWalletUrl, 'avatar_amr_console')
+                    }
+                  >
+                    <span className="avatar-amr-row__subtitle" aria-hidden="true">
+                      <span className="avatar-amr-row__stat">
+                        <span className="avatar-amr-row__stat-label">
+                          {t('settings.amrBalance')}
+                        </span>
+                        <span className="avatar-amr-row__stat-value">
+                          {amrBalanceLabel}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                ) : (
+                  <span className="avatar-amr-row__wallet avatar-amr-row__wallet--static">
                     <span className="avatar-amr-row__subtitle">
                       <span className="avatar-amr-row__stat">
                         <span className="avatar-amr-row__stat-label">
@@ -452,13 +492,13 @@ export function AvatarMenu({
                         </span>
                       </span>
                     </span>
-                  ) : null}
-                </span>
-              </button>
+                  </span>
+                )
+              ) : null}
               {amrCanUpgrade ? (
                 <a
                   className="avatar-amr-row__upgrade"
-                  href={amrPlansUrl}
+                  href={amrPlansUrl ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={handleAmrUpgradeClick}

@@ -28,6 +28,33 @@ export function amrRechargeUrlForProfile(profile: string | null | undefined): st
   return amrConsoleUrlForProfile(profile);
 }
 
+function amrWorkspaceUrl(
+  profile: string | null | undefined,
+  workspaceId: string | null | undefined,
+  view?: 'plans',
+): string | null {
+  const normalizedWorkspaceId = workspaceId?.trim();
+  if (!normalizedWorkspaceId) return null;
+  const url = new URL(amrConsoleUrlForProfile(profile));
+  url.searchParams.set('workspaceId', normalizedWorkspaceId);
+  if (view) url.searchParams.set('view', view);
+  return url.toString();
+}
+
+export function amrWalletUrlForWorkspace(
+  profile: string | null | undefined,
+  workspaceId: string | null | undefined,
+): string | null {
+  return amrWorkspaceUrl(profile, workspaceId);
+}
+
+export function amrPlansUrlForWorkspace(
+  profile: string | null | undefined,
+  workspaceId: string | null | undefined,
+): string | null {
+  return amrWorkspaceUrl(profile, workspaceId, 'plans');
+}
+
 // Console wallet deep-linked to open the subscription/plans modal
 // (`view=plans`), used by the "Upgrade" affordances next to the plan tier.
 export function amrPlansUrlForProfile(profile: string | null | undefined): string {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_AMR_RECHARGE_URL,
+  amrPlansUrlForWorkspace,
   amrProfileBadgeLabel,
   amrRechargeUrlForProfile,
+  amrWalletUrlForWorkspace,
   resolveRunFailureUi,
 } from '../../src/runtime/amr-guidance';
 
@@ -24,6 +26,23 @@ describe('amrRechargeUrlForProfile', () => {
 
   it('labels the feature-test profile distinctly', () => {
     expect(amrProfileBadgeLabel('feature-test')).toBe('FEATURE TEST');
+  });
+});
+
+describe('workspace-scoped AMR URLs', () => {
+  it('pins wallet and plans links to the exact workspace', () => {
+    expect(amrWalletUrlForWorkspace('feature-test', ' workspace-a ')).toBe(
+      'https://amr-feature.powerformer.net/wallet?source=open_design&workspaceId=workspace-a',
+    );
+    expect(amrPlansUrlForWorkspace('feature-test', ' workspace-a ')).toBe(
+      'https://amr-feature.powerformer.net/wallet?source=open_design&workspaceId=workspace-a&view=plans',
+    );
+  });
+
+  it('fails closed when the workspace identity is absent', () => {
+    expect(amrWalletUrlForWorkspace('feature-test', null)).toBeNull();
+    expect(amrWalletUrlForWorkspace('feature-test', '   ')).toBeNull();
+    expect(amrPlansUrlForWorkspace('feature-test', undefined)).toBeNull();
   });
 });
 
