@@ -1,4 +1,5 @@
 import type {
+  WorkspaceBillingRevisionClock,
   WorkspaceBillingRuntimeState,
   WorkspaceBillingSnapshot,
   WorkspaceWalletBalance,
@@ -34,6 +35,7 @@ export interface WorkspaceBillingRuntimeInvalidation {
   workspaceId?: string;
   workspaceMemberId?: string;
   revision?: string;
+  revisionClock?: WorkspaceBillingRevisionClock;
   reason?: string;
 }
 
@@ -69,6 +71,9 @@ interface RuntimeEntry {
   reason: string;
   sourceGapDetected: boolean;
   sourceRevisions: Partial<Record<WorkspaceBillingInvalidationDomain, string>>;
+  sourceRevisionClocks: Partial<
+    Record<WorkspaceBillingInvalidationDomain, WorkspaceBillingRevisionClock>
+  >;
   inFlight: Promise<void> | null;
   pending: boolean;
   pendingReason: string | null;
@@ -165,19 +170,29 @@ export class WorkspaceBillingRuntimeCoordinator {
         if (entry.key.workspaceMemberId !== workspaceMemberId) continue;
       }
       if (entry.status === 'access-revoked') continue;
-      const revisionResult = acceptSourceRevision(
-        entry.sourceRevisions[invalidation.domain],
-        invalidation.revision,
-      );
+      const revisionClock = normalizeRevisionClock(invalidation.revisionClock);
+      const revisionResult = revisionClock
+        ? acceptSourceRevisionClock(
+            entry.sourceRevisionClocks[invalidation.domain],
+            revisionClock,
+          )
+        : acceptSourceRevision(
+            entry.sourceRevisions[invalidation.domain],
+            invalidation.revision,
+          );
       if (!revisionResult.accepted) continue;
-      if (invalidation.revision) {
+      if (revisionClock) {
+        entry.sourceRevisionClocks[invalidation.domain] = revisionClock;
+      } else if (invalidation.revision) {
         entry.sourceRevisions[invalidation.domain] = invalidation.revision;
       }
       entry.sourceGapDetected = revisionResult.gap;
       const reason =
         revisionResult.gap
           ? 'revision-gap'
-          : invalidation.reason ?? `${invalidation.domain}-invalidation`;
+          : revisionResult.epochChanged
+            ? 'revision-epoch-change'
+            : invalidation.reason ?? `${invalidation.domain}-invalidation`;
       this.markStatus(entry, hasProjection(entry) ? 'stale' : 'loading', reason);
       this.requestRefresh(entry, reason, true);
     }
@@ -339,6 +354,7 @@ export class WorkspaceBillingRuntimeCoordinator {
       reason: 'first-interest',
       sourceGapDetected: false,
       sourceRevisions: {},
+      sourceRevisionClocks: {},
       inFlight: null,
       pending: false,
       pendingReason: null,
@@ -592,7 +608,22 @@ function validateProjectionRevision(
   const expectedBilling =
     entry.sourceRevisions.subscription ?? entry.sourceRevisions.legacy;
   const expectedWallet = entry.sourceRevisions.wallet;
+  const expectedBillingClock =
+    entry.sourceRevisionClocks.subscription ?? entry.sourceRevisionClocks.legacy;
+  const expectedWalletClock = entry.sourceRevisionClocks.wallet;
+  const actualBillingClock = normalizeRevisionClock(
+    snapshot.revisionClocks?.billing,
+  );
+  const actualWalletClock = normalizeRevisionClock(
+    snapshot.revisionClocks?.wallet,
+  );
   if (
+    (expectedBillingClock &&
+      actualBillingClock &&
+      revisionClockIsBehind(actualBillingClock, expectedBillingClock)) ||
+    (expectedWalletClock &&
+      actualWalletClock &&
+      revisionClockIsBehind(actualWalletClock, expectedWalletClock)) ||
     revisionIsBehind(snapshot.revisions.billing, expectedBilling) ||
     revisionIsBehind(snapshot.revisions.wallet, expectedWallet)
   ) {
@@ -608,6 +639,26 @@ function recordProjectionRevisions(
 ): void {
   const snapshot = projection.snapshot;
   if (!snapshot) return;
+  const billingClock = normalizeRevisionClock(snapshot.revisionClocks?.billing);
+  const walletClock = normalizeRevisionClock(snapshot.revisionClocks?.wallet);
+  if (
+    billingClock &&
+    revisionClockCanAdvance(entry.sourceRevisionClocks.subscription, billingClock)
+  ) {
+    entry.sourceRevisionClocks.subscription = billingClock;
+  }
+  if (
+    billingClock &&
+    revisionClockCanAdvance(entry.sourceRevisionClocks.legacy, billingClock)
+  ) {
+    entry.sourceRevisionClocks.legacy = billingClock;
+  }
+  if (
+    walletClock &&
+    revisionClockCanAdvance(entry.sourceRevisionClocks.wallet, walletClock)
+  ) {
+    entry.sourceRevisionClocks.wallet = walletClock;
+  }
   if (revisionCanAdvance(entry.sourceRevisions.subscription, snapshot.revisions.billing)) {
     entry.sourceRevisions.subscription = snapshot.revisions.billing;
   }
@@ -633,6 +684,33 @@ function revisionCanAdvance(previous: string | undefined, next: string): boolean
   return true;
 }
 
+function normalizeRevisionClock(
+  value: WorkspaceBillingRevisionClock | undefined,
+): WorkspaceBillingRevisionClock | null {
+  const epoch = value?.epoch?.trim() ?? '';
+  const counter = value?.counter?.trim() ?? '';
+  if (!epoch || !/^(?:0|[1-9]\d*)$/.test(counter)) return null;
+  return { epoch, counter };
+}
+
+function revisionClockIsBehind(
+  actual: WorkspaceBillingRevisionClock,
+  expected: WorkspaceBillingRevisionClock,
+): boolean {
+  return (
+    actual.epoch !== expected.epoch ||
+    BigInt(actual.counter) < BigInt(expected.counter)
+  );
+}
+
+function revisionClockCanAdvance(
+  previous: WorkspaceBillingRevisionClock | undefined,
+  next: WorkspaceBillingRevisionClock,
+): boolean {
+  if (!previous || previous.epoch !== next.epoch) return true;
+  return BigInt(next.counter) > BigInt(previous.counter);
+}
+
 function cloneProjection(
   projection: VelaWorkspaceBillingProjection,
 ): VelaWorkspaceBillingProjection {
@@ -649,6 +727,14 @@ function cloneSnapshot(snapshot: WorkspaceBillingSnapshot | null): WorkspaceBill
     billing: { ...snapshot.billing },
     wallet: { ...snapshot.wallet },
     revisions: { ...snapshot.revisions },
+    ...(snapshot.revisionClocks
+      ? {
+          revisionClocks: {
+            billing: { ...snapshot.revisionClocks.billing },
+            wallet: { ...snapshot.revisionClocks.wallet },
+          },
+        }
+      : {}),
   };
 }
 
@@ -689,20 +775,46 @@ function isAccessRevokedError(error: unknown): boolean {
 function acceptSourceRevision(
   previous: string | undefined,
   next: string | undefined,
-): { accepted: boolean; gap: boolean } {
+): { accepted: boolean; gap: boolean; epochChanged: boolean } {
   const normalized = next?.trim() ?? '';
-  if (!normalized) return { accepted: true, gap: false };
-  if (!previous) return { accepted: true, gap: false };
-  if (previous === normalized) return { accepted: false, gap: false };
+  if (!normalized) return { accepted: true, gap: false, epochChanged: false };
+  if (!previous) return { accepted: true, gap: false, epochChanged: false };
+  if (previous === normalized) return { accepted: false, gap: false, epochChanged: false };
   if (/^\d+$/.test(previous) && /^\d+$/.test(normalized)) {
     const oldValue = BigInt(previous);
     const newValue = BigInt(normalized);
-    if (newValue <= oldValue) return { accepted: false, gap: false };
-    return { accepted: true, gap: newValue > oldValue + 1n };
+    if (newValue <= oldValue) {
+      return { accepted: false, gap: false, epochChanged: false };
+    }
+    return {
+      accepted: true,
+      gap: newValue > oldValue + 1n,
+      epochChanged: false,
+    };
   }
   // Opaque tokens support equality dedupe only. A changed token is a safe
   // invalidation; the authoritative read decides the actual value.
-  return { accepted: true, gap: false };
+  return { accepted: true, gap: false, epochChanged: false };
+}
+
+function acceptSourceRevisionClock(
+  previous: WorkspaceBillingRevisionClock | undefined,
+  next: WorkspaceBillingRevisionClock,
+): { accepted: boolean; gap: boolean; epochChanged: boolean } {
+  if (!previous) return { accepted: true, gap: false, epochChanged: false };
+  if (previous.epoch !== next.epoch) {
+    return { accepted: true, gap: false, epochChanged: true };
+  }
+  const oldValue = BigInt(previous.counter);
+  const newValue = BigInt(next.counter);
+  if (newValue <= oldValue) {
+    return { accepted: false, gap: false, epochChanged: false };
+  }
+  return {
+    accepted: true,
+    gap: newValue > oldValue + 1n,
+    epochChanged: false,
+  };
 }
 
 function strongerReason(current: string | null, next: string): string {

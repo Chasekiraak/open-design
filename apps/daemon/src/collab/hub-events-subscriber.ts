@@ -18,7 +18,24 @@
 //     frame at least every 15s, so 45s of silence means the TCP stream is
 //     zombied and we abort + reconnect.
 
+import type { WorkspaceBillingRevisionClock } from '@open-design/contracts';
+
 export type HubResourceStatus = 'shared' | 'retracted';
+export type HubListenerHealth = 'starting' | 'healthy' | 'reconnecting' | 'stopped';
+
+export interface HubListenerStatus {
+  listenerEpoch: string;
+  listenerHealth: HubListenerHealth;
+  sourceGap: boolean;
+}
+
+export interface HubReadyFrame {
+  workspaceId: string;
+  capabilities: string[];
+  listenerStatus: HubListenerStatus | null;
+}
+
+const BILLING_REVISION_CLOCKS_CAPABILITY = 'billing-revision-clocks-v1';
 
 export interface HubWorkspaceEvent {
   type:
@@ -35,6 +52,7 @@ export interface HubWorkspaceEvent {
   workspaceId?: string;
   workspaceMemberId?: string;
   revision?: string;
+  revisionClock?: WorkspaceBillingRevisionClock;
   projectId?: string;
   resourceId?: string;
   /** Set on 'team-resources-changed': `resource_hub.resources.kind` at emit
@@ -79,6 +97,8 @@ export function parseHubWorkspaceEvent(data: string): HubWorkspaceEvent | null {
       event.workspaceMemberId = parsed.workspaceMemberId;
     }
     if (typeof parsed.revision === 'string') event.revision = parsed.revision;
+    const revisionClock = parseRevisionClock(parsed.revisionClock);
+    if (revisionClock) event.revisionClock = revisionClock;
     if (typeof parsed.projectId === 'string') event.projectId = parsed.projectId;
     if (typeof parsed.resourceId === 'string') event.resourceId = parsed.resourceId;
     if (typeof parsed.resourceKind === 'string') event.resourceKind = parsed.resourceKind;
@@ -92,6 +112,74 @@ export function parseHubWorkspaceEvent(data: string): HubWorkspaceEvent | null {
     if (typeof parsed.version === 'number') event.version = parsed.version;
     if (typeof parsed.at === 'string') event.at = parsed.at;
     return event;
+  } catch {
+    return null;
+  }
+}
+
+export function parseHubReadyFrame(data: string): HubReadyFrame | null {
+  const parsed = parseJsonRecord(data);
+  const workspaceId =
+    typeof parsed?.workspaceId === 'string' ? parsed.workspaceId.trim() : '';
+  if (!workspaceId) return null;
+  const capabilities = Array.isArray(parsed?.capabilities)
+    ? parsed.capabilities.filter(
+        (capability): capability is string =>
+          typeof capability === 'string' && Boolean(capability.trim()),
+      )
+    : [];
+  return {
+    workspaceId,
+    capabilities,
+    listenerStatus: parseHubListenerStatusRecord(parsed),
+  };
+}
+
+export function parseHubListenerStatus(data: string): HubListenerStatus | null {
+  return parseHubListenerStatusRecord(parseJsonRecord(data));
+}
+
+function parseHubListenerStatusRecord(
+  parsed: Record<string, unknown> | null,
+): HubListenerStatus | null {
+  if (!parsed) return null;
+  const listenerEpoch =
+    typeof parsed.listenerEpoch === 'string' ? parsed.listenerEpoch.trim() : '';
+  const listenerHealth = parsed.listenerHealth;
+  if (
+    !listenerEpoch ||
+    (
+      listenerHealth !== 'starting' &&
+      listenerHealth !== 'healthy' &&
+      listenerHealth !== 'reconnecting' &&
+      listenerHealth !== 'stopped'
+    ) ||
+    typeof parsed.sourceGap !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    listenerEpoch,
+    listenerHealth,
+    sourceGap: parsed.sourceGap,
+  };
+}
+
+function parseRevisionClock(value: unknown): WorkspaceBillingRevisionClock | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const epoch = typeof raw.epoch === 'string' ? raw.epoch.trim() : '';
+  const counter = typeof raw.counter === 'string' ? raw.counter.trim() : '';
+  if (!epoch || !/^(?:0|[1-9]\d*)$/.test(counter)) return null;
+  return { epoch, counter };
+}
+
+function parseJsonRecord(data: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   } catch {
     return null;
   }
@@ -120,6 +208,8 @@ export interface HubEventsSubscriberOptions {
   /** Fired after a `ready` frame verifies the stream workspace. Unlike
    *  `onReconnect`, this includes the first successful connection. */
   onConnect?: (connection: { reconnect: boolean; workspaceId?: string }) => void;
+  /** One catch-up nudge per healthy producer-listener epoch that reports a gap. */
+  onSourceGap?: (gap: { workspaceId?: string; listenerEpoch: string }) => void;
   /** Secret-free parser/scope diagnostics. Raw payloads are never exposed. */
   onDrop?: (drop: {
     reason: 'invalid-ready' | 'workspace-mismatch' | 'unverified-scope' | 'invalid-payload';
@@ -158,6 +248,7 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
   let backoffMs = backoffMinMs;
   let abortController: AbortController | null = null;
   let wakeSleep: (() => void) | null = null;
+  const handledSourceGapEpochs = new Set<string>();
 
   const setConnected = (next: boolean) => {
     if (isConnected === next) return;
@@ -207,6 +298,30 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
       let buffer = '';
       let scopeVerified = false;
       let connectionNotified = false;
+      let verifiedWorkspaceId: string | undefined;
+      let revisionClocksEnabled = false;
+      const reportSourceGap = (
+        status: HubListenerStatus | null,
+        suppressCallback = false,
+      ) => {
+        const handledKey =
+          `${verifiedWorkspaceId ?? 'unknown'}\0${status?.listenerEpoch ?? ''}`;
+        if (
+          !status ||
+          status.listenerHealth !== 'healthy' ||
+          !status.sourceGap ||
+          handledSourceGapEpochs.has(handledKey)
+        ) {
+          return;
+        }
+        handledSourceGapEpochs.add(handledKey);
+        if (!suppressCallback) {
+          options.onSourceGap?.({
+            ...(verifiedWorkspaceId ? { workspaceId: verifiedWorkspaceId } : {}),
+            listenerEpoch: status.listenerEpoch,
+          });
+        }
+      };
       const notifyVerifiedConnection = (workspaceId?: string) => {
         if (connectionNotified) return;
         connectionNotified = true;
@@ -239,16 +354,8 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
           }
           const data = dataLines.join('\n');
           if (eventName === 'ready') {
-            let actualWorkspaceId: string | undefined;
-            try {
-              const parsed = JSON.parse(data) as { workspaceId?: unknown };
-              if (typeof parsed.workspaceId === 'string' && parsed.workspaceId.trim()) {
-                actualWorkspaceId = parsed.workspaceId.trim();
-              }
-            } catch {
-              // Reported through the common invalid-ready path below.
-            }
-            if (!actualWorkspaceId) {
+            const ready = parseHubReadyFrame(data);
+            if (!ready) {
               options.onDrop?.({
                 reason: 'invalid-ready',
                 eventName,
@@ -259,6 +366,7 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
               abortController?.abort();
               return;
             }
+            const actualWorkspaceId = ready.workspaceId;
             if (endpoint.workspaceId && actualWorkspaceId !== endpoint.workspaceId) {
               options.onDrop?.({
                 reason: 'workspace-mismatch',
@@ -270,10 +378,23 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
               return;
             }
             scopeVerified = true;
+            verifiedWorkspaceId = actualWorkspaceId;
+            revisionClocksEnabled = ready.capabilities.includes(
+              BILLING_REVISION_CLOCKS_CAPABILITY,
+            );
+            const reconnect = everConnected;
             notifyVerifiedConnection(actualWorkspaceId);
+            // Transport reconnect already invokes the broader onReconnect
+            // catch-up. A first connection has no such callback, so a healthy
+            // producer-side gap reported in ready must trigger it here.
+            reportSourceGap(ready.listenerStatus, reconnect);
             continue;
           }
-          if (eventName !== 'workspace-event') continue; // heartbeat feeds the watchdog only
+          if (eventName === 'source-status' || eventName === 'heartbeat') {
+            if (scopeVerified) reportSourceGap(parseHubListenerStatus(data));
+            continue;
+          }
+          if (eventName !== 'workspace-event') continue;
           if (!scopeVerified) {
             options.onDrop?.({
               reason: 'unverified-scope',
@@ -302,7 +423,12 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
             });
             continue;
           }
-          options.onEvent(event);
+          if (!revisionClocksEnabled && event.revisionClock) {
+            const { revisionClock: _, ...legacyEvent } = event;
+            options.onEvent(legacyEvent);
+          } else {
+            options.onEvent(event);
+          }
         }
       }
     } finally {

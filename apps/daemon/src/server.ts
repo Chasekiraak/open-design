@@ -4017,6 +4017,7 @@ export async function startServer({
             domain: 'legacy',
             ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
             ...(event.revision ? { revision: event.revision } : {}),
+            ...(event.revisionClock ? { revisionClock: event.revisionClock } : {}),
             reason: 'vela-billing-changed',
           });
           emitWorkspaceEvent({
@@ -4032,6 +4033,7 @@ export async function startServer({
             domain: 'subscription',
             workspaceId: event.workspaceId,
             ...(event.revision ? { revision: event.revision } : {}),
+            ...(event.revisionClock ? { revisionClock: event.revisionClock } : {}),
             reason: 'vela-billing-subscription-changed',
           });
           emitWorkspaceEvent({
@@ -4048,6 +4050,7 @@ export async function startServer({
             workspaceId: event.workspaceId,
             workspaceMemberId: event.workspaceMemberId,
             ...(event.revision ? { revision: event.revision } : {}),
+            ...(event.revisionClock ? { revisionClock: event.revisionClock } : {}),
             reason: 'vela-wallet-balance-changed',
           });
           emitWorkspaceEvent({
@@ -4083,6 +4086,16 @@ export async function startServer({
       // reconciler: a missed 'team-resources-changed' push during the
       // disconnect window is closed by one full re-check across every kind
       // this daemon drives it for (no resourceKind => reconcile all).
+      void reconcileTeamResourcesFromRemote().catch(() => undefined);
+    },
+    onSourceGap: ({ workspaceId, listenerEpoch }) => {
+      console.warn(
+        `[od] hub source gap detected listenerEpoch=${listenerEpoch} ` +
+          `workspaceId=${workspaceId ?? 'unknown'}`,
+      );
+      void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+      workspaceBillingRuntime.reconnect(workspaceId);
+      void collabCloud?.pollOnce().catch(() => undefined);
       void reconcileTeamResourcesFromRemote().catch(() => undefined);
     },
     onError: (error) => {

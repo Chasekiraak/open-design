@@ -62,12 +62,16 @@ describe('parseHubWorkspaceEvent', () => {
     });
     expect(
       parseHubWorkspaceEvent(
-        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing-3"}',
+        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing-3","revisionClock":{"epoch":"billing-epoch-a","counter":"3"}}',
       ),
     ).toEqual({
       type: 'billing-subscription-changed',
       workspaceId: 'w1',
       revision: 'billing-3',
+      revisionClock: {
+        epoch: 'billing-epoch-a',
+        counter: '3',
+      },
     });
     expect(
       parseHubWorkspaceEvent(
@@ -77,6 +81,18 @@ describe('parseHubWorkspaceEvent', () => {
       type: 'billing-changed',
       workspaceId: 'w1',
       revision: 'billing-3',
+    });
+  });
+
+  it('drops malformed additive revision clocks and preserves the legacy event', () => {
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing:v1:3","revisionClock":{"epoch":"","counter":"-1"}}',
+      ),
+    ).toEqual({
+      type: 'billing-subscription-changed',
+      workspaceId: 'w1',
+      revision: 'billing:v1:3',
     });
   });
 
@@ -119,6 +135,81 @@ describe('parseHubWorkspaceEvent', () => {
 });
 
 describe('startHubEventsSubscriber', () => {
+  it('uses revision clocks only when the ready frame advertises the capability', async () => {
+    const clockEvent =
+      'event: workspace-event\ndata: {"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing:v1:2","revisionClock":{"epoch":"billing-epoch-a","counter":"2"}}\n\n';
+    const events: unknown[] = [];
+    let fetches = 0;
+    let resolveBoth!: () => void;
+    const both = new Promise<void>((resolve) => {
+      resolveBoth = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({ url: 'https://hub/events', headers: {} }),
+      onEvent: (event) => {
+        events.push(event);
+        if (events.length === 2) resolveBoth();
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () => {
+        fetches += 1;
+        return fetches === 1
+          ? sseResponse([
+              'event: ready\ndata: {"workspaceId":"w1","capabilities":[]}\n\n',
+              clockEvent,
+            ])
+          : sseResponse([
+              'event: ready\ndata: {"workspaceId":"w1","capabilities":["billing-revision-clocks-v1"]}\n\n',
+              clockEvent,
+            ], { holdOpen: true });
+      },
+    });
+
+    await both;
+    expect(events[0]).not.toHaveProperty('revisionClock');
+    expect(events[1]).toMatchObject({
+      revisionClock: { epoch: 'billing-epoch-a', counter: '2' },
+    });
+  });
+
+  it('reports one healthy source gap per listener epoch from status and heartbeat frames', async () => {
+    const gaps: unknown[] = [];
+    let resolveGaps!: () => void;
+    const twoGaps = new Promise<void>((resolve) => {
+      resolveGaps = resolve;
+    });
+    const recordGap = (gap: unknown) => {
+      gaps.push(gap);
+      if (gaps.length === 2) resolveGaps();
+    };
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({
+        url: 'https://hub/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
+      onEvent: () => undefined,
+      onSourceGap: recordGap,
+      fetchImpl: async () => sseResponse([
+        'event: source-status\ndata: {"listenerEpoch":"listener-before-ready","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: ready\ndata: {"workspaceId":"w1","capabilities":["billing-revision-clocks-v1"],"listenerEpoch":"listener-a","listenerHealth":"starting","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-a","listenerHealth":"mystery","sourceGap":true}\n\n',
+        'event: heartbeat\ndata: {"listenerEpoch":"listener-a","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-a","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-b","listenerHealth":"healthy","sourceGap":true}\n\n',
+      ], { holdOpen: true }),
+    });
+
+    await twoGaps;
+    expect(gaps).toEqual([
+      { workspaceId: 'w1', listenerEpoch: 'listener-a' },
+      { workspaceId: 'w1', listenerEpoch: 'listener-b' },
+    ]);
+  });
+
   it('delivers workspace-events and reports connected state', async () => {
     const events: unknown[] = [];
     const states: string[] = [];

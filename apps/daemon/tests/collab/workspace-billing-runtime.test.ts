@@ -19,6 +19,10 @@ function projection(
   billingRevision = '1',
   walletRevision = '1',
   planId: string | null = 'team_plus',
+  revisionClocks?: {
+    billing: { epoch: string; counter: string };
+    wallet: { epoch: string; counter: string };
+  },
 ): VelaWorkspaceBillingProjection {
   return {
     snapshot: {
@@ -33,6 +37,7 @@ function projection(
         updatedAt: '2026-07-27T00:00:00.000Z',
       },
       revisions: { billing: billingRevision, wallet: walletRevision },
+      ...(revisionClocks ? { revisionClocks } : {}),
     },
     workspaceBalance: {
       workspaceId,
@@ -139,6 +144,176 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
       status: 'fresh',
       reason: 'revision-gap',
       sourceGapDetected: true,
+    });
+    runtime.dispose();
+  });
+
+  it('dedupes and detects gaps within one revision-clock epoch', async () => {
+    let calls = 0;
+    let counter = '1';
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          counter,
+          `billing:v1:${counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: { epoch: 'billing-epoch-a', counter },
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: { epoch: 'billing-epoch-a', counter: '1' },
+    });
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:0',
+      revisionClock: { epoch: 'billing-epoch-a', counter: '0' },
+    });
+    await Promise.resolve();
+    expect(calls).toBe(1);
+
+    counter = '4';
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:4',
+      revisionClock: { epoch: 'billing-epoch-a', counter: '4' },
+    });
+    const caughtUp = await runtime.read(KEY_A);
+    expect(calls).toBe(2);
+    expect(caughtUp.state).toMatchObject({
+      status: 'fresh',
+      reason: 'revision-gap',
+      sourceGapDetected: true,
+    });
+    runtime.dispose();
+  });
+
+  it('accepts a counter reset after a revision-clock epoch change', async () => {
+    let clock = { epoch: 'billing-epoch-a', counter: '9' };
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          `billing:v1:${clock.counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: clock,
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-b', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: clock,
+    });
+    const refreshed = await runtime.read(KEY_A);
+
+    expect(calls).toBe(2);
+    expect(refreshed.state).toMatchObject({
+      status: 'fresh',
+      reason: 'revision-epoch-change',
+      sourceGapDetected: false,
+    });
+    runtime.dispose();
+  });
+
+  it('requires a clocked snapshot to catch up to the accepted event clock', async () => {
+    vi.useFakeTimers();
+    let counter = '1';
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          counter,
+          `billing:v1:${counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: { epoch: 'billing-epoch-a', counter },
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:2',
+      revisionClock: { epoch: 'billing-epoch-a', counter: '2' },
+    });
+    const behind = await runtime.read(KEY_A);
+    expect(behind.state).toMatchObject({
+      status: 'error',
+      errorCode: 'workspace_billing_revision_not_caught_up',
+    });
+
+    counter = '2';
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(calls).toBe(3));
+    expect(runtime.peek(KEY_A)?.state.status).toBe('fresh');
+    runtime.dispose();
+  });
+
+  it('keeps prefixed legacy revisions opaque when no valid clock is available', async () => {
+    let revision = 'billing:v1:9';
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          revision,
+          'wallet:v1:1',
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    revision = 'billing:v1:1';
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision,
+      revisionClock: { epoch: '', counter: '-1' },
+    });
+    const refreshed = await runtime.read(KEY_A);
+
+    expect(calls).toBe(2);
+    expect(refreshed.state).toMatchObject({
+      status: 'fresh',
+      sourceGapDetected: false,
     });
     runtime.dispose();
   });

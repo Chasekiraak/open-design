@@ -409,6 +409,14 @@ export interface WorkspaceWalletBalance {
   updatedAt: string | null;
 }
 
+/** Persistent producer cursor for one workspace-billing change domain. */
+export interface WorkspaceBillingRevisionClock {
+  /** Changes only when the producer's persistent revision sequence is rebuilt. */
+  epoch: string;
+  /** Unsigned decimal counter, monotonic within one epoch. */
+  counter: string;
+}
+
 /**
  * One authoritative, explicitly scoped workspace billing snapshot from Vela.
  *
@@ -433,6 +441,16 @@ export interface WorkspaceBillingSnapshot {
   revisions: {
     billing: string;
     wallet: string;
+  };
+  /**
+   * Additive persistent cursors advertised by
+   * `billing-revision-clocks-v1`. Missing means the producer/CLI predates the
+   * capability, so consumers keep treating `revisions` as opaque equality
+   * tokens and rely on reconnect/poll catch-up.
+   */
+  revisionClocks?: {
+    billing: WorkspaceBillingRevisionClock;
+    wallet: WorkspaceBillingRevisionClock;
   };
 }
 
