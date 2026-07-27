@@ -886,22 +886,28 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       if (missingClientPin) {
         meta.assistantMessageId = randomUUID();
       }
-      // Prefer currentPrompt (latest turn) whenever it is a string — including
-      // empty for attachments-only sends. message may be a full flattened
-      // ChatRequest transcript. Minimal MCP requests set both equal. Only fall
-      // back to message when currentPrompt is absent. Empty message is still
-      // seedable when attachment metadata is present so chips/annotations
-      // survive reload for omit-pin clients that leave currentPrompt unset.
+      // Prefer original request currentPrompt (latest turn) whenever it is a
+      // string — including empty for attachments-only sends. Plugin resolution
+      // may replace meta.message with a rendered scenario brief for the run
+      // (see above); seed visible chat content from requestBody so that
+      // internal brief never appears as user-authored content. message may be
+      // a full flattened ChatRequest transcript. Minimal MCP requests set both
+      // equal. Only fall back to message when currentPrompt is absent. Empty
+      // message is still seedable when attachment metadata is present so
+      // chips/annotations survive reload for omit-pin clients that leave
+      // currentPrompt unset.
       const seededAttachments = seededUserMessageAttachmentFields(meta);
       const hasSeedableAttachmentMetadata =
         (seededAttachments.attachments?.length ?? 0) > 0 ||
         (seededAttachments.commentAttachments?.length ?? 0) > 0;
+      const originalCurrentPrompt = requestBody.currentPrompt;
+      const originalMessage = requestBody.message;
       const promptForUserMessage =
-        typeof meta.currentPrompt === 'string'
-          ? meta.currentPrompt
-          : typeof meta.message === 'string' &&
-              (meta.message.trim().length > 0 || hasSeedableAttachmentMetadata)
-            ? meta.message
+        typeof originalCurrentPrompt === 'string'
+          ? originalCurrentPrompt
+          : typeof originalMessage === 'string' &&
+              (originalMessage.trim().length > 0 || hasSeedableAttachmentMetadata)
+            ? originalMessage
             : null;
       if (promptForUserMessage !== null) {
         try {

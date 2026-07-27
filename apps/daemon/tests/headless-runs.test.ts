@@ -455,21 +455,13 @@ describe('POST /api/runs headless fallbacks', () => {
 
   it('seeds empty message attachments-only turns when currentPrompt is unset', async () => {
     started = await startTestServer();
-    // Omit project kind so no default scenario plugin rewrites empty message
-    // into a rendered brief before omit-pin seed (keeps content '').
-    const projectId = `project_${randomUUID()}`;
-    const projectResponse = await fetch(`${started.url}/api/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: projectId,
-        name: 'Omit-pin empty message attachments without currentPrompt',
-        metadata: {},
-      }),
-    });
-    expect(projectResponse.status).toBe(200);
-    const projectBody = await projectResponse.json() as { conversationId: string };
-    const conversationId = projectBody.conversationId;
+    // Use a normal project kind (prototype) so default-scenario resolution can
+    // rewrite meta.message with a rendered brief for the run. Seeded chat
+    // content must still come from the original empty requestBody.message.
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Omit-pin empty message attachments without currentPrompt',
+    );
     const attachmentPath = 'assets/no-prompt.png';
     const commentAttachment = {
       id: `comment-${randomUUID()}`,
@@ -486,7 +478,8 @@ describe('POST /api/runs headless fallbacks', () => {
     };
 
     // Minimal omit-pin client: empty text, optional currentPrompt omitted,
-    // but attachment metadata present — must still seed the user turn.
+    // but attachment metadata present — must still seed the user turn with
+    // the original empty content (not a scenario plugin brief).
     const runResponse = await fetch(`${started.url}/api/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -500,7 +493,10 @@ describe('POST /api/runs headless fallbacks', () => {
       }),
     });
     expect(runResponse.status).toBe(202);
-    const runBody = await runResponse.json() as { assistantMessageId: string | null };
+    const runBody = await runResponse.json() as {
+      assistantMessageId: string | null;
+      appliedPluginSnapshotId?: string | null;
+    };
     expect(runBody.assistantMessageId).toBeTruthy();
 
     const messagesResponse = await fetch(
@@ -515,10 +511,20 @@ describe('POST /api/runs headless fallbacks', () => {
         commentAttachments?: Array<{ id: string; filePath: string; comment: string; slideIndex?: number }>;
       }>;
     };
+    // Default scenario may fill the run prompt, but visible user content must
+    // remain the original empty message — never the rendered plugin brief.
     const emptyAttachmentTurn = messagesBody.messages.find(
       (m) => m.role === 'user' && m.content === '',
     );
     expect(emptyAttachmentTurn).toBeTruthy();
+    expect(
+      messagesBody.messages.some(
+        (m) =>
+          m.role === 'user' &&
+          typeof m.content === 'string' &&
+          m.content.includes('product-studio'),
+      ),
+    ).toBe(false);
     expect(emptyAttachmentTurn?.attachments).toEqual([
       {
         path: attachmentPath,
