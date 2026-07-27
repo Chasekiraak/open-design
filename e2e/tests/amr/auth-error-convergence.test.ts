@@ -55,6 +55,6 @@ describe('AMR auth error convergence', () => {
       const assistant = messages.find((message) => message.id === assistantMessageId);
       expect(assistant?.runStatus).toBe('failed');
       await expect(readRunEvents(webUrl, run.runId)).resolves.toMatch(/AMR_AUTH_REQUIRED/);
-    });
+    }, { amrPersonalWorkspaceAuthority: true });
   });
 });

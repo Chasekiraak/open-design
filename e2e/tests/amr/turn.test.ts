@@ -28,6 +28,7 @@ import { join } from 'node:path';
 
 import { describe, expect, test } from 'vitest';
 
+import { AMR_PERSONAL_WORKSPACE_HEADERS } from '@/vitest/amr';
 import { requestJson } from '@/vitest/http';
 import { listMessages } from '@/vitest/messages';
 import { startRun, waitForRunStatus } from '@/vitest/runs';
@@ -247,6 +248,7 @@ describe('AMR chat-run end-to-end', () => {
           pendingPrompt: null,
           skillId: null,
         },
+        headers: AMR_PERSONAL_WORKSPACE_HEADERS,
       });
       const projectId = project.project.id;
       const conversationId = project.conversationId;
@@ -301,6 +303,6 @@ describe('AMR chat-run end-to-end', () => {
         );
         expect(anyAssistant).toBeTruthy();
       }
-    });
+    }, { amrPersonalWorkspaceAuthority: true });
   }, 180_000);
 });

@@ -585,6 +585,42 @@ function teamWorkspaceContext(
   };
 }
 
+function authoritativeWorkspaceBillingResponse(
+  workspaceId: string,
+  workspaceMemberId: string,
+) {
+  const observedAt = '2026-07-26T00:00:00.000Z';
+  return {
+    summary: null,
+    workspaceBalance: {
+      workspaceId,
+      workspaceMemberId,
+      balanceUsd: '10.00',
+      billingScopeVersion: 2,
+      expiresAt: null,
+      updatedAt: observedAt,
+    },
+    workspaceRuntime: {
+      workspaceId,
+      workspaceMemberId,
+      status: 'fresh',
+      revision: '4',
+      observedAt,
+      softExpiresAt: '2099-07-26T00:00:30.000Z',
+      hardExpiresAt: '2099-07-26T00:02:00.000Z',
+      retryAt: null,
+      errorCode: null,
+      reason: 'authoritative-action-read',
+      sourceGapDetected: false,
+    },
+    authoritativeWorkspaceRead: {
+      workspaceId,
+      workspaceMemberId,
+      observedAt,
+    },
+  };
+}
+
 const runningAssistant: ChatMessage = {
   id: 'assistant-a',
   role: 'assistant',
@@ -880,17 +916,11 @@ describe('ProjectView conversation run isolation', () => {
       const url = String(input);
       if (url.includes('/api/workspace/billing')) {
         const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
-        return new Response(JSON.stringify({
-          summary: null,
-          workspaceBalance: {
-            workspaceId,
-            workspaceMemberId: workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b',
-            balanceUsd: '10.00',
-            billingScopeVersion: 2,
-            expiresAt: null,
-            updatedAt: null,
-          },
-        }), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (!workspaceId) throw new Error('workspace billing request omitted workspaceId');
+        return new Response(JSON.stringify(authoritativeWorkspaceBillingResponse(
+          workspaceId,
+          workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b',
+        )), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });

@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@/playwright/suite';
+import { expect, test as baseTest } from '@/playwright/suite';
 
 import { writeFakeVelaBin } from '@/amr';
 import { routeAgents } from '@/playwright/mock-factory';
@@ -12,10 +12,20 @@ import {
   gotoProject,
   mockAmrWalletSnapshot,
   openSettingsDialog,
+  PERSONAL_PROJECT_WORKSPACE_HEADERS,
+  providePersonalWorkspaceApi,
   putAppConfig,
   seedBrowserConfig,
   sendPrompt,
+  stubPersonalProjectWorkspaceScope,
 } from '@/playwright/amr';
+
+const test = baseTest.extend<{}, { _fakeWorkspaceApi: void }>({
+  _fakeWorkspaceApi: [
+    async ({}, use) => providePersonalWorkspaceApi(use),
+    { auto: true, scope: 'worker' },
+  ],
+});
 
 test.describe.configure({ timeout: T.xlong });
 
@@ -104,7 +114,10 @@ test('[P0] after local Sign out, AMR runs require re-login and Settings keeps AM
   await putAppConfig(page, config);
 
   const projectId = `amr-logout-${Date.now()}`.replace(/[^A-Za-z0-9._-]/g, '-');
-  await createProjectViaApi(page, projectId, 'AMR logout requires relogin');
+  await createProjectViaApi(page, projectId, 'AMR logout requires relogin', {
+    headers: PERSONAL_PROJECT_WORKSPACE_HEADERS,
+  });
+  await stubPersonalProjectWorkspaceScope(page, projectId);
   await gotoProject(page, projectId);
 
   const settings = await openSettingsDialog(page);

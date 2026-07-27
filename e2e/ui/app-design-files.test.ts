@@ -425,9 +425,8 @@ async function runDesignFilesUploadFlow(page: Page) {
 
   await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'moodboard.png',
-  });
+  await page.getByTestId('design-files-tab-cat:image').click();
+  const fileRow = page.getByTestId('design-file-row-moodboard.png');
   await expect(fileRow).toBeVisible();
   const nameBtn = fileRow.getByRole('button').first();
   await nameBtn.click();
@@ -469,10 +468,9 @@ async function runDesignFilesDeleteFlow(page: Page) {
 
   await expect(page.getByRole('tab', { name: /trash-me\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
+  await page.getByTestId('design-files-tab-cat:image').click();
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'trash-me.png',
-  });
+  const fileRow = page.getByTestId('design-file-row-trash-me.png');
   await expect(fileRow).toBeVisible();
   await fileRow.hover();
   await fileRow.locator('[data-testid^="design-file-menu-"]').click();

@@ -59,6 +59,6 @@ describe('AMR insufficient balance run failures', () => {
       const messages = await listMessages(webUrl, project.project.id, project.conversationId);
       const assistant = messages.find((message) => message.id === assistantMessageId);
       expect(assistant?.runStatus).toBe('failed');
-    });
+    }, { amrPersonalWorkspaceAuthority: true });
   });
 });

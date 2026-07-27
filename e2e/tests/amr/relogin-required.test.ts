@@ -50,7 +50,7 @@ describe('AMR relogin-required run failures', () => {
         expect(terminal.status).toBe('failed');
 
         await expect(readRunEvents(webUrl, run.runId)).resolves.toMatch(/AMR_AUTH_REQUIRED/);
-      });
+      }, { amrPersonalWorkspaceAuthority: true });
     });
   });
 
@@ -91,7 +91,7 @@ describe('AMR relogin-required run failures', () => {
         });
 
         await waitForRunStatus(webUrl, run.runId, 'succeeded', { timeoutMs: 20_000 });
-      });
+      }, { amrPersonalWorkspaceAuthority: true });
     });
   });
 
@@ -138,7 +138,7 @@ describe('AMR relogin-required run failures', () => {
           });
 
           await waitForRunStatus(webUrl, run.runId, 'succeeded', { timeoutMs: 20_000 });
-        });
+        }, { amrPersonalWorkspaceAuthority: true });
       },
     );
   });

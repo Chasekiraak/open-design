@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import { delimiter, dirname, join } from 'node:path';
 
 import { expect } from 'vitest';
@@ -66,6 +67,7 @@ export type ToolsDevSuiteContext = {
 };
 
 export type ToolsDevSuiteOptions = {
+  amrPersonalWorkspaceAuthority?: boolean;
   env?: Record<string, string | undefined>;
   onFailure?: (input: {
     context: ToolsDevSuiteContext | null;
@@ -158,7 +160,7 @@ async function allocateDistinctPorts(count: number): Promise<number[]> {
 }
 
 async function reserveFreePort(): Promise<number> {
-  const server = createServer();
+  const server = createNetServer();
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
     server.listen(0, '127.0.0.1', () => resolveListen());
@@ -244,18 +246,29 @@ async function runToolsDevSuite(
   let diagnostics: unknown = null;
   let caughtError: unknown = null;
   let success = false;
+  let closeAmrWorkspaceApi: (() => Promise<void>) | null = null;
+  const suiteEnv = options.amrPersonalWorkspaceAuthority
+    ? {
+        VELA_API_URL: suite.amr.apiUrl,
+        VELA_CONTROL_KEY: 'fake-control-key',
+        ...options.env,
+      }
+    : options.env;
 
   try {
-    const start = await toolsDev.startWeb(options.env);
+    if (options.amrPersonalWorkspaceAuthority) {
+      closeAmrWorkspaceApi = await startAmrPersonalWorkspaceApi(suite.amr.apiUrl);
+    }
+    const start = await toolsDev.startWeb(suiteEnv);
     const runtime = toolsDev.portAllocation;
     if (runtime == null) throw new Error('tools-dev did not expose its allocated ports');
     const webUrl = assertRuntimeUrl(start.web?.status.url, 'web');
-    const status = await toolsDev.status(options.env);
+    const status = await toolsDev.status(suiteEnv);
     assertToolsDevStatus(suite, status);
 
     context = {
-      check: () => toolsDev.check(options.env),
-      logs: () => toolsDev.logs(options.env),
+      check: () => toolsDev.check(suiteEnv),
+      logs: () => toolsDev.logs(suiteEnv),
       runtime,
       start,
       status,
@@ -269,7 +282,7 @@ async function runToolsDevSuite(
     success = true;
   } catch (error) {
     caughtError = error;
-    diagnostics = await toolsDev.check(options.env).catch((diagnosticError: unknown) => ({
+    diagnostics = await toolsDev.check(suiteEnv).catch((diagnosticError: unknown) => ({
       error: diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError),
     }));
     await options.onFailure?.({ context, error, suite }).catch((failureHookError: unknown) => {
@@ -285,9 +298,14 @@ async function runToolsDevSuite(
     // next smoke run on a shared CI runner.
     let stopError: unknown = null;
     try {
-      await toolsDev.stopWeb(options.env);
+      await toolsDev.stopWeb(suiteEnv);
     } catch (error) {
       stopError = error;
+    }
+    try {
+      await closeAmrWorkspaceApi?.();
+    } catch (error) {
+      stopError ??= error;
     }
     if (stopError != null) {
       diagnostics = {
@@ -308,6 +326,47 @@ async function runToolsDevSuite(
     }
   }
   return suite.report.root;
+}
+
+async function startAmrPersonalWorkspaceApi(
+  apiUrl: string,
+): Promise<() => Promise<void>> {
+  const url = new URL(apiUrl);
+  const port = Number(url.port);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(`AMR fixture URL does not include a valid port: ${apiUrl}`);
+  }
+  const server = createHttpServer((request, response) => {
+    const pathname = new URL(request.url ?? '/', apiUrl).pathname;
+    if (request.method === 'GET' && pathname === '/api/v1/workspaces') {
+      response.statusCode = 200;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({
+        items: [{
+          workspaceId: 'workspace-personal',
+          workspaceName: 'Personal',
+          workspaceType: 'personal',
+          workspaceMemberId: 'member-personal',
+          role: 'owner',
+          memberStatus: 'active',
+          lifecycleState: 'active',
+        }],
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, url.hostname, resolve);
+  });
+  return async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  };
 }
 
 function assertRuntimeUrl(value: string | null | undefined, app: string): string {

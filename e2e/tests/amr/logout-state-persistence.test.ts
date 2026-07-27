@@ -85,7 +85,7 @@ describe('AMR logout state persistence', () => {
         expect(terminal.status).toBe('failed');
 
         await expect(readRunEvents(webUrl, secondRun.runId)).resolves.toMatch(/AMR_AUTH_REQUIRED/);
-      });
+      }, { amrPersonalWorkspaceAuthority: true });
     });
   });
 });

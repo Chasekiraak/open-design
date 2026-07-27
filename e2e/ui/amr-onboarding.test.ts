@@ -1,10 +1,12 @@
-import { expect, test } from '@/playwright/suite';
+import { expect, test as baseTest } from '@/playwright/suite';
 import type { Locator, Page } from '@playwright/test';
 
 import {
   dismissPrivacyDialog,
   mockAmrWalletSnapshot,
+  providePersonalWorkspaceApi,
   STORAGE_KEY,
+  stubPersonalWorkspaceContext,
   waitForLoadingToClear,
 } from '@/playwright/amr';
 import { fulfillAgentsRoute } from '@/playwright/mock-factory';
@@ -32,6 +34,13 @@ declare global {
     __amrOnboardingStatusCalls?: number;
   }
 }
+
+const test = baseTest.extend<{}, { _fakeWorkspaceApi: void }>({
+  _fakeWorkspaceApi: [
+    async ({}, use) => providePersonalWorkspaceApi(use),
+    { auto: true, scope: 'worker' },
+  ],
+});
 
 test.describe.configure({ timeout: T.xlong });
 
@@ -406,6 +415,7 @@ test('[P0] @critical onboarding signed-in AMR path finishes setup with the AMR r
 // retired. The preserved coverage: the AMR runtime configured during a
 // signed-in onboarding carries into the first Home run request (agentId 'amr').
 test('[P0] onboarding AMR runtime selection carries into the first Home run request', async ({ page }) => {
+  await stubPersonalWorkspaceContext(page);
   const config = await wireOnboardingMocks(page, {
     amrAvailable: true,
     initialLoggedIn: true,

@@ -1,11 +1,9 @@
 import { mkdir } from 'node:fs/promises';
-import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test as baseTest } from '@/playwright/suite';
 import type { Page } from '@playwright/test';
-import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import { writeFakeVelaBin, seedVelaLoginConfig } from '@/amr';
 import { runErrorCard } from '@/playwright/chat';
@@ -16,12 +14,16 @@ import {
   createProjectViaApi,
   gotoEntryHome,
   gotoProject,
+  mockAmrWalletSnapshot,
   openSettingsDialog,
+  PERSONAL_PROJECT_WORKSPACE_HEADERS,
+  providePersonalWorkspaceApi,
   putAppConfig,
   seedBrowserConfig,
   sendPrompt,
   settingsSurface,
   STORAGE_KEY,
+  stubPersonalProjectWorkspaceScope,
 } from '@/playwright/amr';
 
 let codexRuntime: Awaited<ReturnType<typeof createFakeAgentRuntimes>>['codex'];
@@ -50,98 +52,10 @@ const ANTIGRAVITY_AGENT = {
   version: 'test',
   models: [{ id: 'default', label: 'Default' }],
 };
-const PERSONAL_PROJECT_WORKSPACE_CONTEXT = {
-  workspaceId: 'workspace-personal',
-  workspaceType: 'personal',
-  workspaceMemberId: 'member-personal',
-  role: 'owner',
-  memberStatus: 'active',
-  lifecycleState: 'active',
-  billingState: 'active',
-  planId: null,
-  providerMode: 'platform_credits',
-  seatSummary: {
-    seatLimit: 0,
-    usedSeats: 0,
-    availableSeats: 0,
-    isSeatFull: false,
-  },
-  permissions: {
-    canManageMembers: true,
-    canManageBilling: true,
-    canInviteMembers: true,
-    canManageAutoRecharge: true,
-    canShareProjects: true,
-    canWriteSyncedFiles: true,
-    canViewWorkspaceSettings: true,
-    canManageSharedResources: true,
-  },
-} satisfies WorkspaceCollabContext;
-const PERSONAL_PROJECT_WORKSPACE_HEADERS = {
-  'x-od-workspace-id': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
-  'x-od-workspace-type': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceType,
-  'x-od-workspace-member-id': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceMemberId,
-  'x-od-workspace-role': PERSONAL_PROJECT_WORKSPACE_CONTEXT.role,
-  'x-od-workspace-member-status': PERSONAL_PROJECT_WORKSPACE_CONTEXT.memberStatus,
-  'x-od-workspace-lifecycle-state': PERSONAL_PROJECT_WORKSPACE_CONTEXT.lifecycleState,
-  'x-od-workspace-can-share-projects': String(
-    PERSONAL_PROJECT_WORKSPACE_CONTEXT.permissions.canShareProjects,
-  ),
-  'x-od-workspace-can-write-synced-files': String(
-    PERSONAL_PROJECT_WORKSPACE_CONTEXT.permissions.canWriteSyncedFiles,
-  ),
-};
 
 const test = baseTest.extend<{}, { _fakeWorkspaceApi: void }>({
   _fakeWorkspaceApi: [
-    async ({}, use) => {
-      const server = createServer((request, response) => {
-        const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-        if (request.method === 'GET' && pathname === '/api/v1/workspaces') {
-          response.statusCode = 200;
-          response.setHeader('content-type', 'application/json');
-          response.end(JSON.stringify({
-            items: [{
-              workspaceId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
-              workspaceName: 'Personal',
-              workspaceType: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceType,
-              workspaceMemberId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceMemberId,
-              role: PERSONAL_PROJECT_WORKSPACE_CONTEXT.role,
-              memberStatus: PERSONAL_PROJECT_WORKSPACE_CONTEXT.memberStatus,
-              lifecycleState: PERSONAL_PROJECT_WORKSPACE_CONTEXT.lifecycleState,
-            }],
-          }));
-          return;
-        }
-        response.statusCode = 404;
-        response.end();
-      });
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-      });
-      const address = server.address();
-      if (address == null || typeof address === 'string') {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        throw new Error('fake workspace API did not receive a TCP port');
-      }
-      const previousControlKey = process.env.VELA_CONTROL_KEY;
-      const previousApiUrl = process.env.VELA_API_URL;
-      process.env.VELA_CONTROL_KEY = 'fake-control-key';
-      process.env.VELA_API_URL = `http://127.0.0.1:${address.port}`;
-      try {
-        await use();
-      } finally {
-        if (previousControlKey === undefined) delete process.env.VELA_CONTROL_KEY;
-        else process.env.VELA_CONTROL_KEY = previousControlKey;
-        if (previousApiUrl === undefined) delete process.env.VELA_API_URL;
-        else process.env.VELA_API_URL = previousApiUrl;
-        server.closeAllConnections();
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        });
-      }
-    },
+    async ({}, use) => providePersonalWorkspaceApi(use),
     { auto: true, scope: 'worker' },
   ],
 });
@@ -152,7 +66,6 @@ async function openExecutionSettingsDialog(page: Page) {
   return settings;
 }
 
-test.describe.configure({ mode: 'serial', timeout: T.xlong });
 // Timeout-only configure: each test stubs its own catalogs/agents/status
 // routes and creates its own project, so order independence holds and the
 // file stays splittable across CI shards (a serial group cannot be split).
@@ -186,22 +99,6 @@ async function stubRuntimeAgents(page: Page) {
   ]);
 }
 
-async function stubPersonalProjectWorkspaceScope(page: Page, projectId: string) {
-  await page.route(`**/api/projects/${projectId}/workspace-scope`, async (route) => {
-    await route.fulfill({
-      json: {
-        scope: {
-          kind: 'personal',
-          projectId,
-          workspaceId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
-          visibility: 'personal',
-          context: PERSONAL_PROJECT_WORKSPACE_CONTEXT,
-        },
-      },
-    });
-  });
-}
-
 function artifactPreview(page: Page) {
   return page.locator(ACTIVE_ARTIFACT_PREVIEW_SELECTOR).first();
 }
@@ -230,6 +127,11 @@ test('[P0] @critical AMR insufficient-balance failures surface Top up AMR and re
         user: { id: 'balance-user', email: 'balance-ui@example.com', plan: 'free' },
       }),
     });
+  });
+  await mockAmrWalletSnapshot(page, {
+    email: 'balance-ui@example.com',
+    plan: 'free',
+    profile,
   });
 
   await page.addInitScript(() => {

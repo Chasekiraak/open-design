@@ -122,7 +122,7 @@ test('[P2] captures the settings BYOK surface', async ({ page }) => {
   await gotoVisualWorkspace(page);
 
   const dialog = await prepareVisualSettingsDialog(page);
-  await dialog.getByRole('tab', { name: 'BYOK' }).click();
+  await dialog.getByRole('tab', { name: 'API providers' }).click();
   await expect(dialog.getByRole('tablist', { name: 'API protocol' })).toBeVisible();
   await expect(dialog.getByRole('heading', { name: 'Anthropic API' })).toBeVisible();
   await waitForVisualFonts(page);
@@ -145,7 +145,7 @@ test('[P2] captures the settings BYOK OpenAI surface', async ({ page }) => {
   await gotoVisualWorkspace(page);
 
   const dialog = await prepareVisualSettingsDialog(page);
-  await dialog.getByRole('tab', { name: 'BYOK' }).click();
+  await dialog.getByRole('tab', { name: 'API providers' }).click();
   await dialog.getByRole('tab', { name: 'OpenAI', exact: true }).click();
   await expect(dialog.getByRole('heading', { name: 'OpenAI API' })).toBeVisible();
   await waitForVisualFonts(page);
@@ -168,7 +168,7 @@ test('[P2] captures the settings BYOK model dropdown surface', async ({ page }) 
   await gotoVisualWorkspace(page);
 
   const dialog = await prepareVisualSettingsDialog(page);
-  await dialog.getByRole('tab', { name: 'BYOK' }).click();
+  await dialog.getByRole('tab', { name: 'API providers' }).click();
   await dialog.getByRole('tab', { name: 'OpenAI', exact: true }).click();
   const modelSelect = dialog.getByRole('combobox', { name: 'Model', exact: true });
   await expect(modelSelect).toBeVisible();
