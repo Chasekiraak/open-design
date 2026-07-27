@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import type Database from 'better-sqlite3';
 import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   defaultScenarioPluginIdForProjectMetadata,
@@ -100,6 +101,17 @@ import {
   runDesignSystemCreatedForRun,
   runPreviewModuleCountForRun,
 } from '../runtimes/run-lifecycle-analytics.js';
+import { normalizeCommentAttachments } from '../runtimes/chat-prompt-inputs.js';
+
+const SEEDED_USER_IMAGE_EXTS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.svg',
+]);
 
 type SqliteDb = Database.Database;
 type JsonRecord = Record<string, unknown>;
@@ -108,6 +120,41 @@ type ApiResponse = Response<unknown>;
 type ProjectMetadata = (Partial<ContractProjectMetadata> & JsonRecord) | null | undefined;
 type AgentCliEnv = Parameters<typeof agentCliEnvForAgent>[0];
 type RunDeliveryTarget = 'managed-project' | 'external-project' | 'none';
+
+/**
+ * Map ChatRunCreateRequest attachment fields onto the ChatMessage shape used by
+ * upsertMessage / listMessages. Request `attachments` are project-relative
+ * path strings; persisted messages store `{ path, name, kind, order }` so the
+ * UI can reload chips and annotation context after a headless omit-pin seed.
+ */
+function seededUserMessageAttachmentFields(meta: JsonRecord): {
+  attachments?: Array<{ path: string; name: string; kind: 'image' | 'file'; order: number }>;
+  commentAttachments?: ReturnType<typeof normalizeCommentAttachments>;
+} {
+  const attachments = Array.isArray(meta.attachments)
+    ? meta.attachments
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((attachmentPath, index) => {
+          const name = path.basename(attachmentPath) || attachmentPath;
+          const ext = path.extname(name).toLowerCase();
+          return {
+            path: attachmentPath,
+            name,
+            kind: SEEDED_USER_IMAGE_EXTS.has(ext) ? ('image' as const) : ('file' as const),
+            order: index,
+          };
+        })
+    : [];
+  const commentAttachments = normalizeCommentAttachments(
+    Array.isArray(meta.commentAttachments)
+      ? (meta.commentAttachments as Parameters<typeof normalizeCommentAttachments>[0])
+      : null,
+  );
+  return {
+    ...(attachments.length > 0 ? { attachments } : {}),
+    ...(commentAttachments.length > 0 ? { commentAttachments } : {}),
+  };
+}
 
 interface ProjectRecord {
   id: string;
@@ -771,12 +818,17 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             : null;
       if (promptForUserMessage) {
         try {
+          const now = Date.now();
           upsertMessage(db, meta.conversationId, {
             id: randomUUID(),
             role: 'user',
             content: promptForUserMessage,
-            startedAt: Date.now(),
-            endedAt: Date.now(),
+            startedAt: now,
+            endedAt: now,
+            // Preserve request attachments/commentAttachments on the seeded user
+            // turn so reload/listMessages still show chips and annotation context
+            // for omit-pin / headless clients (same columns as PUT /messages).
+            ...seededUserMessageAttachmentFields(meta),
           });
         } catch (err) {
           console.warn('[runs] api client user message pin failed', err);

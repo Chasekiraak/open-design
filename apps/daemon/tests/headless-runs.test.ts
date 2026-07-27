@@ -226,6 +226,84 @@ describe('POST /api/runs headless fallbacks', () => {
     expect(userMessages.some((m) => m.content === transcript)).toBe(false);
   });
 
+  it('preserves attachments and commentAttachments on omit-pin seeded user turns', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Omit-pin seeds attachment metadata',
+    );
+    const prompt = `omit-pin with attachments ${randomUUID()}`;
+    const attachmentPath = 'assets/hero.png';
+    const commentAttachment = {
+      id: `comment-${randomUUID()}`,
+      order: 1,
+      filePath: 'index.html',
+      elementId: 'hero-title',
+      selector: '#hero-title',
+      label: 'Hero title',
+      comment: 'Make this larger',
+      currentText: 'Welcome',
+      pagePosition: { x: 12, y: 24, width: 180, height: 40 },
+      htmlHint: '<h1 id="hero-title">Welcome</h1>',
+    };
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: prompt,
+        attachments: [attachmentPath],
+        commentAttachments: [commentAttachment],
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{
+        role: string;
+        content: string;
+        attachments?: Array<{ path: string; name: string; kind: string; order?: number }>;
+        commentAttachments?: Array<{
+          id: string;
+          filePath: string;
+          elementId: string;
+          comment: string;
+          selector: string;
+        }>;
+      }>;
+    };
+    const user = messagesBody.messages.find(
+      (m) => m.role === 'user' && m.content.includes(prompt),
+    );
+    expect(user).toBeTruthy();
+    expect(user?.attachments).toEqual([
+      {
+        path: attachmentPath,
+        name: 'hero.png',
+        kind: 'image',
+        order: 0,
+      },
+    ]);
+    expect(user?.commentAttachments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: commentAttachment.id,
+          filePath: commentAttachment.filePath,
+          elementId: commentAttachment.elementId,
+          comment: commentAttachment.comment,
+          selector: commentAttachment.selector,
+        }),
+      ]),
+    );
+  });
+
   it('seeds user prompt after conversation fallback even when pin is client-supplied', async () => {
     started = await startTestServer();
     const { projectId, conversationId: seededConversationId } = await createProject(
