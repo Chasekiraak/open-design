@@ -98,18 +98,26 @@ describe('DISCOVERY_AND_PHILOSOPHY (contracts copy) — prompt routing parity', 
     );
   });
 
-  it('defaults generated deliverables to semantic filenames after active skills', () => {
-    const prompt = composeSystemPrompt({
+  it('keeps standalone semantic-filename guidance in classic only', () => {
+    const classic = composeSystemPrompt({
       skillName: 'simple-deck',
       skillBody: 'Copy assets/template.html to index.html, then fill the deck.',
+      promptCoreVariant: 'classic',
+    });
+    const slim = composePrompt({
+      skillName: 'simple-deck',
+      skillBody: 'Copy assets/template.html to index.html, then fill the deck.',
+      promptCoreVariant: 'slim',
     });
 
-    expect(prompt).toContain('## Semantic output file names');
-    expect(prompt).toContain('Do not call every new artifact `index.html`');
-    expect(prompt).toContain('adapt the destination to a semantic filename');
-    expect(prompt.indexOf('## Semantic output file names')).toBeGreaterThan(
-      prompt.indexOf('## Active skill — simple-deck'),
+    expect(classic).toContain('## Semantic output file names');
+    expect(classic).toContain('Do not call every new artifact `index.html`');
+    expect(classic).toContain('adapt the destination to a semantic filename');
+    expect(classic.indexOf('## Semantic output file names')).toBeGreaterThan(
+      classic.indexOf('## Active skill — simple-deck'),
     );
+    expect(slim).not.toContain('## Semantic output file names');
+    expect(slim).toContain('Use short semantic names from the brief');
   });
 
   it('omits semantic filename guidance from media and plain text-artifact runs', () => {
@@ -128,23 +136,22 @@ describe('DISCOVERY_AND_PHILOSOPHY (contracts copy) — prompt routing parity', 
 
     expect(prompt).not.toContain('Copy the canonical skeleton below as index.html');
     expect(prompt).toContain('# Deck delivery contract');
-    expect(prompt).toContain('one complete HTML deck artifact');
+    expect(prompt).toContain('Deliver one complete HTML deck');
   });
 
   it('pins outcome-based quantitative chart integrity into deck runs (#907)', () => {
     const prompt = composeSystemPrompt({ skillMode: 'deck' });
 
-    expect(prompt).toContain('**Quantitative charts:**');
-    expect(prompt).toContain('Derive visual proportions from the actual values');
-    expect(prompt).toContain('show both category and value labels');
-    expect(prompt).toContain('Never eyeball bar lengths, areas, or ratios');
+    expect(prompt).toContain('**Charts/diagrams:**');
+    expect(prompt).toContain('Derive proportions from actual values');
+    expect(prompt).toContain('label categories and values');
   });
 
   it('pins background-aware chart and diagram legibility into deck runs', () => {
     const prompt = composeSystemPrompt({ skillMode: 'deck' });
 
-    expect(prompt).toContain('**Charts and diagrams:**');
-    expect(prompt).toContain("Theme them for the slide's actual background");
+    expect(prompt).toContain('**Charts/diagrams:**');
+    expect(prompt).toContain('match the slide background');
     expect(prompt).toContain('legible at presentation distance');
   });
 });

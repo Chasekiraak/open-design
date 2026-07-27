@@ -568,59 +568,52 @@ export function renderDeckFrameworkDirective(
 
 export const DECK_DELIVERY_CONTRACT_DIRECTIVE = `# Deck delivery contract
 
-These requirements define only the delivery boundary between the deck and Open Design. They do not prescribe a visual style or slide template.
+These rules define the Open Design delivery boundary, not a visual style.
 
-1. **Deliver a complete artifact.** Following the active execution contract, deliver one complete HTML deck artifact. When editing an existing deck, preserve its compatible runtime structure unless changing it is necessary to fix a real problem; do not rebuild the runtime for an ordinary content edit.
-2. **Use a recognizable slide structure.** Represent every slide as one top-level \`<section class="slide" data-screen-label="NN Title">\` in presentation order. Keep every \`data-screen-label\` stable and unique. The first slide must be visible after load, and all slides must remain in the DOM so the host can navigate, thumbnail, annotate, and export them.
-3. **Use a standard presentation canvas.** Use a fixed 16:9 slide that renders correctly at 1920×1080. Keep all content inside the slide bounds; the audience must not need to scroll to see the complete slide.
-4. **Cooperate with host navigation.** Do not place navigation inside the slide canvas or reserve slide space for it. If the artifact includes standalone previous/next controls, pagination dots, a page counter, reset controls, or keyboard hints, place all of that chrome in one \`data-deck-nav\` container outside the slide canvas. Open Design hides that container when host navigation is present.
-5. **Make the static completed state sufficient.** Essential content must not require hover, clicks, or an unfinished entrance animation to become visible. Every slide must be complete, legible, and exportable in its settled static state.
-6. **Honor explicit user requirements.** If the user explicitly requests another aspect ratio, a vertical deck, or special interaction, you may depart from these defaults. Preserve slide discoverability where possible and state any preview or export limitation that remains.
+1. **Complete artifact.** Deliver one complete HTML deck under the active execution contract. For ordinary edits, preserve a compatible existing runtime.
+2. **Slide DOM.** Each slide is one top-level \`<section class="slide" data-screen-label="NN Title">\` in order. Labels stay unique and stable; the first slide is visible on load; all slides remain in the DOM for host navigation, thumbnails, annotation, and export.
+3. **Canvas.** Default to fixed 16:9 at 1920×1080. Keep every slide inside its bounds with no scrolling.
+4. **Navigation.** Put no navigation inside or over the slide canvas and reserve no canvas space for it. Any standalone controls, counter, dots, reset, or keyboard hints belong together in one \`data-deck-nav\` container outside the canvas; Open Design hides it when host navigation is present.
+5. **Settled state.** Essential content is complete, visible, legible, and exportable without hover, clicks, or unfinished entrance animation.
+6. **Explicit exceptions.** Honor a requested aspect ratio, orientation, or interaction; preserve slide discoverability and disclose any remaining preview/export limitation.
 
-Before handoff, verify slide count and order, first-slide visibility, and slide bounds. When the corresponding capability is available, test host navigation, thumbnail discovery, and multi-page export; otherwise inspect the artifact for the standard structure those capabilities require. Fix failures in the artifact; do not substitute an explanation for a fix.`;
+Before handoff, verify count/order, first-slide visibility, bounds, navigation, thumbnail discovery, and multi-page export wherever those capabilities are available. Fix failures in the artifact.`;
 
 export const DECK_OUTCOME_RULES_DIRECTIVE = `# Deck outcome quality rules
 
 Apply these as result criteria for the deck and for every slide. They constrain the outcome, not the implementation technique.
 
-1. **Give every slide one narrative job.** The deck must move through a deliberate argument, not a pile of independently attractive pages. If removing a slide does not weaken the story, remove or rewrite it.
-2. **End with a purposeful closing slide.** Reinforce the core takeaway and make the intended next step explicit. Match the ending to the deck's purpose: an ask, call to action, recommendation, decision request, contact details, Q&A, or a thank-you when gratitude itself carries clear relational, ceremonial, or brand value. A strict slide count includes this closing; do not add a generic "Thank you" slide with no information gain.
-3. **Make the title the slide's claim.** A title should state the conclusion the audience should retain, not merely name the topic. Keep one primary idea per slide.
-4. **Close the claim–evidence–implication loop.** The body must visibly support the title with the most relevant fact, example, comparison, mechanism, or proof, then make clear why that evidence matters. Do not present unsupported conclusions or evidence with no takeaway.
-5. **Let structure express reasoning.** Use parallel groups for peers, flows for causality, timelines for sequence, comparisons for choices, and charts for quantitative relationships. Do not force unrelated ideas into equal cards or decorate prose with a diagram that adds no meaning.
-6. **Make whitespace functional.** Empty space should establish hierarchy, pacing, grouping, or emphasis. If a slide feels unfinished because content is stranded in one corner, either enlarge the key message, add the missing evidence, or choose a structure that uses the canvas deliberately.
-7. **Design for presentation distance.** At thumbnail size, the claim, primary evidence, and reading order must still be apparent. Use a clear type hierarchy, sufficient contrast, and no more detail than the audience can absorb while listening.
-8. **Create one visual center of gravity.** Each slide needs a dominant element — a statement, number, chart, product view, or diagram. Supporting elements must reinforce it rather than compete with it.
-9. **Vary composition only for narrative reasons.** Keep a coherent deck-wide system. Change surface, density, or layout when the story changes mode — opening, evidence, transition, reveal, or close — never by slide index or for arbitrary variety.
-10. **Preserve epistemic honesty.** Distinguish sourced facts, user-provided facts, assumptions, and recommendations. Never invent metrics, traction, quotes, customers, or research to make a slide look complete; use an explicit placeholder or qualitative framing when evidence is missing.
+1. **One narrative job and claim per slide.** Advance one deliberate argument. Each title states the conclusion to retain, not merely the topic; remove or rewrite any slide whose absence would not weaken the story.
+2. **Purposeful close.** End by reinforcing the takeaway and intended next step: ask, action, recommendation, decision, contact, Q&A, or a thank-you only when gratitude has real relational, ceremonial, or brand value. The requested count includes this slide; no empty "Thank you."
+3. **Claim → evidence → implication.** Support the title with the strongest relevant fact, example, comparison, mechanism, or proof and show why it matters. No unsupported conclusion or evidence without a takeaway.
+4. **Structure carries meaning.** Use parallel groups for peers, flows for causality, timelines for sequence, comparisons for choices, and charts for quantities. Do not force unrelated ideas into equal cards or decorate prose with meaningless diagrams.
+5. **Functional canvas.** Whitespace must create hierarchy, pacing, grouping, or emphasis. If content feels stranded, strengthen the message/evidence or choose a structure that deliberately uses the canvas.
+6. **Presentation distance.** At thumbnail scale, the claim, primary evidence, and reading order remain clear. On 1920×1080, use headlines ≥ 36px and body ≥ 24px unless an explicit brief or trusted seed defines another safe scale.
+7. **Epistemic honesty.** Distinguish sourced/user-provided facts, assumptions, and recommendations. Never invent metrics, traction, quotes, customers, or research; use labelled placeholders or qualitative framing.
 
 ## Presentation presence
 
-- **Design for live delivery, not a document or dashboard.** A slide must work while the audience listens: use the full canvas for a presentation composition, not a narrow web-content column or a sequence of UI panels.
-- **Commit to a visual thesis.** Derive a coherent type character, palette, image treatment, grid, and signature move from the brand, subject, and audience. Consistency must not collapse into identical pages.
-- **Give each narrative act a memorable anchor.** Concentrate visual richness at narrative peaks instead of applying the same intensity everywhere. Use calmer workhorse slides between high-impact opening, reveal, proof, transition, and closing moments.
-- **Choose the richest fitting visual medium.** Select the form that most directly communicates the slide's narrative job: a product view for product proof, a chart for quantitative relationships, a flow or relationship diagram for mechanisms and causality, a comparison for change, an image or illustration for emotion or context, and expressive typography for a reveal. Do not default to prose, tables, or card grids when a visual form would communicate the point more directly.
-- **Use one primary visual medium per slide.** Give it clear dominance and keep supporting elements subordinate. Do not combine charts, icons, illustrations, diagrams, and decorative containers merely to make the slide feel richer.
-- **Make visual assets presentation-grade.** Images, charts, icons, diagrams, and typography must be high-fidelity, share the deck's visual thesis, remain legible at presentation distance, and feel composed into the slide rather than pasted onto it.
-- **Make every visual element earn its place.** Every line, border, container, icon, image, and decorative device must contribute to comprehension, emphasis, pacing, atmosphere, or brand recognition. Remove arbitrary chrome and repeated boundaries; purposeful visual expression is valid even when it does not encode data.
-- **Require a shareable visual payoff.** Before handoff, identify slides whose screenshot communicates a clear point with finished visual expression. If the deck has no such moment, redesign it before delivery.
+- **Live-delivery composition.** Use the full canvas, not a narrow document column or dashboard panels. Derive a coherent type character, palette, image treatment, grid, and signature move from the brand, subject, and audience.
+- **Narrative rhythm.** Vary surface, density, and layout only when the story changes mode. Concentrate richness at opening, reveal, proof, transition, and close; use calmer workhorse slides between peaks.
+- **One dominant, fitting medium.** Give each slide one center of gravity. Use product views for product proof, charts for quantities, flows/relationships for mechanisms, comparisons for change, imagery for emotion/context, and expressive type for reveals. Keep supporting elements subordinate; assets must be high-fidelity and composed into the slide.
+- **Every element earns its place.** Lines, borders, containers, icons, imagery, and decoration must aid comprehension, emphasis, pacing, atmosphere, or brand recognition. Remove arbitrary chrome and repeated boundaries.
+- **Shareable payoff.** The deck needs at least one screenshot-ready slide that communicates a clear point with finished visual expression; redesign if it has none.
 
 Only when relevant:
 
-- **Quantitative charts:** Derive visual proportions from the actual values and show both category and value labels. Never eyeball bar lengths, areas, or ratios.
-- **Charts and diagrams:** Theme them for the slide's actual background and verify that every label remains legible at presentation distance.
+- **Charts/diagrams:** Derive proportions from actual values, label categories and values, match the slide background, and keep every label legible at presentation distance.
 
-Before handoff, review the deck once at thumbnail scale and once slide by slide. Rewrite any slide whose claim is unclear, whose evidence does not support it, whose layout hides the reading order, whose content does not advance the narrative, or whose content clips, overflows, or requires scrolling.`;
+Before handoff, review once at thumbnail scale and once slide by slide. Rewrite any unclear claim, unsupported evidence, hidden reading order, narrative dead end, clipping, overflow, or scrolling.`;
 
 const FILESYSTEM_DECK_RENDERED_VERIFICATION = `
 
 ## Rendered verification — filesystem decks
 
-A newly generated deck has unresolved visual risk until you inspect a real host render. After writing the deck and before final handoff, use the core workflow's single permitted preview:
+A new deck remains visually unverified until you inspect one real host render. Before handoff, use the deck's single permitted preview:
 
 \`"$OD_NODE_BIN" "$OD_BIN" export <deck-file> --project "$OD_PROJECT_ID" --format image --deck --out <review-image>\`
 
-The image export stitches every slide into one review image. Inspect that image at overview scale and zoom into any suspicious slide; source inspection or a claim that you "mentally rendered" the HTML does not satisfy this check. Fix accidental one-column collapse, clipping, overflow, undersized text, broken hierarchy, or unintended empty space, then hand off without starting a screenshot loop. If the host renderer remains unavailable after the core workflow's allowed diagnostic and retry, do not invent a visual result; complete the static checks and state that rendered verification was unavailable.`;
+The export stitches all slides into one review image. Inspect the overview and any suspicious slide; source inspection or "mental rendering" is insufficient. Fix collapse, clipping, overflow, undersized text, broken hierarchy, or unintended empty space without starting a screenshot loop. If the renderer still fails after one targeted fix/retry, complete static checks and state that rendered verification was unavailable.`;
 
 export function renderDeckVNextDirective(
   executionProfile: ExecutionProfile = 'filesystem',

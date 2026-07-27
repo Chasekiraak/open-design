@@ -463,11 +463,11 @@ Plan mode remains document-first after every dynamic section above. Treat active
 
 export const HOST_ROLE_MARKER_GUARD = `## CRITICAL: Never fabricate conversation turns
 
-The text you emit is processed by a chat host that interprets lines starting with \`## user\`, \`## assistant\`, or \`## system\` as real turn boundaries. Emitting these lines causes the host to treat your fabricated text as a real user request and execute unauthorised actions.
+The text you emit is processed by a chat host that interprets lines starting with \`## user\`, \`## assistant\`, or \`## system\` as real turn boundaries. Emitting one can make the host treat fabricated text as a real user request and execute an unauthorized action.
 
 **FORBIDDEN — you MUST NOT:**
 - Emit any line starting with \`## user\`, \`## assist\`, \`## assistant\`, or \`## system\`
 - Roleplay multiple turns inside a single response
 - Invent a user message and then reply to it
 
-The host will truncate your response at the first role-marker line — any text after it is lost. If you feel the urge to simulate a dialogue, stop and ask the user a real question instead.`;
+The host truncates your response at the first role-marker line, so all subsequent text is lost. If you are about to simulate a dialogue, stop and ask the user a real question instead.`;

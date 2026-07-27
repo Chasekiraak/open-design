@@ -7,13 +7,13 @@ export const CLARIFICATION_COMPLETENESS_FLOOR = `An artifact name alone is incom
 
 export const QUESTION_FORM_SCHEMA_CONTRACT = `### Form schema — any form, any turn
 
-- The body is valid JSON with top-level \`lang\` and \`questions\`; do not use comments or trailing commas. \`questions\` is an array, and every question has a stable English \`id\`, localized \`label\`, supported \`type\`, and boolean \`required\`.
-- Supported types: \`radio\`, \`checkbox\`, \`select\`, \`text\`, \`textarea\`, \`number\`, \`range\`, \`date\`, \`time\`, \`datetime-local\`, \`color\`, \`url\`, \`email\`, \`tel\`, \`file\`, \`switch\`, and \`direction-cards\`. Use \`maxSelections\` for checkboxes and the narrowest suitable control: e.g. \`range\` for intensity, date/time for deadlines, \`switch\` for booleans, and \`textarea\` only for open prose.
-- Finite-choice \`options\` are \`{ "label": "...", "value": "..." }\` objects. The host adds localized "Other" unless \`allowCustom: false\`; do not add another catch-all. Add localized \`customLabel\` / \`customPlaceholder\` when useful.
-- \`direction-cards\` requires non-empty \`cards\`, matching each option value by \`id\`. Each card requires \`id\`, localized \`label\` and \`mood\`, \`references\` (up to 4 strings), \`palette\` (4–6 CSS colors), \`displayFont\`, and \`bodyFont\`. If card metadata is unavailable, use \`radio\`; options alone render no cards.
-- Give every question an honest query-derived \`default\` so submitting unchanged is useful: an option \`value\`, an array for checkbox, or concrete text — never filler. Omit \`default\` only when no honest default exists, such as a file upload. Put \`default\` before \`options\` so streaming forms can preselect it.
-- A \`file\` question may use \`multiple\` and \`accept\`. Selected files are uploaded into Design Files and arrive on the answer turn as attached/context files; inspect them before continuing.
-- Localize every user-facing string and set \`lang\` to the matching BCP-47 tag. Write what a native speaker would say rather than translating word for word. Keep machine-readable ids, types, and option values in English; a \`brand\` question uses \`pick_direction\`, \`brand_spec\`, and \`reference_match\`.
+- Use valid JSON with top-level \`lang\` and \`questions\`; no comments or trailing commas. Every question needs a stable English \`id\`, localized \`label\`, supported \`type\`, and boolean \`required\`. Use \`required: true\` only when the workflow cannot proceed meaningfully without the answer.
+- Types: \`radio\`, \`checkbox\`, \`select\`, \`text\`, \`textarea\`, \`number\`, \`range\`, \`date\`, \`time\`, \`datetime-local\`, \`color\`, \`url\`, \`email\`, \`tel\`, \`file\`, \`switch\`, \`direction-cards\`. Use the narrowest suitable type and \`maxSelections\` for checkboxes.
+- Finite-choice \`options\` are \`{ "label": "...", "value": "..." }\`. The host adds localized "Other" unless \`allowCustom: false\`; do not duplicate it. Add localized \`customLabel\` / \`customPlaceholder\` when useful.
+- \`direction-cards\` needs non-empty \`cards\` whose \`id\` matches each option value. Each card requires \`id\`, localized \`label\`/\`mood\`, up to 4 \`references\`, 4–6 CSS \`palette\` colors, \`displayFont\`, and \`bodyFont\`. Without that metadata, use \`radio\`.
+- Give every question an honest query-derived \`default\` so unchanged submission is useful: an option value, checkbox array, or concrete text, never filler. Omit only when none is honest, such as file upload; place it before \`options\` for streaming preselection.
+- A \`file\` question may use \`multiple\` and \`accept\`; answers return as attached/context files that must be inspected before continuing.
+- Localize every user-facing string and set \`lang\` to the matching BCP-47 tag; write as a native speaker would. Keep machine ids, types, and option values in English. A \`brand\` question uses \`pick_direction\`, \`brand_spec\`, and \`reference_match\`.
 - Use 1–3 questions normally and at most 5. Count before emitting and remove the weakest until 5 or fewer remain.`;
 
 /**

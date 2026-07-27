@@ -118,8 +118,8 @@ describe('composeSystemPrompt — shared slim default', () => {
       expect(prompt).toContain('`default`');
       expect(prompt).toContain('safely inferable');
       expect(prompt).toContain('boolean `required`');
-      expect(prompt).toContain('`options` are `{ "label": "...", "value": "..." }` objects');
-      expect(prompt).toContain('`direction-cards` requires non-empty `cards`');
+      expect(prompt).toContain('`options` are `{ "label": "...", "value": "..." }`');
+      expect(prompt).toContain('`direction-cards` needs non-empty `cards`');
       expect(prompt).toContain('`displayFont`, and `bodyFont`');
       expect(prompt).toContain('matching BCP-47 tag');
     }
@@ -148,7 +148,7 @@ describe('composeSystemPrompt — shared slim default', () => {
 
     expect(prompt).toContain('opening `question-form` element');
     expect(prompt).toContain('otherwise use `discovery`');
-    expect(prompt).toContain('Every question must map to one unresolved decision');
+    expect(prompt).toContain('Every question must map to an unresolved material decision');
     expect(prompt).not.toContain('<question-form id="discovery" title="Quick brief');
     expect(prompt).not.toContain('id="<workflow-specific-id>"');
     expect(prompt).not.toContain('id="..."');
@@ -293,7 +293,7 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(boundaryAt).toBeGreaterThan(skillAt);
     expect(protocolAt).toBeGreaterThan(boundaryAt);
     expect(guardAt).toBeGreaterThan(protocolAt);
-    expect(prompt.slice(guardAt)).toContain('The host will truncate your response');
+    expect(prompt.slice(guardAt)).toContain('The host truncates your response');
   });
 
   it('includes the full direction library in BYOK Design when no design system is active', () => {
@@ -333,7 +333,7 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(design).toContain('<od-card type="verify-scorecard">');
     expect(design).toContain('<od-card type="rule-proposal">');
     for (const prompt of [plan, ask, image]) {
-      expect(prompt).toContain('The active session mode owns the workflow');
+      expect(prompt).toContain('activate workflow the session mode disables');
     }
     for (const prompt of [plan, image]) {
       expect(prompt).not.toContain('<od-card type="task-brief">');
@@ -633,8 +633,9 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(defaultDirective).toContain('# Deck delivery contract');
     expect(defaultDirective).toContain('data-deck-nav');
     expect(defaultDirective).toContain('# Deck outcome quality rules');
-    expect(defaultDirective).toContain('Make every visual element earn its place');
-    expect(defaultDirective).toContain('Quantitative charts');
+    expect(defaultDirective).toContain('Every element earns its place');
+    expect(defaultDirective).not.toContain('persist position to localStorage');
+    expect(defaultDirective).toContain('Charts/diagrams');
     expect(defaultDirective).not.toContain('# Slide deck — fixed framework');
     expect(defaultDirective).not.toContain('## Canonical skeleton');
   });
@@ -646,8 +647,8 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(filesystem).toContain('## Rendered verification — filesystem decks');
     expect(filesystem).toContain('export <deck-file>');
     expect(filesystem).toContain('--format image --deck');
-    expect(filesystem).toContain('stitches every slide into one review image');
-    expect(filesystem).toContain('does not satisfy this check');
+    expect(filesystem).toContain('stitches all slides into one review image');
+    expect(filesystem).toContain('"mental rendering" is insufficient');
     expect(textArtifact).not.toContain('## Rendered verification — filesystem decks');
     expect(textArtifact).not.toContain('export <deck-file>');
   });
@@ -656,12 +657,12 @@ describe('composeSystemPrompt — shared slim default', () => {
     const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
     const legacy = renderDeckPromptDirective('current', 'filesystem');
 
-    expect(outcomeOnly).toContain('**End with a purposeful closing slide.**');
-    expect(outcomeOnly).toContain('make the intended next step explicit');
-    expect(outcomeOnly).toContain('gratitude itself carries clear relational, ceremonial, or brand value');
-    expect(outcomeOnly).toContain('do not add a generic "Thank you" slide with no information gain');
-    expect(outcomeOnly).toContain('A strict slide count includes this closing');
-    expect(legacy).not.toContain('**End with a purposeful closing slide.**');
+    expect(outcomeOnly).toContain('**Purposeful close.**');
+    expect(outcomeOnly).toContain('intended next step');
+    expect(outcomeOnly).toContain('gratitude has real relational, ceremonial, or brand value');
+    expect(outcomeOnly).toContain('no empty "Thank you."');
+    expect(outcomeOnly).toContain('The requested count includes this slide');
+    expect(legacy).not.toContain('**Purposeful close.**');
   });
 
   it('adds presentation presence without reducing visual value to comprehension alone', () => {
@@ -680,43 +681,29 @@ describe('composeSystemPrompt — shared slim default', () => {
 
     for (const directive of directives) {
       expect(directive.match(/## Presentation presence/g)).toHaveLength(1);
+      expect(directive).toContain('**Live-delivery composition.**');
+      expect(directive).toContain('coherent type character, palette, image treatment, grid');
       expect(directive).toContain(
-        '**Design for live delivery, not a document or dashboard.**',
+        'Vary surface, density, and layout only when the story changes mode',
       );
-      expect(directive).toContain('**Commit to a visual thesis.**');
+      expect(directive).toContain('**Narrative rhythm.**');
+      expect(directive).toContain('**One dominant, fitting medium.**');
       expect(directive).toContain(
-        '**Give each narrative act a memorable anchor.**',
-      );
-      expect(directive).toContain(
-        '**Choose the richest fitting visual medium.**',
-      );
-      expect(directive).toContain(
-        'a product view for product proof, a chart for quantitative relationships',
+        'product views for product proof, charts for quantities',
       );
       expect(directive).toContain(
-        'an image or illustration for emotion or context, and expressive typography for a reveal',
+        'imagery for emotion/context, and expressive type for reveals',
       );
       expect(directive).toContain(
-        'Do not default to prose, tables, or card grids',
-      );
-      expect(directive).toContain(
-        '**Use one primary visual medium per slide.**',
-      );
-      expect(directive).toContain(
-        '**Make visual assets presentation-grade.**',
-      );
-      expect(directive).toContain(
-        'feel composed into the slide rather than pasted onto it',
-      );
-      expect(directive).toContain(
-        'Use calmer workhorse slides between high-impact opening, reveal, proof, transition, and closing moments.',
+        'use calmer workhorse slides between peaks',
       );
       expect(directive).toContain(
         'comprehension, emphasis, pacing, atmosphere, or brand recognition',
       );
       expect(directive).toContain(
-        '**Require a shareable visual payoff.**',
+        'Keep supporting elements subordinate',
       );
+      expect(directive).toContain('**Shareable payoff.**');
       expect(directive).not.toContain(
         'If removing it does not reduce comprehension, remove it.',
       );
