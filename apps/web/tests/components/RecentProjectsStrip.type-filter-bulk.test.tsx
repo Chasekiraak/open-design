@@ -145,6 +145,26 @@ describe('projectCardCategory', () => {
 });
 
 describe('RecentProjectsStrip type filter (#77)', () => {
+  it('omits the redundant owner filter from the drafts space', () => {
+    const { container } = renderGrid({ heading: 'Drafts', space: 'drafts' });
+
+    const filters = [...container.querySelectorAll('.recent-projects__filter')].map(
+      (node) => node.textContent?.trim(),
+    );
+
+    expect(filters).toEqual(['Any type']);
+  });
+
+  it("keeps the owner filter in spaces that can contain other members' projects", () => {
+    const { container } = renderGrid({ space: 'team' });
+
+    const filters = [...container.querySelectorAll('.recent-projects__filter')].map(
+      (node) => node.textContent?.trim(),
+    );
+
+    expect(filters).toEqual(['All', 'Any type']);
+  });
+
   it('offers exactly the artifact types the cards stamp on themselves', () => {
     const { container } = renderGrid();
 

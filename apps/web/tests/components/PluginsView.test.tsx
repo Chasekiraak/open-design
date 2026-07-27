@@ -302,7 +302,10 @@ describe('PluginsView', () => {
     fireEvent.click(install);
 
     await waitFor(() =>
-      expect(mockedInstallPluginSource).toHaveBeenCalledWith('open-design/official-plugin'),
+      expect(mockedInstallPluginSource).toHaveBeenCalledWith(
+        'open-design/official-plugin',
+        null,
+      ),
     );
     expect(onUsePlugin).not.toHaveBeenCalled();
   });
@@ -383,6 +386,7 @@ describe('PluginsView', () => {
     await waitFor(() =>
       expect(mockedInstallPluginSource).toHaveBeenCalledWith(
         source,
+        null,
       ),
     );
     expect(await screen.findByText('Installed New Plugin.')).toBeTruthy();
@@ -397,7 +401,7 @@ describe('PluginsView', () => {
     fireEvent.click(await screen.findByTestId('plugins-available-install-remote-plugin'));
 
     await waitFor(() =>
-      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin'),
+      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin', null),
     );
     expect(await screen.findByText('Installed New Plugin.')).toBeTruthy();
     expect(screen.getByTestId('plugins-tab-installed').getAttribute('aria-selected')).toBe('true');
@@ -417,7 +421,7 @@ describe('PluginsView', () => {
     fireEvent.click(within(dialog).getByTestId('plugins-available-details-install-remote-plugin'));
 
     await waitFor(() =>
-      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin@1.2.0'),
+      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin@1.2.0', null),
     );
     expect(await screen.findByText('Installed New Plugin.')).toBeTruthy();
     await waitFor(() =>
@@ -496,7 +500,7 @@ describe('PluginsView', () => {
 
     fireEvent.click(within(dialog).getByTestId('plugins-available-details-install-remote-plugin'));
     await waitFor(() =>
-      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin@1.1.0'),
+      expect(mockedInstallPluginSource).toHaveBeenCalledWith('remote-plugin@1.1.0', null),
     );
   });
 
@@ -652,7 +656,10 @@ describe('PluginsView', () => {
     expect(await screen.findByText(/Installed catalog entries are removed from Available/i)).toBeTruthy();
     expect(screen.queryByText('Official Plugin')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull();
-    expect(mockedListPlugins).toHaveBeenCalledWith({ includeHidden: true });
+    expect(mockedListPlugins).toHaveBeenCalledWith({
+      includeHidden: true,
+      workspaceContext: null,
+    });
     expect(mockedApplyPlugin).not.toHaveBeenCalled();
   });
 

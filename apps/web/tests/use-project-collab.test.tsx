@@ -76,7 +76,7 @@ describe('useProjectCollab', () => {
     expect(result.current.syncState).toBe('synced');
   });
 
-  it('stays dormant for a personal workspace (no heartbeat)', async () => {
+  it('activates presence for a personal workspace that can later invite seats', async () => {
     const calls: string[] = [];
     const base = installFetch({ ...TEAM_CONTEXT, workspaceType: 'personal' }, []);
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -89,10 +89,9 @@ describe('useProjectCollab', () => {
       await vi.advanceTimersByTimeAsync(50);
     });
 
-    expect(result.current.enabled).toBe(false);
+    expect(result.current.enabled).toBe(true);
     expect(result.current.present).toEqual([]);
-    // Only the context was fetched; no presence heartbeat fired.
-    expect(calls.some((p) => p.endsWith('/presence/heartbeat'))).toBe(false);
+    expect(calls.some((p) => p.endsWith('/presence/heartbeat'))).toBe(true);
   });
 
   it('stays dormant when there is no workspace context', async () => {
