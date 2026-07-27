@@ -14,6 +14,9 @@ Follow the root `AGENTS.md` and `tools/AGENTS.md` first. This tool owns the repo
 - Linux headless (no-Electron) install/start/stop via `--headless` flag on `install`, `start`, and `stop`.
 - Linux containerized builds via `electronuserland/builder` Docker image for distro-agnostic glibc compat.
 - Consuming sidecar/process/path primitives from `@open-design/sidecar-proto`, `@open-design/sidecar`, and `@open-design/platform`.
+- Consuming the shared channel/namespace suite resolver from
+  `@open-design/distribution-proto`; tools-pack output roots remain tool-owned,
+  but runtime namespace roots must not invent a second layout.
 
 ## Does not own
 

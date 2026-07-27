@@ -335,6 +335,8 @@ describe('buildPackagedDaemonSpawnEnv', () => {
   function fakePaths(): PackagedNamespacePaths {
     return {
       cacheRoot: '/tmp/od-pkg/cache',
+      channel: 'stable',
+      channelRoot: '/tmp',
       dataRoot: '/tmp/od-pkg/data',
       desktopIdentityPath: '/tmp/od-pkg/runtime/desktop-root.json',
       desktopLogPath: '/tmp/od-pkg/logs/desktop/latest.log',
@@ -345,6 +347,8 @@ describe('buildPackagedDaemonSpawnEnv', () => {
       installationRoot: '/tmp/od-pkg/..',
       installerObservationRoot: '/tmp/od-pkg/data/observations/installer',
       logsRoot: '/tmp/od-pkg/logs',
+      namespace: 'default',
+      namespaceBaseRoot: '/tmp',
       namespaceRoot: '/tmp/od-pkg',
       resourceRoot: '/tmp/od-pkg/resources',
       runtimeRoot: '/tmp/od-pkg/runtime',
