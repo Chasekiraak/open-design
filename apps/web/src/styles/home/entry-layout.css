@@ -2315,7 +2315,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
   /* Vertical breathing room lives on the popover, outside the scroller. */
   padding: 0 8px;
 }
@@ -2324,7 +2324,7 @@
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;

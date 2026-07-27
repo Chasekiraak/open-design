@@ -132,7 +132,6 @@ import {
   readSeenUpdateReminderVersion,
   readUpdatedUpdateReminderVersion,
 } from '../lib/update-reminder';
-import { openExternalUrl } from '../providers/registry';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
   notifyTeamProjectsChanged,
@@ -520,8 +519,6 @@ const UPDATE_REMINDER_DEMO = {
   ],
 };
 
-// Fallback update path until the reminder is driven by the in-app updater.
-const UPDATE_REMINDER_RELEASES_URL = 'https://github.com/nexu-io/open-design/releases';
 
 export function EntryShell({
   skills,
@@ -879,10 +876,13 @@ export function EntryShell({
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
 
   // Update reminder lifecycle: 'dialog' (unseen version, shown on the
-  // Community view) → 'strip' (dismissed; collapses to the pill above the nav
-  // rail's account row) → 'hidden' (update confirmed). Both transitions are
-  // persisted per version (see ../lib/update-reminder).
-  const [updateReminderStage, setUpdateReminderStage] = useState<'hidden' | 'dialog' | 'strip'>('hidden');
+  // Community view) → 'strip' (dismissed; collapses to the icon button above
+  // the nav rail's account row) → 'updating' (progress shown above the
+  // button) → 'hidden' (update finished). Transitions are persisted per
+  // version (see ../lib/update-reminder).
+  const [updateReminderStage, setUpdateReminderStage] =
+    useState<'hidden' | 'dialog' | 'strip' | 'updating'>('hidden');
+  const [updateReminderProgress, setUpdateReminderProgress] = useState(0);
   useEffect(() => {
     if (readUpdatedUpdateReminderVersion() === UPDATE_REMINDER_DEMO.version) return;
     setUpdateReminderStage(
@@ -895,10 +895,29 @@ export function EntryShell({
   }, []);
   const confirmUpdateReminder = useCallback(() => {
     markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
-    markUpdateReminderUpdated(UPDATE_REMINDER_DEMO.version);
-    void openExternalUrl(UPDATE_REMINDER_RELEASES_URL);
-    setUpdateReminderStage('hidden');
+    setUpdateReminderProgress(0);
+    setUpdateReminderStage('updating');
   }, []);
+  // Simulated download progress until the reminder is wired to the real
+  // updater feed (see ../lib/updater): ease toward 100% in uneven steps so the
+  // bar reads like a live download rather than a linear animation.
+  useEffect(() => {
+    if (updateReminderStage !== 'updating') return;
+    const timer = window.setInterval(() => {
+      setUpdateReminderProgress((prev) =>
+        prev >= 100 ? 100 : Math.min(100, prev + Math.max(1, Math.round((100 - prev) * 0.14))),
+      );
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [updateReminderStage]);
+  useEffect(() => {
+    if (updateReminderStage !== 'updating' || updateReminderProgress < 100) return;
+    const done = window.setTimeout(() => {
+      markUpdateReminderUpdated(UPDATE_REMINDER_DEMO.version);
+      setUpdateReminderStage('hidden');
+    }, 600);
+    return () => window.clearTimeout(done);
+  }, [updateReminderStage, updateReminderProgress]);
 
   // ⌘K / Ctrl+K opens the project search palette — same as clicking the rail
   // search box.
@@ -1409,8 +1428,12 @@ export function EntryShell({
             ) : null
           }
           accountNotice={
-            updateReminderStage === 'strip' ? (
-              <UpdateReminderStrip onConfirm={confirmUpdateReminder} />
+            updateReminderStage === 'strip' || updateReminderStage === 'updating' ? (
+              <UpdateReminderStrip
+                onConfirm={confirmUpdateReminder}
+                updating={updateReminderStage === 'updating'}
+                progress={updateReminderProgress}
+              />
             ) : null
           }
         />

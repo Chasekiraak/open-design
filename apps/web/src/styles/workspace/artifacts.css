@@ -2781,6 +2781,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: 10px;
   /* Vertical breathing room lives on the popover, outside the scroller. */
   padding: 0 6px;
 }
@@ -2863,7 +2864,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 8px;
 }
 .model-select-searchable__option {
@@ -2871,7 +2872,7 @@ button.agent-group-rescan-btn:hover:not(:disabled) {
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
