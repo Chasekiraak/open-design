@@ -3616,6 +3616,20 @@ export async function startServer({
       }
       updateProject(db, projectId, { metadata });
     },
+    // Retracted-share heal (飞书 recvqA6qhV7St1): delete a placeholder record
+    // whose backing hub resource turned out to be tombstoned. Re-checks the
+    // placeholder stamp HERE — deletion is only ever legal for a record the
+    // stamp proves contentless, so a pull that materialized real content
+    // between the heal's decision and this call is never destroyed. The
+    // `workspace_projects` binding (if any) goes with it via ON DELETE
+    // CASCADE, and the empty content directory is removed best-effort.
+    retireUnmaterializedSharedPlaceholder: (projectId: string) => {
+      const project = getProject(db, projectId);
+      if (!isUnmaterializedSharedPlaceholder(project)) return;
+      dbDeleteProject(db, projectId);
+      void removeProjectDir(PROJECTS_DIR, projectId).catch(() => {});
+    },
+    invalidateTeamProjectCatalog: () => teamProjectsDisplayCache.invalidate(),
     onTeamShareStateChanged: persistWorkspaceProjectVisibility,
     // See `notifyFilesChanged`'s doc comment on RegisterCollabSyncRoutesDeps
     // (recvq6CIesNvWZ): a pull's directory-replace can silently orphan the
