@@ -264,6 +264,17 @@ function readElementInlineStyles(el: Element): ManualEditStyles {
   }, {} as ManualEditStyles);
 }
 
+/** Whether SOURCE is a runtime-rendered brand-kit document — the pages whose
+ * manual-edit targets can exist only in the runtime DOM. Saves for such
+ * targets persist through the payload or override rules, so an empty
+ * saved-markup read must never be classified as "target vanished". This is
+ * independent of whether the target currently owns an override rule: clearing
+ * a target's last declaration legitimately deletes its rule. */
+export function isManualEditRuntimeRenderedSource(source: string): boolean {
+  const doc = parseSource(source);
+  return Boolean(doc?.getElementById('od-brand-payload'));
+}
+
 /** Whether SOURCE persists a runtime style-override rule for the target —
  * the persistence a `set-style` save leaves behind when the target has no
  * saved markup (runtime-only brand-kit ids). */

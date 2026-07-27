@@ -1342,6 +1342,66 @@ describe('FileViewer manual edit regressions', () => {
     expect(frame.srcdoc).toBe(srcdocBefore);
   });
 
+  it('keeps selection and canvas stable when the last runtime style declaration is cleared', async () => {
+    // Clearing a runtime-only target's final declaration (here: toggling the
+    // active alignment back to default) drops its override rule from the
+    // saved source. The reconcile guard must classify the target as
+    // runtime-backed via the brand payload — not via rule ownership — or
+    // this valid, still-rendered target reads as deleted and the debounced
+    // toolbar save drops the selection and reloads the canvas.
+    const source = '<!doctype html><html><head><script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script></head><body><div id="root"></div></body></html>';
+    const { fetchMock, savedBodies } = manualEditWriteMock(source);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <FileViewer projectId="project-1" projectKind="prototype" file={htmlPreviewFile()}
+        liveHtml={source}
+      />,
+    );
+    clickManualTool('manual-edit-mode-toggle');
+    const frame = await previewFrame();
+    const runtimeTarget = {
+      ...heroTarget(),
+      id: 'brand-name',
+      label: 'Brand name',
+      text: 'Acme',
+      fields: { text: 'Acme' },
+      attributes: { 'data-od-id': 'brand-name' },
+      outerHtml: '<h1 data-od-id="brand-name">Acme</h1>',
+    };
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'od-edit-select', target: runtimeTarget },
+        source: frame.contentWindow,
+      }));
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'od-edit-text-selection', id: 'brand-name', hasRange: true },
+        source: frame.contentWindow,
+      }));
+    });
+    await waitFor(() => expect(screen.getByTestId('manual-edit-text-toolbar')).toBeTruthy());
+    const srcdocBefore = frame.srcdoc;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Align center' }));
+    await waitFor(() => expect(savedBodies).toHaveLength(1), { timeout: 4000 });
+    expect(savedBodies[0]!.content).toContain('text-align: center !important');
+
+    // Toggling the active alignment off emits `textAlign: ''` — this deletes
+    // the rule's last declaration and removes the rule itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Align center' }));
+    await waitFor(() => expect(savedBodies).toHaveLength(2), { timeout: 4000 });
+    expect(savedBodies[1]!.content).not.toContain('text-align: center');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // THE regression: the still-rendered runtime target must not be treated
+    // as vanished — no error banner, no selection drop, no canvas reload.
+    expect(screen.queryByText(/no longer exists/)).toBeNull();
+    expect(screen.getByTestId('manual-edit-selection-frame')).toBeTruthy();
+    expect(frame.srcdoc).toBe(srcdocBefore);
+  });
+
   it('persists sanitized inline formatting for runtime-only brand-kit text', async () => {
     const source = '<!doctype html><html><head><script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script></head><body><div id="root"></div></body></html>';
     const { fetchMock, savedBodies } = manualEditWriteMock(source);

@@ -204,7 +204,7 @@ import { ManualEditSelectionOverlay, type ManualEditCropRegion } from './ManualE
 import { ManualEditTextToolbar } from './ManualEditTextToolbar';
 import {
   applyManualEditPatch,
-  hasManualEditRuntimeStyleOverride,
+  isManualEditRuntimeRenderedSource,
   isManualEditFullHtmlDocument,
   manualEditTargetHasNestedMarkup,
   readManualEditAttributes,
@@ -8658,10 +8658,13 @@ function HtmlViewer({
     // persists into the runtime override rule, so an empty outer-HTML read
     // alone must not be treated as "target vanished" (that path drops the
     // selection and reloads the canvas the runtime pages must never flash).
+    // Runtime-backed is a property of the document, not of currently owning
+    // an override rule: clearing the last declaration deletes the rule while
+    // the target stays rendered.
     if (
       id !== '__body__'
       && !readManualEditOuterHtml(savedSource, id)
-      && !hasManualEditRuntimeStyleOverride(savedSource, id)
+      && !isManualEditRuntimeRenderedSource(savedSource)
     ) {
       setManualEditError('The selected target no longer exists in the saved source. Refreshing the preview.');
       setSelectedManualEditTarget(null);
