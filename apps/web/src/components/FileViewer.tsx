@@ -6035,6 +6035,12 @@ function ReactComponentViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -6057,7 +6063,7 @@ function ReactComponentViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
@@ -7120,6 +7126,12 @@ function HtmlViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -7142,7 +7154,7 @@ function HtmlViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
