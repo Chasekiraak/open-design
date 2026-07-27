@@ -25,8 +25,11 @@ import {
 import { checkCraftReferences } from "./lint-craft-references.ts";
 import { collectCssHardcodedColorMatches, cssWideAndSpecialColorKeywords, realNamedColors } from "./style-policy.ts";
 import { checkScriptsLibraryArchitecture } from "./lib/guard/architecture.ts";
-import { runGuardChecks, type GuardCheck } from "./lib/guard/core.ts";
-import { checkUiP0ShadowContract } from "./lib/guard/scope.ts";
+import { runGuardChecks, type GuardCheck, type GuardContext } from "./lib/guard/core.ts";
+import {
+  checkDaemonCoreBoundary as checkDaemonCoreScopeBoundary,
+  checkUiP0ShadowContract,
+} from "./lib/guard/scope.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const allowedE2eScripts = new Set([
@@ -1322,14 +1325,30 @@ async function checkCiTopology(): Promise<boolean> {
   return true;
 }
 
+let crossAppImportsResult: Promise<boolean> | undefined;
+
+function checkCrossAppImportsOnce(): Promise<boolean> {
+  crossAppImportsResult ??= Promise.resolve(checkCrossAppImports());
+  return crossAppImportsResult;
+}
+
+async function checkDaemonCoreBoundary(context: GuardContext): Promise<boolean> {
+  const [crossAppImportsPass, scopeBoundaryPass] = await Promise.all([
+    checkCrossAppImportsOnce(),
+    checkDaemonCoreScopeBoundary(context),
+  ]);
+  return crossAppImportsPass && scopeBoundaryPass;
+}
+
 const checks: GuardCheck[] = [
   { name: "residual JavaScript", run: checkResidualJavaScript },
   { name: "certain-exempt surface consumption", run: checkCertainExemptConsumption },
   { name: "packaged leaf boundary", run: checkPackagedLeafBoundary },
+  { name: "daemon core boundary", run: checkDaemonCoreBoundary },
   { name: "UI P0 shadow contract", run: checkUiP0ShadowContract },
   { name: "package dependency specs", run: checkPackageDependencySpecs },
   { name: "product neutrality", run: checkProductNeutrality },
-  { name: "cross-app imports", run: checkCrossAppImports },
+  { name: "cross-app imports", run: checkCrossAppImportsOnce },
   { name: "@ts-nocheck import resolution", run: checkTsNocheckImports },
   { name: "test layout", run: checkTestLayout },
   { name: "scripts test-free", run: checkScriptsTestFree },

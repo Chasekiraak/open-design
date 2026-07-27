@@ -78,5 +78,6 @@ describe("scripts guard library", () => {
       encoding: "utf8",
     }).trim().split("\n");
     expect(names).toContain("scripts library architecture");
+    expect(names).toContain("daemon core boundary");
   });
 });

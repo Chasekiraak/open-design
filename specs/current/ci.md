@@ -169,6 +169,44 @@ Current evidence:
 - Expected savings are about 7.5 elapsed minutes and 60 runner-minutes per
   qualifying single-PR group, before queue batching discounts.
 
+## Certain daemon-core boundary
+
+Rule `certain-daemon-core` covers `apps/daemon/src/` and
+`apps/daemon/tests/`, excluding `apps/daemon/src/sidecar/` and the
+`daemon-runtime-definition` UI P0 shadow surface. Package manifests, build
+configuration, bins, the packaged sidecar compatibility bridge, and runtime
+definition source/companion tests stay medium-tier.
+
+A pure matching merge group keeps preflight and workspace typecheck, workspace
+unit coverage, broad E2E Vitest, and the complete four-domain UI P0 matrix. It
+skips web workspace tests, visual Playwright, Windows launcher-payload tests,
+and tools-dev/tools-pack unit coverage. The retained plan therefore continues
+to exercise daemon buildability, user-level API/runtime behavior, and every
+merge-gated UI P0 capability without treating web-owned rendering tests or
+packaging-format tests as daemon consumers.
+
+Guard: `daemon core boundary` (`scripts/lib/guard/scope.ts`). The policy-floor
+check verifies that:
+
+- representative source, markdown, and test files resolve only to the certain
+  daemon rule and its exact guarded effects;
+- the daemon sidecar subtree, runtime-definition shadow, and daemon package
+  manifest still escalate;
+- the workflow continues to execute E2E Vitest and the full UI P0 matrix;
+- web code cannot import another app's private implementation, and web tests
+  do not read the daemon tree through filesystem APIs;
+- the visual harness intercepts every daemon-owned route family; explicit
+  visual fixtures win and every remaining request terminates with a
+  deterministic browser-side 404.
+
+The authoritative cross-app critique coverage walker lives in
+`e2e/tests/critique-coverage.test.ts`, which remains armed by the daemon-core
+plan. The latest 400 first-parent merges contain 78 pure daemon-core groups.
+Fifteen recent groups have successful narrow PR validation paired with
+successful full merge-group validation. A representative full queue run spends
+about 20 runner-minutes in the web, visual, and Windows jobs omitted by the
+guarded plan; UI P0 remains the critical path.
+
 ## Daemon UI P0 capability shadow
 
 The UI P0 capability shadow is evidence-only. The applied `ui_p0_matrix`
