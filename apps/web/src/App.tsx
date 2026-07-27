@@ -280,6 +280,13 @@ function projectListScopeKey(context: WorkspaceCollabContext | null): string {
     : 'local';
 }
 
+export function projectViewAuthorizationLifetimeKey(
+  projectId: string,
+  context: WorkspaceCollabContext | null,
+): string {
+  return `${projectListScopeKey(context)}:${projectId}`;
+}
+
 export async function persistComposioConfigChange(
   current: AppConfig,
   composio: AppConfig['composio'],
@@ -3028,7 +3035,7 @@ function AppInner() {
   } else if (activeProject) {
     appMain = (
       <ProjectView
-        key={activeProject.id}
+        key={projectViewAuthorizationLifetimeKey(activeProject.id, workspaceContext)}
         project={activeProject}
         routeFileName={route.kind === 'project' ? route.fileName : null}
         routeConversationId={route.kind === 'project' ? route.conversationId : null}

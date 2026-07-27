@@ -235,6 +235,7 @@ import {
   useCritiqueTheaterEnabled,
 } from './Theater';
 import { useIframeKeepAlivePool } from './IframeKeepAlivePool';
+import { invalidateHtmlSourceSnapshotProject } from './html-source-snapshot-cache';
 import {
   decideAutoOpenAfterWrite,
   selectAutoOpenProducedArtifact,
@@ -1469,6 +1470,17 @@ export function ProjectView({
   // mount-local guard would let the funnel events re-fire on a later
   // conversation/run of the same project.
   const iframeKeepAlivePool = useIframeKeepAlivePool();
+  // ProjectView is the authorization lifetime for project-owned file content.
+  // FileViewer may unmount while switching to a root tab such as Design Files,
+  // but ProjectView remains mounted in that flow so revisit snapshots survive.
+  // Leaving the project (or changing project identity) crosses the boundary:
+  // drop every source snapshot before a later mount can seed content that the
+  // next project/workspace context has not reauthorized.
+  // `viewerOnly` is not a revocation signal: it also represents authorized
+  // read-only members, so this ProjectView lifetime is the fail-closed boundary.
+  useEffect(() => () => {
+    invalidateHtmlSourceSnapshotProject(project.id);
+  }, [project.id]);
   // Team collaboration: presence for a shared project. Dormant (no heartbeat,
   // renders nothing) unless the workspace context marks the viewer an active
   // team member — safe to mount unconditionally.
@@ -2777,6 +2789,7 @@ export function ProjectView({
   const handleProjectEvent = useCallback((evt: ProjectEvent) => {
     if (evt.type === 'file-changed') {
       iframeKeepAlivePool.evictProject(project.id);
+      invalidateHtmlSourceSnapshotProject(project.id);
       coalescedFileChangedRefresh();
       return;
     }
@@ -2800,6 +2813,7 @@ export function ProjectView({
       // status check now (drives the member auto-pull) instead of waiting for
       // the next 5s status tick.
       if (evt.projectId === project.id) {
+        invalidateHtmlSourceSnapshotProject(project.id);
         collabCheckStatusNow();
         // The daemon also pushes this signal when a pull just swapped the
         // shared-project placeholder record for the real name

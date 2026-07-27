@@ -5,6 +5,7 @@ import {
   isAutosaveDraftOnlyChange,
   hydrateReadyTeamProject,
   persistComposioConfigChange,
+  projectViewAuthorizationLifetimeKey,
   resolveDeepLinkedTeamSharedProject,
   resolveSettingsCloseConfig,
   shouldSyncMediaProvidersOnSave,
@@ -118,6 +119,32 @@ describe('hydrateReadyTeamProject', () => {
       applyProject,
     })).resolves.toBeNull();
     expect(applyProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('projectViewAuthorizationLifetimeKey', () => {
+  const projectId = 'same-project';
+  const baseContext = {
+    workspaceId: 'workspace-a',
+    workspaceType: 'team',
+    workspaceMemberId: 'member-a',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    teamId: 'team-a',
+  } as WorkspaceCollabContext;
+
+  it('changes when the workspace or member authorization scope changes', () => {
+    const initial = projectViewAuthorizationLifetimeKey(projectId, baseContext);
+
+    expect(projectViewAuthorizationLifetimeKey(projectId, {
+      ...baseContext,
+      workspaceId: 'workspace-b',
+    })).not.toBe(initial);
+    expect(projectViewAuthorizationLifetimeKey(projectId, {
+      ...baseContext,
+      workspaceMemberId: 'member-b',
+    })).not.toBe(initial);
+    expect(projectViewAuthorizationLifetimeKey(projectId, null)).not.toBe(initial);
   });
 });
 
