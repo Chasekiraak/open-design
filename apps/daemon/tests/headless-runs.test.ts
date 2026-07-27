@@ -453,6 +453,92 @@ describe('POST /api/runs headless fallbacks', () => {
     ]);
   });
 
+  it('seeds empty message attachments-only turns when currentPrompt is unset', async () => {
+    started = await startTestServer();
+    // Omit project kind so no default scenario plugin rewrites empty message
+    // into a rendered brief before omit-pin seed (keeps content '').
+    const projectId = `project_${randomUUID()}`;
+    const projectResponse = await fetch(`${started.url}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: projectId,
+        name: 'Omit-pin empty message attachments without currentPrompt',
+        metadata: {},
+      }),
+    });
+    expect(projectResponse.status).toBe(200);
+    const projectBody = await projectResponse.json() as { conversationId: string };
+    const conversationId = projectBody.conversationId;
+    const attachmentPath = 'assets/no-prompt.png';
+    const commentAttachment = {
+      id: `comment-${randomUUID()}`,
+      order: 0,
+      filePath: 'deck.html',
+      elementId: 'title',
+      selector: '#title',
+      label: 'Title',
+      comment: 'Bold this',
+      currentText: 'Hello',
+      pagePosition: { x: 1, y: 2, width: 10, height: 20 },
+      htmlHint: '<h1 id="title">Hello</h1>',
+      slideIndex: 0,
+    };
+
+    // Minimal omit-pin client: empty text, optional currentPrompt omitted,
+    // but attachment metadata present — must still seed the user turn.
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: '',
+        attachments: [attachmentPath],
+        commentAttachments: [commentAttachment],
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+    const runBody = await runResponse.json() as { assistantMessageId: string | null };
+    expect(runBody.assistantMessageId).toBeTruthy();
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{
+        role: string;
+        content: string;
+        attachments?: Array<{ path: string; name: string; kind: string; order?: number }>;
+        commentAttachments?: Array<{ id: string; filePath: string; comment: string; slideIndex?: number }>;
+      }>;
+    };
+    const emptyAttachmentTurn = messagesBody.messages.find(
+      (m) => m.role === 'user' && m.content === '',
+    );
+    expect(emptyAttachmentTurn).toBeTruthy();
+    expect(emptyAttachmentTurn?.attachments).toEqual([
+      {
+        path: attachmentPath,
+        name: 'no-prompt.png',
+        kind: 'image',
+        order: 0,
+      },
+    ]);
+    expect(emptyAttachmentTurn?.commentAttachments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: commentAttachment.id,
+          filePath: commentAttachment.filePath,
+          comment: commentAttachment.comment,
+          slideIndex: 0,
+        }),
+      ]),
+    );
+  });
+
   it('seeds user prompt after conversation fallback even when pin is client-supplied', async () => {
     started = await startTestServer();
     const { projectId, conversationId: seededConversationId } = await createProject(

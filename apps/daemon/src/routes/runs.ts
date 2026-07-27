@@ -889,11 +889,18 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       // Prefer currentPrompt (latest turn) whenever it is a string — including
       // empty for attachments-only sends. message may be a full flattened
       // ChatRequest transcript. Minimal MCP requests set both equal. Only fall
-      // back to message when currentPrompt is absent.
+      // back to message when currentPrompt is absent. Empty message is still
+      // seedable when attachment metadata is present so chips/annotations
+      // survive reload for omit-pin clients that leave currentPrompt unset.
+      const seededAttachments = seededUserMessageAttachmentFields(meta);
+      const hasSeedableAttachmentMetadata =
+        (seededAttachments.attachments?.length ?? 0) > 0 ||
+        (seededAttachments.commentAttachments?.length ?? 0) > 0;
       const promptForUserMessage =
         typeof meta.currentPrompt === 'string'
           ? meta.currentPrompt
-          : typeof meta.message === 'string' && meta.message.trim().length > 0
+          : typeof meta.message === 'string' &&
+              (meta.message.trim().length > 0 || hasSeedableAttachmentMetadata)
             ? meta.message
             : null;
       if (promptForUserMessage !== null) {
@@ -914,7 +921,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             // Preserve request attachments/commentAttachments on the seeded user
             // turn so reload/listMessages still show chips and annotation context
             // for omit-pin / headless clients (same columns as PUT /messages).
-            ...seededUserMessageAttachmentFields(meta),
+            ...seededAttachments,
           });
           // Bump parent project updatedAt so listProjects reorders (same as
           // PUT /messages). Headless/API turns that never hit that route would
