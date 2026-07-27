@@ -562,7 +562,7 @@ describe('FileViewer manual edit history regressions', () => {
     });
   });
 
-  it('clears the selection when a style save resolves to a target missing from the saved source', async () => {
+  it('keeps runtime-only style selections when the save lands as an override', async () => {
     const brandKitSource = '<!doctype html><html><head>'
       + '<script id="od-brand-payload" type="application/json">{"status":"ready","brand":{"name":"Acme"}}</script>'
       + '</head><body><div id="root"></div></body></html>';
@@ -623,8 +623,10 @@ describe('FileViewer manual edit history regressions', () => {
     expect(savedSources[0]).toContain('color: #ef4444 !important');
     // ...the brand payload is never corrupted...
     expect(savedSources[0]).toContain('od-brand-payload');
-    // ...and reconcile detects the vanished target: selection cleared, panel closed.
-    await waitFor(() => expect(screen.queryByTestId('mock-manual-edit-panel')).toBeNull());
+    // ...and reconcile keeps runtime-only targets selected: their saved source
+    // representation is the override rule, not source markup.
+    await waitFor(() => expect(screen.queryByTestId('mock-manual-edit-panel')).not.toBeNull());
+    expect(panelState.props?.selectedTarget?.id).toBe('brand-header');
   });
 
   it('persists page-style changes to the body when saving the page card', async () => {
