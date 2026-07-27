@@ -808,15 +808,17 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       if (missingClientPin) {
         meta.assistantMessageId = randomUUID();
       }
-      // Prefer currentPrompt (latest turn) when present; message may be a full
-      // flattened ChatRequest transcript. Minimal MCP requests set both equal.
+      // Prefer currentPrompt (latest turn) whenever it is a string — including
+      // empty for attachments-only sends. message may be a full flattened
+      // ChatRequest transcript. Minimal MCP requests set both equal. Only fall
+      // back to message when currentPrompt is absent.
       const promptForUserMessage =
-        typeof meta.currentPrompt === 'string' && meta.currentPrompt.trim().length > 0
+        typeof meta.currentPrompt === 'string'
           ? meta.currentPrompt
           : typeof meta.message === 'string' && meta.message.trim().length > 0
             ? meta.message
             : null;
-      if (promptForUserMessage) {
+      if (promptForUserMessage !== null) {
         try {
           const now = Date.now();
           upsertMessage(db, meta.conversationId, {

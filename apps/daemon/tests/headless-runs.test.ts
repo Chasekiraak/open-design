@@ -304,6 +304,60 @@ describe('POST /api/runs headless fallbacks', () => {
     );
   });
 
+  it('preserves empty currentPrompt for attachments-only omit-pin sends', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Omit-pin empty currentPrompt attachments-only',
+    );
+    const attachmentPath = 'assets/only-file.png';
+    // ChatRequest shape: message is the flattened transcript; currentPrompt is
+    // intentionally empty for attachments-only turns.
+    const transcript = `## user\nprior turn\n\n## assistant\nprior reply\n\n## user\n`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: transcript,
+        currentPrompt: '',
+        attachments: [attachmentPath],
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{
+        role: string;
+        content: string;
+        attachments?: Array<{ path: string; name: string; kind: string; order?: number }>;
+      }>;
+    };
+    const userMessages = messagesBody.messages.filter((m) => m.role === 'user');
+    // Must not fall back to the full transcript when currentPrompt is empty.
+    expect(userMessages.some((m) => m.content === transcript)).toBe(false);
+    expect(userMessages.some((m) => m.content.includes('prior turn'))).toBe(false);
+    const emptyAttachmentTurn = userMessages.find(
+      (m) => m.content === '' && m.attachments?.some((a) => a.path === attachmentPath),
+    );
+    expect(emptyAttachmentTurn).toBeTruthy();
+    expect(emptyAttachmentTurn?.attachments).toEqual([
+      {
+        path: attachmentPath,
+        name: 'only-file.png',
+        kind: 'image',
+        order: 0,
+      },
+    ]);
+  });
+
   it('seeds user prompt after conversation fallback even when pin is client-supplied', async () => {
     started = await startTestServer();
     const { projectId, conversationId: seededConversationId } = await createProject(
