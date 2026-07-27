@@ -189,6 +189,86 @@ describe('POST /api/runs headless fallbacks', () => {
     expect(run2Body.assistantMessageId).toBe(clientId);
   });
 
+  it('seeds only currentPrompt when message is a full ChatRequest transcript', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Omit-pin prefers currentPrompt',
+    );
+    const latestTurn = `latest user turn ${randomUUID()}`;
+    const transcript = `## user\nprior turn\n\n## assistant\nprior reply\n\n## user\n${latestTurn}`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: transcript,
+        currentPrompt: latestTurn,
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+    const runBody = await runResponse.json() as { assistantMessageId: string | null };
+    expect(runBody.assistantMessageId).toBeTruthy();
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userMessages = messagesBody.messages.filter((m) => m.role === 'user');
+    expect(userMessages.some((m) => m.content === latestTurn)).toBe(true);
+    expect(userMessages.some((m) => m.content.includes('prior turn'))).toBe(false);
+    expect(userMessages.some((m) => m.content === transcript)).toBe(false);
+  });
+
+  it('seeds user prompt after conversation fallback even when pin is client-supplied', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId: seededConversationId } = await createProject(
+      started.url,
+      'Fallback seed with client pin',
+    );
+    const prompt = `fallback seed with client pin ${randomUUID()}`;
+    const clientPin = `client-pin-${randomUUID()}`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        // conversationId omitted → server binds default conversation
+        assistantMessageId: clientPin,
+        message: prompt,
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+    const runBody = await runResponse.json() as {
+      conversationId: string | null;
+      assistantMessageId: string | null;
+    };
+    expect(runBody.conversationId).toBe(seededConversationId);
+    expect(runBody.assistantMessageId).toBe(clientPin);
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(seededConversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{ id: string; role: string; content: string; runId?: string | null }>;
+    };
+    const assistant = messagesBody.messages.find((m) => m.id === clientPin);
+    expect(assistant?.role).toBe('assistant');
+    const user = messagesBody.messages.find(
+      (m) => m.role === 'user' && m.content.includes(prompt),
+    );
+    expect(user).toBeTruthy();
+  });
+
   it('rejects cross-project conversationId before seeding omit-pin prompt', async () => {
     started = await startTestServer();
     const projectA = await createProject(started.url, 'Ownership project A');

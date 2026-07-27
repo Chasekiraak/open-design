@@ -697,6 +697,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     }
     // Headless / MCP clients often omit conversationId; bind the project's
     // earliest conversation so the run has a chat home.
+    let conversationFallbackBound = false;
     if (
       typeof meta.projectId === 'string' &&
       meta.projectId &&
@@ -716,6 +717,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
           : null;
         if (defaultConv && typeof defaultConv.id === 'string' && defaultConv.id) {
           meta.conversationId = defaultConv.id;
+          conversationFallbackBound = true;
         }
       } catch (err) {
         console.warn('[runs] mcp conversation fallback failed', err);
@@ -745,16 +747,28 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     // omit it. Without a server-side pin, pinAssistantMessageOnRunCreate no-ops,
     // lastMessageId stays null, and multi-turn native session resume is skipped
     // (missing_cursor / resume_skipped). Ownership is validated above first.
+    // Also seed the user turn when the server bound conversationId via the
+    // headless fallback even if the client already supplied a pin — the pre-
+    // refactor path always seeded in that case, and MCP allows pin + omitted
+    // conversationId independently.
+    const missingClientPin =
+      typeof meta.assistantMessageId !== 'string' || !meta.assistantMessageId;
     if (
       typeof meta.conversationId === 'string' &&
       meta.conversationId &&
-      (typeof meta.assistantMessageId !== 'string' || !meta.assistantMessageId)
+      (missingClientPin || conversationFallbackBound)
     ) {
-      meta.assistantMessageId = randomUUID();
+      if (missingClientPin) {
+        meta.assistantMessageId = randomUUID();
+      }
+      // Prefer currentPrompt (latest turn) when present; message may be a full
+      // flattened ChatRequest transcript. Minimal MCP requests set both equal.
       const promptForUserMessage =
-        typeof meta.message === 'string' && meta.message.trim().length > 0
-          ? meta.message
-          : null;
+        typeof meta.currentPrompt === 'string' && meta.currentPrompt.trim().length > 0
+          ? meta.currentPrompt
+          : typeof meta.message === 'string' && meta.message.trim().length > 0
+            ? meta.message
+            : null;
       if (promptForUserMessage) {
         try {
           upsertMessage(db, meta.conversationId, {
