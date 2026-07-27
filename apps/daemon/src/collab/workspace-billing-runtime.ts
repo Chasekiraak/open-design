@@ -658,6 +658,7 @@ function validateProjectionRevision(
         actualBillingClock,
         expectedBillingClock,
         previousBillingClock,
+        entry.retiredRevisionClockEpochs.subscription,
       )) ||
     (expectedWalletClock &&
       actualWalletClock &&
@@ -665,6 +666,7 @@ function validateProjectionRevision(
         actualWalletClock,
         expectedWalletClock,
         previousWalletClock,
+        entry.retiredRevisionClockEpochs.wallet,
       )) ||
     (!billingClockComparable &&
       revisionIsBehind(snapshot.revisions.billing, expectedBilling)) ||
@@ -759,7 +761,9 @@ function fencedRevisionClockIsBehind(
   actual: WorkspaceBillingRevisionClock,
   expected: WorkspaceBillingRevisionClock,
   previousAuthoritative: WorkspaceBillingRevisionClock | null,
+  retiredEpochs: ReadonlySet<string>,
 ): boolean {
+  if (retiredEpochs.has(actual.epoch)) return true;
   if (actual.epoch === expected.epoch) {
     return BigInt(actual.counter) < BigInt(expected.counter);
   }

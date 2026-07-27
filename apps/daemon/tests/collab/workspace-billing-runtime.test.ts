@@ -317,6 +317,167 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
     runtime.dispose();
   });
 
+  it('rejects an authoritative reconnect snapshot from a retired revision epoch', async () => {
+    vi.useFakeTimers();
+    let clock = { epoch: 'billing-epoch-a', counter: '9' };
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          `billing:v1:${clock.counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: clock,
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+    });
+
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-b', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: clock,
+    });
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-c', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: clock,
+    });
+    const current = await runtime.read(KEY_A);
+    expect(current).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-c', counter: '1' },
+          },
+        },
+      },
+      state: { status: 'fresh', errorCode: null },
+    });
+
+    // An authoritative reconnect can lag behind the already accepted C fence.
+    // B is retired even though its counter is numerically newer, so it must
+    // fail closed and preserve the last-good C projection.
+    clock = { epoch: 'billing-epoch-b', counter: '99' };
+    runtime.reconnect('workspace-a');
+    const afterReconnect = await runtime.read(KEY_A);
+
+    expect(afterReconnect).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-c', counter: '1' },
+          },
+        },
+      },
+      state: {
+        status: 'error',
+        errorCode: 'workspace_billing_revision_not_caught_up',
+        reason: 'reconnect',
+        retryAt: expect.any(String),
+      },
+    });
+    expect(calls).toBe(4);
+
+    clock = { epoch: 'billing-epoch-c', counter: '2' };
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(calls).toBe(5));
+    expect(runtime.peek(KEY_A)).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-c', counter: '2' },
+          },
+        },
+      },
+      state: {
+        status: 'fresh',
+        errorCode: null,
+        reason: 'bounded-retry',
+        retryAt: null,
+      },
+    });
+    runtime.dispose();
+  });
+
+  it('rejects a direct authoritative refresh from a retired revision epoch', async () => {
+    let clock = { epoch: 'billing-epoch-a', counter: '9' };
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          `billing:v1:${clock.counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: clock,
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+      retryDelaysMs: [],
+    });
+
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-b', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: clock,
+    });
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-c', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: clock,
+    });
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-b', counter: '99' };
+    runtime.refreshAll('authoritative-refresh');
+    const afterRefresh = await runtime.read(KEY_A);
+
+    expect(afterRefresh).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-c', counter: '1' },
+          },
+        },
+      },
+      state: {
+        status: 'error',
+        errorCode: 'workspace_billing_revision_not_caught_up',
+        reason: 'authoritative-refresh',
+      },
+    });
+    expect(calls).toBe(4);
+    runtime.dispose();
+  });
+
   it('rejects a fenced read that remains on the pre-event authoritative epoch', async () => {
     let clock = { epoch: 'billing-epoch-a', counter: '9' };
     let calls = 0;
