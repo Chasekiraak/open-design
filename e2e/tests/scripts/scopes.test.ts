@@ -480,9 +480,9 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     }),
   },
   {
-    name: "merge_group packaged daemon sidecar stays full",
+    name: "merge_group excluded daemon surfaces stay full",
     context: { eventName: "merge_group" },
-    files: ["apps/daemon/src/sidecar/server.ts"],
+    files: ["apps/daemon/src/sidecar/server.ts", "apps/daemon/src/runtimes/defs/claude.ts"],
     expected: FULL_PLAN,
   },
   {
@@ -607,7 +607,7 @@ test("packaged-leaf core matches only its certain rule with the guarded effects"
   );
 });
 
-test("daemon core matches only its certain rule while packaged sidecar stays medium", async () => {
+test("daemon core matches only its certain rule while excluded daemon surfaces stay medium", async () => {
   const { evaluateScopeOutputs, matchesRuleMatch, scopeRules } = await import("../../../scripts/scopes.ts");
   const files = [
     "apps/daemon/src/server.ts",
@@ -635,11 +635,17 @@ test("daemon core matches only its certain rule while packaged sidecar stays med
     ],
   );
 
-  const sidecar = evaluateScopeOutputs(["apps/daemon/src/sidecar/server.ts"], "certain", {
-    deriveWorkspaceValidationFromTestScopes: true,
-  });
-  assert.equal(sidecar.decisions[0]?.escalated, true);
-  assert.equal(sidecar.decisions[0]?.matchedRules.includes("certain-daemon-core"), false);
+  for (const file of [
+    "apps/daemon/src/sidecar/server.ts",
+    "apps/daemon/src/runtimes/defs/claude.ts",
+    "apps/daemon/tests/runtimes/agent-args.test.ts",
+  ]) {
+    const outside = evaluateScopeOutputs([file], "certain", {
+      deriveWorkspaceValidationFromTestScopes: true,
+    });
+    assert.equal(outside.decisions[0]?.escalated, true, file);
+    assert.equal(outside.decisions[0]?.matchedRules.includes("certain-daemon-core"), false, file);
+  }
 });
 
 test("packaged-leaf consumption collector resolves imports, packages, and static paths", async () => {

@@ -172,9 +172,10 @@ Current evidence:
 ## Certain daemon-core boundary
 
 Rule `certain-daemon-core` covers `apps/daemon/src/` and
-`apps/daemon/tests/`, excluding `apps/daemon/src/sidecar/`. Package manifests,
-build configuration, bins, and the packaged sidecar compatibility bridge stay
-medium-tier.
+`apps/daemon/tests/`, excluding `apps/daemon/src/sidecar/` and the
+`daemon-runtime-definition` UI P0 shadow surface. Package manifests, build
+configuration, bins, the packaged sidecar compatibility bridge, and runtime
+definition source/companion tests stay medium-tier.
 
 A pure matching merge group keeps preflight and workspace typecheck, workspace
 unit coverage, broad E2E Vitest, and the complete four-domain UI P0 matrix. It
@@ -189,7 +190,8 @@ check verifies that:
 
 - representative source, markdown, and test files resolve only to the certain
   daemon rule and its exact guarded effects;
-- the daemon sidecar subtree and daemon package manifest still escalate;
+- the daemon sidecar subtree, runtime-definition shadow, and daemon package
+  manifest still escalate;
 - the workflow continues to execute E2E Vitest and the full UI P0 matrix;
 - web code cannot import another app's private implementation, and web tests
   do not read the daemon tree through filesystem APIs;

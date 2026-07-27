@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { uiP0CiMatrix } from "../../../e2e/lib/playwright/suites.ts";
 import {
+  CERTAIN_DAEMON_CORE_EXCLUDED_EXACT,
   CERTAIN_DAEMON_CORE_EXCLUDED_PREFIXES,
   CERTAIN_DAEMON_CORE_PREFIXES,
   DAEMON_RUNTIME_DEFINITION_EXACT,
@@ -130,6 +131,8 @@ export function daemonCoreScopeContractErrors(): string[] {
 
   for (const outsideFile of [
     `${CERTAIN_DAEMON_CORE_EXCLUDED_PREFIXES[0]}server.ts`,
+    `${DAEMON_RUNTIME_DEFINITION_PREFIXES[0]}example.ts`,
+    CERTAIN_DAEMON_CORE_EXCLUDED_EXACT[0],
     "apps/daemon/package.json",
   ]) {
     const outside = evaluateScopeOutputs([outsideFile], "certain", {
