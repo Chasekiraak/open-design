@@ -24,9 +24,9 @@ import { CERTAIN_EXEMPT_EXACT, CERTAIN_EXEMPT_PREFIXES } from "./scopes.ts";
 //   enters an exempt directory: flagged as the same repository dependency.
 //
 // Deliberately outside the checked surface:
-// - root `scripts/` — floor-owned code. Preflight and workspace unit tests are
-//   unconditionally armed on every plan, so floor checks may read the exempt
-//   surface (product neutrality validates docs/ prose on every run).
+// - root `scripts/` — policy-floor code. Preflight is armed on every plan, so
+//   its guard checks may read the exempt surface (product neutrality validates
+//   docs/ prose on every run).
 // - `apps/landing-page/` — it IS the exempt surface; landing-page CI owns it.
 
 const repoRoot = path.resolve(import.meta.dirname, "..");

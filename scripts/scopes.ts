@@ -74,6 +74,7 @@ type ScopePlan = ScopeOutputs & {
   run_playwright_critical: boolean;
   run_playwright_visual: boolean;
   run_preflight: boolean;
+  run_preflight_typecheck: boolean;
   run_ui_p0: boolean;
   run_web_workspace_tests: boolean;
   run_windows_tools_pack_payload_tests: boolean;
@@ -100,10 +101,10 @@ type GitHubEvent = {
 // ---------------------------------------------------------------------------
 
 // Certain-tier exempt core: surfaces whose "cannot affect gate validation"
-// invariant is definitional and enforced by the named guard check. Floor lanes
-// (preflight and workspace unit tests, both unconditionally armed) still run
-// for these files, so floor-owned checks that read them — e.g. product
-// neutrality over docs/ — keep validating them on every plan.
+// invariant is definitional and enforced by the named guard check. The
+// preflight policy floor still runs for these files, so floor-owned checks
+// that read them — e.g. product neutrality over docs/ — keep validating them
+// on every plan.
 export const CERTAIN_EXEMPT_PREFIXES = [
   ".vscode/",
   ".idea/",
@@ -457,6 +458,11 @@ function createRunPlan(
   fullLanes: boolean = ciMode === "full",
 ): Omit<ScopePlan, keyof ScopeOutputs | "ui_p0_matrix" | "visual_matrix"> {
   const isFull = fullLanes;
+  const hasValidationScope = SCOPE_EFFECTS.some((effect) => outputs[effect]);
+  // Preserve every PR/manual-hot signal. Only a merge-queue plan whose
+  // certain-tier rules claim zero validation effects may skip broad workspace
+  // work; preflight itself stays armed as the always-run policy floor.
+  const runBroadWorkspaceValidation = isFull || ciMode === "hot" || hasValidationScope;
   const runUiP0 = isFull || outputs.ui_p0_validation_required;
 
   return {
@@ -465,10 +471,11 @@ function createRunPlan(
     run_playwright_critical: outputs.ui_critical_validation_required && !runUiP0,
     run_playwright_visual: isFull || outputs.visual_validation_required,
     run_preflight: true,
+    run_preflight_typecheck: runBroadWorkspaceValidation,
     run_ui_p0: runUiP0,
     run_web_workspace_tests: isFull || outputs.web_tests_required,
     run_windows_tools_pack_payload_tests: isFull || outputs.tools_pack_tests_required,
-    run_workspace_unit_tests: true,
+    run_workspace_unit_tests: runBroadWorkspaceValidation,
   };
 }
 
@@ -571,7 +578,7 @@ function createEnvScopePlan(): PlanWithTrace {
     // The merge queue evaluates the whole queued group's union diff at the
     // "certain" threshold. Files matching only certain-tier rules contribute
     // their claimed radius (for the certain-exempt core: none — a pure-docs
-    // group drops to the unconditional floor lanes); every other file
+    // group drops to the preflight policy floor); every other file
     // escalates and keeps the plan full. The trace's ifTrustAll shadow column
     // is the evidence stream for future promotions. Resolution anomalies fail
     // open to the full plan: queue throughput must never depend on this

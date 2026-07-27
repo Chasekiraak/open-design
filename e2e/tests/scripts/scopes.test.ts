@@ -136,15 +136,17 @@ function expectedPlan(opts: {
   const runs = new Set<RunKey>(opts.runs ?? []);
   const plan: Record<string, unknown> = {};
   for (const key of SCOPE_KEYS) plan[key] = scopes.has(key);
+  const runBroadWorkspaceValidation = opts.ciMode === "hot" || scopes.size > 0;
   plan["ci_mode"] = opts.ciMode;
   plan["run_e2e_vitest"] = runs.has("run_e2e_vitest");
   plan["run_playwright_critical"] = runs.has("run_playwright_critical");
   plan["run_playwright_visual"] = runs.has("run_playwright_visual");
   plan["run_preflight"] = true;
+  plan["run_preflight_typecheck"] = runBroadWorkspaceValidation;
   plan["run_ui_p0"] = runs.has("run_ui_p0");
   plan["run_web_workspace_tests"] = runs.has("run_web_workspace_tests");
   plan["run_windows_tools_pack_payload_tests"] = runs.has("run_windows_tools_pack_payload_tests");
-  plan["run_workspace_unit_tests"] = true;
+  plan["run_workspace_unit_tests"] = runBroadWorkspaceValidation;
   plan["ui_p0_matrix"] = UI_P0_MATRIX_JSON;
   plan["visual_matrix"] = VISUAL_MATRIX_JSON;
   return plan;
@@ -435,10 +437,10 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
   {
     // The first certain-tier promotion: a group confined to the certain-exempt
     // core (docs/, landing-page, editor configs, LICENSE/CODEOWNERS) drops to
-    // the unconditional floor lanes instead of running everything. Guarded by
+    // the preflight policy floor instead of running everything. Guarded by
     // the "certain-exempt surface consumption" guard check; methodology in
     // specs/current/ci.md.
-    name: "merge_group certain-exempt core group drops to the floor lanes",
+    name: "merge_group certain-exempt core group drops to the policy floor",
     context: { eventName: "merge_group" },
     files: ["docs/architecture.md", "docs/nested/guide.mdx", "apps/landing-page/src/pages/index.astro", "LICENSE", ".github/CODEOWNERS"],
     expected: expectedPlan({ ciMode: "full" }),

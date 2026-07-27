@@ -15,10 +15,12 @@ PR and manual-hot runs believe `medium`, the merge queue believes only
 `certain`, manual-full runs believe nothing. A file below threshold — or
 matching no rule — escalates fail-closed to the full radius.
 
-Two floors never move: `run_preflight` and `run_workspace_unit_tests` are
-unconditionally true in every plan. Preflight runs `pnpm guard` and the
-workspace typecheck, so guard checks execute on every run of every plan —
-including runs where a certain-tier rule skipped everything else.
+The policy floor never moves: `run_preflight` is true in every plan, and its
+workspace setup, `pnpm guard`, and i18n structure check always execute. Broad
+app declaration builds, workspace typecheck, and `run_workspace_unit_tests`
+may skip only for a merge-queue plan whose certain-tier evaluation claims zero
+validation effects. PR, manual-hot, forced-full, and escalated queue plans keep
+all broad workspace validation.
 
 The error cost is asymmetric by tier. A wrong `medium` rule under-arms a PR
 run and gets caught by the merge queue's stricter threshold — cost: one queue
@@ -51,7 +53,7 @@ Requirements:
 2. **A guard that resolves.** The rule's `guard` field must name a live
    `scripts/guard.ts` check (`pnpm --silent guard --list-checks` is the
    registry; the rule-table invariant test enforces resolution). Guards for
-   certain rules must run in a floor lane — `pnpm guard` in preflight
+   certain rules must run in the policy floor — `pnpm guard` in preflight
    qualifies — so the check that justifies skipping always itself runs.
 3. **Evidence proportional to the guard's strength.** Guard invariants come in
    three strengths: *definitional* (the surface cannot enter build or runtime
@@ -93,8 +95,8 @@ Rule `certain-exempt-surface`: prefixes `docs/`, `apps/landing-page/`,
 `.vscode/`, `.idea/`, `.github/ISSUE_TEMPLATE/` plus exacts `LICENSE`,
 `.github/CODEOWNERS`. Guard: `certain-exempt surface consumption`
 (`scripts/check-certain-exempt-consumption.ts`) — no skippable-lane source may
-reference a certain-exempt path; floor-owned code (root `scripts/`) is exempt
-from the scan because floor lanes always run and may validate docs content
+reference a certain-exempt path; policy-floor code (root `scripts/`) is exempt
+from the scan because preflight always runs and may validate docs content
 (product neutrality does).
 
 Evidence, from replaying the 398 first-parent merges before the promotion:
@@ -102,11 +104,35 @@ Evidence, from replaying the 398 first-parent merges before the promotion:
 - 56 merges (14.1%) touched only the exempt surface; under the promoted core
   49 (12.3%) stay pure. The 7 lost are mostly root markdown (`README.md`),
   deliberately left medium.
-- Each pure-core queue run drops from the full lane set to the two floors.
+- Each pure-core queue run originally dropped from the full lane set to
+  preflight + workspace unit; optimization #2 below narrows that further to
+  the preflight policy floor.
 - Known true consumer found and allowlisted with rationale:
   `tools/release/src/release-note/prepare.ts` reads `docs/CHANGELOG`, which
   executes only in release workflows; `@open-design/tools-release` tests run
   in no `ci.yml` lane.
+
+## Optimization #2 (2026-07): zero-effect queue policy floor
+
+A merge-queue plan that trusts every changed file at `certain` and receives no
+scope effects keeps preflight setup, `pnpm guard`, and the i18n structure check,
+but skips preflight's app prebuild/typecheck steps and the workspace-unit job.
+The predicate is deliberately queue-only: PR/manual-hot retain their previous
+validation even when the medium-tier plan has no effects, and forced-full or
+escalated queue plans still run everything.
+
+Safety comes from promotion #1's existing boundary rather than a new rule:
+the certain-exempt consumption guard still executes in preflight, and
+`pnpm guard` still sees every changed path (including a misleading executable
+such as `docs/example.js`). The skipped workspace-unit job does not own
+landing-page validation, and the broad workspace typecheck already excludes
+`@open-design/landing-page`.
+
+Evidence from the 398-merge replay ending at `b99a9fdc3` found 46 qualifying
+queue plans (11.6%). Across 12 recent successful merge-group runs, the skipped
+prebuild/typecheck work cost about 1.95 runner-min and the workspace-unit job
+about 1.6 runner-min, for roughly 3.6 runner-min and 2.1 critical-path minutes
+saved per qualifying run (~166 runner-min over the replay window).
 
 ## Evidence recipes
 
@@ -157,10 +183,9 @@ evidence, not provisioned in advance.
 - Shadow-evidence window for the first structural promotion (define N when
   that proposal exists).
 - Demotion policy beyond the guard-resolution hard rule.
-- Floor conditionalization: pure certain-core changes still pay preflight +
-  workspace unit tests; skipping the floors is the natural second certain-tier
-  proposal and must confront the "docs/ can hide a `.js` file from guard"
-  class of questions.
+- PR-side zero-effect conditionalization: optimization #2 intentionally
+  changes only queue-trusted plans. Extending it to medium-tier PR plans needs
+  its own evidence and containment review.
 - Queue batching discount: the 12.3% figure assumes single-PR queue groups; a
   mixed group loses the benefit file-by-file. Check real `merge_group` traces
   once a few have accumulated.
