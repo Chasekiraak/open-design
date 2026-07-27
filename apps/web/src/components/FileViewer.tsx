@@ -8309,19 +8309,44 @@ function HtmlViewer({
       setManualEditFrozenSource(livePreviewSource);
     }
   }, [manualEditMode, manualEditFrozenSource, livePreviewSource]);
-  // Capture / release the annotation snapshot at mode entry / exit. Captured
-  // once (the `=== null` guard), so a mid-pass file change can't slip a fresh
-  // snapshot in; cleared on exit so `previewSource` falls back to the latest
-  // live source and the deferred update lands in one clean render.
+  // Capture / release the annotation snapshot at mode entry / exit, and keep
+  // it following SETTLED content versions while the mode stays open.
+  //
+  // Two different "background changes" hit this freeze and they need opposite
+  // handling:
+  //   - Streaming repaints (`liveHtml` defined — an agent run rewriting the
+  //     artifact chunk by chunk) must stay invisible until mode exit; that
+  //     anti-thrash hold is the snapshot's original purpose.
+  //   - A settled on-disk version (raw lane, `liveHtml === undefined`) — e.g.
+  //     the daemon auto-pull landing an owner's published update into a
+  //     team-shared mirror — must atomically REPLACE the snapshot. Comment
+  //     mode is a read-only member's resting interaction state, so "deferred
+  //     until mode exit" degrades to "never": the slide rail (unfrozen
+  //     `deckVisualSource`) repaints with the new version while the canvas
+  //     pins the stale bytes indefinitely. The srcDoc transport already knows
+  //     how to remount cleanly when srcDoc changes under Comment mode (see
+  //     the boardMode branch in canActivateSrcDocTransport), so one snapshot
+  //     swap per settled version is a clean atomic repaint — old content
+  //     stays up until the new bytes have fully arrived.
+  //
+  // Cleared on exit so `previewSource` falls back to the latest live source
+  // and any still-deferred streaming update lands in one clean render.
   useEffect(() => {
     if (annotationFreezeActive) {
       if (annotationFrozenSource === null && livePreviewSource != null) {
+        setAnnotationFrozenSource(livePreviewSource);
+      } else if (
+        annotationFrozenSource !== null &&
+        liveHtml === undefined &&
+        livePreviewSource != null &&
+        livePreviewSource !== annotationFrozenSource
+      ) {
         setAnnotationFrozenSource(livePreviewSource);
       }
     } else if (annotationFrozenSource !== null) {
       setAnnotationFrozenSource(null);
     }
-  }, [annotationFreezeActive, annotationFrozenSource, livePreviewSource]);
+  }, [annotationFreezeActive, annotationFrozenSource, livePreviewSource, liveHtml]);
   const previewSource = (manualEditMode && manualEditFrozenSource !== null)
     ? manualEditFrozenSource
     : (annotationFreezeActive && annotationFrozenSource !== null)
