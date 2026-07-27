@@ -706,6 +706,7 @@ import {
   createProactiveContentPull,
   type ProactiveContentPullTarget,
 } from './collab/proactive-content-pull.js';
+import { createProjectContentTransferStateStore } from './collab/project-content-transfer-state.js';
 import {
   emitSharedProjectPullTiming,
   sharedProjectPullProfileEnabled,
@@ -3410,8 +3411,32 @@ export async function startServer({
         generation: 0,
       },
     );
+  const projectContentTransferStates =
+    createProjectContentTransferStateStore({
+      onChange: (scope, state) => {
+        emitProjectEvent(scope.projectId, {
+          type: 'project-content-transfer-state',
+          projectId: scope.projectId,
+          at: state.updatedAt,
+        });
+      },
+    });
   const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
+    readContentTransferState: (projectId, scope) =>
+      projectContentTransferStates.read({ projectId, ...scope }),
+    beginContentTransfer: (projectId, scope, version) =>
+      projectContentTransferStates.begin(
+        { projectId, ...scope },
+        version,
+      ).token,
+    finishContentTransfer: (projectId, scope, token, version) => {
+      projectContentTransferStates.finish(
+        { projectId, ...scope },
+        token,
+        version,
+      );
+    },
     // Register-on-pull: after a member pulls a shared project, insert a local
     // project record so it appears in /api/projects and opens read-only (the
     // member is not the owner). Idempotent — an already-local project is a no-op.

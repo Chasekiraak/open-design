@@ -462,6 +462,35 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
   });
 
+  it('settles lifecycle observation only when no retry remains', async () => {
+    const retry = makeRetryScheduler();
+    const onEventSettled = vi.fn();
+    let fail = true;
+    const deps = makeDeps({
+      onEventSettled,
+      scheduler: retry.scheduler,
+      random: () => 1,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (fail) throw new Error('temporary transport failure');
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    expect(onEventSettled).not.toHaveBeenCalled();
+
+    fail = false;
+    await retry.runNext();
+    // Retry completion is observed through `onPulled`; the original-event
+    // terminal callback is intentionally only for its synchronous decision.
+    expect(onEventSettled).not.toHaveBeenCalled();
+
+    await pull.handleContentChanged(baseEvent);
+    expect(onEventSettled).toHaveBeenCalledWith(baseEvent);
+  });
+
   it('lets a v2 catch-up retry after a failed v1 pull without advancing the cursor', async () => {
     const onError = vi.fn();
     let attempt = 0;

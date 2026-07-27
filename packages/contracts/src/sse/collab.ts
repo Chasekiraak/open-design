@@ -41,6 +41,18 @@ export interface ProjectMetadataChangedSsePayload {
 }
 
 /**
+ * Thin invalidation for daemon-local inbound project content. The project id
+ * is not an authorization scope: the web must re-read `/collab/status`, which
+ * resolves the current workspace/resource/viewer/owner binding, rather than
+ * applying an unscoped lifecycle payload directly.
+ */
+export interface ProjectContentTransferStateSsePayload {
+  type: 'project-content-transfer-state';
+  projectId: string;
+  at?: number;
+}
+
+/**
  * Project-scoped collab invalidation events multiplexed onto
  * `/api/projects/:id/events`. Each carries the `projectId` it invalidates.
  */
@@ -48,6 +60,9 @@ export type CollabProjectInvalidationSsePayload =
   | CommentChangedSsePayload
   | PresenceChangedSsePayload
   | ProjectMetadataChangedSsePayload;
+
+export const PROJECT_CONTENT_TRANSFER_STATE_EVENT =
+  'project-content-transfer-state' as const;
 
 /** The SSE `event:` names for the project-scoped collab invalidations. */
 export const COLLAB_PROJECT_INVALIDATION_EVENTS = [

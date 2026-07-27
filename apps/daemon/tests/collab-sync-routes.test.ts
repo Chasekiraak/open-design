@@ -29,6 +29,7 @@ import {
   type ProactiveContentPullTarget,
   type ProactivePullAuthorizationWitness,
 } from '../src/collab/proactive-content-pull.js';
+import { createProjectContentTransferStateStore } from '../src/collab/project-content-transfer-state.js';
 import { resolveAuthorizedActiveTeamWorkspaceSnapshot } from '../src/collab/active-workspace-selection.js';
 import {
   promoteAuthorizedTeamProjectStage,
@@ -807,6 +808,34 @@ describe('collab sync routes', () => {
     });
   });
 
+  it('returns the daemon-local content transfer snapshot for reconnects', async () => {
+    const contentTransferState = {
+      status: 'downloading' as const,
+      version: 8,
+      startedAt: 100,
+      updatedAt: 101,
+    };
+    const readContentTransferState = vi.fn(() => contentTransferState);
+    const api = await startSyncServer(
+      fixedShareContextProvider(true),
+      {
+        resolveSharedProjectOwner: async () => 'wm-owner',
+        readContentTransferState,
+      },
+    );
+
+    const res = await api.json('/api/projects/shared-p/collab/status');
+
+    expect(res.status).toBe(200);
+    expect(res.body.contentTransferState).toEqual(contentTransferState);
+    expect(readContentTransferState).toHaveBeenCalledWith('shared-p', {
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-1',
+      ownerMemberId: 'wm-owner',
+    });
+  });
+
   it('fails closed to a null materialized version when the durable cursor cannot be read', async () => {
     const api = await startSyncServer(
       fixedShareContextProvider(true),
@@ -1472,6 +1501,64 @@ describe('collab sync routes', () => {
     await api.awaitPublishedVersion('/api/projects/p1/collab/status', null);
     const after = await api.json('/api/projects/p1/collab/pull', { method: 'POST' });
     expect(after.body.version).toBe(1);
+  });
+
+  it('finishes the exact scoped transfer token when a shared pull succeeds', async () => {
+    const pullScope: TeamMirrorPullScope = {
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-1',
+      ownerMemberId: 'wm-owner',
+    };
+    const transferStates = createProjectContentTransferStateStore();
+    const beginContentTransfer = vi.fn(
+      (projectId: string, scope: TeamMirrorPullScope, version?: number) =>
+        transferStates.begin({ projectId, ...scope }, version).token,
+    );
+    const finishContentTransfer = vi.fn(
+      (
+        projectId: string,
+        scope: TeamMirrorPullScope,
+        token: ReturnType<typeof beginContentTransfer>,
+        version?: number,
+      ) => {
+        transferStates.finish({ projectId, ...scope }, token, version);
+      },
+    );
+    const api = await startSyncServer(fixedShareContextProvider(true), {
+      beginContentTransfer,
+      finishContentTransfer,
+      projectStore: fakeProjectStore(),
+      resolvePullDir: (projectId) => `/does/not/exist/${projectId}`,
+      resolveSharedProject: async (projectId) => ({
+        projectId,
+        ownerMemberId: pullScope.ownerMemberId,
+        sharedAt: '2026-07-25T00:00:00.000Z',
+      }),
+    });
+    await api.json('/api/projects/p1/collab/publish', { method: 'POST' });
+    await api.awaitPublishedVersion('/api/projects/p1/collab/status', null);
+
+    const pull = await api.handle.pullSharedProject('p1', pullScope);
+
+    expect(pull).toEqual({ status: 'pulled', version: 1 });
+    expect(beginContentTransfer).toHaveBeenCalledTimes(1);
+    const [projectId, scope, version] =
+      beginContentTransfer.mock.calls[0]!;
+    const token = beginContentTransfer.mock.results[0]!.value;
+    expect(projectId).toBe('p1');
+    expect(scope).toEqual(pullScope);
+    expect(version).toBeUndefined();
+    expect(finishContentTransfer).toHaveBeenCalledWith(
+      'p1',
+      scope,
+      token,
+      1,
+    );
+    expect(transferStates.read({ projectId, ...scope })).toMatchObject({
+      status: 'idle',
+      version: 1,
+    });
   });
 
   it('refuses to pull a project that is no longer team-shared (revocation)', async () => {

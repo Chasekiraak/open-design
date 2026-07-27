@@ -49,6 +49,161 @@ afterEach(() => {
 });
 
 describe('CollabClient', () => {
+  it('applies content-transfer SSE state in timestamp order', () => {
+    const { fetchImpl } = makeFetch();
+    const client = new CollabClient({
+      projectId: 'p1',
+      member: null,
+      fetch: fetchImpl,
+    });
+
+    client.applyContentTransferState({
+      status: 'downloading',
+      version: 8,
+      startedAt: 100,
+      updatedAt: 100,
+    });
+    client.applyContentTransferState({
+      status: 'idle',
+      version: 8,
+      startedAt: 100,
+      updatedAt: 200,
+    });
+    client.applyContentTransferState({
+      status: 'downloading',
+      version: 8,
+      startedAt: 100,
+      updatedAt: 150,
+    });
+
+    expect(client.getSnapshot().contentTransferState).toMatchObject({
+      status: 'idle',
+      updatedAt: 200,
+    });
+  });
+
+  it('clears a stale downloading snapshot when the current daemon reports no transfer', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        publishedVersion: 8,
+        materializedVersion: 8,
+        contentTransferState: null,
+        syncState: 'synced',
+      }),
+    })) as unknown as typeof fetch;
+    const client = new CollabClient({
+      projectId: 'p1',
+      member: null,
+      fetch: fetchImpl,
+    });
+    client.applyContentTransferState({
+      status: 'downloading',
+      version: 8,
+      startedAt: 100,
+      updatedAt: 100,
+    });
+
+    await client.pollStatus();
+
+    expect(client.getSnapshot().contentTransferState).toBeNull();
+  });
+
+  it('does not let an older null status response clear a newer SSE transfer', async () => {
+    let resolveStatus!: (response: Response) => void;
+    const statusResponse = new Promise<Response>((resolve) => {
+      resolveStatus = resolve;
+    });
+    const fetchImpl = vi.fn(async () => statusResponse) as unknown as typeof fetch;
+    const client = new CollabClient({
+      projectId: 'p1',
+      member: null,
+      fetch: fetchImpl,
+    });
+
+    const polling = client.pollStatus();
+    client.applyContentTransferState({
+      status: 'downloading',
+      version: 9,
+      startedAt: 200,
+      updatedAt: 200,
+    });
+    resolveStatus({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        publishedVersion: 8,
+        materializedVersion: 8,
+        contentTransferState: null,
+        syncState: 'synced',
+      }),
+    } as Response);
+    await polling;
+
+    expect(client.getSnapshot().contentTransferState).toMatchObject({
+      status: 'downloading',
+      version: 9,
+    });
+  });
+
+  it('does not let an older concrete poll overwrite a restart null and newer SSE transfer', async () => {
+    let resolveOldStatus!: (response: Response) => void;
+    const oldStatusResponse = new Promise<Response>((resolve) => {
+      resolveOldStatus = resolve;
+    });
+    let statusCall = 0;
+    const fetchImpl = vi.fn(async () => {
+      statusCall += 1;
+      if (statusCall === 1) return oldStatusResponse;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          publishedVersion: 8,
+          materializedVersion: 8,
+          contentTransferState: null,
+          syncState: 'synced',
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
+    const client = new CollabClient({
+      projectId: 'p1',
+      member: null,
+      fetch: fetchImpl,
+    });
+
+    const oldPolling = client.pollStatus();
+    await client.pollStatus();
+    client.applyContentTransferState({
+      status: 'downloading',
+      version: 9,
+      startedAt: 1,
+      updatedAt: 1,
+    });
+    resolveOldStatus({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        publishedVersion: 8,
+        materializedVersion: 8,
+        contentTransferState: {
+          status: 'downloading',
+          version: 8,
+          startedAt: 10_000,
+          updatedAt: 10_000,
+        },
+        syncState: 'synced',
+      }),
+    } as Response);
+    await oldPolling;
+
+    expect(client.getSnapshot().contentTransferState).toMatchObject({
+      status: 'downloading',
+      version: 9,
+    });
+  });
+
   it('polls status on start, then heartbeats once the project is shared', async () => {
     const { fetchImpl, calls, state } = makeFetch({
       present: [{ memberId: 'm1', name: 'Author' }],

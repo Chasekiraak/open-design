@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CollabMemberRole, CollabPresenceMember, WorkspaceCollabContext } from '@open-design/contracts';
+import type {
+  CollabMemberRole,
+  CollabPresenceMember,
+  ProjectContentTransferState,
+  WorkspaceCollabContext,
+} from '@open-design/contracts';
 import { resolveCollabSession } from './collab-session';
 import {
   lastResolvedTeamProjects as cachedTeamProjects,
@@ -160,6 +165,8 @@ export interface ProjectCollab {
   refreshPresence: () => void;
   /** Run one status check now (hub push-channel consumer). */
   checkStatusNow: () => void;
+  /** Apply an inbound-transfer lifecycle update from the project SSE. */
+  applyContentTransferState?: (state: ProjectContentTransferState) => void;
 }
 
 /**
@@ -405,6 +412,8 @@ export function useProjectCollab(
   // observe the ref cursor written by a successful pull.
   const downloadPending = shouldAutoPull
     && (
+      collab.contentTransferState?.status === 'downloading'
+      ||
       (publishedVersion != null && publishedVersion > pullCursorRef.current.version)
       || pullInFlightRef.current
     );
@@ -424,5 +433,6 @@ export function useProjectCollab(
     requestPublish: collab.requestPublish,
     refreshPresence: collab.refreshPresence,
     checkStatusNow: collab.checkStatusNow,
+    applyContentTransferState: collab.applyContentTransferState,
   };
 }

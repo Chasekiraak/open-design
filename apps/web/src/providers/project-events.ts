@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
 import {
   COLLAB_PROJECT_INVALIDATION_EVENTS,
+  PROJECT_CONTENT_TRANSFER_STATE_EVENT,
   type CollabProjectInvalidationSsePayload,
   type LiveArtifactRefreshSsePayload,
   type LiveArtifactSsePayload,
   type ProjectConversationCreatedSsePayload,
+  type ProjectContentTransferStateSsePayload,
 } from '@open-design/contracts';
 export interface ProjectFileChangeEvent {
   type: 'file-changed';
@@ -30,7 +32,8 @@ export type ProjectEvent =
   | ProjectFileChangeEvent
   | ProjectConversationCreatedEvent
   | ProjectLiveArtifactEvent
-  | ProjectCollabInvalidationEvent;
+  | ProjectCollabInvalidationEvent
+  | ProjectContentTransferStateSsePayload;
 
 export interface ProjectEventsConnectionOptions {
   /** Test seam: substitute a mock EventSource constructor. */
@@ -167,6 +170,27 @@ export function createProjectEventsConnection(
         }
       });
     }
+    es.addEventListener(PROJECT_CONTENT_TRANSFER_STATE_EVENT, (evt) => {
+      try {
+        // Thin invalidation only. The consumer must re-read exact-scoped
+        // collab status; this project stream is not workspace/owner scoped.
+        const data = JSON.parse(
+          (evt as MessageEvent).data,
+        ) as ProjectContentTransferStateSsePayload;
+        onChange(data);
+      } catch (err) {
+        if (
+          typeof process !== 'undefined'
+          && process.env?.NODE_ENV === 'development'
+        ) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[project-events] malformed ${PROJECT_CONTENT_TRANSFER_STATE_EVENT} payload`,
+            err,
+          );
+        }
+      }
+    });
     es.addEventListener('error', () => {
       if (cancelled) return;
       options.onConnectedChange?.(false);

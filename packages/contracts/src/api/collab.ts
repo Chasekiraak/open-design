@@ -33,6 +33,23 @@ export interface CollabPresenceResponse {
   present: CollabPresenceMember[];
 }
 
+/**
+ * Daemon-local lifecycle for an inbound shared-project content transfer.
+ *
+ * This is deliberately transport-agnostic: the UI only needs to know whether
+ * bytes are still being fetched/materialized. `updatedAt` lets an SSE update
+ * and a racing `/collab/status` response resolve in last-write-wins order.
+ */
+export interface ProjectContentTransferState {
+  status: 'downloading' | 'idle';
+  /** Hub version associated with the transfer, when the event supplied one. */
+  version?: number;
+  /** First observation of this transfer (epoch ms). */
+  startedAt: number;
+  /** Last transition (epoch ms, monotonic within one daemon process). */
+  updatedAt: number;
+}
+
 /** POST /api/projects/:id/presence/heartbeat request body. */
 export interface CollabPresenceHeartbeatRequest {
   memberId: string;
@@ -67,6 +84,11 @@ export interface CollabSyncStatusResponse {
    * treat a non-null published head as potentially pending.
    */
   materializedVersion: number | null;
+  /**
+   * Latest daemon-local inbound-transfer state. Null means this daemon has not
+   * observed a transfer for the project in its current process lifetime.
+   */
+  contentTransferState?: ProjectContentTransferState | null;
   syncState: ProjectSyncState;
   /**
    * The member who shared this project (its single writer), resolved

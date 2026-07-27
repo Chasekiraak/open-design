@@ -4,11 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   workspaceContextHasWorkspaceIdentity,
+  type ProjectContentTransferState,
   type ProjectMetadata,
   type ProjectSyncIntentEvent,
   type TeamProject,
   type WorkspaceCollabContext,
 } from '@open-design/contracts';
+import type {
+  ProjectContentTransferToken,
+} from '../collab/project-content-transfer-state.js';
 import type { CollabRuntime } from '../collab/runtime.js';
 import {
   contextToResourceHubPrincipal,
@@ -124,6 +128,24 @@ export interface RegisterCollabSyncRoutesDeps {
     projectId: string,
     scope: TeamMirrorPullScope,
   ) => number | null;
+  /** Read the daemon-local inbound content-transfer lifecycle snapshot. */
+  readContentTransferState?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+  ) => ProjectContentTransferState | null;
+  /** Begin one exact-scope transfer generation after authorization resolves. */
+  beginContentTransfer?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    version?: number,
+  ) => ProjectContentTransferToken;
+  /** Only the matching exact-scope generation token may complete a transfer. */
+  finishContentTransfer?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    token: ProjectContentTransferToken,
+    version?: number,
+  ) => void;
   /** Persist the actual version after either HTTP or proactive pull lands. */
   writeMaterializedVersion?: (
     projectId: string,
@@ -1611,11 +1633,15 @@ export function registerCollabSyncRoutes(
     ]);
     const existing = pullsInFlight.get(key);
     if (existing) return existing;
+    const transferToken = scope
+      ? deps.beginContentTransfer?.(projectId, scope, expectedVersion)
+      : undefined;
     const previous = projectPullTails.get(projectId) ?? Promise.resolve();
     const run = (async () => {
+      let outcome: CollabSyncPullOutcome | null = null;
       try {
         await previous.catch(() => undefined);
-        return await pullSharedProjectOnce(
+        outcome = await pullSharedProjectOnce(
           projectId,
           principal,
           scope,
@@ -1623,7 +1649,18 @@ export function registerCollabSyncRoutes(
           expectedVersion,
           authorizedStageInvocation,
         );
+        return outcome;
       } finally {
+        if (scope && transferToken) {
+          deps.finishContentTransfer?.(
+            projectId,
+            scope,
+            transferToken,
+            outcome?.status === 'pulled'
+              ? outcome.version ?? expectedVersion
+              : expectedVersion,
+          );
+        }
         pullsInFlight.delete(key);
       }
     })();
@@ -1802,9 +1839,24 @@ export function registerCollabSyncRoutes(
         materializedVersion = null;
       }
     }
+    const transferScope =
+      resolvedWorkspaceId
+      && principal
+      && ownerMemberId
+        ? {
+            workspaceId: resolvedWorkspaceId,
+            resourceTeamId: principal.teamId,
+            viewerMemberId: principal.memberId,
+            ownerMemberId,
+          }
+        : null;
     res.json({
       publishedVersion: headResult.head,
       materializedVersion,
+      contentTransferState:
+        transferScope
+          ? deps.readContentTransferState?.(projectId, transferScope) ?? null
+          : null,
       syncState,
       ownerMemberId,
       ...(ownerDisplayName ? { ownerDisplayName } : {}),

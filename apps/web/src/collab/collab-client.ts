@@ -5,7 +5,12 @@
 //
 // Polling-based by design (live cursors were cut; content is polled — the spec).
 
-import type { CollabMemberRole, CollabPresenceMember, ProjectSyncState } from '@open-design/contracts';
+import type {
+  CollabMemberRole,
+  CollabPresenceMember,
+  ProjectContentTransferState,
+  ProjectSyncState,
+} from '@open-design/contracts';
 
 // Presence identity is the shared contract DTO; re-export so collab consumers
 // keep importing it from the client module.
@@ -15,6 +20,7 @@ export interface CollabSnapshot {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
   materializedVersion: number | null;
+  contentTransferState: ProjectContentTransferState | null;
   /** Monotonic trigger incremented after every successful status response. */
   statusPollGeneration: number;
   /**  project sync state; null until the first status poll lands. */
@@ -69,12 +75,23 @@ export class CollabClient {
     present: [],
     publishedVersion: null,
     materializedVersion: null,
+    contentTransferState: null,
     statusPollGeneration: 0,
     syncState: null,
     ownerMemberId: null,
     ownerDisplayName: null,
     ownerRole: null,
   };
+  /**
+   * Local ordering fences for status requests racing each other and project
+   * SSE. Server timestamps cannot safely order states across a daemon restart,
+   * and a null tombstone has no timestamp at all. Therefore every status
+   * response, concrete or null, may change transfer state only when it is the
+   * newest request issued and no local transfer update landed while it was in
+   * flight.
+   */
+  private contentTransferStateGeneration = 0;
+  private contentTransferStatusRequestGeneration = 0;
   private running = false;
   private onVisibilityChange: (() => void) | null = null;
 
@@ -188,17 +205,30 @@ export class CollabClient {
   }
 
   async pollStatus(): Promise<void> {
+    const statusRequestGeneration =
+      ++this.contentTransferStatusRequestGeneration;
+    const transferGenerationAtStart =
+      this.contentTransferStateGeneration;
     try {
       const wasShared = this.isSharedProject();
       const body = await this.get('/collab/status');
       const version = typeof body?.publishedVersion === 'number' ? body.publishedVersion : null;
       const materializedVersion =
         typeof body?.materializedVersion === 'number' ? body.materializedVersion : null;
+      const contentTransferState =
+        parseProjectContentTransferState(body?.contentTransferState);
+      const reportsContentTransferState =
+        body != null
+        && typeof body === 'object'
+        && Object.prototype.hasOwnProperty.call(
+          body,
+          'contentTransferState',
+        );
       const syncState = (body?.syncState as ProjectSyncState | undefined) ?? null;
       const ownerMemberId = typeof body?.ownerMemberId === 'string' ? body.ownerMemberId : null;
       const ownerDisplayName = typeof body?.ownerDisplayName === 'string' ? body.ownerDisplayName : null;
       const ownerRole = isCollabMemberRole(body?.ownerRole) ? body.ownerRole : null;
-      this.update({
+      const next: Partial<CollabSnapshot> = {
         publishedVersion: version,
         materializedVersion,
         statusPollGeneration: this.snapshot.statusPollGeneration + 1,
@@ -206,11 +236,48 @@ export class CollabClient {
         ownerMemberId,
         ownerDisplayName,
         ownerRole,
-      });
+      };
+      const transferResponseIsCurrent =
+        reportsContentTransferState
+        && statusRequestGeneration
+          === this.contentTransferStatusRequestGeneration
+        && transferGenerationAtStart
+          === this.contentTransferStateGeneration;
+      if (transferResponseIsCurrent) {
+        if (
+          contentTransferState
+          && (
+            this.snapshot.contentTransferState == null
+            || contentTransferState.updatedAt
+              >= this.snapshot.contentTransferState.updatedAt
+          )
+        ) {
+          next.contentTransferState = contentTransferState;
+        } else if (body?.contentTransferState == null) {
+          next.contentTransferState = null;
+        }
+        // Even an invalid or timestamp-older concrete response is a settled
+        // request-generation tombstone. Older in-flight requests must not
+        // become eligible merely because this response made no visible patch.
+        this.contentTransferStateGeneration += 1;
+      }
+      this.update(next);
       if (!wasShared && this.isSharedProject()) void this.heartbeat();
     } catch (error) {
       this.onError?.(error);
     }
+  }
+
+  /**
+   * Apply the project SSE lifecycle update immediately. Timestamp ordering
+   * prevents a slower status response from restoring an already-finished
+   * download badge.
+   */
+  applyContentTransferState(state: ProjectContentTransferState): void {
+    const current = this.snapshot.contentTransferState;
+    if (current && current.updatedAt > state.updatedAt) return;
+    this.contentTransferStateGeneration += 1;
+    this.update({ contentTransferState: state });
   }
 
   private async leave(): Promise<void> {
@@ -282,4 +349,43 @@ export class CollabClient {
 
 function isCollabMemberRole(value: unknown): value is CollabMemberRole {
   return value === 'owner' || value === 'admin' || value === 'member';
+}
+
+function parseProjectContentTransferState(
+  value: unknown,
+): ProjectContentTransferState | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.status !== 'downloading'
+    && candidate.status !== 'idle'
+  ) {
+    return null;
+  }
+  if (
+    typeof candidate.startedAt !== 'number'
+    || !Number.isFinite(candidate.startedAt)
+    || typeof candidate.updatedAt !== 'number'
+    || !Number.isFinite(candidate.updatedAt)
+  ) {
+    return null;
+  }
+  if (
+    candidate.version !== undefined
+    && (
+      typeof candidate.version !== 'number'
+      || !Number.isSafeInteger(candidate.version)
+      || candidate.version < 0
+    )
+  ) {
+    return null;
+  }
+  return {
+    status: candidate.status,
+    ...(typeof candidate.version === 'number'
+      ? { version: candidate.version }
+      : {}),
+    startedAt: candidate.startedAt,
+    updatedAt: candidate.updatedAt,
+  };
 }

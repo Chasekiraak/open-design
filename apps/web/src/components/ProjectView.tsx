@@ -1390,7 +1390,8 @@ function projectEventToAgentEvent(evt: ProjectEvent): LiveArtifactEventItem['eve
   if (
     evt.type === 'comment-changed' ||
     evt.type === 'presence-changed' ||
-    evt.type === 'project-metadata-changed'
+    evt.type === 'project-metadata-changed' ||
+    evt.type === 'project-content-transfer-state'
   ) {
     return null;
   }
@@ -2880,6 +2881,17 @@ export function ProjectView({
           }
           onProjectChange(fresh);
         });
+      }
+      return;
+    }
+    if (evt.type === 'project-content-transfer-state') {
+      if (evt.projectId === project.id) {
+        // The daemon intentionally emits no transfer payload here. A project
+        // id can be reused across workspace/owner/resource bindings, so direct
+        // application could let scope A's idle hide scope B's download.
+        // Re-read the exact-scoped status; CollabClient's request/tombstone
+        // fences reject stale responses.
+        collabCheckStatusNow();
       }
       return;
     }
