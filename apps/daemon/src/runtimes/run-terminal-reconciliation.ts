@@ -39,6 +39,8 @@ interface DurableRunState {
   endedWithUnfinishedWork?: boolean;
   userPrompt?: string;
   model?: string;
+  resolvedModelId?: string;
+  preflightAgentCliVersion?: string;
   reasoning?: string;
   skillId?: string;
   designSystemId?: string;
@@ -142,6 +144,12 @@ function hydrateRun(state: DurableRunState, events: ReturnType<typeof readEvents
     events,
     ...(state.userPrompt !== undefined ? { userPrompt: state.userPrompt } : {}),
     ...(state.model !== undefined ? { model: state.model } : {}),
+    ...(state.resolvedModelId !== undefined
+      ? { resolvedModelId: state.resolvedModelId }
+      : {}),
+    ...(state.preflightAgentCliVersion !== undefined
+      ? { preflightAgentCliVersion: state.preflightAgentCliVersion }
+      : {}),
     ...(state.reasoning !== undefined ? { reasoning: state.reasoning } : {}),
     ...(state.skillId !== undefined ? { skillId: state.skillId } : {}),
     ...(state.designSystemId !== undefined ? { designSystemId: state.designSystemId } : {}),

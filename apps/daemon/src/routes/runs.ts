@@ -67,6 +67,7 @@ import {
   runtimeTypeForRunAnalytics,
   scanRunEventsForUsageAnalytics,
   summarizeRunTimingAnalytics,
+  summarizeToolAnalytics,
   type RunEventForAnalyticsObservability,
   type RunTelemetryTimestamps,
 } from '../run-analytics-observability.js';
@@ -163,6 +164,8 @@ interface ChatRun {
   clients: Set<SseClient>;
   analyticsContext?: AnalyticsContext;
   analyticsTelemetry?: RunTelemetryTimestamps;
+  resolvedModelId?: string | null;
+  preflightAgentCliVersion?: string | null;
   // E-lite root-cause telemetry read at run_finished. `stdinBackpressure`: the
   // prompt write to child stdin was queued (pipe buffer full). `lastAgentActivityAt`:
   // the inactivity-watchdog clock, used to derive `last_progress_age_ms`.
@@ -1187,6 +1190,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         ...(run.analyticsTelemetry ? { telemetry: run.analyticsTelemetry } : {}),
           events: run.events,
         });
+        const toolAnalytics = summarizeToolAnalytics(run.events);
         const toolStreamArtifactCount = (): number => runArtifactCountForRun(run);
         const toolStreamDesignSystemCreated = (): boolean =>
           runDesignSystemCreatedForRun(run);
@@ -1250,8 +1254,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         });
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
-          : modelIdForTracking(usageAnalytics.agent_reported_model);
+          : modelIdForTracking(
+              usageAnalytics.agent_reported_model ?? run.resolvedModelId,
+            );
         const runtimeVersions = getDetectedRuntimeVersions(run.agentId);
+        const agentCliVersion =
+          run.preflightAgentCliVersion ?? runtimeVersions?.agentCliVersion;
         for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
           design.analytics.capture({
             eventName: retryEvent.event,
@@ -1261,11 +1269,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             insertId: `${runInsertId}-${retryEvent.event}-${index}`,
           });
         }
-        await Promise.resolve(design.analytics.capture({
-          eventName: 'run_finished',
-          context: analyticsContext,
-          appVersion: design.getAppVersion(),
-          properties: {
+        const finishedProperties = {
             ...baseProps,
             design_system_id: run.designSystemId ?? undefined,
             design_system_digest: run.designSystemDigest ?? undefined,
@@ -1288,8 +1292,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             asked_user_question: runAskedUserQuestion(run.events),
             retry_attempt_count: run.retryAttemptCount ?? 0,
             retry_final_result: run.retryFinalResult ?? 'not_attempted',
-            ...(runtimeVersions?.agentCliVersion
-              ? { agent_cli_version: runtimeVersions.agentCliVersion }
+            ...(agentCliVersion
+              ? { agent_cli_version: agentCliVersion }
               : {}),
             ...(runtimeVersions?.runtimeCompanionName
               ? { runtime_companion_name: runtimeVersions.runtimeCompanionName }
@@ -1350,6 +1354,9 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             ...(usageAnalytics.total_tokens !== undefined
               ? { total_tokens: usageAnalytics.total_tokens }
               : {}),
+            ...(usageAnalytics.thought_tokens !== undefined
+              ? { thought_tokens: usageAnalytics.thought_tokens }
+              : {}),
             ...(usageAnalytics.cache_read_input_tokens !== undefined
               ? { cache_read_input_tokens: usageAnalytics.cache_read_input_tokens }
               : {}),
@@ -1375,8 +1382,27 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             ...(firstCallUsage ?? {}),
             is_followup_turn: isFollowupTurn,
             cache_token_source: usageAnalytics.cache_token_source,
+            // Prefer provider scan over run_created baseProps (`estimated`).
             token_count_source: usageAnalytics.token_count_source,
-          },
+            tool_error_count: toolAnalytics.tool_error_count,
+            tool_name_count: toolAnalytics.tool_name_count,
+            tool_names: toolAnalytics.tool_names_csv,
+          };
+        // Refresh local recovery snapshot so crash recovery matches PostHog
+        // `run_finished` (usage/timing/tools), not only run_created baseProps.
+        // Keep the base insertId here: reconcileDurableRunTerminals appends
+        // `-finish` when replaying. Storing `${runInsertId}-finish` would
+        // produce `…-finish-finish` and can duplicate PostHog events.
+        design.runs.setAnalyticsRecovery?.(run, {
+          context: analyticsContext,
+          properties: finishedProperties,
+          insertId: runInsertId,
+        });
+        await Promise.resolve(design.analytics.capture({
+          eventName: 'run_finished',
+          context: analyticsContext,
+          appVersion: design.getAppVersion(),
+          properties: finishedProperties,
           insertId: `${runInsertId}-finish`,
         }));
         design.runs.markAnalyticsCompleted?.(run);

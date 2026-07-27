@@ -20,6 +20,10 @@ import { uiP0CiMatrix, visualCiMatrix } from "../e2e/lib/playwright/suites.ts";
 //   "certain" requires a `guard` naming the check that keeps its boundary
 //   invariant true, and is a deliberate, reviewed behavior change.
 // - manual full runs believe nothing and arm everything.
+//
+// The promotion methodology — evidence requirements, guard placement rules,
+// and the replay recipes behind every confidence change — lives in
+// `specs/current/ci.md`. Read it before editing confidence or guard fields.
 // ---------------------------------------------------------------------------
 
 type CiMode = "hot" | "full";
@@ -95,20 +99,37 @@ type GitHubEvent = {
 // Rule table
 // ---------------------------------------------------------------------------
 
-const EXEMPT_PREFIXES = [
+// Certain-tier exempt core: surfaces whose "cannot affect gate validation"
+// invariant is definitional and enforced by the named guard check. Floor lanes
+// (preflight and workspace unit tests, both unconditionally armed) still run
+// for these files, so floor-owned checks that read them — e.g. product
+// neutrality over docs/ — keep validating them on every plan.
+export const CERTAIN_EXEMPT_PREFIXES = [
   ".vscode/",
   ".idea/",
   "docs/",
   "apps/landing-page/",
-  "nix/",
   ".github/ISSUE_TEMPLATE/",
 ] as const;
 
-const EXEMPT_EXACT = [
-  "LICENSE",
+// LICENSE and CODEOWNERS are GitHub/legal metadata; the consumption guard scan
+// proves no gate-lane source reads them.
+export const CERTAIN_EXEMPT_EXACT = ["LICENSE", ".github/CODEOWNERS"] as const;
+
+const CERTAIN_EXEMPT_SURFACE: RuleMatch = {
+  prefixes: CERTAIN_EXEMPT_PREFIXES,
+  exact: CERTAIN_EXEMPT_EXACT,
+};
+
+// Medium-tier exempt residue. The global markdown regex stays medium on
+// purpose: its safety at certain would depend on every other rule continuing
+// to cover each directory where markdown is runtime content (skills/, craft/,
+// design-templates/, ...) — a cross-rule invariant no local guard can keep.
+const MEDIUM_EXEMPT_PREFIXES = ["nix/"] as const;
+
+const MEDIUM_EXEMPT_EXACT = [
   ".gitignore",
   ".editorconfig",
-  ".github/CODEOWNERS",
   "flake.nix",
   "flake.lock",
   ".github/workflows/landing-page-ci.yml",
@@ -124,16 +145,32 @@ const EXEMPT_EXACT = [
 
 const EXEMPT_REGEXES = [/\.(?:md|mdx|txt)$/] as const;
 
+// Union of both exempt tiers; this is what the fail-closed fallbacks exclude.
 const EXEMPT_SURFACE: RuleMatch = {
-  prefixes: EXEMPT_PREFIXES,
-  exact: EXEMPT_EXACT,
+  prefixes: [...CERTAIN_EXEMPT_PREFIXES, ...MEDIUM_EXEMPT_PREFIXES],
+  exact: [...CERTAIN_EXEMPT_EXACT, ...MEDIUM_EXEMPT_EXACT],
   regexes: EXEMPT_REGEXES,
 };
 
 export const scopeRules: readonly ScopeRule[] = [
   {
+    id: "certain-exempt-surface",
+    match: CERTAIN_EXEMPT_SURFACE,
+    effects: [],
+    confidence: "certain",
+    guard: "certain-exempt surface consumption",
+  },
+  {
+    // excludeWhen keeps this rule off certain-core files: a `docs/*.md` file
+    // must match only the certain rule, or min-confidence co-matching would
+    // silently neutralize the promotion.
     id: "exempt-surface",
-    match: EXEMPT_SURFACE,
+    match: {
+      prefixes: MEDIUM_EXEMPT_PREFIXES,
+      exact: MEDIUM_EXEMPT_EXACT,
+      regexes: EXEMPT_REGEXES,
+      excludeWhen: CERTAIN_EXEMPT_SURFACE,
+    },
     effects: [],
     confidence: "medium",
   },
@@ -290,8 +327,14 @@ export const scopeRules: readonly ScopeRule[] = [
     id: "ui-critical-fallback",
     match: {
       excludeWhen: {
-        prefixes: [...EXEMPT_PREFIXES, "apps/desktop/", "apps/packaged/", "tools/pack/"],
-        exact: EXEMPT_EXACT,
+        prefixes: [
+          ...CERTAIN_EXEMPT_PREFIXES,
+          ...MEDIUM_EXEMPT_PREFIXES,
+          "apps/desktop/",
+          "apps/packaged/",
+          "tools/pack/",
+        ],
+        exact: [...CERTAIN_EXEMPT_EXACT, ...MEDIUM_EXEMPT_EXACT],
         regexes: EXEMPT_REGEXES,
       },
     },
@@ -526,11 +569,13 @@ function createEnvScopePlan(): PlanWithTrace {
 
   if (eventName === "merge_group") {
     // The merge queue evaluates the whole queued group's union diff at the
-    // "certain" threshold. While the certain rule set is empty every file
-    // escalates and the plan stays full, so this path is behavior-preserving;
-    // its trace's ifTrustAll shadow column is the evidence stream for future
-    // promotions. Resolution anomalies fail open to the full plan: queue
-    // throughput must never depend on this evaluation succeeding.
+    // "certain" threshold. Files matching only certain-tier rules contribute
+    // their claimed radius (for the certain-exempt core: none — a pure-docs
+    // group drops to the unconditional floor lanes); every other file
+    // escalates and keeps the plan full. The trace's ifTrustAll shadow column
+    // is the evidence stream for future promotions. Resolution anomalies fail
+    // open to the full plan: queue throughput must never depend on this
+    // evaluation succeeding.
     let files: string[];
     try {
       files = changedMergeGroupFiles();

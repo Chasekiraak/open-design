@@ -902,6 +902,34 @@ describe('classifyRunFailure — signal and interrupt attribution', () => {
     });
 
     expect(
+      classify(
+        'AGENT_EXECUTION_FAILED',
+        "The 'gpt-5.6-terra' model requires a newer version of Codex.",
+        [
+          {
+            event: 'diagnostic',
+            data: {
+              type: 'model_capability_preflight',
+              status: 'incompatible',
+              model: 'gpt-5.6-terra',
+            },
+          },
+          errorEvent(
+            'AGENT_EXECUTION_FAILED',
+            "The 'gpt-5.6-terra' model requires a newer version of Codex.",
+            false,
+          ),
+        ],
+      ),
+    ).toMatchObject({
+      failure_category: 'model_unavailable',
+      failure_detail: 'cli_version_incompatible',
+      failure_stage: 'preflight',
+      retryable: false,
+      user_action: 'switch_model',
+    });
+
+    expect(
       classify(null, 'Selected model is at capacity. Please try a different model.'),
     ).toMatchObject({
       failure_category: 'upstream_unavailable',
