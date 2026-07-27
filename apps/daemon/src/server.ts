@@ -191,6 +191,7 @@ import {
   getAgentDef,
   isKnownModel,
   isKnownServiceTier,
+  openDesignAmrRunAttempt,
   openDesignAmrTraceEnv,
   applyAgentLaunchEnv,
   resolveAgentLaunch,
@@ -401,6 +402,7 @@ import {
 } from './run-artifact-fs.js';
 import {
   AiHtmlVersionSnapshotError,
+  artifactOriginForRun,
   snapshotAiHtmlVersionsForRun,
 } from './run-html-version-snapshots.js';
 import { reportRunCompletedFromDaemon } from './langfuse-bridge.js';
@@ -852,7 +854,7 @@ const SANDBOX_MODE_ENABLED = isSandboxModeEnabled(process.env);
 const RUNTIME_DATA_DIR = resolveDataDir(process.env.OD_DATA_DIR, PROJECT_ROOT, {
   requireExplicit: SANDBOX_MODE_ENABLED,
 });
-const byokCredentialService = new ByokCredentialService({
+const defaultByokCredentialService = new ByokCredentialService({
   dataDir: RUNTIME_DATA_DIR,
 });
 const SANDBOX_RUNTIME = resolveSandboxRuntimeConfig(SANDBOX_MODE_ENABLED, RUNTIME_DATA_DIR);
@@ -2033,6 +2035,7 @@ export interface DaemonRuntimeContext {
 }
 
 export interface StartServerOptions {
+  byokCredentialService?: ByokCredentialService;
   desktopArtifactExporter?: DesktopArtifactExporter | null;
   desktopPdfExporter?: DesktopPdfExporter | null;
   desktopSlideRenderer?: DesktopSlideRenderer | null;
@@ -2050,6 +2053,7 @@ export interface StartServerResult {
 }
 
 export async function startServer({
+  byokCredentialService = defaultByokCredentialService,
   port = 7456,
   host = normalizeDaemonBindHost(process.env.OD_BIND_HOST),
   returnServer = false,
@@ -2543,6 +2547,7 @@ export async function startServer({
   const telemetry = registerTelemetryRoutes(app, {
     dataDir: RUNTIME_DATA_DIR,
     readAppConfig,
+    writeAppConfig,
   });
   const { analyticsService } = telemetry;
   const design = {
@@ -4853,18 +4858,50 @@ export async function startServer({
       return outcome;
     };
     const snapshotAiHtmlVersionsBeforeSuccess = async () => {
+      const origin = artifactOriginForRun({
+        runId: run.id,
+        externalPluginAnalytics: run.externalPluginAnalytics,
+      });
+      if (origin) {
+        // A successful Plugin run starts pessimistically. Only the exact
+        // versions returned by the snapshot writer may promote it to matched.
+        run.artifactOriginStatus = 'missing_version';
+        run.artifactVersionId = undefined;
+      }
       const outcome = resolveRunArtifactOutcomeBeforeFinish();
       if (!outcome?.diff || !outcome.projectRoot || !run.projectId) return;
       const promptInfo = latestRunPromptForHtmlVersionSnapshot();
-      await snapshotAiHtmlVersionsForRun({
+      const result = await snapshotAiHtmlVersionsForRun({
         projectsRoot: PROJECTS_DIR,
         projectId: run.projectId,
         projectRoot: outcome.projectRoot,
         diff: outcome.diff,
         prompt: promptInfo.prompt,
         ...(promptInfo.promptSource ? { promptSource: promptInfo.promptSource } : {}),
+        ...(origin ? { origin } : {}),
         metadata: projectRecord?.metadata,
       });
+      if (origin) {
+        const matching = result.snapshots.filter(({ version }) =>
+          version.origin?.entrySurface === origin.entrySurface
+          && version.origin.externalPluginId === origin.externalPluginId
+          && version.origin.pluginWorkflowId === origin.pluginWorkflowId
+          && version.origin.runId === origin.runId,
+        );
+        if (matching.length > 0) {
+          run.artifactOriginStatus = 'matched';
+          const configuredEntry =
+            typeof projectRecord?.metadata?.entryFile === 'string'
+              ? projectRecord.metadata.entryFile.replaceAll('\\', '/')
+              : null;
+          const selected =
+            (configuredEntry
+              ? matching.find(({ fileName }) => fileName === configuredEntry)
+              : undefined)
+            ?? (matching.length === 1 ? matching[0] : undefined);
+          run.artifactVersionId = selected?.version.id;
+        }
+      }
     };
     // Chain onto the run service's terminal chokepoint so startup rejection,
     // direct cancellation, shutdown, and every explicit finish path all consume
@@ -6601,7 +6638,11 @@ export async function startServer({
           agentId: def.id,
           runId: run.id,
           conversationId: run.conversationId,
-          runAttempt: run.retryAttemptCount ?? 0,
+          runAttempt: openDesignAmrRunAttempt({
+            retryAttemptCount: run.retryAttemptCount,
+            manualResumeAttemptCount: run.manualResumeAttemptCount,
+          }),
+          externalPluginAnalytics: run.externalPluginAnalytics ?? null,
         }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the

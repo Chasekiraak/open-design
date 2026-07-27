@@ -69,6 +69,33 @@ function durableRunState(run) {
     ...(run.promptTelemetry ? { promptTelemetry: run.promptTelemetry } : {}),
     ...(run.promptCache ? { promptCache: run.promptCache } : {}),
     ...(run.analyticsRecovery ? { analyticsRecovery: run.analyticsRecovery } : {}),
+    ...(run.externalPluginAnalytics
+      ? { externalPluginAnalytics: run.externalPluginAnalytics }
+      : {}),
+    ...(typeof run.manualResumeAttemptCount === 'number'
+      ? { manualResumeAttemptCount: run.manualResumeAttemptCount }
+      : {}),
+    ...(typeof run.rechargeWaitDurationMs === 'number'
+      ? { rechargeWaitDurationMs: run.rechargeWaitDurationMs }
+      : {}),
+    ...(typeof run.artifactOriginStatus === 'string'
+      ? { artifactOriginStatus: run.artifactOriginStatus }
+      : {}),
+    ...(typeof run.artifactVersionId === 'string'
+      ? { artifactVersionId: run.artifactVersionId }
+      : {}),
+    ...(typeof run.deliverableValid === 'boolean'
+      ? { deliverableValid: run.deliverableValid }
+      : {}),
+    ...(typeof run.deliverableValidation === 'string'
+      ? { deliverableValidation: run.deliverableValidation }
+      : {}),
+    ...(typeof run.deliverableEntryFile === 'string'
+      ? { deliverableEntryFile: run.deliverableEntryFile }
+      : {}),
+    ...(typeof run.deliverableArtifactKind === 'string'
+      ? { deliverableArtifactKind: run.deliverableArtifactKind }
+      : {}),
     ...(typeof run.langfuseCompletedAt === 'number'
       ? { langfuseCompletedAt: run.langfuseCompletedAt }
       : {}),
@@ -144,6 +171,7 @@ export function createChatRunService({
 }) {
   const runs = new Map();
   const runIdsByClientRequestId = new Map();
+  const runIdsByPluginWorkflowId = new Map();
 
   if (runsLogDir) {
     try {
@@ -156,6 +184,14 @@ export function createChatRunService({
           && typeof state.id === 'string'
         ) {
           runIdsByClientRequestId.set(state.clientRequestId, state.id);
+        }
+        const pluginWorkflowId =
+          state?.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+          && typeof state.externalPluginAnalytics.pluginWorkflowId === 'string'
+            ? state.externalPluginAnalytics.pluginWorkflowId
+            : null;
+        if (pluginWorkflowId && typeof state.id === 'string') {
+          runIdsByPluginWorkflowId.set(pluginWorkflowId, state.id);
         }
       }
     } catch {
@@ -243,6 +279,29 @@ export function createChatRunService({
         meta.context && typeof meta.context === 'object' && !Array.isArray(meta.context)
           ? meta.context
           : null,
+      externalPluginAnalytics:
+        meta.analyticsHints
+        && typeof meta.analyticsHints === 'object'
+        && !Array.isArray(meta.analyticsHints)
+        && meta.analyticsHints.externalPluginId === 'open-design-cloud'
+          ? {
+              entrySurface: meta.analyticsHints.entrySurface,
+              hostProduct: meta.analyticsHints.hostProduct,
+              externalPluginId: meta.analyticsHints.externalPluginId,
+              externalPluginVersion: meta.analyticsHints.externalPluginVersion,
+              distributionMechanism:
+                meta.analyticsHints.distributionMechanism,
+              publisherClass: meta.analyticsHints.publisherClass,
+              attributionQuality: meta.analyticsHints.attributionQuality,
+              pluginWorkflowId: meta.analyticsHints.pluginWorkflowId,
+              logicalRequestDigest: meta.analyticsHints.logicalRequestDigest,
+              logicalRequestDigestVersion:
+                meta.analyticsHints.logicalRequestDigestVersion,
+              briefState: meta.analyticsHints.briefState,
+              generationSloWindowMs:
+                meta.analyticsHints.generationSloWindowMs,
+            }
+          : null,
       status: 'queued',
       createdAt: now,
       updatedAt: now,
@@ -293,9 +352,20 @@ export function createChatRunService({
       // can't lazily re-open a stream nothing will ever close (FD leak).
       eventsLogClosed: false,
       cleanupGeneration: 0,
+      manualResumeAttemptCount: 0,
+      rechargeWaitDurationMs: 0,
     };
     runs.set(run.id, run);
     if (run.clientRequestId) runIdsByClientRequestId.set(run.clientRequestId, run.id);
+    if (
+      run.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+      && typeof run.externalPluginAnalytics.pluginWorkflowId === 'string'
+    ) {
+      runIdsByPluginWorkflowId.set(
+        run.externalPluginAnalytics.pluginWorkflowId,
+        run.id,
+      );
+    }
     if (run.statePath) atomicWriteJson(run.statePath, durableRunState(run));
     return run;
   };
@@ -353,7 +423,24 @@ export function createChatRunService({
     persistState(run);
   };
 
+  const setDeliverableValidation = (run, result) => {
+    if (!run || !result) return;
+    run.deliverableValid = result.valid === true;
+    run.deliverableValidation =
+      typeof result.validation === 'string' ? result.validation : 'entry_missing';
+    run.deliverableEntryFile =
+      typeof result.entryFile === 'string' ? result.entryFile : undefined;
+    run.deliverableArtifactKind =
+      typeof result.artifactKind === 'string' ? result.artifactKind : undefined;
+    persistState(run);
+  };
+
   const get = (id) => runs.get(id) ?? hydrateDurableRun(id);
+  const findByPluginWorkflowId = (pluginWorkflowId) => {
+    if (typeof pluginWorkflowId !== 'string' || !pluginWorkflowId) return null;
+    const runId = runIdsByPluginWorkflowId.get(pluginWorkflowId);
+    return runId ? get(runId) : null;
+  };
 
   const scheduleCleanup = (run) => {
     const generation = (run.cleanupGeneration ?? 0) + 1;
@@ -370,10 +457,12 @@ export function createChatRunService({
 
   const prepareRestart = (run) => {
     if (!run || !TERMINAL_RUN_STATUSES.has(run.status)) return null;
+    const resumedAt = Date.now();
+    const rechargeWaitDurationMs = Math.max(0, resumedAt - run.updatedAt);
     // Invalidate the cleanup timer scheduled for the prior terminal attempt.
     run.cleanupGeneration = (run.cleanupGeneration ?? 0) + 1;
     run.status = 'queued';
-    run.updatedAt = Date.now();
+    run.updatedAt = resumedAt;
     run.exitCode = null;
     run.signal = null;
     run.error = null;
@@ -392,6 +481,10 @@ export function createChatRunService({
     run.retryOriginErrorCode = null;
     run.artifactCount = undefined;
     run.artifactOutcome = undefined;
+    run.deliverableValid = undefined;
+    run.deliverableValidation = undefined;
+    run.deliverableEntryFile = undefined;
+    run.deliverableArtifactKind = undefined;
     run.endedWithUnfinishedWork = false;
     run.child = null;
     run.acpSession = null;
@@ -402,11 +495,14 @@ export function createChatRunService({
     run.eventsLogStream = null;
     run.eventsLogClosed = false;
     run.manualResumeAttemptCount = (run.manualResumeAttemptCount ?? 0) + 1;
+    run.rechargeWaitDurationMs =
+      (run.rechargeWaitDurationMs ?? 0) + rechargeWaitDurationMs;
     persistState(run);
     emit(run, 'run_resume_attempted', {
       runId: run.id,
       attempt: run.manualResumeAttemptCount,
       reason: 'recharge',
+      rechargeWaitDurationMs: run.rechargeWaitDurationMs,
     });
     return run;
   };
@@ -514,6 +610,34 @@ export function createChatRunService({
     ...(run.promptCache ? { promptCache: run.promptCache } : {}),
     ...(run.nativeSessionRecovery ? { nativeSessionRecovery: run.nativeSessionRecovery } : {}),
     ...(run.browserUse ? { browserUse: run.browserUse } : {}),
+    ...(typeof run.clientType === 'string' ? { clientType: run.clientType } : {}),
+    ...(run.externalPluginAnalytics
+      ? { externalPluginAnalytics: run.externalPluginAnalytics }
+      : {}),
+    ...(typeof run.manualResumeAttemptCount === 'number'
+      ? { manualResumeAttemptCount: run.manualResumeAttemptCount }
+      : {}),
+    ...(typeof run.rechargeWaitDurationMs === 'number'
+      ? { rechargeWaitDurationMs: run.rechargeWaitDurationMs }
+      : {}),
+    ...(typeof run.artifactOriginStatus === 'string'
+      ? { artifactOriginStatus: run.artifactOriginStatus }
+      : {}),
+    ...(typeof run.artifactVersionId === 'string'
+      ? { artifactVersionId: run.artifactVersionId }
+      : {}),
+    ...(typeof run.deliverableValid === 'boolean'
+      ? { deliverableValid: run.deliverableValid }
+      : {}),
+    ...(typeof run.deliverableValidation === 'string'
+      ? { deliverableValidation: run.deliverableValidation }
+      : {}),
+    ...(typeof run.deliverableEntryFile === 'string'
+      ? { deliverableEntryFile: run.deliverableEntryFile }
+      : {}),
+    ...(typeof run.deliverableArtifactKind === 'string'
+      ? { deliverableArtifactKind: run.deliverableArtifactKind }
+      : {}),
   });
 
   const finish = (run, status, code: number | null = null, signal: string | null = null) => {
@@ -861,6 +985,17 @@ export function createChatRunService({
     ) {
       runIdsByClientRequestId.delete(run.clientRequestId);
     }
+    const pluginWorkflowId =
+      run.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+      && typeof run.externalPluginAnalytics.pluginWorkflowId === 'string'
+        ? run.externalPluginAnalytics.pluginWorkflowId
+        : null;
+    if (
+      pluginWorkflowId
+      && runIdsByPluginWorkflowId.get(pluginWorkflowId) === run.id
+    ) {
+      runIdsByPluginWorkflowId.delete(pluginWorkflowId);
+    }
     if (run.statePath) {
       try { fs.unlinkSync(run.statePath); } catch { /* best-effort */ }
     }
@@ -883,6 +1018,7 @@ export function createChatRunService({
     prepareRestart,
     start,
     get,
+    findByPluginWorkflowId,
     list,
     stream,
     cancel,
@@ -893,6 +1029,7 @@ export function createChatRunService({
     setAnalyticsRecovery,
     markAnalyticsCompleted,
     markLangfuseCompleted,
+    setDeliverableValidation,
     finish,
     fail,
     drop,

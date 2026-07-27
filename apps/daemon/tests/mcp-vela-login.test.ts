@@ -70,6 +70,65 @@ describe('local MCP Vela login tools', () => {
     expect(firstText(result)).not.toContain('/local/private');
   });
 
+  it('carries the validated plugin workflow attribution into the daemon login request', async () => {
+    const analyticsHeaders = {
+      'x-od-analytics-device-id': 'installation-1',
+      'x-od-analytics-client-type': 'external_mcp',
+      'x-od-analytics-entry-surface': 'external_mcp',
+      'x-od-analytics-external-plugin-id': 'open-design-cloud',
+      'x-od-analytics-external-plugin-version': '0.4.0',
+      'x-od-analytics-distribution-mechanism': 'git_marketplace',
+      'x-od-analytics-publisher-class': 'open_design_first_party',
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/api/integrations/vela/login')) {
+        expect(init?.method).toBe('POST');
+        expect(init?.headers).toEqual({
+          'Content-Type': 'application/json',
+          ...analyticsHeaders,
+        });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          pluginWorkflowId: '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
+        });
+        return new Response(
+          JSON.stringify({ pid: 42, startedAt: '2026-07-24T00:00:00.000Z' }),
+          { status: 202 },
+        );
+      }
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return new Response(
+          JSON.stringify({ loggedIn: false, loginInFlight: true }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await handleMcpToolCall(
+      'http://127.0.0.1:17456',
+      'start_vela_login',
+      {},
+      {
+        analyticsHeaders,
+        pluginAttribution: {
+          context: {
+            id: 'open-design-cloud',
+            version: '0.4.0',
+            distributionMechanism: 'git_marketplace',
+            publisherClass: 'open_design_first_party',
+          },
+          pluginWorkflowId: '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
+        },
+      },
+    );
+
+    expect(JSON.parse(firstText(result))).toMatchObject({
+      started: { pid: 42 },
+      status: { loginInFlight: true },
+    });
+  });
+
   it('gets the current login status without exposing the local config path', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       expect(url).toBe('http://127.0.0.1:17456/api/integrations/vela/status');

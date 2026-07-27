@@ -5,6 +5,11 @@ import {
   type OpenDesignBriefArtifactType,
 } from '@open-design/contracts';
 import { randomBytes, randomUUID } from 'node:crypto';
+import {
+  type ExternalPluginContext,
+  validateExternalPluginContext,
+  validatePluginWorkflowId,
+} from './mcp-observability.js';
 
 const DEFAULT_BRIEF_TTL_MS = 15 * 60 * 1000;
 
@@ -23,6 +28,9 @@ interface StoredBriefDraft {
   expiresAt: number;
   confirmation?: LocalMcpBriefConfirmation;
   confirmationAnswersDigest?: string;
+  pluginWorkflowId?: string;
+  externalPluginContext?: ExternalPluginContext;
+  briefState?: 'confirmed' | 'skipped';
 }
 
 export interface LocalMcpBriefForm {
@@ -32,6 +40,8 @@ export interface LocalMcpBriefForm {
   briefDraftId: string;
   nonce: string;
   expiresAt: number;
+  pluginWorkflowId?: string;
+  externalPluginContext?: ExternalPluginContext;
   questionForm: {
     id: 'open-design-brief';
     title: string;
@@ -63,11 +73,22 @@ export interface LocalMcpBriefConfirmation {
   confirmedAt: number;
   answers: OpenDesignBriefAnswers;
   summary: string;
+  pluginWorkflowId?: string;
+  externalPluginContext?: ExternalPluginContext;
 }
 
 export interface LocalMcpBriefStore {
   collect(input: UnknownRecord): LocalMcpBriefForm;
   confirm(input: UnknownRecord): LocalMcpBriefConfirmation;
+  attributionForDraft(
+    briefDraftId: unknown,
+  ): {
+    pluginWorkflowId: string;
+    externalPluginContext: ExternalPluginContext;
+  } | null;
+  briefStateForWorkflow(
+    pluginWorkflowId: unknown,
+  ): 'confirmed' | 'skipped' | 'not_applicable';
 }
 
 export function createLocalMcpBriefStore(
@@ -87,6 +108,27 @@ export function createLocalMcpBriefStore(
   };
 
   return {
+    attributionForDraft(briefDraftId) {
+      if (typeof briefDraftId !== 'string') return null;
+      const draft = drafts.get(briefDraftId);
+      if (!draft?.pluginWorkflowId || !draft.externalPluginContext) return null;
+      return {
+        pluginWorkflowId: draft.pluginWorkflowId,
+        externalPluginContext: draft.externalPluginContext,
+      };
+    },
+    briefStateForWorkflow(pluginWorkflowId) {
+      if (typeof pluginWorkflowId !== 'string') return 'not_applicable';
+      for (const draft of drafts.values()) {
+        if (
+          draft.pluginWorkflowId === pluginWorkflowId
+          && draft.briefState
+        ) {
+          return draft.briefState;
+        }
+      }
+      return 'not_applicable';
+    },
     collect(input) {
       const at = now();
       pruneExpired(at);
@@ -94,6 +136,21 @@ export function createLocalMcpBriefStore(
       const projectTitle = readProjectTitle(input.projectTitle);
       const knownAnswers = readAnswerRecord(input.knownAnswers, 'knownAnswers');
       const skip = input.skip === true;
+      const hasPluginContext = Object.prototype.hasOwnProperty.call(
+        input,
+        'externalPluginContext',
+      );
+      const externalPluginContext = hasPluginContext
+        ? validateExternalPluginContext(input.externalPluginContext)
+        : undefined;
+      const pluginWorkflowId = hasPluginContext
+        ? validatePluginWorkflowId(input.pluginWorkflowId)
+        : undefined;
+      if (!hasPluginContext && input.pluginWorkflowId !== undefined) {
+        throw new Error(
+          'pluginWorkflowId requires a validated externalPluginContext',
+        );
+      }
       const decision = collectOpenDesignBrief({
         artifactType,
         knownAnswers,
@@ -108,6 +165,9 @@ export function createLocalMcpBriefStore(
         knownAnswers: { ...decision.answers },
         nonce,
         expiresAt,
+        ...(pluginWorkflowId ? { pluginWorkflowId } : {}),
+        ...(externalPluginContext ? { externalPluginContext } : {}),
+        ...(pluginWorkflowId && skip ? { briefState: 'skipped' as const } : {}),
       });
 
       return {
@@ -117,6 +177,8 @@ export function createLocalMcpBriefStore(
         briefDraftId,
         nonce,
         expiresAt,
+        ...(pluginWorkflowId ? { pluginWorkflowId } : {}),
+        ...(externalPluginContext ? { externalPluginContext } : {}),
         questionForm: {
           id: 'open-design-brief',
           title: `Choose the ${artifactType.replaceAll('-', ' ')} direction`,
@@ -192,9 +254,18 @@ export function createLocalMcpBriefStore(
         confirmedAt: at,
         answers: decision.answers,
         summary: decision.summary,
+        ...(draft.pluginWorkflowId
+          ? { pluginWorkflowId: draft.pluginWorkflowId }
+          : {}),
+        ...(draft.externalPluginContext
+          ? { externalPluginContext: draft.externalPluginContext }
+          : {}),
       };
       draft.confirmation = confirmation;
       draft.confirmationAnswersDigest = confirmationAnswersDigest;
+      if (draft.pluginWorkflowId && draft.briefState !== 'skipped') {
+        draft.briefState = 'confirmed';
+      }
       return confirmation;
     },
   };

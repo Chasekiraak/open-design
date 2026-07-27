@@ -49,6 +49,11 @@ import {
 import { parseMediaExecutionPolicyInput } from '../media/policy.js';
 import { isManagedProjectCwd } from '../mcp-config.js';
 import {
+  normalizeExternalPluginRunAnalyticsHints,
+  resolvePluginGenerationSloWindowMs,
+  validatePluginWorkflowId,
+} from '../mcp-observability.js';
+import {
   buildConnectorProbe,
   getInstalledPlugin,
   resolvePluginSnapshot,
@@ -76,6 +81,10 @@ import {
   snapshotProjectArtifacts,
   type RunArtifactBaseline,
 } from '../run-artifact-fs.js';
+import {
+  validateRunDeliverable,
+  type RunDeliverableValidationResult,
+} from '../run-deliverable-validation.js';
 import type { RunEventForDiagnostics } from '../run-diagnostics.js';
 import { summarizeRunDiagnosticsForAnalytics } from '../run-diagnostics.js';
 import type { RunEventForFailureClassification } from '../run-failure-classification.js';
@@ -91,6 +100,7 @@ import {
   BYOK_OPENCODE_AGENT_ID,
   BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
 } from '../runtimes/byok-opencode.js';
+import { resolveChatRunInactivityTimeoutMs } from '../runtimes/chat-run-lifecycle.js';
 import {
   deriveActivationMilestones,
   runAskedUserQuestion,
@@ -159,12 +169,27 @@ interface ChatRun {
   projectMetadata?: ProjectMetadata;
   appliedPluginSnapshotId?: string | null;
   pluginId?: string | null;
-  clientType?: 'desktop' | 'web';
+  clientType?: 'desktop' | 'web' | 'external_mcp';
   sessionMode?: string | null;
   context?: Record<string, unknown> | null;
   events: RunEventRecord[];
   clients: Set<SseClient>;
   analyticsContext?: AnalyticsContext;
+  analyticsRecovery?: { context?: AnalyticsContext } | null;
+  externalPluginAnalytics?: Record<string, unknown> | null;
+  manualResumeAttemptCount?: number;
+  rechargeWaitDurationMs?: number;
+  artifactOriginStatus?:
+    | 'matched'
+    | 'missing_version'
+    | 'digest_mismatch'
+    | 'invalid_origin'
+    | 'unknown';
+  artifactVersionId?: string;
+  deliverableValid?: boolean;
+  deliverableValidation?: ChatRunStatusResponse['deliverableValidation'];
+  deliverableEntryFile?: string;
+  deliverableArtifactKind?: ChatRunStatusResponse['deliverableArtifactKind'];
   analyticsTelemetry?: RunTelemetryTimestamps;
   resolvedModelId?: string | null;
   preflightAgentCliVersion?: string | null;
@@ -230,6 +255,7 @@ interface ChatRunService {
     | { kind: 'conflict'; run: ChatRun };
   prepareRestart(run: ChatRun): ChatRun | null;
   get(id: string): ChatRun | null;
+  findByPluginWorkflowId(pluginWorkflowId: string): ChatRun | null;
   list(filters: RunListFilters): ChatRun[];
   statusBody(run: ChatRun): ChatRunStatusResponse;
   stream(run: ChatRun, req: Request, res: Response): void;
@@ -244,6 +270,10 @@ interface ChatRunService {
     insertId: string;
   }): void;
   markAnalyticsCompleted?(run: ChatRun): void;
+  setDeliverableValidation?(
+    run: ChatRun,
+    result: RunDeliverableValidationResult,
+  ): void;
 }
 
 interface AnalyticsService {
@@ -391,6 +421,41 @@ function toProjectRecord(value: unknown): ProjectRecord | null {
     : null;
 }
 
+async function validateChatRunDeliverable(input: {
+  db: SqliteDb;
+  projectsRoot: string;
+  run: ChatRun;
+  runStatus: ChatRunStatus;
+  artifactCount: number;
+  touchedPaths?: string[];
+}): Promise<RunDeliverableValidationResult> {
+  const project = input.run.projectId
+    ? toProjectRecord(getProject(input.db, input.run.projectId))
+    : null;
+  return validateRunDeliverable({
+    projectsRoot: input.projectsRoot,
+    projectId: input.run.projectId,
+    projectMetadata:
+      project?.metadata ?? input.run.projectMetadata ?? null,
+    runStatus: input.runStatus,
+    artifactCount: input.artifactCount,
+    ...(input.touchedPaths ? { touchedPaths: input.touchedPaths } : {}),
+  });
+}
+
+function runTouchedArtifactPaths(run: ChatRun): string[] | undefined {
+  const diff = (
+    run.artifactOutcome as
+      | { diff?: { touchedPaths?: unknown } }
+      | undefined
+  )?.diff;
+  return Array.isArray(diff?.touchedPaths)
+    ? diff.touchedPaths.filter(
+        (value): value is string => typeof value === 'string' && value.length > 0,
+      )
+    : undefined;
+}
+
 function isProjectEnrichableDesignSystem(project: ProjectRecord): boolean {
   if (typeof project.designSystemId === 'string' && project.designSystemId.length > 0) {
     return true;
@@ -515,30 +580,73 @@ function canonicalJsonValue(value: unknown): unknown {
   return value;
 }
 
-function runRequestFingerprint(meta: RunCreateMeta): string {
-  const logicalRequest = {
-    projectId: meta.projectId ?? null,
-    conversationId: meta.conversationId ?? null,
-    agentId: meta.agentId ?? null,
-    message: meta.message ?? null,
-    currentPrompt: meta.currentPrompt ?? null,
-    skillId: meta.skillId ?? null,
-    skillIds: meta.skillIds ?? null,
-    designSystemId: meta.designSystemId ?? null,
-    pluginId: meta.pluginId ?? null,
-    appliedPluginSnapshotId: meta.appliedPluginSnapshotId ?? null,
-    pluginInputs: meta.pluginInputs ?? null,
-    model: meta.model ?? null,
-    reasoning: meta.reasoning ?? null,
-    serviceTier: meta.serviceTier ?? null,
-    byokProfileId: meta.byokProfileId ?? null,
-    sessionMode: meta.sessionMode ?? null,
-    mediaExecution: meta.mediaExecution ?? null,
-    toolBundle: meta.toolBundle ?? null,
-  };
+function semanticPluginSnapshot(
+  snapshot: AppliedPluginSnapshot | null | undefined,
+): Record<string, unknown> | null {
+  if (!snapshot) return null;
+  const {
+    snapshotId: _snapshotId,
+    appliedAt: _appliedAt,
+    status: _status,
+    ...semantic
+  } = snapshot;
+  return semantic;
+}
+
+function runRequestFingerprint(
+  meta: RunCreateMeta,
+  appliedPluginSnapshot?: AppliedPluginSnapshot | null,
+): string {
+  // Fingerprint the complete execution-shaping request, not a hand-picked
+  // subset that silently aliases system prompts, attachments, context,
+  // research or media defaults. Exclude only transport/recovery metadata,
+  // analytics-only source hints and derived mutable rows. A freshly-created
+  // snapshot id is deliberately excluded; its immutable semantic content is
+  // included instead so a lost-response retry neither conflicts spuriously
+  // nor ignores a real plugin upgrade.
+  const logicalRequest = { ...meta } as JsonRecord;
+  delete logicalRequest.clientRequestId;
+  delete logicalRequest.requestFingerprint;
+  delete logicalRequest.resume;
+  delete logicalRequest.analyticsHints;
+  delete logicalRequest.assistantMessageId;
+  delete logicalRequest.projectMetadata;
+  delete logicalRequest.appliedPluginSnapshotId;
+  logicalRequest.appliedPluginSnapshot =
+    semanticPluginSnapshot(appliedPluginSnapshot);
   return createHash('sha256')
     .update(JSON.stringify(canonicalJsonValue(logicalRequest)))
     .digest('hex');
+}
+
+const EXTERNAL_PLUGIN_ANALYTICS_KEYS = [
+  'entrySurface',
+  'hostProduct',
+  'externalPluginId',
+  'externalPluginVersion',
+  'distributionMechanism',
+  'publisherClass',
+  'attributionQuality',
+  'pluginWorkflowId',
+  'logicalRequestDigest',
+  'logicalRequestDigestVersion',
+] as const;
+
+function externalPluginAttributionMismatch(
+  existing: Record<string, unknown> | null | undefined,
+  incoming: unknown,
+): boolean {
+  const next =
+    incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)
+      : null;
+  const existingIsPlugin = existing?.externalPluginId === 'open-design-cloud';
+  const nextIsPlugin = next?.externalPluginId === 'open-design-cloud';
+  if (!existingIsPlugin && !nextIsPlugin) return false;
+  if (!existingIsPlugin || !nextIsPlugin) return true;
+  return EXTERNAL_PLUGIN_ANALYTICS_KEYS.some(
+    (key) => existing[key] !== next[key],
+  );
 }
 
 const CREDENTIAL_FIELD_PATTERN =
@@ -637,6 +745,7 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       return sendApiError(res, 503, 'UPSTREAM_UNAVAILABLE', 'daemon is shutting down');
     }
     const requestBody = toJsonRecord(req.body);
+    const requestAnalyticsContext = readAnalyticsContext(req);
     const mediaExecution = parseMediaExecutionPolicyInput(requestBody.mediaExecution);
     if (!mediaExecution.ok) {
       return sendApiError(res, 400, 'BAD_REQUEST', mediaExecution.message);
@@ -782,6 +891,66 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     if (runProject?.metadata) {
       meta.projectMetadata = runProject.metadata;
     }
+    const requestAnalyticsHints =
+      meta.analyticsHints
+      && typeof meta.analyticsHints === 'object'
+      && !Array.isArray(meta.analyticsHints)
+        ? (meta.analyticsHints as Record<string, unknown>)
+        : null;
+    const hasExternalPluginHints = Boolean(
+      requestAnalyticsHints
+      && (
+        requestAnalyticsHints.externalPluginId !== undefined
+        || requestAnalyticsHints.externalPluginVersion !== undefined
+        || requestAnalyticsHints.pluginWorkflowId !== undefined
+        || requestAnalyticsHints.logicalRequestDigest !== undefined
+        || requestAnalyticsHints.logicalRequestDigestVersion !== undefined
+      ),
+    );
+    if (hasExternalPluginHints) {
+      let normalizedExternalPluginHints;
+      try {
+        normalizedExternalPluginHints =
+          normalizeExternalPluginRunAnalyticsHints(requestAnalyticsHints, {
+            clientRequestId: meta.clientRequestId,
+            analyticsContext: requestAnalyticsContext,
+          });
+      } catch (error) {
+        return sendApiError(
+          res,
+          400,
+          'PLUGIN_CONTRACT_REJECTED',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      const runtimeDef =
+        typeof meta.agentId === 'string' ? getAgentDef(meta.agentId) : null;
+      const inactivityTimeoutMs = resolveChatRunInactivityTimeoutMs(
+        runtimeDef?.inactivityTimeoutMs,
+      );
+      meta.analyticsHints = {
+        ...requestAnalyticsHints,
+        ...normalizedExternalPluginHints,
+        generationSloWindowMs: resolvePluginGenerationSloWindowMs({
+          inactivityTimeoutMs,
+          configuredValue: process.env.OD_PLUGIN_GENERATION_SLO_WINDOW_MS,
+        }),
+      };
+      const existingWorkflowRun = design.runs.findByPluginWorkflowId(
+        normalizedExternalPluginHints.pluginWorkflowId,
+      );
+      if (
+        existingWorkflowRun
+        && existingWorkflowRun.clientRequestId !== meta.clientRequestId
+      ) {
+        return sendApiError(
+          res,
+          409,
+          'PLUGIN_WORKFLOW_CONFLICT',
+          'pluginWorkflowId is already bound to a different logical run request',
+        );
+      }
+    }
     let fallbackUserMessage: {
       conversationId: string;
       content: string;
@@ -844,7 +1013,10 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
         ? normalizeConversationSessionMode(meta.sessionMode)
         : normalizeConversationSessionMode(conversationSession?.sessionMode);
-    meta.requestFingerprint = runRequestFingerprint(meta);
+    meta.requestFingerprint = runRequestFingerprint(
+      meta,
+      resolvedSnapshot?.ok ? resolvedSnapshot.snapshot : null,
+    );
     const creation = design.runs.createOrReuse(meta);
     if (creation.kind === 'conflict') {
       return sendApiError(
@@ -855,6 +1027,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       );
     }
     const run = creation.run;
+    const analyticsAttributionMismatch =
+      creation.kind === 'reused'
+      && externalPluginAttributionMismatch(
+        run.externalPluginAnalytics,
+        meta.analyticsHints,
+      );
     let resumed = false;
     if (creation.kind === 'reused') {
       const resumeRequested = requestBody.resume === true;
@@ -873,6 +1051,9 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
           clientRequestId: run.clientRequestId ?? null,
           reused: true,
           resumed: false,
+          ...(analyticsAttributionMismatch
+            ? { analyticsAttributionMismatch: true }
+            : {}),
           ...(run.appliedPluginSnapshotId
             ? { appliedPluginSnapshotId: run.appliedPluginSnapshotId }
             : {}),
@@ -904,7 +1085,9 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       console.warn('[runs] message create pin failed', err);
     }
     const declaredClient = String(req.get('x-od-client') ?? '').toLowerCase();
-    if (declaredClient === 'desktop' || declaredClient === 'web') {
+    if (requestAnalyticsContext?.clientType === 'external_mcp') {
+      run.clientType = 'external_mcp';
+    } else if (declaredClient === 'desktop' || declaredClient === 'web') {
       run.clientType = declaredClient;
     } else {
       const ua = String(req.get('user-agent') ?? '');
@@ -925,6 +1108,9 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       clientRequestId: run.clientRequestId ?? null,
       reused: creation.kind === 'reused',
       resumed,
+      ...(analyticsAttributionMismatch
+        ? { analyticsAttributionMismatch: true }
+        : {}),
       ...(resolvedSnapshot?.ok
         ? {
             appliedPluginSnapshotId: resolvedSnapshot.snapshotId,
@@ -983,8 +1169,21 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       }).catch(() => {});
     }
 
-    const analyticsContext = readAnalyticsContext(req);
-    if (analyticsContext) {
+    const recoveredAnalyticsContext =
+      run.analyticsRecovery
+      && typeof run.analyticsRecovery === 'object'
+      && (run.analyticsRecovery as { context?: unknown }).context
+      && typeof (run.analyticsRecovery as { context?: unknown }).context === 'object'
+        ? ((run.analyticsRecovery as { context: AnalyticsContext }).context)
+        : null;
+    // Source/identity is first-write immutable for a logical run. A retry or
+    // recharge resume cannot relabel a prior ordinary request as Plugin (or
+    // vice versa) by changing analytics-only headers.
+    const analyticsContext =
+      run.analyticsContext
+      ?? recoveredAnalyticsContext
+      ?? requestAnalyticsContext;
+    if (!run.analyticsContext && analyticsContext) {
       run.analyticsContext = analyticsContext;
     }
     design.runs.wait(run).then((status: { status: string }) => {
@@ -1221,6 +1420,42 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         mcp_id: runMcpServerIds[0] ?? null,
         skill_ids: runSkillIds,
         token_count_source: userQueryTokens > 0 ? 'estimated' : 'unknown',
+        ...(run.externalPluginAnalytics
+          ? {
+              entry_surface:
+                run.externalPluginAnalytics.entrySurface,
+              host_product:
+                run.externalPluginAnalytics.hostProduct,
+              external_plugin_id:
+                run.externalPluginAnalytics.externalPluginId,
+              external_plugin_version:
+                run.externalPluginAnalytics.externalPluginVersion,
+              distribution_mechanism:
+                run.externalPluginAnalytics.distributionMechanism,
+              publisher_class:
+                run.externalPluginAnalytics.publisherClass,
+              attribution_quality:
+                run.externalPluginAnalytics.attributionQuality,
+              plugin_workflow_id:
+                run.externalPluginAnalytics.pluginWorkflowId,
+              logical_request_digest:
+                run.externalPluginAnalytics.logicalRequestDigest,
+              logical_request_digest_version:
+                run.externalPluginAnalytics.logicalRequestDigestVersion,
+              brief_state:
+                run.externalPluginAnalytics.briefState,
+              generation_slo_window_ms:
+                run.externalPluginAnalytics.generationSloWindowMs,
+              deduplicated: creation.kind === 'reused',
+              resume: resumed,
+              attempt_count: (run.manualResumeAttemptCount ?? 0) + 1,
+              recharge_wait_duration_ms:
+                run.rechargeWaitDurationMs ?? 0,
+              ...(analyticsAttributionMismatch
+                ? { source_metadata_mismatch: true }
+                : {}),
+            }
+          : {}),
       };
       design.runs.setAnalyticsRecovery?.(run, {
         context: analyticsContext,
@@ -1395,6 +1630,22 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             previewModuleCount = toolStreamPreviewModuleCount();
           }
         }
+        const touchedArtifactPaths = runTouchedArtifactPaths(run);
+        const deliverable = run.externalPluginAnalytics
+          ? await validateChatRunDeliverable({
+              db,
+              projectsRoot: PROJECTS_DIR,
+              run,
+              runStatus: run.status,
+              artifactCount,
+              ...(touchedArtifactPaths
+                ? { touchedPaths: touchedArtifactPaths }
+                : {}),
+            })
+          : null;
+        if (deliverable) {
+          design.runs.setDeliverableValidation?.(run, deliverable);
+        }
         const activationMilestones = deriveActivationMilestones({
           result,
           artifactCount,
@@ -1445,6 +1696,22 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             ...(activationMilestones ? { $set_once: activationMilestones } : {}),
             model_id: finishedModelId,
             artifact_count: artifactCount,
+            ...(run.externalPluginAnalytics
+              ? {
+                  deliverable_valid: deliverable?.valid === true,
+                  deliverable_validation:
+                    deliverable?.valid === true ? 'valid' : 'invalid',
+                  artifact_origin_status:
+                    run.artifactOriginStatus ?? 'missing_version',
+                  ...(run.artifactVersionId
+                    ? { artifact_version_id: run.artifactVersionId }
+                    : {}),
+                  resume: (run.manualResumeAttemptCount ?? 0) > 0,
+                  attempt_count: (run.manualResumeAttemptCount ?? 0) + 1,
+                  recharge_wait_duration_ms:
+                    run.rechargeWaitDurationMs ?? 0,
+                }
+              : {}),
             ...(artifactsCreated !== undefined ? { artifacts_created: artifactsCreated } : {}),
             ...(artifactsModified !== undefined ? { artifacts_modified: artifactsModified } : {}),
             asked_user_question: runAskedUserQuestion(run.events),
@@ -1575,6 +1842,47 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     res.json(body);
   });
 
+  app.get('/api/runs/by-plugin-workflow/:workflowId', (req: ApiRequest, res: ApiResponse) => {
+    let pluginWorkflowId: string;
+    try {
+      pluginWorkflowId = validatePluginWorkflowId(req.params.workflowId);
+    } catch {
+      return sendApiError(
+        res,
+        400,
+        'PLUGIN_CONTRACT_REJECTED',
+        'pluginWorkflowId must be a canonical UUID or ULID',
+      );
+    }
+    const run = design.runs.findByPluginWorkflowId(pluginWorkflowId);
+    const analytics =
+      run?.externalPluginAnalytics
+      && run.externalPluginAnalytics.externalPluginId === 'open-design-cloud'
+        ? run.externalPluginAnalytics
+        : null;
+    if (!run || !analytics) {
+      return sendApiError(
+        res,
+        404,
+        'NOT_FOUND',
+        'plugin workflow run not found',
+      );
+    }
+    res.json({
+      runId: run.id,
+      projectId: run.projectId,
+      pluginWorkflowId,
+      logicalRequestDigest: analytics.logicalRequestDigest,
+      logicalRequestDigestVersion: analytics.logicalRequestDigestVersion,
+      externalPluginContext: {
+        id: analytics.externalPluginId,
+        version: analytics.externalPluginVersion,
+        distributionMechanism: analytics.distributionMechanism,
+        publisherClass: analytics.publisherClass,
+      },
+    });
+  });
+
   app.get('/api/runs/:id/result-package', async (req: ApiRequest, res: ApiResponse) => {
     const runId = routeParamId(req);
     if (!runId) return sendApiError(res, 400, 'BAD_REQUEST', 'run id missing');
@@ -1661,12 +1969,47 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     res.json(body);
   });
 
-  app.get('/api/runs/:id', (req: ApiRequest, res: ApiResponse) => {
+  app.get('/api/runs/:id', async (req: ApiRequest, res: ApiResponse) => {
     const runId = routeParamId(req);
     if (!runId) return sendApiError(res, 400, 'BAD_REQUEST', 'run id missing');
     const run = design.runs.get(runId);
     if (!run) return sendApiError(res, 404, 'NOT_FOUND', 'run not found');
-    res.json(design.runs.statusBody(run));
+    const status = design.runs.statusBody(run);
+    if (!design.runs.isTerminal(run.status)) {
+      res.json(status);
+      return;
+    }
+    if (
+      typeof status.deliverableValid === 'boolean'
+      && typeof status.deliverableValidation === 'string'
+    ) {
+      res.json(status);
+      return;
+    }
+    const touchedArtifactPaths = runTouchedArtifactPaths(run);
+    const deliverable = await validateChatRunDeliverable({
+      db,
+      projectsRoot: PROJECTS_DIR,
+      run,
+      runStatus: run.status,
+      artifactCount:
+        typeof status.artifactCount === 'number' ? status.artifactCount : 0,
+      ...(touchedArtifactPaths
+        ? { touchedPaths: touchedArtifactPaths }
+        : {}),
+    });
+    design.runs.setDeliverableValidation?.(run, deliverable);
+    res.json({
+      ...status,
+      deliverableValid: deliverable.valid,
+      deliverableValidation: deliverable.validation,
+      ...(deliverable.entryFile
+        ? { deliverableEntryFile: deliverable.entryFile }
+        : {}),
+      ...(deliverable.artifactKind
+        ? { deliverableArtifactKind: deliverable.artifactKind }
+        : {}),
+    });
   });
 
   app.get('/api/runs/:id/events', (req: ApiRequest, res: ApiResponse) => {

@@ -1,4 +1,4 @@
-import type { ProjectFile } from './files';
+import type { ProjectFile, ProjectFileKind } from './files';
 import type { RunResultPackageResponse, RunWorkspace } from './workspaces.js';
 import type {
   PreviewCommentAttachment,
@@ -13,7 +13,14 @@ import type { RunContextSelection } from './context.js';
 import type { MediaExecutionPolicy } from './media.js';
 import type { AppliedPluginSnapshot } from '../plugins/apply.js';
 import type { McpAuthMode, McpServerConfig, McpTransport } from './mcp';
-import type { TrackingRuntimeType } from '../analytics/public-params.js';
+import type {
+  AnalyticsAttributionQuality,
+  AnalyticsDistributionMechanism,
+  AnalyticsEntrySurface,
+  AnalyticsHostProduct,
+  AnalyticsPublisherClass,
+  TrackingRuntimeType,
+} from '../analytics/public-params.js';
 import type {
   TrackingRunFailureCategory,
   TrackingRunFailureDetail,
@@ -235,6 +242,19 @@ export interface ChatAnalyticsHints {
   // `ai_refined` enrichment metadata on success. It carries no execution
   // semantics — omitting it just means the run is not an enrichment pass.
   dsEnrichment?: boolean;
+  /** Bounded source attribution for local MCP/plugin initiated runs. */
+  entrySurface?: AnalyticsEntrySurface;
+  hostProduct?: AnalyticsHostProduct;
+  externalPluginId?: string;
+  externalPluginVersion?: string;
+  distributionMechanism?: AnalyticsDistributionMechanism;
+  publisherClass?: AnalyticsPublisherClass;
+  attributionQuality?: AnalyticsAttributionQuality;
+  pluginWorkflowId?: string;
+  logicalRequestDigest?: string;
+  logicalRequestDigestVersion?: number;
+  /** Daemon-computed and frozen for Plugin generation maturity queries. */
+  generationSloWindowMs?: number;
 }
 
 export interface RunScopedMcpServerConfig extends Omit<McpServerConfig, 'enabled'> {
@@ -314,6 +334,8 @@ export interface McpRunCreateRequest {
   pluginInputs?: Record<string, unknown>;
   mediaExecution?: MediaExecutionPolicy;
   toolBundle?: RunScopedToolBundle;
+  resume?: boolean;
+  analyticsHints?: ChatAnalyticsHints;
 }
 
 export const CHAT_RUN_STATUSES = [
@@ -391,6 +413,8 @@ export interface ChatRunCreateResponse {
   assistantMessageId?: string | null;
   appliedPluginSnapshotId?: string | null;
   pluginId?: string | null;
+  /** Analytics-only data-quality signal; it never changes run reuse semantics. */
+  analyticsAttributionMismatch?: boolean;
 }
 
 export type NativeSessionRecoveryState =
@@ -514,6 +538,23 @@ export interface ChatRunStatusResponse {
   /** Authoritative artifact files created or modified by this run. Mirrors
    *  ChatSseEndPayload.artifactCount and run_finished.artifact_count. */
   artifactCount?: number;
+  /** Filesystem-backed validation of the one canonical artifact entry this
+   *  run can deliver. Present for terminal runs when the daemon can inspect
+   *  the project; callers must not infer validity from artifactCount alone. */
+  deliverableValid?: boolean;
+  deliverableValidation?:
+    | 'valid'
+    | 'not_succeeded'
+    | 'no_artifact'
+    | 'project_missing'
+    | 'entry_missing'
+    | 'entry_not_touched'
+    | 'entry_unreadable'
+    | 'type_mismatch';
+  /** Canonical project-relative file selected by deliverable validation. */
+  deliverableEntryFile?: string;
+  /** File kind of deliverableEntryFile, derived from the daemon file index. */
+  deliverableArtifactKind?: ProjectFileKind;
   /** Absolute path to the per-run JSONL event log the daemon mirrors
    *  the SSE stream to (see runs.ts `runsLogDir`). Null when the
    *  daemon was launched without event persistence configured. */
