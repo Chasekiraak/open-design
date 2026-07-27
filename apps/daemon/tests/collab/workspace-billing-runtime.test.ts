@@ -242,6 +242,212 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
     runtime.dispose();
   });
 
+  it('rebases to a fenced authoritative snapshot that has advanced beyond the event epoch', async () => {
+    let clock = { epoch: 'billing-epoch-a', counter: '9' };
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          `billing:v1:${clock.counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: clock,
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    // The producer's fenced snapshot has already crossed C by the time the B
+    // event reaches this consumer.
+    clock = { epoch: 'billing-epoch-c', counter: '1' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: { epoch: 'billing-epoch-b', counter: '1' },
+    });
+    const rebased = await runtime.read(KEY_A);
+
+    expect(rebased).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-c', counter: '1' },
+          },
+        },
+      },
+      state: {
+        status: 'fresh',
+        errorCode: null,
+        sourceGapDetected: false,
+      },
+    });
+
+    // The legacy alias for the B write can arrive after the C snapshot has
+    // already committed. B is now a retired fence and must not regress the
+    // accepted C baseline or schedule another projection read.
+    runtime.invalidate({
+      domain: 'legacy',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: { epoch: 'billing-epoch-b', counter: '1' },
+    });
+    await Promise.resolve();
+    expect(runtime.peek(KEY_A)?.state).toMatchObject({
+      status: 'fresh',
+      errorCode: null,
+    });
+    expect(calls).toBe(2);
+
+    runtime.reconnect('workspace-a');
+    const afterReconnect = await runtime.read(KEY_A);
+    expect(afterReconnect.state).toMatchObject({
+      status: 'fresh',
+      errorCode: null,
+      reason: 'reconnect',
+    });
+    expect(calls).toBe(3);
+    runtime.dispose();
+  });
+
+  it('rejects a fenced read that remains on the pre-event authoritative epoch', async () => {
+    let clock = { epoch: 'billing-epoch-a', counter: '9' };
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          `billing:v1:${clock.counter}`,
+          'wallet:v1:1',
+          'team_plus',
+          {
+            billing: clock,
+            wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+          },
+        );
+      },
+      retryDelaysMs: [],
+    });
+    await runtime.read(KEY_A);
+
+    clock = { epoch: 'billing-epoch-a', counter: '10' };
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision: 'billing:v1:1',
+      revisionClock: { epoch: 'billing-epoch-b', counter: '1' },
+    });
+    const stale = await runtime.read(KEY_A);
+
+    expect(stale).toMatchObject({
+      projection: {
+        snapshot: {
+          revisionClocks: {
+            billing: { epoch: 'billing-epoch-a', counter: '9' },
+          },
+        },
+      },
+      state: {
+        status: 'error',
+        errorCode: 'workspace_billing_revision_not_caught_up',
+      },
+    });
+    runtime.reconnect('workspace-a');
+    const afterReconnect = await runtime.read(KEY_A);
+    expect(afterReconnect.state).toMatchObject({
+      status: 'error',
+      errorCode: 'workspace_billing_revision_not_caught_up',
+    });
+    expect(calls).toBe(3);
+    runtime.dispose();
+  });
+
+  it('dedupes clocked subscription and legacy aliases across billing domains', async () => {
+    for (const domains of [
+      ['subscription', 'legacy'],
+      ['legacy', 'subscription'],
+    ] as const) {
+      let clock = { epoch: 'billing-epoch-a', counter: '1' };
+      let calls = 0;
+      const runtime = createWorkspaceBillingRuntimeCoordinator({
+        fetchProjection: async () => {
+          calls += 1;
+          return projection(
+            'workspace-a',
+            'member-a',
+            String(calls),
+            `billing:v1:${clock.counter}`,
+            'wallet:v1:1',
+            'team_plus',
+            {
+              billing: clock,
+              wallet: { epoch: 'wallet-epoch-a', counter: '1' },
+            },
+          );
+        },
+      });
+      await runtime.read(KEY_A);
+
+      clock = { epoch: 'billing-epoch-b', counter: '1' };
+      for (const domain of domains) {
+        runtime.invalidate({
+          domain,
+          workspaceId: 'workspace-a',
+          revision: 'billing:v1:1',
+          revisionClock: clock,
+        });
+      }
+      await runtime.read(KEY_A);
+
+      expect(calls).toBe(2);
+      runtime.dispose();
+    }
+  });
+
+  it('keeps unclocked subscription and legacy aliases as independent compatibility invalidations', async () => {
+    let revision = 'billing:v1:1';
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        return projection(
+          'workspace-a',
+          'member-a',
+          String(calls),
+          revision,
+          'wallet:v1:1',
+        );
+      },
+    });
+    await runtime.read(KEY_A);
+
+    revision = 'billing:v1:2';
+    runtime.invalidate({
+      domain: 'subscription',
+      workspaceId: 'workspace-a',
+      revision,
+    });
+    runtime.invalidate({
+      domain: 'legacy',
+      workspaceId: 'workspace-a',
+      revision,
+    });
+    await runtime.read(KEY_A);
+
+    expect(calls).toBe(3);
+    runtime.dispose();
+  });
+
   it('requires a clocked snapshot to catch up to the accepted event clock', async () => {
     vi.useFakeTimers();
     let counter = '1';

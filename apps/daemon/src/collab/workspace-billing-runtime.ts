@@ -74,6 +74,10 @@ interface RuntimeEntry {
   sourceRevisionClocks: Partial<
     Record<WorkspaceBillingInvalidationDomain, WorkspaceBillingRevisionClock>
   >;
+  retiredRevisionClockEpochs: {
+    subscription: Set<string>;
+    wallet: Set<string>;
+  };
   inFlight: Promise<void> | null;
   pending: boolean;
   pendingReason: string | null;
@@ -171,10 +175,14 @@ export class WorkspaceBillingRuntimeCoordinator {
       }
       if (entry.status === 'access-revoked') continue;
       const revisionClock = normalizeRevisionClock(invalidation.revisionClock);
+      const clockDomain =
+        invalidation.domain === 'wallet' ? 'wallet' : 'subscription';
+      const previousClock = entry.sourceRevisionClocks[clockDomain];
       const revisionResult = revisionClock
-        ? acceptSourceRevisionClock(
-            entry.sourceRevisionClocks[invalidation.domain],
+        ? acceptFencedSourceRevisionClock(
+            previousClock,
             revisionClock,
+            entry.retiredRevisionClockEpochs[clockDomain],
           )
         : acceptSourceRevision(
             entry.sourceRevisions[invalidation.domain],
@@ -182,7 +190,16 @@ export class WorkspaceBillingRuntimeCoordinator {
           );
       if (!revisionResult.accepted) continue;
       if (revisionClock) {
-        entry.sourceRevisionClocks[invalidation.domain] = revisionClock;
+        if (clockDomain === 'subscription') {
+          // Current producers emit one subscription write as both the v2
+          // event and its legacy billing alias. A valid billing clock is the
+          // shared identity across those aliases, independent of arrival
+          // order, so the second frame must not schedule a trailing refresh.
+          entry.sourceRevisionClocks.subscription = revisionClock;
+          entry.sourceRevisionClocks.legacy = revisionClock;
+        } else {
+          entry.sourceRevisionClocks.wallet = revisionClock;
+        }
       } else if (invalidation.revision) {
         entry.sourceRevisions[invalidation.domain] = invalidation.revision;
       }
@@ -355,6 +372,10 @@ export class WorkspaceBillingRuntimeCoordinator {
       sourceGapDetected: false,
       sourceRevisions: {},
       sourceRevisionClocks: {},
+      retiredRevisionClockEpochs: {
+        subscription: new Set(),
+        wallet: new Set(),
+      },
       inFlight: null,
       pending: false,
       pendingReason: null,
@@ -398,8 +419,8 @@ export class WorkspaceBillingRuntimeCoordinator {
         if (entry.attempt !== attempt || this.disposed) return;
         validateProjectionScope(entry.key, projection);
         validateProjectionRevision(entry, projection);
-        entry.projection = cloneProjection(projection);
         recordProjectionRevisions(entry, projection);
+        entry.projection = cloneProjection(projection);
         entry.observedAt = this.scheduler.now();
         entry.retryAt = null;
         entry.errorCode = null;
@@ -617,15 +638,38 @@ function validateProjectionRevision(
   const actualWalletClock = normalizeRevisionClock(
     snapshot.revisionClocks?.wallet,
   );
+  const previousSnapshot = entry.projection.snapshot;
+  const previousBillingClock = normalizeRevisionClock(
+    previousSnapshot?.revisionClocks?.billing,
+  );
+  const previousWalletClock = normalizeRevisionClock(
+    previousSnapshot?.revisionClocks?.wallet,
+  );
+  const billingClockComparable = Boolean(
+    expectedBillingClock && actualBillingClock,
+  );
+  const walletClockComparable = Boolean(
+    expectedWalletClock && actualWalletClock,
+  );
   if (
     (expectedBillingClock &&
       actualBillingClock &&
-      revisionClockIsBehind(actualBillingClock, expectedBillingClock)) ||
+      fencedRevisionClockIsBehind(
+        actualBillingClock,
+        expectedBillingClock,
+        previousBillingClock,
+      )) ||
     (expectedWalletClock &&
       actualWalletClock &&
-      revisionClockIsBehind(actualWalletClock, expectedWalletClock)) ||
-    revisionIsBehind(snapshot.revisions.billing, expectedBilling) ||
-    revisionIsBehind(snapshot.revisions.wallet, expectedWallet)
+      fencedRevisionClockIsBehind(
+        actualWalletClock,
+        expectedWalletClock,
+        previousWalletClock,
+      )) ||
+    (!billingClockComparable &&
+      revisionIsBehind(snapshot.revisions.billing, expectedBilling)) ||
+    (!walletClockComparable &&
+      revisionIsBehind(snapshot.revisions.wallet, expectedWallet))
   ) {
     throw Object.assign(new Error('workspace billing revision not caught up'), {
       code: 'workspace_billing_revision_not_caught_up',
@@ -641,22 +685,40 @@ function recordProjectionRevisions(
   if (!snapshot) return;
   const billingClock = normalizeRevisionClock(snapshot.revisionClocks?.billing);
   const walletClock = normalizeRevisionClock(snapshot.revisionClocks?.wallet);
-  if (
-    billingClock &&
-    revisionClockCanAdvance(entry.sourceRevisionClocks.subscription, billingClock)
-  ) {
+  const previousSnapshot = entry.projection.snapshot;
+  const previousBillingClock = normalizeRevisionClock(
+    previousSnapshot?.revisionClocks?.billing,
+  );
+  const previousWalletClock = normalizeRevisionClock(
+    previousSnapshot?.revisionClocks?.wallet,
+  );
+  if (billingClock) {
+    retireRevisionClockEpoch(
+      entry.retiredRevisionClockEpochs.subscription,
+      previousBillingClock,
+      billingClock,
+    );
+    retireRevisionClockEpoch(
+      entry.retiredRevisionClockEpochs.subscription,
+      entry.sourceRevisionClocks.subscription ??
+        entry.sourceRevisionClocks.legacy ??
+        null,
+      billingClock,
+    );
     entry.sourceRevisionClocks.subscription = billingClock;
-  }
-  if (
-    billingClock &&
-    revisionClockCanAdvance(entry.sourceRevisionClocks.legacy, billingClock)
-  ) {
     entry.sourceRevisionClocks.legacy = billingClock;
   }
-  if (
-    walletClock &&
-    revisionClockCanAdvance(entry.sourceRevisionClocks.wallet, walletClock)
-  ) {
+  if (walletClock) {
+    retireRevisionClockEpoch(
+      entry.retiredRevisionClockEpochs.wallet,
+      previousWalletClock,
+      walletClock,
+    );
+    retireRevisionClockEpoch(
+      entry.retiredRevisionClockEpochs.wallet,
+      entry.sourceRevisionClocks.wallet ?? null,
+      walletClock,
+    );
     entry.sourceRevisionClocks.wallet = walletClock;
   }
   if (revisionCanAdvance(entry.sourceRevisions.subscription, snapshot.revisions.billing)) {
@@ -693,22 +755,29 @@ function normalizeRevisionClock(
   return { epoch, counter };
 }
 
-function revisionClockIsBehind(
+function fencedRevisionClockIsBehind(
   actual: WorkspaceBillingRevisionClock,
   expected: WorkspaceBillingRevisionClock,
+  previousAuthoritative: WorkspaceBillingRevisionClock | null,
 ): boolean {
-  return (
-    actual.epoch !== expected.epoch ||
-    BigInt(actual.counter) < BigInt(expected.counter)
-  );
+  if (actual.epoch === expected.epoch) {
+    return BigInt(actual.counter) < BigInt(expected.counter);
+  }
+  // Snapshot reads are producer-fenced: an unseen epoch is the new
+  // authoritative baseline even if it advanced again after the thin event.
+  // Remaining on the last committed epoch, however, proves the read model has
+  // not crossed the event's epoch fence and must fail closed.
+  return previousAuthoritative?.epoch === actual.epoch;
 }
 
-function revisionClockCanAdvance(
-  previous: WorkspaceBillingRevisionClock | undefined,
-  next: WorkspaceBillingRevisionClock,
-): boolean {
-  if (!previous || previous.epoch !== next.epoch) return true;
-  return BigInt(next.counter) > BigInt(previous.counter);
+function retireRevisionClockEpoch(
+  retired: Set<string>,
+  previous: WorkspaceBillingRevisionClock | null,
+  authoritative: WorkspaceBillingRevisionClock,
+): void {
+  if (previous && previous.epoch !== authoritative.epoch) {
+    retired.add(previous.epoch);
+  }
 }
 
 function cloneProjection(
@@ -815,6 +884,17 @@ function acceptSourceRevisionClock(
     gap: newValue > oldValue + 1n,
     epochChanged: false,
   };
+}
+
+function acceptFencedSourceRevisionClock(
+  previous: WorkspaceBillingRevisionClock | undefined,
+  next: WorkspaceBillingRevisionClock,
+  retiredEpochs: ReadonlySet<string>,
+): { accepted: boolean; gap: boolean; epochChanged: boolean } {
+  if (retiredEpochs.has(next.epoch) && previous?.epoch !== next.epoch) {
+    return { accepted: false, gap: false, epochChanged: false };
+  }
+  return acceptSourceRevisionClock(previous, next);
 }
 
 function strongerReason(current: string | null, next: string): string {
