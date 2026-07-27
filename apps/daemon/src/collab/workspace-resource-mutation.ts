@@ -35,7 +35,12 @@ export type WorkspaceResourceContext = {
   canWriteSyncedFiles: boolean;
 };
 
-export type WorkspaceResourceMutationCapability = 'rename' | 'delete' | 'duplicate' | 'writeFiles';
+export type WorkspaceResourceMutationCapability =
+  | 'rename'
+  | 'delete'
+  | 'duplicate'
+  | 'writeFiles'
+  | 'comment';
 
 /**
  * The one fact a mutation gate needs from the daemon's own verified workspace
@@ -200,16 +205,39 @@ export function workspaceResourceAccess(
 function workspaceResourceMutationAllowed(
   row: WorkspaceResourceAccessInput | null | undefined,
   ctx: WorkspaceResourceContext,
-  _capability: WorkspaceResourceMutationCapability,
+  capability: WorkspaceResourceMutationCapability,
 ): boolean {
   if (!row) return false;
-  // Every mutation capability collapses to the same `canMutate` bit today —
+  const access = workspaceResourceAccess(row, ctx);
+  // `comment` is the one capability the product grants MORE WIDELY than
+  // resource ownership: sharing a resource into the team explicitly invites
+  // every active member to comment (the member-facing read-only banner
+  // promises "view and comment"), while rename/delete/duplicate/writeFiles
+  // stay creator/privileged-only. Gating comments on the strict `canMutate`
+  // bit 403'd every plain member's comment on someone else's shared project
+  // at the workspace layer (2026-07-28 dogfood: “评论保存失败，请重试。”),
+  // before the per-comment author rules in routes/project/comments.ts ever
+  // ran. Same base preconditions as `canMutate` (not frozen, writable
+  // lifecycle, active membership); only the standing test widens — the
+  // sharing act (`visibility: 'team'`) is what grants comment standing
+  // beyond creator/privileged, so an unshared personal binding stays closed
+  // to other members.
+  if (capability === 'comment') {
+    return (
+      access.canMutate ||
+      (!access.frozen &&
+        ctx.canWriteSyncedFiles &&
+        ctx.memberStatus === 'active' &&
+        row.visibility === 'team')
+    );
+  }
+  // Every other mutation capability collapses to the same `canMutate` bit —
   // project's original per-capability branch (`canRename`/`canDelete`/
   // `canDuplicate`/`canRestoreVersion`) all read the identical computed
-  // value. `capability` stays a parameter so a future resource type that DOES
-  // need one capability to diverge (e.g. staying allowed while frozen) has a
-  // seam to hang that on without another signature change at every call site.
-  return workspaceResourceAccess(row, ctx).canMutate;
+  // value. `capability` stays a parameter so the next capability that needs
+  // to diverge (as `comment` above did) has a seam to hang that on without
+  // another signature change at every call site.
+  return access.canMutate;
 }
 
 /**
