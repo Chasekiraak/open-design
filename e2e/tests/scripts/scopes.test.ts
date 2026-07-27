@@ -776,6 +776,47 @@ test("merge-queue threshold escalates medium-confidence files to the full radius
   });
 });
 
+test("runtime-definition changes produce only a three-domain UI P0 shadow candidate", async () => {
+  const { evaluateUiP0Shadow } = await import("../../../scripts/scopes.ts");
+  const decision = evaluateUiP0Shadow([
+    "apps/daemon/src/runtimes/defs/atomcode.ts",
+    "apps/daemon/src/runtimes/metadata.ts",
+    "apps/daemon/tests/runtimes/atomcode.test.ts",
+  ]);
+  assert.equal(decision.mode, "candidate");
+  assert.equal(decision.capability, "daemon-runtime-definition");
+  assert.deepEqual(
+    decision.matrix.map((entry) => entry.name),
+    ["entry-settings", "project-workspace", "project-runtime"],
+  );
+  assert.deepEqual(decision.outsideCapabilityFiles, []);
+});
+
+test("runtime-definition shadow fails closed for mixed, unknown, empty, and unresolved changes", async () => {
+  const { evaluateUiP0Shadow } = await import("../../../scripts/scopes.ts");
+  for (const files of [
+    ["apps/daemon/src/runtimes/defs/atomcode.ts", "apps/daemon/src/server.ts"],
+    ["apps/daemon/src/runtimes/detection.ts"],
+    ["mystery.xyz"],
+    [],
+  ]) {
+    const decision = evaluateUiP0Shadow(files);
+    assert.equal(decision.mode, "full-fallback", files.join(", "));
+    assert.deepEqual(
+      decision.matrix.map((entry) => entry.name),
+      ["entry-settings", "project-workspace", "project-runtime", "workspace-restoration"],
+    );
+  }
+  assert.equal(evaluateUiP0Shadow([], false).reason, "files-unresolved");
+});
+
+test("UI P0 shadow guard pins full applied coverage and closed fallbacks", async () => {
+  const { uiP0ShadowContractErrors } = await import(
+    "../../../scripts/check-ui-p0-shadow.ts"
+  );
+  assert.deepEqual(uiP0ShadowContractErrors(), []);
+});
+
 test("plan command evaluates offline at the pr threshold", () => {
   const stdout = execFileSync(
     process.execPath,
@@ -787,6 +828,33 @@ test("plan command evaluates offline at the pr threshold", () => {
   assert.equal(result.trace["threshold"], "medium");
   assert.equal(result.trace["fileCount"], 2);
   assert.deepEqual(result.trace["escalations"], []);
+});
+
+test("plan trace reports the runtime-definition UI P0 shadow without changing the applied plan", () => {
+  const stdout = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      scopesScript,
+      "plan",
+      "--context",
+      "pr",
+      "--files",
+      "apps/daemon/src/runtimes/defs/atomcode.ts",
+      "apps/daemon/tests/runtimes/atomcode.test.ts",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  const result = JSON.parse(stdout) as {
+    plan: Record<string, unknown>;
+    trace: { uiP0Shadow: { mode: string; matrix: Array<{ name: string }> } };
+  };
+  assert.equal(result.plan["ui_p0_matrix"], UI_P0_MATRIX_JSON);
+  assert.equal(result.trace.uiP0Shadow.mode, "candidate");
+  assert.deepEqual(
+    result.trace.uiP0Shadow.matrix.map((entry) => entry.name),
+    ["entry-settings", "project-workspace", "project-runtime"],
+  );
 });
 
 test("plan command surfaces queue-tier escalation and the trust-all shadow column", () => {

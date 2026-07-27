@@ -162,6 +162,38 @@ Current evidence:
 - Expected savings are about 7.5 elapsed minutes and 60 runner-minutes per
   qualifying single-PR group, before queue batching discounts.
 
+## Daemon UI P0 capability shadow
+
+The UI P0 capability shadow is evidence-only. The applied `ui_p0_matrix`
+remains the full four-domain matrix in PR and merge-queue plans; no job reads
+the shadow candidate as an execution input.
+
+The `daemon-runtime-definition` capability matches changes confined to:
+
+- `apps/daemon/src/runtimes/defs/`;
+- `capabilities.ts`, `local-profiles.ts`, `metadata.ts`, and `registry.ts`
+  directly under `apps/daemon/src/runtimes/`;
+- the explicit companion-test list in
+  `DAEMON_RUNTIME_DEFINITION_EXACT` (`scripts/scopes.ts`).
+
+Its candidate keeps `entry-settings`, `project-workspace`, and
+`project-runtime`, and omits only `workspace-restoration`. The project
+workspace remains included because its P0 coverage contains the local-agent
+and model selector. Any empty, unresolved, mixed, unknown, or out-of-surface
+change falls back to the full four-domain matrix and records the reason in
+`trace.uiP0Shadow`.
+
+Guard: `UI P0 shadow contract` (`scripts/check-ui-p0-shadow.ts`). It pins the
+applied full matrix, the candidate group set, representative in-bound
+resolution, and full fallback for shared daemon, runtime-composition, web, and
+unresolved inputs. The shadow must accumulate successful paired runs before it
+can become an execution input under the certain-tier requirements.
+
+The latest-400 first-parent replay contains three matching groups. The
+candidate would avoid one UI P0 worker per matching group, currently about
+8.5–9.2 runner-minutes, but the shadow produces no execution savings until its
+paired evidence satisfies the promotion requirements.
+
 ## Zero-effect merge-queue policy floor
 
 A merge-queue plan that trusts every changed file at `certain` and receives no

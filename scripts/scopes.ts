@@ -3,6 +3,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { uiP0CiMatrix, visualCiMatrix } from "../e2e/lib/playwright/suites.ts";
+import type { UiP0CiMatrixEntry } from "../e2e/lib/playwright/suites.ts";
 
 // ---------------------------------------------------------------------------
 // Scope model
@@ -46,6 +47,35 @@ export type ScopeOutputs = Record<ScopeEffect, boolean>;
 export type Confidence = "medium" | "certain";
 
 export type TrustThreshold = "medium" | "certain";
+
+export const DAEMON_RUNTIME_DEFINITION_PREFIXES = [
+  "apps/daemon/src/runtimes/defs/",
+] as const;
+
+export const DAEMON_RUNTIME_DEFINITION_EXACT = [
+  "apps/daemon/src/runtimes/capabilities.ts",
+  "apps/daemon/src/runtimes/local-profiles.ts",
+  "apps/daemon/src/runtimes/metadata.ts",
+  "apps/daemon/src/runtimes/registry.ts",
+  "apps/daemon/tests/runtimes/agent-args.test.ts",
+  "apps/daemon/tests/runtimes/antigravity-model-lock.test.ts",
+  "apps/daemon/tests/runtimes/atomcode.test.ts",
+  "apps/daemon/tests/runtimes/byok-opencode.test.ts",
+  "apps/daemon/tests/runtimes/chat-run-inactivity-timeout.test.ts",
+  "apps/daemon/tests/runtimes/claude-resume-args.test.ts",
+  "apps/daemon/tests/runtimes/codebuddy.test.ts",
+  "apps/daemon/tests/runtimes/codex-resume-args.test.ts",
+  "apps/daemon/tests/runtimes/detection-resilience.test.ts",
+  "apps/daemon/tests/runtimes/opencode-resume-args.test.ts",
+  "apps/daemon/tests/runtimes/registry-and-args.test.ts",
+  "apps/daemon/tests/runtimes/trae-cli.test.ts",
+] as const;
+
+const DAEMON_RUNTIME_DEFINITION_MATRIX_NAMES = [
+  "entry-settings",
+  "project-workspace",
+  "project-runtime",
+] as const;
 
 export type RuleMatch = {
   prefixes?: readonly string[];
@@ -518,6 +548,63 @@ function buildScopePlan(outputs: ScopeOutputs, ciMode: CiMode, fullLanes?: boole
 // Decision trace
 // ---------------------------------------------------------------------------
 
+export type UiP0ShadowDecision = {
+  mode: "candidate" | "full-fallback";
+  capability: "daemon-runtime-definition" | null;
+  matrix: readonly UiP0CiMatrixEntry[];
+  reason: "capability-match" | "empty-change-set" | "files-unresolved" | "outside-capability";
+  outsideCapabilityFiles: readonly string[];
+};
+
+function isDaemonRuntimeDefinitionFile(file: string): boolean {
+  return (
+    DAEMON_RUNTIME_DEFINITION_PREFIXES.some((prefix) => file.startsWith(prefix)) ||
+    DAEMON_RUNTIME_DEFINITION_EXACT.includes(file as (typeof DAEMON_RUNTIME_DEFINITION_EXACT)[number])
+  );
+}
+
+export function evaluateUiP0Shadow(
+  files: readonly string[],
+  filesResolved: boolean = true,
+): UiP0ShadowDecision {
+  if (!filesResolved) {
+    return {
+      mode: "full-fallback",
+      capability: null,
+      matrix: uiP0CiMatrix,
+      reason: "files-unresolved",
+      outsideCapabilityFiles: [],
+    };
+  }
+  if (files.length === 0) {
+    return {
+      mode: "full-fallback",
+      capability: null,
+      matrix: uiP0CiMatrix,
+      reason: "empty-change-set",
+      outsideCapabilityFiles: [],
+    };
+  }
+  const outsideCapabilityFiles = files.filter((file) => !isDaemonRuntimeDefinitionFile(file));
+  if (outsideCapabilityFiles.length > 0) {
+    return {
+      mode: "full-fallback",
+      capability: null,
+      matrix: uiP0CiMatrix,
+      reason: "outside-capability",
+      outsideCapabilityFiles,
+    };
+  }
+  const candidateNames = new Set<string>(DAEMON_RUNTIME_DEFINITION_MATRIX_NAMES);
+  return {
+    mode: "candidate",
+    capability: "daemon-runtime-definition",
+    matrix: uiP0CiMatrix.filter((entry) => candidateNames.has(entry.name)),
+    reason: "capability-match",
+    outsideCapabilityFiles: [],
+  };
+}
+
 export type ScopeTrace = {
   source: string;
   threshold: TrustThreshold | "none";
@@ -525,6 +612,7 @@ export type ScopeTrace = {
   fileCount: number;
   ruleHits: Record<string, number>;
   escalations: readonly { file: string; reason: string }[];
+  uiP0Shadow: UiP0ShadowDecision;
   plans: {
     applied: ScopePlan;
     /**
@@ -539,6 +627,7 @@ export type ScopeTrace = {
 
 function buildTrace(
   source: string,
+  files: readonly string[],
   threshold: TrustThreshold,
   evaluation: ScopeEvaluation,
   appliedPlan: ScopePlan,
@@ -559,6 +648,7 @@ function buildTrace(
     escalations: evaluation.decisions
       .filter((decision) => decision.escalated)
       .map((decision) => ({ file: decision.file, reason: decision.reason ?? "unknown" })),
+    uiP0Shadow: evaluateUiP0Shadow(files),
     plans: { applied: appliedPlan, ifTrustAll: ifTrustAllPlan },
   };
 }
@@ -571,6 +661,7 @@ function buildEverythingTrace(source: string, appliedPlan: ScopePlan): ScopeTrac
     fileCount: 0,
     ruleHits: {},
     escalations: [],
+    uiP0Shadow: evaluateUiP0Shadow([], false),
     plans: { applied: appliedPlan },
   };
 }
@@ -652,7 +743,7 @@ function evaluateChangedFilesPlan(
   const plan = buildScopePlan(evaluation.outputs, options.ciMode, fullLanes);
   const trustAll = evaluateScopeOutputs(files, "medium", options.evaluate);
   const trustAllPlan = buildScopePlan(trustAll.outputs, options.ciMode, fullLanes);
-  return { plan, trace: buildTrace(source, options.threshold, evaluation, plan, trustAllPlan) };
+  return { plan, trace: buildTrace(source, files, options.threshold, evaluation, plan, trustAllPlan) };
 }
 
 function resolveManualCiMode(): CiMode {
@@ -757,6 +848,7 @@ function emitTraceStepSummary(trace: ScopeTrace): void {
     "",
     `- source: \`${trace.source}\`, trust threshold: \`${trace.threshold}\``,
     `- files: ${trace.filesResolved ? trace.fileCount : "not resolved"}, escalated: ${trace.escalations.length}`,
+    `- UI P0 shadow: \`${trace.uiP0Shadow.mode}\` (${trace.uiP0Shadow.matrix.map((entry) => entry.name).join(", ")})`,
   ];
   const hits = Object.entries(trace.ruleHits);
   if (hits.length > 0) {

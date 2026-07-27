@@ -7,6 +7,7 @@ import { checkCertainExemptConsumption } from "./check-certain-exempt-consumptio
 import { checkCrossAppImports } from "./check-cross-app-imports.ts";
 import { checkPackagedLeafBoundary } from "./check-packaged-leaf-boundary.ts";
 import { checkTsNocheckImports } from "./check-ts-nocheck-imports.ts";
+import { checkUiP0ShadowContract } from "./check-ui-p0-shadow.ts";
 import { checkDesignSystemManifests } from "./check-design-system-manifests.ts";
 import { checkDesignSystemPackageQuality } from "./check-design-system-package-quality.ts";
 import { checkDesignSystemComponentFixtureReport } from "./check-components-fixtures.ts";
@@ -1328,6 +1329,7 @@ const checks: GuardCheck[] = [
   { name: "residual JavaScript", run: checkResidualJavaScript },
   { name: "certain-exempt surface consumption", run: checkCertainExemptConsumption },
   { name: "packaged leaf boundary", run: checkPackagedLeafBoundary },
+  { name: "UI P0 shadow contract", run: checkUiP0ShadowContract },
   { name: "package dependency specs", run: checkPackageDependencySpecs },
   { name: "product neutrality", run: checkProductNeutrality },
   { name: "cross-app imports", run: checkCrossAppImports },
