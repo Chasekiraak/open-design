@@ -13102,20 +13102,20 @@ function HtmlViewer({
             <button
               type="button"
               className={`chrome-action chrome-action-secondary chrome-action-icon od-tooltip${versionModalOpen ? ' is-active' : ''}`}
-              // Browsing history is a read action, not an edit — a viewer-only
-              // shared project should open this exactly like it already opens
-              // Present (recvq56vFjQKfT). `FileVersionManagerModal` already
-              // disables its own Restore button on `viewerOnly` (see
-              // `restoreDisabled` below); gating the ENTRY POINT on the same
-              // flag was the actual bug, and this button disagreed with the
-              // equivalent "more" menu item just below, which never had this
-              // gate.
-              disabled={source === null}
+              // Same disabled contract as the Share button directly below:
+              // `viewerOnly` + `viewerOnlyDisabledTitle`. A readonly shared
+              // project has no history to show a member in the first place —
+              // `.file-versions` is excluded from member mirrors, so the
+              // owner's real history never arrives — so an openable entry only
+              // ever led to an empty panel. This supersedes recvq56vFjQKfT,
+              // which had un-gated the entry on the reasoning that browsing
+              // history is a read action.
+              disabled={source === null || viewerOnly}
               aria-label={t('fileViewer.versions.entry')}
               aria-expanded={Boolean(versionModalOpen)}
-              data-tooltip={t('fileViewer.versions.entryFull')}
+              data-tooltip={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               data-tooltip-placement="bottom"
-              title={t('fileViewer.versions.entryFull')}
+              title={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               onClick={() => {
                 // The version history is a floating panel now, not a modal, so
                 // the toolbar icon is a toggle: a second click dismisses it.
