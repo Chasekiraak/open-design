@@ -79,6 +79,10 @@ import {
   openHostExternalUrl,
 } from '@open-design/host';
 import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
+import {
+  evictSharedCancellableGet,
+  sharedCancellableGet,
+} from '../lib/shared-cancellable-get';
 import { workspaceProjectHeaders } from '../state/projects';
 
 export const DEFAULT_DEPLOY_PROVIDER_ID = 'vercel-self';
@@ -1624,26 +1628,26 @@ export async function fetchProjectFiles(
   projectId: string,
   options?: { signal?: AbortSignal },
 ): Promise<ProjectFile[]> {
-  const run = async (): Promise<ProjectFile[]> => {
-    try {
-      const url = `/api/projects/${encodeURIComponent(projectId)}/files`;
-      const resp = options?.signal
-        ? await fetch(url, { signal: options.signal })
-        : await fetch(url);
-      if (!resp.ok) return [];
-      const json = (await resp.json()) as { files: ProjectFile[] };
-      return json.files ?? [];
-    } catch {
-      return [];
-    }
-  };
-  // A cancellable caller owns its request lifetime (project-card cover scans
-  // are aborted when Home unmounts), so it must not share the foreground
-  // project's module-level single-flight entry. Otherwise reopening a project
-  // joins the abandoned card request and waits behind the entire Home burst.
-  if (options?.signal) return run();
-  // Non-cancellable display reads still collapse identical mount-burst calls.
-  return coalescedGet(projectFilesCacheKey(projectId), run);
+  // Every reader of the same project's file list shares one request
+  // (Batch A §4.3). Cancellable callers (project-card cover scans aborted
+  // when Home unmounts) detach individually; the shared request is aborted
+  // only when no reader is left awaiting it, so a foreground project read
+  // can never be killed by an abandoned card scan.
+  try {
+    return await sharedCancellableGet(
+      projectFilesCacheKey(projectId),
+      async (signal): Promise<ProjectFile[]> => {
+        const url = `/api/projects/${encodeURIComponent(projectId)}/files`;
+        const resp = await fetch(url, { signal });
+        if (!resp.ok) return [];
+        const json = (await resp.json()) as { files: ProjectFile[] };
+        return json.files ?? [];
+      },
+      { signal: options?.signal },
+    );
+  } catch {
+    return [];
+  }
 }
 
 export type ProjectDesignTokenSuggestion = import('@open-design/contracts').ProjectDesignTokenSuggestion;
@@ -2285,7 +2289,7 @@ export async function writeProjectTextFileDetailed(
       };
     }
     const json = (await resp.json()) as { file: ProjectFile };
-    evictCoalescedGet(projectFilesCacheKey(projectId));
+    evictSharedCancellableGet(projectFilesCacheKey(projectId));
     return { ok: true, file: json.file };
   } catch {
     return { ok: false, message: 'Network error while saving the file' };
@@ -2309,7 +2313,7 @@ export async function writeProjectBase64File(
     });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { file: ProjectFile };
-    evictCoalescedGet(projectFilesCacheKey(projectId));
+    evictSharedCancellableGet(projectFilesCacheKey(projectId));
     return json.file;
   } catch {
     return null;
@@ -2333,7 +2337,7 @@ export async function uploadProjectFile(
     });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { file: ProjectFile };
-    evictCoalescedGet(projectFilesCacheKey(projectId));
+    evictSharedCancellableGet(projectFilesCacheKey(projectId));
     return json.file;
   } catch {
     return null;
@@ -2441,7 +2445,7 @@ export async function uploadProjectFiles(
         break;
       }
 
-      evictCoalescedGet(projectFilesCacheKey(projectId));
+      evictSharedCancellableGet(projectFilesCacheKey(projectId));
       const json = (await resp.json()) as {
         files: { name: string; path: string; size?: number; originalName?: string }[];
       };
@@ -2514,7 +2518,7 @@ export async function deleteProjectFile(
       },
     );
     if (resp.ok) {
-      evictCoalescedGet(projectFilesCacheKey(projectId));
+      evictSharedCancellableGet(projectFilesCacheKey(projectId));
       return true;
     }
     return false;
@@ -2541,7 +2545,7 @@ export async function renameProjectFile(
     const errorBody = await readApiErrorBody(resp);
     throw new Error(errorBody.message);
   }
-  evictCoalescedGet(projectFilesCacheKey(projectId));
+  evictSharedCancellableGet(projectFilesCacheKey(projectId));
   return (await resp.json()) as RenameProjectFileResponse;
 }
 
@@ -2590,11 +2594,17 @@ export async function fetchRecentLinkedDirs(): Promise<string[]> {
   try {
     // `/api/recent-dirs` returns the list pruned to folders that still exist
     // on disk (and persists the pruning), so deleted folders never linger.
-    const resp = await fetch('/api/recent-dirs');
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    const list = data?.dirs;
-    return Array.isArray(list) ? list.filter((d: unknown): d is string => typeof d === 'string') : [];
+    // Concurrent consumers (composer pickers, project panels) share one read
+    // per burst (Batch A §4.3); pushRecentLinkedDir evicts after writing.
+    return await coalescedGet('recent-dirs', async () => {
+      const resp = await fetch('/api/recent-dirs');
+      if (!resp.ok) return [] as string[];
+      const data = await resp.json();
+      const list = data?.dirs;
+      return Array.isArray(list)
+        ? list.filter((d: unknown): d is string => typeof d === 'string')
+        : [];
+    });
   } catch {
     return [];
   }
@@ -2618,6 +2628,9 @@ export async function pushRecentLinkedDir(dir: string): Promise<string[]> {
     // Daemon offline — the picked dir still applies to this project; the
     // recents list just won't persist for next time.
   }
+  // Thin invalidation: the daemon list changed, so the next read must not be
+  // answered by the shared burst cache.
+  evictCoalescedGet('recent-dirs');
   return next;
 }
 

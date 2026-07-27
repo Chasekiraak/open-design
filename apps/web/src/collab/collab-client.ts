@@ -14,6 +14,7 @@ import type {
 
 // Presence identity is the shared contract DTO; re-export so collab consumers
 // keep importing it from the client module.
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 export type { CollabPresenceMember };
 
 export interface CollabSnapshot {
@@ -211,6 +212,13 @@ export class CollabClient {
       this.contentTransferStateGeneration;
     try {
       const wasShared = this.isSharedProject();
+      // Deliberately NOT the shared single-flight read: the poll's transfer
+      // fences (`statusRequestGeneration` / `transferGenerationAtStart`) order
+      // responses by request START time. Joining an already-in-flight GET
+      // would let a poll issued AFTER a restart tombstone receive a body
+      // captured BEFORE it and apply pre-restart transfer state over the
+      // tombstone. One-shot consumers without ordering fences share
+      // `fetchProjectCollabStatus` below instead.
       const body = await this.get('/collab/status');
       const version = typeof body?.publishedVersion === 'number' ? body.publishedVersion : null;
       const materializedVersion =
@@ -345,6 +353,36 @@ export class CollabClient {
   private url(path: string): string {
     return `${this.baseUrl}/api/projects/${encodeURIComponent(this.projectId)}${path}`;
   }
+}
+
+/**
+ * Single-flight `/collab/status` read for one-shot consumers without local
+ * ordering fences (shared-status checks in FileWorkspace/FileViewer and
+ * similar display reads, Batch A §4.3). CollabClient's poll loop does NOT use
+ * this — see the comment in `pollStatus`. Short burst TTL only; call
+ * `evictProjectCollabStatusRead` when an authoritative change event demands a
+ * guaranteed-fresh read.
+ */
+export function fetchProjectCollabStatus(
+  projectId: string,
+  options?: { baseUrl?: string; fetchImpl?: typeof fetch },
+): Promise<Record<string, unknown> | null> {
+  const baseUrl = options?.baseUrl ?? '';
+  const fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  return coalescedGet(`collab-status:${baseUrl}|${projectId}`, async () => {
+    const response = await fetchImpl(
+      `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/collab/status`,
+    );
+    if (!response.ok) {
+      throw new Error(`collab GET /collab/status failed: ${response.status}`);
+    }
+    return (await response.json()) as Record<string, unknown>;
+  });
+}
+
+/** Thin invalidation for the shared status read (authoritative SSE change). */
+export function evictProjectCollabStatusRead(projectId: string, baseUrl = ''): void {
+  evictCoalescedGet(`collab-status:${baseUrl}|${projectId}`);
 }
 
 function isCollabMemberRole(value: unknown): value is CollabMemberRole {

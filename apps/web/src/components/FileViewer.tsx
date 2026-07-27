@@ -12,7 +12,6 @@ import {
   type ProjectFileVersion,
   type SocialShareRequest,
   type SocialShareResponse,
-  type WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
 import {
   anonymizeArtifactId,
@@ -187,27 +186,7 @@ import type {
 } from '../types';
 import { Icon } from './Icon';
 import { RemixIcon } from './RemixIcon';
-
-async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean> {
-  try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/status`);
-    if (response.ok) {
-      const body = (await response.json()) as { syncState?: unknown; ownerMemberId?: unknown };
-      if (typeof body.ownerMemberId === 'string' && body.ownerMemberId.trim()) return true;
-      if (typeof body.syncState === 'string' && body.syncState !== 'local_only') return true;
-    }
-  } catch {
-    // Fall through to the team-project directory below.
-  }
-  try {
-    const response = await fetch('/api/workspace/projects/team');
-    if (!response.ok) return false;
-    const body = (await response.json()) as WorkspaceTeamProjectsResponse;
-    return body.projects.some((project) => project.projectId === projectId);
-  } catch {
-    return false;
-  }
-}
+import { projectIsSharedWithWorkspace } from '../collab/project-shared-status';
 import { HandoffButton } from './HandoffButton';
 import { SocialShareGrid } from './SocialShareGrid';
 import { Toast } from './Toast';
@@ -6056,6 +6035,12 @@ function ReactComponentViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -6078,7 +6063,7 @@ function ReactComponentViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
@@ -7141,6 +7126,12 @@ function HtmlViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -7163,7 +7154,7 @@ function HtmlViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
