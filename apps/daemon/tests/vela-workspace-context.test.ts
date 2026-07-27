@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createCachedWorkspaceDirectoryFetcher,
   createVelaWorkspaceContextProvider,
   mapVelaWorkspaceContext,
 } from '../src/collab/vela-workspace-context.js';
@@ -91,6 +92,90 @@ describe('mapVelaWorkspaceContext', () => {
     expect(mapVelaWorkspaceContext({ ...B_TEAM_CONTEXT, lifecycleState: 'frozen' })).toBeNull();
     expect(mapVelaWorkspaceContext({ ...B_TEAM_CONTEXT, workspaceMemberId: '' })).toBeNull();
     expect(mapVelaWorkspaceContext(null)).toBeNull();
+  });
+});
+
+describe('createCachedWorkspaceDirectoryFetcher', () => {
+  it('coalesces concurrent readers and briefly reuses one authoritative success', async () => {
+    let now = 1_000;
+    let resolveRead:
+      | ((result: { ok: true; items: [] }) => void)
+      | undefined;
+    const fetchDirectory = vi.fn(
+      () =>
+        new Promise<{ ok: true; items: [] }>((resolve) => {
+          resolveRead = resolve;
+        }),
+    );
+    const read = createCachedWorkspaceDirectoryFetcher({
+      fetchDirectory,
+      ttlMs: 5_000,
+      now: () => now,
+    });
+
+    const first = read();
+    const concurrent = read();
+    expect(fetchDirectory).toHaveBeenCalledTimes(1);
+    resolveRead?.({ ok: true, items: [] });
+    await expect(first).resolves.toEqual({ ok: true, items: [] });
+    await expect(concurrent).resolves.toEqual({ ok: true, items: [] });
+
+    await expect(read()).resolves.toEqual({ ok: true, items: [] });
+    expect(fetchDirectory).toHaveBeenCalledTimes(1);
+
+    now += 5_000;
+    const refreshed = read();
+    expect(fetchDirectory).toHaveBeenCalledTimes(2);
+    resolveRead?.({ ok: true, items: [] });
+    await expect(refreshed).resolves.toEqual({ ok: true, items: [] });
+  });
+
+  it('does not cache a failed directory read', async () => {
+    const fetchDirectory = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, items: [] })
+      .mockResolvedValueOnce({ ok: true, items: [] });
+    const read = createCachedWorkspaceDirectoryFetcher({ fetchDirectory });
+
+    await expect(read()).resolves.toEqual({ ok: false, items: [] });
+    await expect(read()).resolves.toEqual({ ok: true, items: [] });
+    expect(fetchDirectory).toHaveBeenCalledTimes(2);
+  });
+
+  it('never serves account A cache or in-flight data after identity changes to B', async () => {
+    let identity = 'account-a';
+    const reads: Array<{
+      identity: string;
+      resolve: (result: { ok: true; items: [] }) => void;
+    }> = [];
+    const fetchDirectory = vi.fn(
+      () =>
+        new Promise<{ ok: true; items: [] }>((resolve) => {
+          reads.push({ identity, resolve });
+        }),
+    );
+    const read = createCachedWorkspaceDirectoryFetcher({
+      fetchDirectory,
+      identityKey: () => identity,
+    });
+
+    const accountA = read();
+    identity = 'account-b';
+    const accountB = read();
+    expect(fetchDirectory).toHaveBeenCalledTimes(2);
+    expect(reads.map((entry) => entry.identity)).toEqual(['account-a', 'account-b']);
+
+    reads[0]!.resolve({ ok: true, items: [] });
+    await expect(accountA).resolves.toEqual({ ok: true, items: [] });
+    let accountBResolved = false;
+    void accountB.then(() => {
+      accountBResolved = true;
+    });
+    await Promise.resolve();
+    expect(accountBResolved).toBe(false);
+
+    reads[1]!.resolve({ ok: true, items: [] });
+    await expect(accountB).resolves.toEqual({ ok: true, items: [] });
   });
 });
 

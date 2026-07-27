@@ -86,6 +86,8 @@ import {
   type WorkspaceResourceMutationCapability,
 } from '../../collab/workspace-resource-mutation.js';
 import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
+import { resolveProjectWorkspaceScope } from '../../collab/project-workspace-scope.js';
+import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
@@ -101,6 +103,12 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
    * like before this cross-check existed.
    */
   workspaceContext?: Pick<WorkspaceContextProvider, 'lastKnown'>;
+  /**
+   * Authoritative signed-in membership directory. Project detail uses it to
+   * resolve the project's persisted workspace independently from the daemon's
+   * ambient active workspace.
+   */
+  fetchWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   /**
    * Collab-cloud comment seams, threaded to the nested preview-comment routes.
    * `resolveAuthorMemberId` stamps the server-authoritative author AND identifies
@@ -3304,8 +3312,40 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       }
     }
     const resolvedDir = projectDetailResolvedDir(PROJECTS_DIR, project, resolveProjectDir);
+    const binding = getWorkspaceProjectByProjectId(db, project.id);
     /** @type {import('@open-design/contracts').ProjectResponse} */
-    const body = { project, resolvedDir };
+    const body = {
+      project: {
+        ...project,
+        workspaceId:
+          typeof binding?.workspaceId === 'string' && binding.workspaceId.trim()
+            ? binding.workspaceId.trim()
+            : null,
+      },
+      resolvedDir,
+    };
+    res.json(body);
+  });
+
+  app.get('/api/projects/:id/workspace-scope', async (req, res) => {
+    const project = getProject(db, req.params.id);
+    const locations = await configuredProjectLocations();
+    if (!project || !projectVisibleForLocations(project, locations)) {
+      return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
+    }
+    const binding = getWorkspaceProjectByProjectId(db, project.id);
+    const directory = ctx.fetchWorkspaceDirectory
+      ? await ctx.fetchWorkspaceDirectory().catch(
+          (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+        )
+      : { ok: false, items: [] };
+    const scope = resolveProjectWorkspaceScope({
+      projectId: project.id,
+      binding,
+      directory,
+    });
+    /** @type {import('@open-design/contracts').ProjectWorkspaceScopeResponse} */
+    const body = { scope };
     res.json(body);
   });
 

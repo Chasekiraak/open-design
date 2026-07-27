@@ -205,6 +205,33 @@ describe('workspace project routes', () => {
     expect(allB.projects.map((item) => item.id)).not.toContain(projectId);
   });
 
+  it('keeps the persisted workspace binding on the project detail read model', async () => {
+    const suffix = Date.now();
+    const projectId = `workspace-detail-scope-${suffix}`;
+    const workspaceA = `${workspaceId}-detail-a-${suffix}`;
+    const createResp = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: workspaceHeaders(workspaceA, 'member-detail-a'),
+      body: JSON.stringify({
+        id: projectId,
+        name: 'Project detail scope fixture',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(createResp.status).toBe(200);
+
+    const detailResp = await fetch(`${baseUrl}/api/projects/${projectId}`);
+    expect(detailResp.status).toBe(200);
+    const detail = (await detailResp.json()) as {
+      project: { id: string; workspaceId?: string | null };
+    };
+    expect(detail.project).toMatchObject({
+      id: projectId,
+      workspaceId: workspaceA,
+    });
+  });
+
   // Adoption must never mint a second row for a project that already has one.
   // The narrowed primary key would reject it, so a regression here surfaces as a
   // 500 rather than a silent duplicate — but the read path must not get there.

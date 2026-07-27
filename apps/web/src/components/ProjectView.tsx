@@ -223,6 +223,11 @@ import { DesignSystemPicker } from './DesignSystemPicker';
 import { PresenceBar } from '../collab/PresenceBar';
 import { useProjectCollab } from '../collab/useProjectCollab';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  projectWorkspaceContext,
+  projectWorkspaceScopeReady,
+  useProjectWorkspaceScope,
+} from '../collab/useProjectWorkspaceScope';
 import { CollabProvider, type CollabContextValue } from '../collab/collab-context';
 import { persistCommentAnchors } from '../collab/comment-anchor-client';
 import type { AnchorWriteBack } from '../comments';
@@ -1438,6 +1443,13 @@ export function ProjectView({
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
   const { context: workspaceContext } = useWorkspaceContext();
+  const projectWorkspaceScopeState = useProjectWorkspaceScope(project.id);
+  const projectRunWorkspaceContext = projectWorkspaceContext(
+    projectWorkspaceScopeState.scope,
+  );
+  const projectRunWorkspaceScopeReady = projectWorkspaceScopeReady(
+    projectWorkspaceScopeState.scope,
+  );
   // Onboarding first-generation funnel (spec §11.1). Consume the pending entry
   // (set by the Home recommendation) exactly once on mount; the refs guard the
   // two lifecycle events so each fires only for the genuine first send / first
@@ -2015,7 +2027,8 @@ export function ProjectView({
     currentConversationHasActiveRun
     && !currentConversationStreaming
     && !currentConversationHasProgrammaticBrandExtractionRun;
-  const currentConversationSendDisabled = currentConversationLoading
+  const currentConversationSendDisabled = !projectRunWorkspaceScopeReady
+    || currentConversationLoading
     || failedMessagesConversationId === activeConversationId
     || currentConversationAwaitingActiveRunAttach;
   const currentConversationActionDisabled = currentConversationBusy || currentConversationSendDisabled;
@@ -5130,6 +5143,10 @@ export function ProjectView({
         attachments.length === 0 &&
         commentAttachments.length === 0
       ) return false;
+      // A bound project must resolve its own persisted workspace membership
+      // before any run can start. Never borrow the ambient navigation
+      // workspace while the exact project scope is loading or unavailable.
+      if (!projectRunWorkspaceScopeReady) return false;
       const effectiveAttachments = mergeChatAttachments(
         attachments,
         ...commentAttachments.map((attachment) =>
@@ -5195,10 +5212,10 @@ export function ProjectView({
         amrGateInFlightConversationsRef.current.add(gateConversationId);
         try {
           const gate = await checkAmrBalanceGate(
-            workspaceContext
+            projectRunWorkspaceContext
               ? {
-                  workspaceType: workspaceContext.workspaceType,
-                  workspaceId: workspaceContext.workspaceId,
+                  workspaceType: projectRunWorkspaceContext.workspaceType,
+                  workspaceId: projectRunWorkspaceContext.workspaceId,
                 }
               : undefined,
           );
@@ -6231,7 +6248,7 @@ export function ProjectView({
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
           designSystemId: projectDesignSystemId ?? null,
-          workspaceContext,
+          workspaceContext: projectRunWorkspaceContext,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6392,7 +6409,7 @@ export function ProjectView({
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
           designSystemId: projectDesignSystemId ?? null,
-          workspaceContext,
+          workspaceContext: projectRunWorkspaceContext,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6502,6 +6519,8 @@ export function ProjectView({
       byokImageModelOptionsPV,
       byokVideoModelOptionsPV,
       byokSpeechModelOptionsPV,
+      projectRunWorkspaceContext,
+      projectRunWorkspaceScopeReady,
     ],
   );
 
@@ -8811,6 +8830,7 @@ export function ProjectView({
   useEffect(() => {
     if (autoSentRef.current) return;
     if (!activeConversationId) return;
+    if (!projectRunWorkspaceScopeReady) return;
     // Wait for the initial listMessages DB read to land. Without this gate
     // the auto-send fires before the in-flight DB response, which then
     // arrives with `setMessages([])` and wipes the freshly-pushed user +
@@ -8869,6 +8889,7 @@ export function ProjectView({
     project.metadata,
     initialDraft,
     project.pendingPrompt,
+    projectRunWorkspaceScopeReady,
     handleSend,
   ]);
 
@@ -8937,6 +8958,7 @@ export function ProjectView({
         onOpenSettings={onOpenSettings}
         onRefreshAgents={onRefreshAgents}
         placement="up"
+        projectWorkspaceScope={projectWorkspaceScopeState}
       />
     </>
   );

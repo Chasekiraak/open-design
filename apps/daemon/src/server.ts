@@ -190,7 +190,6 @@ import {
   detectAgents,
   getAgentDef,
   isKnownModel,
-  openDesignAmrTraceEnv,
   applyAgentLaunchEnv,
   resolveAgentLaunch,
   sanitizeCustomModel,
@@ -690,7 +689,9 @@ import {
   projectCollabScope,
 } from './collab/team-share-scope.js';
 import { resolveWorkspaceScope } from './collab/workspace-scope.js';
+import { openDesignAmrTraceEnvForProject } from './runtimes/project-amr-trace-env.js';
 import {
+  createCachedWorkspaceDirectoryFetcher,
   createWorkspaceContextProviderFromEnv,
   fetchVelaWorkspaceDirectory,
 } from './collab/vela-workspace-context.js';
@@ -2736,11 +2737,13 @@ export async function startServer({
   // recorded in — and a project-scoped collab call may only be pinned to — a
   // workspace that can actually host a team plane. See collab/team-share-scope.ts.
   const workspaceTypes = createWorkspaceTypeRegistry();
-  const fetchWorkspaceDirectory = async () => {
-    const result = await fetchVelaWorkspaceDirectory();
-    if (result.ok) workspaceTypes.learn(result.items);
-    return result;
-  };
+  const fetchWorkspaceDirectory = createCachedWorkspaceDirectoryFetcher({
+    fetchDirectory: async () => {
+      const result = await fetchVelaWorkspaceDirectory();
+      if (result.ok) workspaceTypes.learn(result.items);
+      return result;
+    },
+  });
   const listWorkspaceDirectory = async () => {
     const result = await fetchWorkspaceDirectory();
     return result.items;
@@ -5091,6 +5094,7 @@ export async function startServer({
     // Same provider `collab` was built with (collab.workspaceContext ===
     // workspaceContext) — see the mutation-gate cross-check note above.
     workspaceContext,
+    fetchWorkspaceDirectory,
     events: projectEventDeps,
     ids: idDeps,
     telemetry: { reportFinalizedMessage },
@@ -8713,26 +8717,21 @@ export async function startServer({
         ...(mmdRouteLaunchEnv || {}),
         ...odMediaEnv,
         ...(byokOpenCodeProvider ? byokOpenCodeProvider.env : {}),
-        ...openDesignAmrTraceEnv({
+        ...await openDesignAmrTraceEnvForProject(db, {
           agentId: def.id,
           runId: run.id,
           conversationId: run.conversationId,
           runAttempt: run.retryAttemptCount ?? 0,
-          // Vela's workspace-credit isolation reads this env purely to
-          // decide which workspace's wallet an AMR spend attributes to — the
-          // project's own pinned TEAM workspace, never the account's ambient
-          // "current selection" (a workspace switched elsewhere must not
-          // re-aim a run that is already in flight for a different project).
-          // No team pin (personal project) means no header at all, so vela's
-          // NULL-sponsor fallback attributes the spend to the caller's own
-          // personal wallet.
-          workspaceId: resolveWorkspaceScope({
-            projectWorkspaceId:
-              typeof projectId === 'string' && projectId
-                ? findTeamWorkspaceIdForProject(db, projectId)
-                : null,
-          }).workspaceId,
-        }),
+          // Vela's workspace-credit isolation reads this env purely to decide
+          // which wallet an AMR spend attributes to. SQLite pins the project's
+          // workspace; the daemon's shared authoritative directory proves that
+          // exact workspace/member and distinguishes team from personal.
+          // Project visibility is intentionally irrelevant: a private draft in
+          // a team workspace still spends the team wallet. A personal workspace
+          // emits no header, so Vela's NULL-sponsor fallback uses the caller's
+          // account wallet. Ambient/current selection never participates.
+          projectId,
+        }, { fetchWorkspaceDirectory }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the
         // daemon-built MCP config wins over a stale value the user

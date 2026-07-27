@@ -318,8 +318,21 @@ function billingInvalidationToken(event: BillingInvalidation): string {
  * workspace wallet are independently nullable, so a summary outage cannot
  * erase workspace money. Null means the scoped request itself has not resolved.
  */
-export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
-  const { context, loading: contextLoading } = useWorkspaceContext();
+export function useWorkspaceBillingResponse(explicitScope?: {
+  context: WorkspaceCollabContext | null;
+  loading?: boolean;
+  /**
+   * Identity epoch for a caller whose exact scope can cycle A→B→A. Project
+   * detail normally stays pinned and may omit it; ambient navigation uses the
+   * provider's global context revision below.
+   */
+  revision?: string | number;
+}): WorkspaceBillingResponse | null {
+  const ambient = useWorkspaceContext();
+  const context = explicitScope ? explicitScope.context : ambient.context;
+  const contextLoading = explicitScope
+    ? explicitScope.loading === true
+    : ambient.loading;
   const workspaceId = context?.workspaceId?.trim() ?? '';
   const workspaceMemberId = context?.workspaceMemberId?.trim() ?? '';
   const billingScopeKey =
@@ -339,7 +352,9 @@ export function useWorkspaceBillingResponse(): WorkspaceBillingResponse | null {
   // The same workspace can be left and selected again while an earlier read is
   // still in flight. The context revision makes A→B→A a new request identity.
   const billingRequestKey = billingScopeKey
-    ? `${billingScopeKey}:context-revision:${workspaceContextRevision}`
+    ? `${billingScopeKey}:context-revision:${
+        explicitScope?.revision ?? workspaceContextRevision
+      }`
     : null;
   const billingRuntimeGeneration =
     billingRequestKey && context?.workspaceType === 'team'

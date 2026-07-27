@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectView, mergeSavedPreviewComment } from '../../src/components/ProjectView';
 import type { SettingsSection } from '../../src/components/SettingsDialog';
+import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 import type {
   AgentInfo,
   AppConfig,
@@ -43,6 +45,18 @@ const saveTabs = vi.fn();
 const playSound = vi.fn();
 const showCompletionNotification = vi.fn();
 const analyticsTrackMock = vi.fn();
+const workspaceScopeMocks = vi.hoisted(() => ({
+  ambientContext: null as WorkspaceCollabContext | null,
+  projectScope: {
+    loading: false,
+    scope: {
+      kind: 'unbound' as const,
+      projectId: 'project-1',
+      workspaceId: null,
+      context: null,
+    },
+  } as ProjectWorkspaceScopeState,
+}));
 
 vi.mock('../../src/analytics/provider', () => ({
   useAnalytics: () => ({
@@ -61,6 +75,24 @@ vi.mock('../../src/i18n', () => ({
 
 vi.mock('../../src/providers/anthropic', () => ({
   streamMessage: (...args: unknown[]) => streamMessage(...args),
+}));
+
+vi.mock('../../src/collab/useWorkspaceContext', () => ({
+  useWorkspaceContext: () => ({
+    context: workspaceScopeMocks.ambientContext,
+    loading: false,
+  }),
+  useWorkspaceBilling: () => null,
+}));
+
+vi.mock('../../src/collab/useProjectWorkspaceScope', () => ({
+  useProjectWorkspaceScope: () => workspaceScopeMocks.projectScope,
+  projectWorkspaceContext: (scope: ProjectWorkspaceScopeState['scope']) =>
+    scope?.kind === 'personal' || scope?.kind === 'team'
+      ? scope.context
+      : null,
+  projectWorkspaceScopeReady: (scope: ProjectWorkspaceScopeState['scope']) =>
+    scope?.kind === 'unbound' || scope?.kind === 'personal' || scope?.kind === 'team',
 }));
 
 vi.mock('../../src/providers/daemon', () => ({
@@ -505,6 +537,41 @@ const createdConversation: Conversation = {
   updatedAt: 2,
 };
 
+function teamWorkspaceContext(
+  workspaceId: string,
+  workspaceMemberId: string,
+): WorkspaceCollabContext {
+  return {
+    workspaceId,
+    workspaceType: 'team',
+    workspaceMemberId,
+    role: 'member',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: 'team_pro',
+    providerMode: 'platform_credits',
+    seatSummary: {
+      seatLimit: 5,
+      usedSeats: 2,
+      availableSeats: 3,
+      isSeatFull: false,
+    },
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    teamId: workspaceId,
+    teamName: workspaceId,
+  };
+}
+
 const runningAssistant: ChatMessage = {
   id: 'assistant-a',
   role: 'assistant',
@@ -570,6 +637,16 @@ describe('ProjectView conversation run isolation', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    workspaceScopeMocks.ambientContext = null;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'unbound',
+        projectId: project.id,
+        workspaceId: null,
+        context: null,
+      },
+    };
     resolveConversationBMessages = null;
     conversationAMessages = [runningAssistant];
     listConversations.mockResolvedValue(conversations);
@@ -656,6 +733,95 @@ describe('ProjectView conversation run isolation', () => {
         conversationId: 'conv-b',
         locale: 'zh-CN',
       }),
+    );
+  });
+
+  it('uses the project-bound workspace instead of the ambient workspace for run authorization', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+
+    renderProjectView(config, { ...project, workspaceId: workspaceA.workspaceId });
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        workspaceContext: workspaceA,
+      }),
+    );
+  });
+
+  it('checks the project-bound team wallet instead of the ambient workspace wallet', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/workspace/billing')) {
+        const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            workspaceId,
+            workspaceMemberId: workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b',
+            balanceUsd: '10.00',
+            billingScopeVersion: 2,
+            expiresAt: null,
+            updatedAt: null,
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      { ...project, workspaceId: workspaceA.workspaceId },
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`workspaceId=${encodeURIComponent(workspaceA.workspaceId)}`),
+      { cache: 'no-store' },
     );
   });
 

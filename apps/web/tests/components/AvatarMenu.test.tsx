@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import { AvatarMenu } from '../../src/components/AvatarMenu';
+import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
 import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
 
 vi.mock('../../src/i18n', () => ({
@@ -122,6 +123,35 @@ const baseConfig: AppConfig = {
   agentCliEnv: {},
 };
 
+type EventSourceListener = (event: unknown) => void;
+class MockAvatarEventSource {
+  static instances: MockAvatarEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<EventSourceListener>>();
+
+  constructor(readonly url: string) {
+    MockAvatarEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventSourceListener): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+
+  removeEventListener(name: string, listener: EventSourceListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string, data: unknown): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close(): void {}
+}
+
 type ModeChangeHandler = (mode: ExecMode) => void;
 type AgentChangeHandler = (id: string) => void;
 type AgentModelChangeHandler = (
@@ -140,6 +170,7 @@ function renderMenu({
   onAgentModelChange = vi.fn<AgentModelChangeHandler>(),
   onOpenSettings = vi.fn<OpenSettingsHandler>(),
   onRefreshAgents = vi.fn<VoidHandler>(),
+  projectWorkspaceScope,
 }: {
   config?: AppConfig;
   agents?: AgentInfo[];
@@ -149,6 +180,7 @@ function renderMenu({
   onAgentModelChange?: ReturnType<typeof vi.fn<AgentModelChangeHandler>>;
   onOpenSettings?: ReturnType<typeof vi.fn<OpenSettingsHandler>>;
   onRefreshAgents?: ReturnType<typeof vi.fn<VoidHandler>>;
+  projectWorkspaceScope?: ProjectWorkspaceScopeState;
 } = {}) {
   render(
     <AvatarMenu
@@ -160,6 +192,7 @@ function renderMenu({
       onAgentModelChange={onAgentModelChange}
       onOpenSettings={onOpenSettings}
       onRefreshAgents={onRefreshAgents}
+      projectWorkspaceScope={projectWorkspaceScope}
     />,
   );
   return {
@@ -182,6 +215,7 @@ describe('AvatarMenu', () => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
     vi.clearAllMocks();
+    MockAvatarEventSource.instances = [];
   });
 
   // The composer popover is a one-decision surface: pick the model for the
@@ -545,6 +579,91 @@ describe('AvatarMenu', () => {
     const dialog = openMenu();
     expect(await within(dialog).findByText('$7.89')).toBeTruthy();
     expect(within(dialog).queryByText('$247.51')).toBeNull();
+  });
+
+  it('renders and refreshes the project-bound balance while ambient navigation is elsewhere', async () => {
+    let balance = '131.08';
+    vi.stubGlobal('EventSource', MockAvatarEventSource as unknown as typeof EventSource);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '247.5087' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext({
+          workspaceId: 'workspace-b',
+          workspaceMemberId: 'member-b',
+          teamId: 'workspace-b',
+        }));
+      }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=workspace-a') {
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'workspace-a',
+            workspaceMemberId: 'member-a',
+            balanceUsd: balance,
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 202 });
+    }));
+
+    renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      agents: [{
+        id: 'amr',
+        name: 'Open Design AMR',
+        bin: 'vela',
+        available: true,
+        models: [{ id: 'default', label: 'Default (CLI config)' }],
+      }],
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'team',
+          projectId: 'project-a',
+          workspaceId: 'workspace-a',
+          visibility: 'personal',
+          context: teamMemberWorkspaceContext({
+            workspaceId: 'workspace-a',
+            workspaceMemberId: 'member-a',
+            teamId: 'workspace-a',
+          }) as WorkspaceCollabContext & { workspaceType: 'team' },
+        },
+      },
+    });
+
+    const dialog = openMenu();
+    expect(await within(dialog).findByText('$131.08')).toBeTruthy();
+    expect(within(dialog).queryByText('$247.51')).toBeNull();
+
+    balance = '132.09';
+    act(() => {
+      MockAvatarEventSource.instances[0]!.dispatch('wallet-balance-changed', {
+        type: 'wallet-balance-changed',
+        workspaceId: 'workspace-a',
+        workspaceMemberId: 'member-a',
+        revision: 'wallet-project-a',
+      });
+    });
+    expect(await within(dialog).findByText('$132.09')).toBeTruthy();
   });
 
   it('omits wallet and upgrade links for non-upgradeable plans', async () => {

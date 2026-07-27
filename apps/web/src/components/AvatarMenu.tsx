@@ -26,6 +26,11 @@ import {
   useWorkspaceContext,
   workspaceBillingBalanceUsd,
 } from '../collab/useWorkspaceContext';
+import {
+  projectWorkspaceContext,
+  projectWorkspaceScopeReady,
+  type ProjectWorkspaceScopeState,
+} from '../collab/useProjectWorkspaceScope';
 
 interface Props {
   config: AppConfig;
@@ -45,6 +50,12 @@ interface Props {
   placement?: 'down' | 'up';
   /** Fired when the dropdown transitions from closed to open. */
   onOpen?: () => void;
+  /**
+   * Project detail supplies its daemon-authoritative persisted workspace
+   * scope. Other surfaces omit it and continue using the ambient navigation
+   * workspace.
+   */
+  projectWorkspaceScope?: ProjectWorkspaceScopeState;
 }
 
 function displayAgentName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
@@ -67,6 +78,7 @@ export function AvatarMenu({
   onBack,
   placement = 'down',
   onOpen,
+  projectWorkspaceScope,
 }: Props) {
   const t = useT();
   const analytics = useAnalytics();
@@ -74,10 +86,27 @@ export function AvatarMenu({
   // not just plan tier — a team member without `canManageBilling` (owner-only)
   // can't act on an upgrade even when the tier itself is upgradeable.
   const {
-    context: workspaceContext,
-    loading: workspaceContextLoading,
+    context: ambientWorkspaceContext,
+    loading: ambientWorkspaceContextLoading,
   } = useWorkspaceContext();
-  const workspaceBillingResponse = useWorkspaceBillingResponse();
+  const workspaceContext = projectWorkspaceScope
+    ? projectWorkspaceContext(projectWorkspaceScope.scope)
+    : ambientWorkspaceContext;
+  const workspaceContextLoading = projectWorkspaceScope
+    ? projectWorkspaceScope.loading ||
+      !projectWorkspaceScopeReady(projectWorkspaceScope.scope)
+    : ambientWorkspaceContextLoading;
+  const workspaceBillingResponse = useWorkspaceBillingResponse(
+    projectWorkspaceScope
+      ? {
+          context: workspaceContext,
+          loading: workspaceContextLoading,
+          revision: `${projectWorkspaceScope.scope?.projectId ?? 'unknown'}:${
+            projectWorkspaceScope.scope?.workspaceId ?? 'unbound'
+          }`,
+        }
+      : undefined,
+  );
   const [open, setOpen] = useState(false);
   // Toggle that reports the closed→open transition (for analytics) without
   // firing on close.
