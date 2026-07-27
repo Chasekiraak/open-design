@@ -1119,6 +1119,7 @@ export const ru: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Сбросить фильтры',
   'pluginsHome.title': 'Сообщество',
   'pluginsHome.subtitle': 'Готовые рабочие процессы Open Design, входящие в состав этой среды выполнения. Выберите один, чтобы загрузить стартовый запрос, или просмотрите реестр для дополнительных вариантов.',

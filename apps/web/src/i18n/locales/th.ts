@@ -1119,6 +1119,7 @@ export const th: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'ล้างตัวกรอง',
   'pluginsHome.title': 'คอมมูนิตี้',
   'pluginsHome.subtitle': 'เวิร์กโฟลว์ Open Design พร้อมใช้งานที่มาพร้อมกับรันไทม์นี้ เลือกหนึ่งรายการเพื่อโหลดพรอมป์ต์เริ่มต้น หรือเรียกดูรีจิสตรีเพื่อดูเพิ่มเติม',

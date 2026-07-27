@@ -14,6 +14,8 @@ import {
   listProjects,
   listWorkspaceProjectSummaries,
   listPlugins,
+  moveWorkspaceProject,
+  workspaceProjectMoveErrorCode,
   patchProject,
   pickLocalFolderPath,
   publishGeneratedPluginToGitHub,
@@ -941,5 +943,53 @@ describe('pickLocalFolderPath', () => {
     )));
 
     await expect(pickLocalFolderPath()).rejects.toThrow('cross-origin request rejected');
+  });
+});
+
+describe('moveWorkspaceProject error surfaces (recvqzjnshIlOe)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('carries the daemon contract error code so the UI can tell a permanent owner conflict from a transient failure', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        error: {
+          code: 'TEAM_PROJECT_OWNER_CONFLICT',
+          message: 'Error: … 403: {"error":"team_project_owner_conflict"}',
+        },
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )));
+
+    const attempt = moveWorkspaceProject({
+      projectId: 'wsclone-visual-verify',
+      visibility: 'team',
+      workspaceContext: teamWorkspaceContext(),
+    });
+    const error = await attempt.then(
+      () => {
+        throw new Error('expected the move to reject');
+      },
+      (err: unknown) => err,
+    );
+    expect(workspaceProjectMoveErrorCode(error)).toBe('TEAM_PROJECT_OWNER_CONFLICT');
+    expect(String(error)).toMatch(/team_project_owner_conflict/);
+  });
+
+  it('classifies a body-less failure as code-less (generic handling)', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(null, { status: 502 })));
+
+    const error = await moveWorkspaceProject({
+      projectId: 'p1',
+      visibility: 'team',
+      workspaceContext: teamWorkspaceContext(),
+    }).then(
+      () => {
+        throw new Error('expected the move to reject');
+      },
+      (err: unknown) => err,
+    );
+    expect(workspaceProjectMoveErrorCode(error)).toBeNull();
   });
 });

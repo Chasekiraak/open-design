@@ -748,6 +748,7 @@ import {
   handleHubTeamProjectsChanged,
   handlePolledWorkspaceInvalidation,
   reconcileWorkspaceProjectsWithRemote,
+  reconcilerRemoteTeamProjects,
   type LocalTeamProjectBinding,
 } from './collab/workspace-projects-reconciler.js';
 import {
@@ -3267,9 +3268,11 @@ export async function startServer({
    * a value cached before the unshare is still gated. Owner scoping keeps a
    * teammate's own share of the same project id visible.
    */
-  const withoutLocallyUnsharedProjects = async (
-    projects: TeamProject[],
-  ): Promise<TeamProject[]> => {
+  const withoutLocallyUnsharedProjects = async <
+    T extends { projectId: string; ownerMemberId: string },
+  >(
+    projects: T[],
+  ): Promise<T[]> => {
     const workspaceId = activeWorkspace.get();
     if (!workspaceId || projects.length === 0) return projects;
     const memberId = contextToResourceHubPrincipal(
@@ -3303,11 +3306,36 @@ export async function startServer({
         if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
         return { workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
       },
+      // Membership, not display: a catalog row whose latest publish failed is
+      // still registered to its owner, so it must keep counting as "remote
+      // lists it" here even though the display list hides it. Judging this
+      // dep by the display read demoted a teammate's sync-failed mirror into
+      // a self-attributed personal draft (recvqzjnshIlOe) — see
+      // `reconcilerRemoteTeamProjects`'s invariant comment. Both sources run
+      // through `withoutLocallyUnsharedProjects` so a row this member just
+      // moved back to personal cannot be re-bound out from under the move
+      // while the hub deletion is still propagating.
+      // The membership read is deliberately UNCACHED (the raw catalog client,
+      // not the SWR-wrapped display caches): reconciliation only runs on
+      // team-projects-changed signals, and a ≤TTL-stale list here is exactly
+      // the shape that misreads a just-shared row as absent.
       listRemoteTeamProjects: async () =>
-        (await teamProjectsForDisplay()).map((project) => ({
-          projectId: project.projectId,
-          ownerMemberId: project.ownerMemberId,
-        })),
+        reconcilerRemoteTeamProjects({
+          listCatalogMembership: velaCliWorkspaceTeamProjectCatalog
+            ? async () =>
+              (await withoutLocallyUnsharedProjects(
+                await velaCliWorkspaceTeamProjectCatalog.list(),
+              )).map((record) => ({
+                projectId: record.projectId,
+                ownerMemberId: record.ownerMemberId,
+              }))
+            : null,
+          listDisplayTeamProjects: async () =>
+            (await teamProjectsForDisplay()).map((project) => ({
+              projectId: project.projectId,
+              ownerMemberId: project.ownerMemberId,
+            })),
+        }),
       // Materialization gate for the bind direction — see the dep's doc
       // comment in workspace-projects-reconciler.ts. `getProject` is the same
       // `projects`-table read `workspace_projects`' FOREIGN KEY points at.

@@ -7,6 +7,7 @@
 
 import { coalescedGet } from '../lib/coalesced-get';
 import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
+import { API_ERROR_CODES, type ApiErrorCode } from '@open-design/contracts';
 import type {
   AppliedPluginSnapshot,
   ApplyResult,
@@ -76,6 +77,37 @@ export function workspaceProjectHeaders(context: WorkspaceCollabContext): Header
   };
 }
 
+/**
+ * A workspace project move the daemon refused, carrying the contract error
+ * code (`ApiError.code`) when the response body names one. Kept as a named
+ * class so UI callers can branch on `code` — `TEAM_PROJECT_OWNER_CONFLICT`
+ * is a permanent ownership conflict that must not render as the generic
+ * "try again later" hint.
+ */
+export class WorkspaceProjectMoveError extends Error {
+  readonly code: ApiErrorCode | null;
+
+  constructor(message: string, code: ApiErrorCode | null) {
+    super(message);
+    this.name = 'WorkspaceProjectMoveError';
+    this.code = code;
+  }
+}
+
+/**
+ * The contract error code a failed move carries, or null. Duck-typed on a
+ * string `code` property (validated against `API_ERROR_CODES`) instead of
+ * `instanceof`, so callers and tests can classify any conforming error
+ * without importing the concrete class.
+ */
+export function workspaceProjectMoveErrorCode(error: unknown): ApiErrorCode | null {
+  if (!(error instanceof Error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && (API_ERROR_CODES as readonly string[]).includes(code)
+    ? (code as ApiErrorCode)
+    : null;
+}
+
 export async function moveWorkspaceProject(input: {
   projectId: string;
   visibility: ProjectVisibility;
@@ -94,7 +126,28 @@ export async function moveWorkspaceProject(input: {
       body: JSON.stringify({ visibility: input.visibility }),
     },
   );
-  if (!resp.ok) throw new Error(`workspace project move failed with status ${resp.status}`);
+  if (!resp.ok) {
+    let message = `workspace project move failed with status ${resp.status}`;
+    let code: ApiErrorCode | null = null;
+    try {
+      const body = await resp.json() as { error?: unknown };
+      if (body.error && typeof body.error === 'object') {
+        const errorBody = body.error as { code?: unknown; message?: unknown };
+        if (
+          typeof errorBody.code === 'string' &&
+          (API_ERROR_CODES as readonly string[]).includes(errorBody.code)
+        ) {
+          code = errorBody.code as ApiErrorCode;
+        }
+        if (typeof errorBody.message === 'string' && errorBody.message.trim()) {
+          message = errorBody.message;
+        }
+      }
+    } catch {
+      // Keep the generic fallback when the error body is absent or invalid.
+    }
+    throw new WorkspaceProjectMoveError(message, code);
+  }
   const json = (await resp.json()) as { project: WorkspaceProjectSummary };
   return json.project;
 }

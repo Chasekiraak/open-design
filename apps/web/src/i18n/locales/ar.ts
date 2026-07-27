@@ -1119,6 +1119,7 @@ export const ar: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'مسح عوامل التصفية',
   'pluginsHome.title': 'المجتمع',
   'pluginsHome.subtitle': 'سير عمل Open Design جاهز للاستخدام ومرفق بهذا التشغيل. اختر واحدًا لتحميل موجّه بدء، أو تصفّح السجل للمزيد.',

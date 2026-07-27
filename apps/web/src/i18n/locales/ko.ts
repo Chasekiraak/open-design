@@ -1119,6 +1119,7 @@ export const ko: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': '필터 지우기',
   'pluginsHome.title': '커뮤니티',
   'pluginsHome.subtitle': '이 런타임에 번들로 제공되는 바로 사용 가능한 Open Design 워크플로입니다. 하나를 선택해 시작용 프롬프트를 불러오거나, 레지스트리에서 더 둘러보세요.',

@@ -1119,6 +1119,7 @@ export const uk: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Очистити фільтри',
   'pluginsHome.title': 'Спільнота',
   'pluginsHome.subtitle': 'Готові до використання робочі процеси Open Design, що постачаються з цим середовищем виконання. Виберіть один, щоб завантажити початковий запит, або перегляньте реєстр для отримання інших.',

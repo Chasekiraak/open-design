@@ -1119,6 +1119,7 @@ export const hu: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Szűrők törlése',
   'pluginsHome.title': 'Közösség',
   'pluginsHome.subtitle': 'Ehhez a futtatókörnyezethez csomagolt, használatra kész Open Design munkafolyamatok. Válasszon egyet egy kezdő prompt betöltéséhez, vagy böngésszen a registry-ben továbbiakért.',

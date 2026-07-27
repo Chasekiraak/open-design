@@ -1516,6 +1516,7 @@ export interface Dict {
   'recentProjects.moveOutOfTeam': string;
   'recentProjects.unshareFailed': string;
   'recentProjects.shareFailed': string;
+  'recentProjects.shareOwnerConflict': string;
   'recentProjects.clearFilters': string;
   'pluginsHome.title': string;
   'pluginsHome.subtitle': string;

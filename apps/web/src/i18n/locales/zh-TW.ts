@@ -1134,6 +1134,7 @@ export const zhTW: Dict = {
   "recentProjects.moveOutOfTeam": "移出團隊空間",
   "recentProjects.unshareFailed": "移出團隊空間失敗，請稍後重試。",
   "recentProjects.shareFailed": "轉入團隊空間失敗，請稍後重試。",
+  "recentProjects.shareOwnerConflict": "轉入團隊空間失敗：此專案已由其他成員分享至團隊空間。",
   "recentProjects.clearFilters": "清除篩選條件",
   "pluginsHome.title": "社群",
   "pluginsHome.subtitle":

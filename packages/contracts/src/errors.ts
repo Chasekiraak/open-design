@@ -131,6 +131,13 @@ export const API_ERROR_CODES = [
   'WORKSPACE_AUTHORITY_UNAVAILABLE',
   'WORKSPACE_RESOURCE_FROZEN',
   'WORKSPACE_RESOURCE_DELETED',
+  // Moving a project into the team space was refused because the team hub
+  // already registers the project under a DIFFERENT member's ownership
+  // (vela `team_project_owner_conflict`). This is a permanent ownership
+  // conflict, not a transient failure: retrying cannot succeed until the
+  // registered owner unshares the project, so clients must not render it as
+  // a "try again later" error.
+  'TEAM_PROJECT_OWNER_CONFLICT',
   'INTERNAL_ERROR',
 ] as const;
 

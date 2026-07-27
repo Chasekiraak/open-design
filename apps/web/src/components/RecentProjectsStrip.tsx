@@ -30,7 +30,7 @@ import {
   resolveWorkspaceInviteTarget,
   workspaceUpgradeUrl,
 } from './EntryNavRail';
-import { moveWorkspaceProject } from '../state/projects';
+import { moveWorkspaceProject, workspaceProjectMoveErrorCode } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
 
@@ -422,7 +422,11 @@ export function RecentProjectsStrip({
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [unsharingId, setUnsharingId] = useState<string | null>(null);
   const [shareErrorProjectId, setShareErrorProjectId] = useState<string | null>(null);
-  const [shareErrorKind, setShareErrorKind] = useState<'share' | 'unshare'>('share');
+  // 'owner-conflict' is the daemon's TEAM_PROJECT_OWNER_CONFLICT refusal: the
+  // team hub already registers this project under another member's ownership.
+  // That state is permanent until the registered owner unshares, so it gets
+  // its own message instead of the retryable 'share' hint.
+  const [shareErrorKind, setShareErrorKind] = useState<'share' | 'unshare' | 'owner-conflict'>('share');
   // Whether a card is team-shared is decided upstream, not here — the grids'
   // 全部项目 / 草稿 partition reads the very same predicate, so the badge and the
   // card's grid can no longer disagree.
@@ -808,7 +812,11 @@ export function RecentProjectsStrip({
     } catch (err) {
       console.warn('[RecentProjectsStrip] share project to team failed:', err);
       setShareErrorProjectId(project.id);
-      setShareErrorKind('share');
+      setShareErrorKind(
+        workspaceProjectMoveErrorCode(err) === 'TEAM_PROJECT_OWNER_CONFLICT'
+          ? 'owner-conflict'
+          : 'share',
+      );
       setMenuOpenId(project.id);
     } finally {
       setSharingId(null);
@@ -1485,7 +1493,9 @@ export function RecentProjectsStrip({
                           {t(
                             shareErrorKind === 'unshare'
                               ? 'recentProjects.unshareFailed'
-                              : 'recentProjects.shareFailed',
+                              : shareErrorKind === 'owner-conflict'
+                                ? 'recentProjects.shareOwnerConflict'
+                                : 'recentProjects.shareFailed',
                           )}
                         </div>
                       ) : null}

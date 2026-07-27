@@ -1119,6 +1119,7 @@ export const fa: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'پاک کردن فیلترها',
   'pluginsHome.title': 'انجمن',
   'pluginsHome.subtitle': 'گردش‌کارهای آماده Open Design که همراه این runtime ارائه شده‌اند. یکی را برای بارگذاری یک پرامپت شروع انتخاب کنید، یا برای موارد بیشتر در رجیستری بگردید.',

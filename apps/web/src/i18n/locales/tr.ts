@@ -1119,6 +1119,7 @@ export const tr: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Filtreleri temizle',
   'pluginsHome.title': 'Topluluk',
   'pluginsHome.subtitle': 'Bu çalışma zamanıyla birlikte gelen, kullanıma hazır Open Design iş akışları. Başlangıç istemi yüklemek için birini seçin veya daha fazlası için kayıt defterine göz atın.',

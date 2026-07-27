@@ -2554,6 +2554,20 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     });
   }
 
+  /**
+   * True when a team-share request was refused because the hub catalog
+   * already registers this project under a DIFFERENT member's ownership
+   * (vela's `team_project_owner_conflict`, re-thrown through the CLI
+   * transport). The literal is the hub API's stable error token, so matching
+   * it keeps this mapping independent of how the CLI frames its stderr text.
+   * The conflict is permanent until the registered owner unshares the
+   * project, so it must not collapse into the generic BAD_REQUEST bucket the
+   * web renders as "try again later".
+   */
+  function isTeamProjectOwnerConflictError(error: unknown): boolean {
+    return /team_project_owner_conflict/i.test(String(error));
+  }
+
   app.post('/api/workspaces/:workspaceId/projects/:projectId/move', async (req, res) => {
     try {
       const ctx = workspaceProjectContext(req, req.params.workspaceId);
@@ -2595,6 +2609,9 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       const updatedRow = listWorkspaceProjects(db, ctx.workspaceId).find((item: any) => item.id === project.id);
       res.json({ project: normalizeWorkspaceProjectRow(updatedRow, ctx) });
     } catch (err: any) {
+      if (isTeamProjectOwnerConflictError(err)) {
+        return sendApiError(res, 409, 'TEAM_PROJECT_OWNER_CONFLICT', String(err));
+      }
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }
   });
@@ -2644,6 +2661,9 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       const projects = projectIds.map((id: string) => normalizeWorkspaceProjectRow(updatedRows.find((row: any) => row.id === id), ctx));
       res.json({ ok: true, projects });
     } catch (err: any) {
+      if (isTeamProjectOwnerConflictError(err)) {
+        return sendApiError(res, 409, 'TEAM_PROJECT_OWNER_CONFLICT', String(err));
+      }
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }
   });

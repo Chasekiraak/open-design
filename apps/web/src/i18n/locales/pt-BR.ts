@@ -1119,6 +1119,7 @@ export const ptBR: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Limpar filtros',
   'pluginsHome.title': 'Comunidade',
   'pluginsHome.subtitle': 'Fluxos de trabalho do Open Design prontos para uso e incluídos neste runtime. Escolha um para carregar um prompt inicial ou navegue pelo registro para ver mais.',

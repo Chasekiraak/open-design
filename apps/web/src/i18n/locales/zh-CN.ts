@@ -1132,6 +1132,7 @@ export const zhCN: Dict = {
   "recentProjects.moveOutOfTeam": "移出团队空间",
   "recentProjects.unshareFailed": "移出团队空间失败，请稍后重试。",
   "recentProjects.shareFailed": "转入团队空间失败，请稍后重试。",
+  "recentProjects.shareOwnerConflict": "转入团队空间失败：该项目已由其他成员共享至团队空间。",
   "recentProjects.clearFilters": "清除筛选",
   "pluginsHome.title": "Community",
   "pluginsHome.subtitle":

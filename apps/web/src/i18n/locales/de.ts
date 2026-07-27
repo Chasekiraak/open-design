@@ -1119,6 +1119,7 @@ export const de: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Filter zurücksetzen',
   'pluginsHome.title': 'Community',
   'pluginsHome.subtitle': 'Sofort einsatzbereite Open Design Workflows, die mit dieser Laufzeitumgebung gebündelt sind. Wähle einen aus, um einen Starter-Prompt zu laden, oder durchsuche die Registry für mehr.',

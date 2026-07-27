@@ -1119,6 +1119,7 @@ export const id: Dict = {
   'recentProjects.moveOutOfTeam': 'Move out of team space',
   'recentProjects.unshareFailed': 'Could not move out of team space. Try again.',
   'recentProjects.shareFailed': 'Could not move to team space. Try again.',
+  'recentProjects.shareOwnerConflict': 'Could not move to team space: another member already shares this project with the team.',
   'recentProjects.clearFilters': 'Hapus filter',
   'pluginsHome.title': 'Komunitas',
   'pluginsHome.subtitle': 'Alur kerja Open Design siap pakai yang disertakan dengan runtime ini. Pilih salah satu untuk memuat prompt awal, atau jelajahi registry untuk lebih banyak.',
