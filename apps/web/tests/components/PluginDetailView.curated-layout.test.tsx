@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InstalledPluginRecordSchema } from '@open-design/contracts';
 
@@ -70,6 +72,76 @@ const PLUGIN = InstalledPluginRecordSchema.parse({
   installedAt: 0,
   updatedAt: 0,
 });
+
+function knowledgePlugin(
+  id: string,
+  skillPaths: string[] = ['./SKILL.md'],
+) {
+  return InstalledPluginRecordSchema.parse({
+    id,
+    title: `${id} knowledge suite`,
+    version: '0.1.0',
+    sourceKind: 'bundled',
+    source: `/plugins/${id}`,
+    sourceMarketplaceId: 'official',
+    sourceMarketplaceEntryName: `open-design/${id}`,
+    trust: 'bundled',
+    capabilitiesGranted: ['prompt:inject'],
+    manifest: {
+      name: id,
+      title: `${id} knowledge suite`,
+      version: '0.1.0',
+      description: 'A neutral knowledge-skill fixture.',
+      compat: {
+        agentSkills: skillPaths.map((path) => ({ path })),
+      },
+      od: {
+        kind: 'bundle',
+        capabilities: ['prompt:inject'],
+      },
+    },
+    fsPath: `/plugins/${id}`,
+    installedAt: 0,
+    updatedAt: 0,
+  });
+}
+
+const KNOWLEDGE_PLUGIN = knowledgePlugin('knowledge-suite');
+const HUMANIZE_SKILL_MARKDOWN = readFileSync(
+  resolve(process.cwd(), '../../plugins/community/humanize-ppt/SKILL.md'),
+  'utf8',
+);
+const HOSTILE_HUMANIZE_SKILL_MARKDOWN = HUMANIZE_SKILL_MARKDOWN.replace(
+  'A presentation system',
+  'A <img src=x onerror=alert(1)> presentation <script>globalThis.pwned = true</script> system',
+);
+
+function markdownResponse(markdown: string, headers: Record<string, string> = {}) {
+  return new Response(markdown, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Length': String(new TextEncoder().encode(markdown).byteLength),
+      ...headers,
+    },
+  });
+}
+
+function mockKnowledgeDetailRequests(markdown = HOSTILE_HUMANIZE_SKILL_MARKDOWN) {
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url === `/api/plugins/${KNOWLEDGE_PLUGIN.id}`) {
+      return new Response(JSON.stringify(KNOWLEDGE_PLUGIN), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url === `/api/plugins/${KNOWLEDGE_PLUGIN.id}/asset/SKILL.md`) {
+      return markdownResponse(markdown);
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+}
 
 beforeEach(() => {
   globalThis.fetch = vi.fn(async () =>
@@ -178,5 +250,207 @@ describe('PluginDetailView curated installed-extension layout', () => {
     expect(screen.getByRole('region', { name: /知识技能/ })).toBeTruthy();
     expect(screen.getByText('Open Design 官方')).toBeTruthy();
     expect(screen.getByText('@OpenDesign')).toBeTruthy();
+  });
+
+  it('renders a safe paragraph from the repository humanize-ppt knowledge skill', async () => {
+    mockKnowledgeDetailRequests();
+
+    const { container } = render(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={KNOWLEDGE_PLUGIN.id} />
+      </I18nProvider>,
+    );
+
+    const skills = await screen.findByRole('region', { name: /knowledge skills/i });
+    const heading = within(skills).getByRole('heading', { name: './SKILL.md' });
+    const article = heading.closest('article');
+    await waitFor(() => {
+      expect(article?.querySelector('p')).toHaveTextContent(
+        'A presentation system for agent-made PPTs — born for the talk, not just the template.',
+      );
+    });
+    expect(article?.querySelector('p')?.textContent).not.toContain('>-');
+    expect(article?.querySelector('img')).toBeNull();
+    expect(article?.querySelector('script')).toBeNull();
+    expect(article?.textContent).not.toContain('onerror');
+    expect(article?.textContent).not.toContain('globalThis.pwned');
+    expect(container.querySelector('[onerror]')).toBeNull();
+  });
+
+  it('does not reuse a shared skill-path description while the next plugin asset is pending', async () => {
+    const alpha = knowledgePlugin('alpha-suite');
+    const beta = knowledgePlugin('beta-suite');
+    let resolveBetaAsset: ((response: Response) => void) | undefined;
+    const betaAsset = new Promise<Response>((resolve) => {
+      resolveBetaAsset = resolve;
+    });
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === `/api/plugins/${alpha.id}`) {
+        return new Response(JSON.stringify(alpha), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url === `/api/plugins/${beta.id}`) {
+        return new Response(JSON.stringify(beta), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url === `/api/plugins/${alpha.id}/asset/SKILL.md`) {
+        return markdownResponse('---\ndescription: Alpha description\n---\n');
+      }
+      if (url === `/api/plugins/${beta.id}/asset/SKILL.md`) return betaAsset;
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const view = render(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={alpha.id} />
+      </I18nProvider>,
+    );
+    expect(await screen.findByText('Alpha description')).toBeTruthy();
+
+    view.rerender(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={beta.id} />
+      </I18nProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: beta.title })).toBeTruthy();
+    const betaSkill = screen.getByRole('heading', { name: './SKILL.md' }).closest('article');
+    expect(betaSkill?.querySelector('p')).toBeNull();
+    expect(screen.queryByText('Alpha description')).toBeNull();
+
+    resolveBetaAsset?.(markdownResponse('---\ndescription: Beta description\n---\n'));
+  });
+
+  it('bounds knowledge-skill asset count and concurrency and skips non-Markdown paths', async () => {
+    const paths = [
+      './one.md',
+      './two.md',
+      './three.md',
+      './four.md',
+      './five.md',
+      './six.md',
+      './seven.md',
+      './eight.md',
+      './nine.md',
+      './notes.txt',
+    ];
+    const plugin = knowledgePlugin('bounded-suite', paths);
+    const assetRequests: string[] = [];
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === `/api/plugins/${plugin.id}`) {
+        return new Response(JSON.stringify(plugin), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      assetRequests.push(url);
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeRequests -= 1;
+      return markdownResponse('---\ndescription: Bounded description\n---\n');
+    });
+
+    render(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={plugin.id} />
+      </I18nProvider>,
+    );
+    expect(await screen.findAllByText('Bounded description')).toHaveLength(8);
+    expect(assetRequests).toHaveLength(8);
+    expect(assetRequests.some((url) => url.endsWith('/notes.txt'))).toBe(false);
+    expect(maxActiveRequests).toBeLessThanOrEqual(2);
+  });
+
+  it.each([
+    {
+      name: 'non-Markdown response media type',
+      response: () => markdownResponse(
+        '---\ndescription: Must not render\n---\n',
+        { 'Content-Type': 'application/json' },
+      ),
+    },
+    {
+      name: 'declared oversized response',
+      response: () => markdownResponse(
+        '---\ndescription: Must not render\n---\n',
+        { 'Content-Length': '1000000' },
+      ),
+    },
+  ])('falls back to no description for a $name', async ({ response }) => {
+    let assetResponse: Response | undefined;
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === `/api/plugins/${KNOWLEDGE_PLUGIN.id}`) {
+        return new Response(JSON.stringify(KNOWLEDGE_PLUGIN), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      assetResponse = response();
+      return assetResponse;
+    });
+
+    render(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={KNOWLEDGE_PLUGIN.id} />
+      </I18nProvider>,
+    );
+    const skillHeading = await screen.findByRole('heading', { name: './SKILL.md' });
+    await waitFor(() => expect(assetResponse).toBeDefined());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(assetResponse?.bodyUsed).toBe(true);
+    expect(skillHeading.closest('article')?.querySelector('p')).toBeNull();
+  });
+
+  it.each([
+    { name: 'missing Content-Length', contentLength: undefined },
+    { name: 'underreported Content-Length', contentLength: '1' },
+  ])('cancels a streamed response over the byte cap with $name', async ({ contentLength }) => {
+    let streamCancelled = false;
+    const chunk = new TextEncoder().encode('x'.repeat(40_000));
+    let chunksSent = 0;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (chunksSent >= 3) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        chunksSent += 1;
+      },
+      cancel() {
+        streamCancelled = true;
+      },
+    }), {
+      headers: {
+        'Content-Type': 'text/markdown',
+        ...(contentLength === undefined ? {} : { 'Content-Length': contentLength }),
+      },
+    });
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === `/api/plugins/${KNOWLEDGE_PLUGIN.id}`) {
+        return new Response(JSON.stringify(KNOWLEDGE_PLUGIN), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return response;
+    });
+
+    render(
+      <I18nProvider initial="en">
+        <PluginDetailView pluginId={KNOWLEDGE_PLUGIN.id} />
+      </I18nProvider>,
+    );
+    const skillHeading = await screen.findByRole('heading', { name: './SKILL.md' });
+    await waitFor(() => expect(streamCancelled).toBe(true));
+    expect(skillHeading.closest('article')?.querySelector('p')).toBeNull();
   });
 });
