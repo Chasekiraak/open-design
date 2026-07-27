@@ -78,7 +78,7 @@ import {
   isOpenDesignHostAvailable,
   openHostExternalUrl,
 } from '@open-design/host';
-import { coalescedGet } from '../lib/coalesced-get';
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 import { workspaceProjectHeaders } from '../state/projects';
 
 export const DEFAULT_DEPLOY_PROVIDER_ID = 'vercel-self';
@@ -1616,6 +1616,10 @@ export async function createSocialSharePayload(
 
 // Project files — all paths are scoped under .od/projects/<id>/ on disk.
 
+function projectFilesCacheKey(projectId: string): string {
+  return `project-files:${projectId}`;
+}
+
 export async function fetchProjectFiles(
   projectId: string,
   options?: { signal?: AbortSignal },
@@ -1639,7 +1643,7 @@ export async function fetchProjectFiles(
   // joins the abandoned card request and waits behind the entire Home burst.
   if (options?.signal) return run();
   // Non-cancellable display reads still collapse identical mount-burst calls.
-  return coalescedGet(`project-files:${projectId}`, run);
+  return coalescedGet(projectFilesCacheKey(projectId), run);
 }
 
 export type ProjectDesignTokenSuggestion = import('@open-design/contracts').ProjectDesignTokenSuggestion;
@@ -2281,6 +2285,7 @@ export async function writeProjectTextFileDetailed(
       };
     }
     const json = (await resp.json()) as { file: ProjectFile };
+    evictCoalescedGet(projectFilesCacheKey(projectId));
     return { ok: true, file: json.file };
   } catch {
     return { ok: false, message: 'Network error while saving the file' };
@@ -2304,6 +2309,7 @@ export async function writeProjectBase64File(
     });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { file: ProjectFile };
+    evictCoalescedGet(projectFilesCacheKey(projectId));
     return json.file;
   } catch {
     return null;
@@ -2327,6 +2333,7 @@ export async function uploadProjectFile(
     });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { file: ProjectFile };
+    evictCoalescedGet(projectFilesCacheKey(projectId));
     return json.file;
   } catch {
     return null;
@@ -2434,6 +2441,7 @@ export async function uploadProjectFiles(
         break;
       }
 
+      evictCoalescedGet(projectFilesCacheKey(projectId));
       const json = (await resp.json()) as {
         files: { name: string; path: string; size?: number; originalName?: string }[];
       };
@@ -2505,7 +2513,11 @@ export async function deleteProjectFile(
         ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
       },
     );
-    return resp.ok;
+    if (resp.ok) {
+      evictCoalescedGet(projectFilesCacheKey(projectId));
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -2529,6 +2541,7 @@ export async function renameProjectFile(
     const errorBody = await readApiErrorBody(resp);
     throw new Error(errorBody.message);
   }
+  evictCoalescedGet(projectFilesCacheKey(projectId));
   return (await resp.json()) as RenameProjectFileResponse;
 }
 

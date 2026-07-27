@@ -198,6 +198,42 @@ describe('fetchProjectFiles', () => {
     await expect(foreground).resolves.toEqual(files);
   });
 
+  it('refetches the project file list after a successful upload', async () => {
+    const uploadedFile = {
+      name: 'uploaded.png',
+      path: 'uploaded.png',
+      kind: 'image' as const,
+      mtime: 2,
+      size: 68,
+      mime: 'image/png',
+    };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ files: [] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ files: [uploadedFile] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ files: [uploadedFile] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchProjectFiles('project-upload-cache')).resolves.toEqual([]);
+    await expect(uploadProjectFiles(
+      'project-upload-cache',
+      [new File(['png'], 'uploaded.png', { type: 'image/png' })],
+    )).resolves.toMatchObject({
+      uploaded: [{ name: 'uploaded.png', path: 'uploaded.png' }],
+      failed: [],
+    });
+    await expect(fetchProjectFiles('project-upload-cache')).resolves.toEqual([uploadedFile]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps ordinary live-artifact reads independent from cancellable card scans', async () => {
     const artifacts = [{
       id: 'artifact-1',

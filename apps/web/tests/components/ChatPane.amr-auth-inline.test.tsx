@@ -9,7 +9,7 @@
  * AmrLoginPill.test.tsx; here we only assert ChatPane's wiring.
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { forwardRef, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -198,5 +198,17 @@ describe('ChatPane inline AMR auth', () => {
     lastPillProps?.onStatusChange?.(signedIn);
 
     expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it('offers a manual retry when the signed-in user reopens the failed run', async () => {
+    fetchVelaLoginStatusMock.mockResolvedValue(signedIn);
+    const onRetry = vi.fn();
+    renderChat(onRetry);
+
+    const retry = await waitFor(() => screen.getByText('promptTemplates.retry'));
+    fireEvent.click(retry);
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry.mock.calls[0]![0]).toMatchObject({ id: 'msg-amr-auth' });
   });
 });
