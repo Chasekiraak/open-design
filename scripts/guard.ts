@@ -5,6 +5,7 @@ import ts from "typescript";
 
 import { checkCertainExemptConsumption } from "./check-certain-exempt-consumption.ts";
 import { checkCrossAppImports } from "./check-cross-app-imports.ts";
+import { checkPackagedLeafBoundary } from "./check-packaged-leaf-boundary.ts";
 import { checkTsNocheckImports } from "./check-ts-nocheck-imports.ts";
 import { checkDesignSystemManifests } from "./check-design-system-manifests.ts";
 import { checkDesignSystemPackageQuality } from "./check-design-system-package-quality.ts";
@@ -1326,6 +1327,7 @@ async function checkCiTopology(): Promise<boolean> {
 const checks: GuardCheck[] = [
   { name: "residual JavaScript", run: checkResidualJavaScript },
   { name: "certain-exempt surface consumption", run: checkCertainExemptConsumption },
+  { name: "packaged leaf boundary", run: checkPackagedLeafBoundary },
   { name: "package dependency specs", run: checkPackageDependencySpecs },
   { name: "product neutrality", run: checkProductNeutrality },
   { name: "cross-app imports", run: checkCrossAppImports },

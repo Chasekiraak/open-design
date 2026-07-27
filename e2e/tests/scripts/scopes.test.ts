@@ -289,7 +289,7 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     files: ["tools/pack/src/build.ts"],
     expected: expectedPlan({
       ciMode: "hot",
-      scopes: ["tools_pack_tests_required", "workspace_validation_required"],
+      scopes: ["tools_dev_tests_required", "tools_pack_tests_required", "workspace_validation_required"],
       runs: ["run_windows_tools_pack_payload_tests"],
     }),
   },
@@ -299,7 +299,7 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     files: ["apps/desktop/src/main/index.ts"],
     expected: expectedPlan({
       ciMode: "hot",
-      scopes: ["tools_pack_tests_required", "workspace_validation_required"],
+      scopes: ["tools_dev_tests_required", "tools_pack_tests_required", "workspace_validation_required"],
       runs: ["run_windows_tools_pack_payload_tests"],
     }),
   },
@@ -368,6 +368,7 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
       ciMode: "hot",
       scopes: [
         "web_tests_required",
+        "tools_dev_tests_required",
         "tools_pack_tests_required",
         "ui_critical_validation_required",
         "ui_p0_validation_required",
@@ -444,6 +445,26 @@ const GOLDEN_CASES: readonly GoldenCase[] = [
     context: { eventName: "merge_group" },
     files: ["docs/architecture.md", "docs/nested/guide.mdx", "apps/landing-page/src/pages/index.astro", "LICENSE", ".github/CODEOWNERS"],
     expected: expectedPlan({ ciMode: "full" }),
+  },
+  {
+    name: "merge_group packaged-leaf core uses the guarded narrow plan",
+    context: { eventName: "merge_group" },
+    files: [
+      "apps/desktop/src/main/index.ts",
+      "apps/packaged/tests/launcher.test.ts",
+      "tools/pack/resources/linux/open-design.desktop.template",
+    ],
+    expected: expectedPlan({
+      ciMode: "full",
+      scopes: ["tools_dev_tests_required", "tools_pack_tests_required", "workspace_validation_required"],
+      runs: ["run_windows_tools_pack_payload_tests"],
+    }),
+  },
+  {
+    name: "merge_group packaged configuration outside the certain core stays full",
+    context: { eventName: "merge_group" },
+    files: ["apps/desktop/package.json", "tools/pack/bin/tools-pack.mjs"],
+    expected: FULL_PLAN,
   },
   {
     name: "merge_group mixed group runs everything at the certain threshold",
@@ -536,6 +557,48 @@ test("merge-queue threshold trusts the certain-exempt core without escalation", 
     matchedRules: ["certain-exempt-surface"],
     escalated: false,
   });
+});
+
+test("packaged-leaf core matches only its certain rule with the guarded effects", async () => {
+  const { evaluateScopeOutputs, matchesRuleMatch, scopeRules } = await import("../../../scripts/scopes.ts");
+  const files = [
+    "apps/desktop/src/main.ts",
+    "apps/packaged/tests/main.test.ts",
+    "tools/pack/resources/linux/open-design.desktop.template",
+  ];
+  for (const file of files) {
+    const matched = scopeRules.filter((rule) => matchesRuleMatch(file, rule.match)).map((rule) => rule.id);
+    assert.deepEqual(matched, ["certain-packaged-leaf-sources"], file);
+  }
+  const evaluation = evaluateScopeOutputs(files, "certain", {
+    deriveWorkspaceValidationFromTestScopes: true,
+  });
+  assert.deepEqual(evaluation.decisions.map((decision) => decision.escalated), [false, false, false]);
+  assert.deepEqual(
+    Object.entries(evaluation.outputs)
+      .filter(([, enabled]) => enabled)
+      .map(([effect]) => effect),
+    ["tools_dev_tests_required", "tools_pack_tests_required", "workspace_validation_required"],
+  );
+});
+
+test("packaged-leaf consumption collector resolves imports, packages, and static paths", async () => {
+  const { collectPackagedLeafConsumptionFromSource } = await import(
+    "../../../scripts/check-packaged-leaf-boundary.ts"
+  );
+  const violations = collectPackagedLeafConsumptionFromSource(
+    "packages/example/src/index.ts",
+    [
+      `import "@open-design/desktop/main";`,
+      `await import("../../../apps/packaged/src/index.ts");`,
+      `const source = path.join(repoRoot, "tools", "pack", "src", "index.ts");`,
+      `const prose = "desktop behavior is packaged elsewhere";`,
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    violations.map((violation) => violation.lineNumber),
+    [1, 2, 3],
+  );
 });
 
 test("the consumption guard folds repository paths while allowing sandbox fixture writers", async () => {
@@ -681,7 +744,8 @@ test("fallback matching honors excludeWhen semantics", async () => {
 
   assert.equal(matchesRuleMatch("README.md", workspaceFallback.match), false);
   assert.equal(matchesRuleMatch("mystery.xyz", workspaceFallback.match), true);
-  assert.equal(matchesRuleMatch("tools/pack/src/build.ts", workspaceFallback.match), true);
+  assert.equal(matchesRuleMatch("tools/pack/src/build.ts", workspaceFallback.match), false);
+  assert.equal(matchesRuleMatch("tools/pack/bin/tools-pack.mjs", workspaceFallback.match), true);
 
   assert.equal(matchesRuleMatch("tools/pack/src/build.ts", uiCriticalFallback.match), false);
   assert.equal(matchesRuleMatch("apps/desktop/src/main.ts", uiCriticalFallback.match), false);

@@ -122,6 +122,25 @@ const CERTAIN_EXEMPT_SURFACE: RuleMatch = {
   exact: CERTAIN_EXEMPT_EXACT,
 };
 
+export const CERTAIN_PACKAGED_LEAF_PREFIXES = [
+  "apps/desktop/src/",
+  "apps/desktop/tests/",
+  "apps/packaged/src/",
+  "apps/packaged/tests/",
+  "tools/pack/src/",
+  "tools/pack/tests/",
+  "tools/pack/resources/",
+] as const;
+
+const CERTAIN_PACKAGED_LEAF_SURFACE: RuleMatch = {
+  prefixes: CERTAIN_PACKAGED_LEAF_PREFIXES,
+};
+
+const CERTAIN_SURFACE: RuleMatch = {
+  prefixes: [...CERTAIN_EXEMPT_PREFIXES, ...CERTAIN_PACKAGED_LEAF_PREFIXES],
+  exact: CERTAIN_EXEMPT_EXACT,
+};
+
 // Medium-tier exempt residue. The global markdown regex stays medium on
 // purpose: its safety at certain would depend on every other rule continuing
 // to cover each directory where markdown is runtime content (skills/, craft/,
@@ -146,9 +165,8 @@ const MEDIUM_EXEMPT_EXACT = [
 
 const EXEMPT_REGEXES = [/\.(?:md|mdx|txt)$/] as const;
 
-// Union of both exempt tiers; this is what the fail-closed fallbacks exclude.
-const EXEMPT_SURFACE: RuleMatch = {
-  prefixes: [...CERTAIN_EXEMPT_PREFIXES, ...MEDIUM_EXEMPT_PREFIXES],
+const WORKSPACE_FALLBACK_EXCLUDED_SURFACE: RuleMatch = {
+  prefixes: [...CERTAIN_EXEMPT_PREFIXES, ...MEDIUM_EXEMPT_PREFIXES, ...CERTAIN_PACKAGED_LEAF_PREFIXES],
   exact: [...CERTAIN_EXEMPT_EXACT, ...MEDIUM_EXEMPT_EXACT],
   regexes: EXEMPT_REGEXES,
 };
@@ -170,7 +188,7 @@ export const scopeRules: readonly ScopeRule[] = [
       prefixes: MEDIUM_EXEMPT_PREFIXES,
       exact: MEDIUM_EXEMPT_EXACT,
       regexes: EXEMPT_REGEXES,
-      excludeWhen: CERTAIN_EXEMPT_SURFACE,
+      excludeWhen: CERTAIN_SURFACE,
     },
     effects: [],
     confidence: "medium",
@@ -232,6 +250,13 @@ export const scopeRules: readonly ScopeRule[] = [
     confidence: "medium",
   },
   {
+    id: "certain-packaged-leaf-sources",
+    match: CERTAIN_PACKAGED_LEAF_SURFACE,
+    effects: ["tools_dev_tests_required", "tools_pack_tests_required", "workspace_validation_required"],
+    confidence: "certain",
+    guard: "packaged leaf boundary",
+  },
+  {
     id: "tools-pack-sources",
     match: {
       prefixes: [
@@ -245,6 +270,7 @@ export const scopeRules: readonly ScopeRule[] = [
         "packages/sidecar/",
         "packages/sidecar-proto/",
       ],
+      excludeWhen: CERTAIN_PACKAGED_LEAF_SURFACE,
     },
     effects: ["tools_pack_tests_required"],
     confidence: "medium",
@@ -314,7 +340,7 @@ export const scopeRules: readonly ScopeRule[] = [
   },
   {
     id: "workspace-fallback",
-    match: { excludeWhen: EXEMPT_SURFACE },
+    match: { excludeWhen: WORKSPACE_FALLBACK_EXCLUDED_SURFACE },
     effects: ["workspace_validation_required"],
     confidence: "medium",
   },

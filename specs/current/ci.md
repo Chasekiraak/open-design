@@ -64,10 +64,12 @@ Requirements:
    three strengths: *definitional* (the surface cannot enter build or runtime
    by construction — e.g. docs), *structural* (an import-graph boundary), and
    *behavioral* (a topology test). Definitional rules may rely on replay
-   evidence alone. Structural and behavioral rules additionally require shadow
-   evidence from real queue runs (the `ifTrustAll` column in the scope decision
-   trace). The required window is unspecified and must be resolved before any
-   such rule becomes `certain`.
+   evidence alone. Structural and behavioral rules additionally require at
+   least 10 qualifying single-PR queue groups from the latest 400 first-parent
+   merges. Native `ifTrustAll` traces are preferred; paired evidence also
+   qualifies when the PR ran the candidate medium plan for the same file set,
+   the real queue group ran the full plan, both succeeded, and the proposed
+   plan has not weakened since that pair.
 4. **Goldens updated, divergence pinned.** The golden that changes is the
    proof of the behavior change; the goldens that do not change are the proof
    of its containment.
@@ -114,6 +116,51 @@ Current evidence and exceptions:
   `tools/release/src/release-note/prepare.ts` reads `docs/CHANGELOG`, which
   executes only in release workflows; `@open-design/tools-release` tests run
   in no `ci.yml` lane.
+
+## Certain packaged-leaf boundary
+
+Rule `certain-packaged-leaf-sources` covers only:
+
+- `apps/desktop/{src,tests}/`
+- `apps/packaged/{src,tests}/`
+- `tools/pack/{src,tests,resources}/`
+
+It claims `tools_dev_tests_required`, `tools_pack_tests_required`, and
+`workspace_validation_required`. A pure matching merge group therefore keeps
+preflight/typecheck, workspace unit tests, desktop/packaged/tools-pack tests,
+the focused packaged launcher update-loop fallback, and Windows launcher
+payload tests. It skips web workspace tests, broad E2E Vitest, UI P0, critical
+Playwright, and visual Playwright.
+
+Guard: `packaged leaf boundary`
+(`scripts/check-packaged-leaf-boundary.ts`). The policy-floor check scans
+skippable-lane source for package imports and repository paths entering the
+certain core, verifies that every core sample resolves to exactly the guarded
+effects at the certain threshold, and pins the workspace-unit command block.
+Allowed consumers are limited to:
+
+- `tools/dev/`, whose tests stay armed by the certain rule;
+- the focused packaged launcher update-loop test;
+- scope, workflow, cross-app, fork-approval, and package-manager invocation
+  fixtures that treat the paths as data;
+- the packaged and tools-pack esbuild entry configs, which own their source
+  entrypoints while config changes themselves remain medium-tier.
+
+Package manifests, build configs, bins, vendor content, and files outside the
+listed core remain medium. A mixed queue group containing any medium file
+still escalates to the full plan.
+
+Current evidence:
+
+- The latest 400 first-parent merges contain 19 pure packaged-leaf groups.
+- All 19 have successful narrow PR validation paired with successful full
+  merge-queue validation; the active narrow plan additionally runs desktop,
+  packaged, and focused update-loop coverage absent from the historical plan.
+- A current full merge-group run measures about 11.8 elapsed minutes and 68
+  runner-minutes. A representative pure-leaf narrow PR run measures about 4.2
+  elapsed minutes and 8.1 runner-minutes.
+- Expected savings are about 7.5 elapsed minutes and 60 runner-minutes per
+  qualifying single-PR group, before queue batching discounts.
 
 ## Zero-effect merge-queue policy floor
 
@@ -182,7 +229,6 @@ infrastructure.
 
 ## Open questions
 
-- Required shadow-evidence window for structural or behavioral certain rules.
 - Demotion policy beyond the guard-resolution hard rule.
 - Whether medium-tier zero-effect PR plans should use the policy floor; this
   needs its own evidence and containment review.

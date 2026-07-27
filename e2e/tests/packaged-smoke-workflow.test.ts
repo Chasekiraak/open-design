@@ -974,10 +974,37 @@ process.stdin.on("end", () => {
       await expect(runScopesPrint("workflow_dispatch", hot, [file])).resolves.toMatchObject({
         run_playwright_critical: false,
         run_ui_p0: false,
+        tools_dev_tests_required: true,
+        tools_pack_tests_required: true,
         ui_critical_validation_required: false,
         workspace_validation_required: true,
       });
     }
+
+    const mergeGroup = {
+      merge_group: {
+        base_sha: "1111111111111111111111111111111111111111",
+        head_sha: "2222222222222222222222222222222222222222",
+      },
+    };
+    await expect(runScopesPrint("merge_group", mergeGroup, ["apps/desktop/src/main.ts"])).resolves.toMatchObject({
+      run_e2e_vitest: false,
+      run_playwright_critical: false,
+      run_playwright_visual: false,
+      run_ui_p0: false,
+      run_web_workspace_tests: false,
+      run_windows_tools_pack_payload_tests: true,
+      tools_dev_tests_required: true,
+      tools_pack_tests_required: true,
+      workspace_validation_required: true,
+    });
+
+    await expect(runScopesPrint("merge_group", mergeGroup, ["apps/desktop/package.json"])).resolves.toMatchObject({
+      run_e2e_vitest: true,
+      run_playwright_visual: true,
+      run_ui_p0: true,
+      run_web_workspace_tests: true,
+    });
 
     // Fail-closed: anything that can reach the Playwright runtime — tools-dev,
     // transitive packages (including the undeclared metatool edge), scripts,
