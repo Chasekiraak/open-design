@@ -537,10 +537,15 @@ const createdConversation: Conversation = {
   updatedAt: 2,
 };
 
+type TeamProjectWorkspaceContext = Extract<
+  NonNullable<ProjectWorkspaceScopeState['scope']>,
+  { kind: 'team' }
+>['context'];
+
 function teamWorkspaceContext(
   workspaceId: string,
   workspaceMemberId: string,
-): WorkspaceCollabContext {
+): TeamProjectWorkspaceContext {
   return {
     workspaceId,
     workspaceType: 'team',
