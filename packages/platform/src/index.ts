@@ -40,6 +40,7 @@ export {
   createProcessStampArgs,
   isProcessAlive,
   listProcessSnapshots,
+  listProcessSnapshotsStrict,
   matchesProcessStamp,
   matchesStampedProcess,
   processCommandExactlyRunsExecutable,

@@ -6,6 +6,7 @@ Follow the root `AGENTS.md` and `tools/AGENTS.md` first. This tool owns small lo
 
 - `tools-serve` CLI.
 - Local static updater fixtures for desktop update IPC and packaged-runtime debugging.
+- Identity-bound Codex plugin runtime fixtures that consume a `tools-pack` build report.
 
 ## Rules
 

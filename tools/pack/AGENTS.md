@@ -5,6 +5,7 @@ Follow the root `AGENTS.md` and `tools/AGENTS.md` first. This tool owns the repo
 ## Owns
 
 - Local packaging orchestration for packaged Open Design artifacts.
+- Relocatable Codex plugin local-marketplace snapshots and machine-readable build reports.
 - mac build/install/start/stop/logs/uninstall/cleanup smoke commands.
 - Windows NSIS build/install/start/stop/logs/uninstall/cleanup/list/reset smoke commands.
 - Windows registry observation/cleanup must go through `reg.exe` and stay scoped to entries matching the namespace install/uninstaller paths.
@@ -20,6 +21,7 @@ Follow the root `AGENTS.md` and `tools/AGENTS.md` first. This tool owns the repo
 - Sidecar protocol definitions.
 - A second process identity model.
 - Product/business update runtime integration.
+- Codex Desktop installation, restart, configuration mutation, or chat lifecycle.
 
 ## Rules
 
