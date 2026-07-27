@@ -301,7 +301,7 @@ describe('FileViewer manual edit regressions', () => {
       // bump so srcDoc-mode previews see fresh HTML after agent edits.
       await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
         expect.stringMatching(/^\/api\/projects\/project-1\/raw\/preview\.html(\?|$)/),
-        {},
+        { cache: 'no-store' },
       ));
       await enterManualEditMode();
       await selectManualEditTarget();
