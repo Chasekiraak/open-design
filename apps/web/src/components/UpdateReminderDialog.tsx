@@ -33,7 +33,10 @@ function RocketBadgeIcon({ className }: { className?: string }) {
 /** Collapsed form of the reminder: after the dialog is dismissed it survives
  *  as this icon-only "update now" button pinned to the right above the nav
  *  rail's account row. The label lives in the rail's hover bubble (od-tooltip)
- *  + aria-label. While `updating`, a live progress readout stacks above it. */
+ *  + aria-label. While `updating`, progress draws as a ring hugging the round
+ *  button's edge and the button face swaps the rocket for "N%", settling on
+ *  完成 (updater.done) at 100 (no separate bar/label row); the full 正在下载
+ *  label stays reachable through the hover bubble and the ring's aria-label. */
 export function UpdateReminderStrip({
   onConfirm,
   updating = false,
@@ -45,29 +48,55 @@ export function UpdateReminderStrip({
 }) {
   const t = useT();
   const percent = Math.min(100, Math.max(0, Math.round(progress)));
+  const downloadDone = percent >= 100;
+  const progressLabel = downloadDone
+    ? t('updater.done')
+    : t('updater.downloadingPercent', { percent });
+  // r=20 centers the 2.5px ring stroke in the 5px band between the 34px
+  // button edge and the 44px viewBox edge; the dash pair turns the circle
+  // into a top-anchored progress arc (the CSS rotates it -90°).
+  const ringRadius = 20;
+  const ringCircumference = 2 * Math.PI * ringRadius;
   return (
     <div className={styles.stripWrap}>
-      {updating ? (
-        <div className={styles.progress} role="status" data-testid="update-reminder-progress">
-          <span className={styles.progressLabel}>
-            {t('updater.downloadingPercent', { percent })}
-          </span>
-          <span className={styles.progressTrack} aria-hidden>
-            <span className={styles.progressFill} style={{ width: `${percent}%` }} />
-          </span>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        className={`${styles.strip} od-tooltip`}
-        onClick={onConfirm}
-        disabled={updating}
-        aria-label={t('updateReminder.confirm')}
-        data-tooltip={updating ? undefined : t('updateReminder.confirm')}
-        data-testid="update-reminder-strip"
-      >
-        <RocketBadgeIcon className={styles.stripIcon} />
-      </button>
+      <span className={styles.stripRingHost}>
+        {updating ? (
+          <svg
+            className={styles.ring}
+            viewBox="0 0 44 44"
+            role="status"
+            aria-label={progressLabel}
+            data-testid="update-reminder-progress"
+          >
+            <circle className={styles.ringTrack} cx="22" cy="22" r={ringRadius} />
+            <circle
+              className={styles.ringFill}
+              cx="22"
+              cy="22"
+              r={ringRadius}
+              strokeDasharray={ringCircumference}
+              strokeDashoffset={ringCircumference * (1 - percent / 100)}
+            />
+          </svg>
+        ) : null}
+        <button
+          type="button"
+          className={`${styles.strip} od-tooltip`}
+          onClick={onConfirm}
+          disabled={updating}
+          aria-label={t('updateReminder.confirm')}
+          data-tooltip={updating ? progressLabel : t('updateReminder.confirm')}
+          data-testid="update-reminder-strip"
+        >
+          {updating ? (
+            <span className={styles.stripPercent} aria-hidden>
+              {downloadDone ? t('updater.done') : `${percent}%`}
+            </span>
+          ) : (
+            <RocketBadgeIcon className={styles.stripIcon} />
+          )}
+        </button>
+      </span>
     </div>
   );
 }

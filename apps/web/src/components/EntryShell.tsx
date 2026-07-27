@@ -510,7 +510,7 @@ function inactiveViewProps(active: boolean) {
 // until then this drives the dialog on the Community view and the collapsed
 // strip above the nav rail's account row.
 const UPDATE_REMINDER_DEMO = {
-  version: '1.4.5',
+  version: '1.4.6',
   coverSrc: '/update-reminder-cover.jpg',
   notes: [
     'Faster canvas rendering with smoother pan and zoom',
