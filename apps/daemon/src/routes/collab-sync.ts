@@ -37,6 +37,7 @@ import {
   promoteAuthorizedTeamProjectStage,
   type PromoteAuthorizedTeamProjectStageInput,
 } from '../collab/team-mirror-promotion.js';
+import { isUnmaterializedSharedPlaceholder } from '../collab/shared-project-placeholder.js';
 import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
@@ -68,7 +69,7 @@ export interface TeamMirrorPullScope {
 }
 
 export interface PulledProjectStore {
-  get?: (projectId: string) => { name?: string | null } | null;
+  get?: (projectId: string) => { name?: string | null; metadata?: unknown } | null;
   has(projectId: string): boolean;
   register(input: RegisterPulledProjectInput): void;
   update?: (input: RegisterPulledProjectInput) => void;
@@ -117,6 +118,15 @@ export interface RegisterCollabSyncRoutesDeps {
   /** Set/clear the non-destructive "team mirror revoked" flag on a local
    *  project so read routes stop serving a project that has left the team. */
   markTeamProjectRevoked?: (projectId: string, revoked: boolean) => void;
+  /**
+   * Set/clear the `sharedProjectPlaceholderAt` stamp on a local project's
+   * metadata (see collab/shared-project-placeholder.ts). Set when
+   * `ensureSharedProjectPlaceholder` registers a placeholder record; cleared
+   * exactly once a pull has materialized real hub content locally. While the
+   * stamp is set, the publish paths refuse to treat the local copy as content
+   * authority (the recvqzaDvUU6B3 fresh-install wipe guard).
+   */
+  markSharedProjectPlaceholder?: (projectId: string, placeholder: boolean) => void;
   resolveOwnerDisplayName?: (
     memberId: string,
   ) => Promise<{ displayName: string; role: 'owner' | 'admin' | 'member' } | null>;
@@ -548,6 +558,7 @@ export function registerCollabSyncRoutes(
     resolveSharedProjectOwner,
     resolveSharedProject,
     markTeamProjectRevoked,
+    markSharedProjectPlaceholder,
     resolveOwnerDisplayName,
     notifyFilesChanged,
     notifyProjectMetadataChanged,
@@ -848,6 +859,11 @@ export function registerCollabSyncRoutes(
       createdAt: now,
       updatedAt: now,
     });
+    // Stamp the record as an unmaterialized placeholder so no publish path
+    // ever treats its (empty) content directory as content authority until a
+    // pull lands real hub content (the recvqzaDvUU6B3 fresh-install wipe
+    // guard — see collab/shared-project-placeholder.ts).
+    markSharedProjectPlaceholder?.(projectId, true);
   }
 
   app.post('/api/projects/:id/collab/changed', (req, res) => {
@@ -1354,6 +1370,9 @@ export function registerCollabSyncRoutes(
         notifyFilesChanged?.(projectId);
         if (localRecordChanged) notifyProjectMetadataChanged?.(projectId);
         markTeamProjectRevoked?.(projectId, false);
+        // Real hub content is on disk and registered — the local record is no
+        // longer an unmaterialized placeholder, so publishing may resume.
+        markSharedProjectPlaceholder?.(projectId, false);
         return complete({
           status: 'pulled',
           version: staged.receipt.version,
@@ -1566,6 +1585,9 @@ export function registerCollabSyncRoutes(
         // manual reload (recvqhwv6RPU1j).
         notifyProjectMetadataChanged?.(projectId);
       }
+      // Real hub content is on disk and registered — the local record is no
+      // longer an unmaterialized placeholder, so publishing may resume.
+      markSharedProjectPlaceholder?.(projectId, false);
     }
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
@@ -1743,6 +1765,31 @@ export function registerCollabSyncRoutes(
     // retry storm builds up.
     if (ownerMemberId) {
       ensureSharedProjectPlaceholder(projectId);
+    }
+    // Owner self-materialization (recvqzaDvUU6B3): an owner opening their OWN
+    // shared project whose local record is still an unmaterialized
+    // placeholder (fresh data root after a reinstall, or shared from another
+    // machine) has no other pull path — "the owner never auto-pulls" below
+    // only holds for owners whose local copy IS the source of truth. Pull the
+    // published hub content in the background through the exact same
+    // coalesced flow a member pull uses; on success the registration clears
+    // the placeholder stamp and normal owner publishing resumes on top of the
+    // materialized content instead of an empty directory.
+    if (
+      callerIsOwner &&
+      projectStore?.get &&
+      isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
+    ) {
+      void (async () => {
+        const { principal: resourcePrincipal, scope } = await pullAccessForRequest(
+          projectId,
+          req,
+          ownerMemberId,
+          { principal, workspaceId: resolvedWorkspaceId ?? null },
+        );
+        if (!scope) return;
+        await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
+      })().catch(() => undefined);
     }
     // A verified local mirror binding is enough to return shared identity and
     // unlock presence immediately. The owner-name directory and published-head

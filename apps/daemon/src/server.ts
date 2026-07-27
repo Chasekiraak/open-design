@@ -727,6 +727,10 @@ import { readVelaControlApiContext } from './integrations/vela.js';
 import { fetchVelaWorkspaceBillingProjection } from './integrations/vela-billing.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
 import { createShouldPublish } from './collab/should-publish.js';
+import {
+  isUnmaterializedSharedPlaceholder,
+  SHARED_PROJECT_PLACEHOLDER_METADATA_KEY,
+} from './collab/shared-project-placeholder.js';
 import { recoverPersistedTeamShareOwnership } from './collab/persisted-team-share.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
@@ -3006,8 +3010,20 @@ export async function startServer({
     // NEW workspaceId would find nothing and silently never migrate it.
     rebindWorkspaceProject(db, input.projectId, { ...patch, workspaceId });
   }
+  /**
+   * The recvqzaDvUU6B3 fresh-install wipe guard's one db-backed predicate:
+   * is this project's local record still an unmaterialized shared-project
+   * placeholder (see collab/shared-project-placeholder.ts)? Consulted by the
+   * publish watcher's shouldPublish AND the runtime's scheduler publish gate,
+   * so neither a new watch nor an already-scheduled flush can push a
+   * placeholder's empty directory over the team's real hub content.
+   */
+  const projectIsUnmaterializedSharedPlaceholder = (projectId: string): boolean =>
+    isUnmaterializedSharedPlaceholder(getProject(db, projectId));
   const collab = createCollabRuntime({
     workspaceContext,
+    canPublishProjectContent: (projectId) =>
+      !projectIsUnmaterializedSharedPlaceholder(projectId),
     resolveProjectDir: async (projectId) => {
       const project = getProject(db, projectId);
       if (project) await ensureProject(PROJECTS_DIR, projectId, project.metadata);
@@ -3446,6 +3462,7 @@ export async function startServer({
       resolveSharedProjectOwner,
       workspaceContext: collab.workspaceContext,
       rememberTeamShare: collab.rememberTeamShare,
+      hasUnmaterializedPlaceholder: projectIsUnmaterializedSharedPlaceholder,
     }),
     subscribeFiles: (projectId, onChange) => {
       const watchProject = getProject(db, projectId);
@@ -3573,6 +3590,22 @@ export async function startServer({
       } else {
         if (!metadata.teamMirrorRevokedAt) return;
         delete metadata.teamMirrorRevokedAt;
+      }
+      updateProject(db, projectId, { metadata });
+    },
+    // Set/clear the unmaterialized shared-project placeholder stamp (the
+    // recvqzaDvUU6B3 fresh-install wipe guard) — same non-destructive
+    // metadata-flag pattern as markTeamProjectRevoked above.
+    markSharedProjectPlaceholder: (projectId: string, placeholder: boolean) => {
+      const project = getProject(db, projectId);
+      if (!project) return;
+      const metadata: Record<string, unknown> = { ...((project.metadata as Record<string, unknown> | null) ?? {}) };
+      if (placeholder) {
+        if (metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY]) return;
+        metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY] = Date.now();
+      } else {
+        if (!metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY]) return;
+        delete metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY];
       }
       updateProject(db, projectId, { metadata });
     },

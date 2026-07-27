@@ -133,6 +133,18 @@ export interface CreateCollabRuntimeOptions {
   /** Fired when a project's presence set changes (join/leave). */
   onPresenceChange?: (result: { projectId: string; present: PresenceMember[] }) => void;
   onError?: (result: { projectId: string; error: unknown; principal: ResourceHubPrincipal | null }) => void;
+  /**
+   * Gate for SCHEDULER-driven publishes (file watcher, `/collab/changed`,
+   * `/collab/publish`, run boundaries): return false and the flush becomes a
+   * no-op for that project. The second layer of the fresh-install wipe guard
+   * (recvqzaDvUU6B3) — `should-publish.ts` keeps a placeholder from ever
+   * being WATCHED, this keeps an already-scheduled notification (or a direct
+   * HTTP nudge) from publishing one. Deliberately NOT consulted by
+   * `requestTeamShare`/`publishNow`: an explicit share is the user saying
+   * "publish my local state", which must keep working for brand-new local
+   * projects. Defaults to allow.
+   */
+  canPublishProjectContent?: (projectId: string) => boolean;
 }
 
 function selectResourcePublishAdapter(
@@ -332,6 +344,14 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
   const schedulerAdapter: ResourcePublishAdapter = {
     async publish({ projectId: key, reason }) {
       const { projectId, principal } = parseScopedProjectKey(key);
+      // Fresh-install wipe guard, layer 2 (recvqzaDvUU6B3): every scheduler
+      // flush re-asks whether this project's local copy is publishable at
+      // all. An unmaterialized placeholder answers no, so even a publish
+      // notification that raced ahead of the placeholder stamp (or a direct
+      // `/collab/publish` nudge) cannot push its empty directory to the hub.
+      if (options.canPublishProjectContent && !options.canPublishProjectContent(projectId)) {
+        return null;
+      }
       if (!principal) {
         const principals = principalsForProject(projectId);
         if (principals.length > 0) {

@@ -23,6 +23,7 @@ describe('createShouldPublish', () => {
       resolveSharedProjectOwner: async () => 'owner-1',
       workspaceContext: providerReturning(ACTIVE_OWNER_CONTEXT),
       rememberTeamShare,
+      hasUnmaterializedPlaceholder: () => false,
     });
 
     expect(await shouldPublish('p1')).toBe(true);
@@ -43,6 +44,7 @@ describe('createShouldPublish', () => {
       resolveSharedProjectOwner: async () => 'owner-1',
       workspaceContext: providerReturning({ ...ACTIVE_OWNER_CONTEXT, memberStatus: 'removed' }),
       rememberTeamShare,
+      hasUnmaterializedPlaceholder: () => false,
     });
 
     expect(await shouldPublish('p1')).toBe(false);
@@ -54,6 +56,7 @@ describe('createShouldPublish', () => {
       resolveSharedProjectOwner: async () => null,
       workspaceContext: providerReturning(ACTIVE_OWNER_CONTEXT),
       rememberTeamShare: vi.fn(),
+      hasUnmaterializedPlaceholder: () => false,
     });
 
     expect(await shouldPublish('p1')).toBe(false);
@@ -65,6 +68,7 @@ describe('createShouldPublish', () => {
       resolveSharedProjectOwner: async () => 'someone-else',
       workspaceContext: providerReturning(ACTIVE_OWNER_CONTEXT),
       rememberTeamShare,
+      hasUnmaterializedPlaceholder: () => false,
     });
 
     expect(await shouldPublish('p1')).toBe(false);
@@ -76,8 +80,25 @@ describe('createShouldPublish', () => {
       resolveSharedProjectOwner: async () => 'owner-1',
       workspaceContext: providerReturning(null),
       rememberTeamShare: vi.fn(),
+      hasUnmaterializedPlaceholder: () => false,
     });
 
     expect(await shouldPublish('p1')).toBe(false);
+  });
+
+  it('refuses an unmaterialized shared-project placeholder even when the hub names this member as owner (recvqzaDvUU6B3)', async () => {
+    const rememberTeamShare = vi.fn();
+    const resolveSharedProjectOwner = vi.fn(async () => 'owner-1');
+    const shouldPublish = createShouldPublish({
+      resolveSharedProjectOwner,
+      workspaceContext: providerReturning(ACTIVE_OWNER_CONTEXT),
+      rememberTeamShare,
+      hasUnmaterializedPlaceholder: (projectId) => projectId === 'placeholder-1',
+    });
+
+    expect(await shouldPublish('placeholder-1')).toBe(false);
+    expect(rememberTeamShare).not.toHaveBeenCalled();
+    // The guard answers before any hub round-trip.
+    expect(resolveSharedProjectOwner).not.toHaveBeenCalled();
   });
 });

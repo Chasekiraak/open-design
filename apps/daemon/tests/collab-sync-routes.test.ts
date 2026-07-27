@@ -39,6 +39,7 @@ import {
   getTeamProjectMaterialization,
   materializePulledTeamMirror,
 } from '../src/collab/team-mirror-materializer.js';
+import { SHARED_PROJECT_PLACEHOLDER_METADATA_KEY } from '../src/collab/shared-project-placeholder.js';
 import { withLastKnownWorkspaceContext } from '../src/collab/workspace-context.js';
 import { closeDatabase, getProject, openDatabase } from '../src/db.js';
 import { readVelaControlApiContext } from '../src/integrations/vela.js';
@@ -763,6 +764,80 @@ describe('collab sync routes', () => {
     // Idempotent: subsequent polls do not re-register the now-known project.
     await api.json('/api/projects/shared-p/collab/status');
     expect(projectStore.registerCalls).toBe(1);
+  });
+
+  it('owner opening their own unmaterialized shared project self-pulls and clears the placeholder stamp (recvqzaDvUU6B3)', async () => {
+    // Fresh-install shape: the hub still lists the project with THIS member as
+    // owner, but the local data root has no copy. The status poll registers a
+    // placeholder — and, because the owner has no other pull path ("the owner
+    // never auto-pulls" only holds when their local copy is real), that same
+    // poll must kick off a background self-pull. Without it the empty
+    // placeholder stays the only local state, which is exactly what the
+    // publish paths used to wipe the hub with.
+    const projectStore = fakeProjectStore();
+    const markSharedProjectPlaceholder = vi.fn(
+      (projectId: string, placeholder: boolean) => {
+        const rec = projectStore.projects.get(projectId);
+        if (!rec) return;
+        const metadata = {
+          ...((rec.metadata as Record<string, unknown> | undefined) ?? {}),
+        };
+        if (placeholder) {
+          metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY] = Date.now();
+        } else {
+          delete metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY];
+        }
+        projectStore.projects.set(projectId, { ...rec, metadata: metadata as never });
+      },
+    );
+    const pullDir = await mkdtemp(path.join(tmpdir(), 'od-owner-selfpull-'));
+    tempDirs.push(pullDir);
+    let pullCalls = 0;
+    const api = await startSyncServer(
+      fixedShareContextProvider(true),
+      {
+        projectStore,
+        markSharedProjectPlaceholder,
+        resolvePullDir: () => pullDir,
+        // The CALLER (wm-1) is the hub-registered owner of this project.
+        resolveSharedProjectOwner: async () => 'wm-1',
+        resolveSharedProject: async () => ({
+          projectId: 'owned-shared-p',
+          ownerMemberId: 'wm-1',
+          sharedAt: new Date(1).toISOString(),
+          name: 'Real Owner Project',
+        }),
+      },
+      {
+        adapter: {
+          publish: async () => {
+            throw new Error('an owner self-pull must never publish');
+          },
+          syncLatest: async () => ({ version: 5 }),
+          pull: async () => {
+            pullCalls += 1;
+            return { version: 5 };
+          },
+        },
+      },
+    );
+
+    const res = await api.json('/api/projects/owned-shared-p/collab/status');
+    expect(res.status).toBe(200);
+    // The placeholder was registered AND stamped as unmaterialized on open.
+    expect(markSharedProjectPlaceholder).toHaveBeenCalledWith('owned-shared-p', true);
+
+    // The same status poll kicks off the background owner self-pull …
+    await vi.waitFor(() => {
+      expect(pullCalls).toBeGreaterThan(0);
+    });
+    // … whose registration replaces the placeholder with the real record and
+    // clears the stamp, so normal owner publishing can resume on top of the
+    // materialized content.
+    await vi.waitFor(() => {
+      expect(markSharedProjectPlaceholder).toHaveBeenCalledWith('owned-shared-p', false);
+    });
+    expect(projectStore.projects.get('owned-shared-p')?.name).toBe('Real Owner Project');
   });
 
   it('reports the durable owner-scoped materialized version for a shared project', async () => {
