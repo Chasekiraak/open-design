@@ -117,7 +117,13 @@ import {
   type DesignDeliveryOutcome,
 } from '../runtime/design-delivery';
 import { RESUME_CONTINUE_PROMPT } from '../runtime/resume';
-import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
+import {
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
+  checkAmrBalanceGate,
+  isAmrBalanceGateScope,
+  type AmrBalanceGateScope,
+} from '../runtime/amr-balance-gate';
 import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
@@ -867,9 +873,12 @@ function autoSendContextKey(projectId: string): string {
   return `od:auto-send-context:${projectId}`;
 }
 
-/** Set by the home create flow when its submit already ran the Open Design
- * Cloud balance gate — the first auto-send must not re-prompt the user. */
-function autoSendAmrGateOkKey(projectId: string): string {
+/** Exact workspace/member authority checked by the Home AMR preflight. */
+function autoSendAmrGateWitnessKey(projectId: string): string {
+  return `od:auto-send-amr-gate-witness:${projectId}`;
+}
+
+function legacyAutoSendAmrGateOkKey(projectId: string): string {
   return `od:auto-send-amr-gate-ok:${projectId}`;
 }
 
@@ -902,13 +911,30 @@ function readAutoSendContext(projectId: string): RunContextSelection | null {
   }
 }
 
+function readAutoSendAmrGateWitness(
+  projectId: string,
+): AmrBalanceGateScope | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.sessionStorage.getItem(
+      autoSendAmrGateWitnessKey(projectId),
+    );
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    return isAmrBalanceGateScope(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function clearAutoSendSession(projectId: string): void {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.removeItem(autoSendFirstMessageKey(projectId));
     window.sessionStorage.removeItem(autoSendAttachmentsKey(projectId));
     window.sessionStorage.removeItem(autoSendContextKey(projectId));
-    window.sessionStorage.removeItem(autoSendAmrGateOkKey(projectId));
+    window.sessionStorage.removeItem(autoSendAmrGateWitnessKey(projectId));
+    window.sessionStorage.removeItem(legacyAutoSendAmrGateOkKey(projectId));
   } catch {
     /* ignore */
   }
@@ -8212,22 +8238,24 @@ export function ProjectView({
   const autoSendAttachmentsRef = useRef<ChatAttachment[] | null>(null);
   const autoSendContextRef = useRef<RunContextSelection | null>(null);
   const autoSendFirstMessageRef = useRef(false);
-  const autoSendAmrGateOkRef = useRef(false);
+  const autoSendAmrGateWitnessRef = useRef<AmrBalanceGateScope | undefined>(
+    undefined,
+  );
   if (autoSendSeedRef.current === null) {
     let isAutoSend = false;
-    let amrGateOk = false;
+    let amrGateWitness: AmrBalanceGateScope | undefined;
     try {
       isAutoSend = Boolean(
         window.sessionStorage.getItem(autoSendFirstMessageKey(project.id)),
       );
-      amrGateOk = Boolean(
-        window.sessionStorage.getItem(autoSendAmrGateOkKey(project.id)),
-      );
+      amrGateWitness = readAutoSendAmrGateWitness(project.id);
     } catch {
       /* sessionStorage may be unavailable; treat as manual flow. */
     }
     autoSendFirstMessageRef.current = isAutoSend;
-    autoSendAmrGateOkRef.current = isAutoSend && amrGateOk;
+    autoSendAmrGateWitnessRef.current = isAutoSend
+      ? amrGateWitness
+      : undefined;
     autoSendSeedRef.current = isAutoSend ? (project.pendingPrompt ?? '') : '';
     autoSendAttachmentsRef.current = isAutoSend ? readAutoSendAttachments(project.id) : [];
     autoSendContextRef.current = isAutoSend ? readAutoSendContext(project.id) : null;
@@ -8882,11 +8910,17 @@ export function ProjectView({
     }
     clearAutoSendSession(project.id);
     autoSendAttachmentsRef.current = [];
+    const autoSendGateStillMatches =
+      autoSendAmrGateWitnessRef.current !== undefined &&
+      amrBalanceGateScopesMatch(
+        autoSendAmrGateWitnessRef.current,
+        amrBalanceGateScopeForWorkspaceContext(projectRunWorkspaceContext),
+      );
     void handleSend(seed, attachments, [], {
       ...(context ? { context } : {}),
-      // The home submit already gated this exact task (and the user answered
-      // any soft warning there); asking again would double-prompt.
-      ...(autoSendAmrGateOkRef.current ? { amrGatePrechecked: true } : {}),
+      // Only reuse Home's decision for the exact persisted project scope.
+      // A workspace/member mismatch falls through to handleSend's normal gate.
+      ...(autoSendGateStillMatches ? { amrGatePrechecked: true } : {}),
     });
   }, [
     activeConversationId,

@@ -110,6 +110,11 @@ import {
   amrArtifactUpgradeHomeMockOffer,
   type AmrArtifactUpgradeHomeOffer,
 } from './runtime/amr-artifact-upgrade';
+import {
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
+  type AmrBalanceGateScope,
+} from './runtime/amr-balance-gate';
 import { installFontRecovery } from './runtime/font-recovery';
 import {
   createDesignSystemProjectFromProject,
@@ -163,10 +168,8 @@ type AppCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   initialRunContext?: RunContextSelection | null;
   conversationMode?: ChatSessionMode;
   autoSendFirstMessage?: boolean;
-  /** The home submit already ran the Open Design Cloud balance gate (and the
-   *  user acknowledged any soft warning), so the project's first auto-send
-   *  must not re-gate — re-prompting a decision the user just made. */
-  amrGatePrechecked?: boolean;
+  /** Exact workspace/member authority checked by the Home AMR preflight. */
+  amrGatePrecheckWitness?: AmrBalanceGateScope;
   requestId?: string;
   pendingFiles?: File[];
   userWorkingDirToken?: string;
@@ -1978,6 +1981,18 @@ function AppInner() {
         kind === 'template' ? 'template' : 'blank';
       let result;
       try {
+        const createWorkspaceContext = resolvedWorkspaceContextForWrite(
+          workspaceContextStateRef.current,
+        );
+        if (
+          input.amrGatePrecheckWitness &&
+          !amrBalanceGateScopesMatch(
+            input.amrGatePrecheckWitness,
+            amrBalanceGateScopeForWorkspaceContext(createWorkspaceContext),
+          )
+        ) {
+          throw new Error('AMR_WORKSPACE_GATE_STALE');
+        }
         result = await createProject({
           name: input.name,
           skillId: input.skillId,
@@ -1990,9 +2005,7 @@ function AppInner() {
             ? { appliedPluginSnapshotId: input.appliedPluginSnapshotId }
             : {}),
           ...(input.pluginInputs ? { pluginInputs: input.pluginInputs } : {}),
-          workspaceContext: resolvedWorkspaceContextForWrite(
-            workspaceContextStateRef.current,
-          ),
+          workspaceContext: createWorkspaceContext,
         });
       } catch (err) {
         const errorCode =
@@ -2131,16 +2144,19 @@ function AppInner() {
             `od:auto-send-first:${result.project.id}`,
             '1',
           );
-          if (input.amrGatePrechecked) {
+          if (input.amrGatePrecheckWitness) {
             window.sessionStorage.setItem(
-              `od:auto-send-amr-gate-ok:${result.project.id}`,
-              '1',
+              `od:auto-send-amr-gate-witness:${result.project.id}`,
+              JSON.stringify(input.amrGatePrecheckWitness),
             );
           } else {
             window.sessionStorage.removeItem(
-              `od:auto-send-amr-gate-ok:${result.project.id}`,
+              `od:auto-send-amr-gate-witness:${result.project.id}`,
             );
           }
+          window.sessionStorage.removeItem(
+            `od:auto-send-amr-gate-ok:${result.project.id}`,
+          );
           if (firstMessageAttachments.length > 0) {
             window.sessionStorage.setItem(
               `od:auto-send-attachments:${result.project.id}`,

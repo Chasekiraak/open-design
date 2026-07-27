@@ -102,7 +102,12 @@ import { UpdaterPopup } from './UpdaterPopup';
 import { WhatsNewPopup } from './WhatsNewPopup';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
-import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
+import {
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
+  checkAmrBalanceGate,
+  type AmrBalanceGateScope,
+} from '../runtime/amr-balance-gate';
 import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
 import { HomeView, seedHomeComposerPrompt } from './HomeView';
 import { EntryBlankState } from './EntryBlankState';
@@ -279,9 +284,8 @@ type EntryCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   initialRunContext?: RunContextSelection | null;
   conversationMode?: ChatSessionMode;
   autoSendFirstMessage?: boolean;
-  /** The home submit already ran the Open Design Cloud balance gate; the
-   *  project's first auto-send must not re-gate. */
-  amrGatePrechecked?: boolean;
+  /** Exact workspace/member authority checked by the Home AMR preflight. */
+  amrGatePrecheckWitness?: AmrBalanceGateScope;
   requestId?: string;
   pendingFiles?: File[];
   userWorkingDirToken?: string;
@@ -562,6 +566,8 @@ export function EntryShell({
   // (personal or team); workspace surfaces gate on B's permission bits, not on
   // workspaceType.
   const { context: workspaceContext, loading: workspaceLoading } = useWorkspaceContext();
+  const workspaceContextRef = useRef(workspaceContext);
+  workspaceContextRef.current = workspaceContext;
   const workspaceBillingResponse = useWorkspaceBillingResponse();
   const workspaceBilling = workspaceBillingResponse?.summary ?? null;
   const workspaceBalanceUsd = workspaceBillingBalanceUsd(
@@ -1047,60 +1053,58 @@ export function EntryShell({
     // project is created, so the dialog appears right here on the home page
     // and the composer keeps its draft. In-project sends are gated separately
     // in ProjectView.handleSend.
-    let amrGatePrechecked = false;
+    let amrGatePrecheckWitness: AmrBalanceGateScope | undefined;
     if (config.mode === 'daemon' && config.agentId === 'amr') {
-      let gate = await checkAmrBalanceGate(
-        workspaceContext
-          ? {
-              workspaceType: workspaceContext.workspaceType,
-              workspaceId: workspaceContext.workspaceId,
-              workspaceMemberId: workspaceContext.workspaceMemberId,
-            }
-          : undefined,
-      );
-      // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
-      // its blocking condition clears (sign-in completed, recharge landed)
-      // and the gate re-runs, so the task auto-continues through the normal
-      // accept path. Still hard after the re-check (e.g. signed in but the
-      // wallet is empty) → the dialog re-shows with the fresh snapshot.
-      while (gate.kind === 'hard') {
-        const blocked = gate;
-        const decision = await new Promise<'retry' | 'dismiss'>((resolve) => {
-          setAmrBalanceGateBlock({
-            reason: blocked.reason,
-            snapshot: blocked.snapshot,
-            resolve,
-          });
-        });
-        setAmrBalanceGateBlock(null);
-        if (decision === 'dismiss') return 'blocked' as const;
-        gate = await checkAmrBalanceGate(
-          workspaceContext
-            ? {
-                workspaceType: workspaceContext.workspaceType,
-                workspaceId: workspaceContext.workspaceId,
-                workspaceMemberId: workspaceContext.workspaceMemberId,
-              }
-            : undefined,
+      // Awaiting the wallet or either dialog can outlive a workspace switch.
+      // Re-run once against the latest exact workspace/member authority; if it
+      // changes again, fail closed instead of reusing a stale decision.
+      for (let workspaceAttempt = 0; workspaceAttempt < 2; workspaceAttempt += 1) {
+        const gateScope = amrBalanceGateScopeForWorkspaceContext(
+          workspaceContextRef.current,
         );
-      }
-      if (gate.kind === 'unavailable') return 'blocked' as const;
-      if (gate.kind === 'soft') {
-        // Hold THIS submit while the reminder waits for a decision; 'proceed'
-        // resumes the same create-and-run below, so HomeView's normal accept
-        // path (draft clearing, context consumption) still applies.
-        const plan = await resolveAmrPlan(gate.snapshot);
-        if (isPaidAmrPlan(plan)) {
-          const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
-            setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
+        let gate = await checkAmrBalanceGate(gateScope);
+        // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
+        // its blocking condition clears (sign-in completed, recharge landed)
+        // and the gate re-runs, so the task auto-continues through the normal
+        // accept path. Still hard after the re-check (e.g. signed in but the
+        // wallet is empty) → the dialog re-shows with the fresh snapshot.
+        while (gate.kind === 'hard') {
+          const blocked = gate;
+          const decision = await new Promise<'retry' | 'dismiss'>((resolve) => {
+            setAmrBalanceGateBlock({
+              reason: blocked.reason,
+              snapshot: blocked.snapshot,
+              resolve,
+            });
           });
-          setAmrLowBalanceWarn(null);
-          if (decision !== 'proceed') return 'blocked' as const;
+          setAmrBalanceGateBlock(null);
+          if (decision === 'dismiss') return 'blocked' as const;
+          gate = await checkAmrBalanceGate(gateScope);
         }
+        if (gate.kind === 'unavailable') return 'blocked' as const;
+        if (gate.kind === 'soft') {
+          // Hold THIS submit while the reminder waits for a decision; 'proceed'
+          // resumes the same create-and-run below, so HomeView's normal accept
+          // path (draft clearing, context consumption) still applies.
+          const plan = await resolveAmrPlan(gate.snapshot);
+          if (isPaidAmrPlan(plan)) {
+            const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
+              setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
+            });
+            setAmrLowBalanceWarn(null);
+            if (decision !== 'proceed') return 'blocked' as const;
+          }
+        }
+        const currentScope = amrBalanceGateScopeForWorkspaceContext(
+          workspaceContextRef.current,
+        );
+        if (!amrBalanceGateScopesMatch(gateScope, currentScope)) continue;
+        amrGatePrecheckWitness = gateScope;
+        break;
       }
-      // The decision (or clean pass) carries into the created project's first
-      // auto-send, which must not re-prompt what the user just answered.
-      amrGatePrechecked = true;
+      if (!amrGatePrecheckWitness) {
+        return 'blocked' as const;
+      }
     }
     // Starting from the Home composer is a concrete entry — retire the
     // recommendation (spec §7.4). Done only once the submit actually proceeds
@@ -1172,7 +1176,7 @@ export function EntryShell({
       // not need the desktop main-process trust token that baseDir imports
       // require for write access.
       autoSendFirstMessage: true,
-      amrGatePrechecked,
+      ...(amrGatePrecheckWitness ? { amrGatePrecheckWitness } : {}),
     });
   }
 

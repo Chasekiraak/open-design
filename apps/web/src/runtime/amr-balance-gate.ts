@@ -14,6 +14,7 @@
 
 import type {
   AmrWalletSnapshot,
+  WorkspaceCollabContext,
   WorkspaceBillingResponse,
 } from '@open-design/contracts';
 import { fetchAmrWalletSnapshot } from '../providers/daemon';
@@ -46,6 +47,54 @@ export interface AmrBalanceGateScope {
   workspaceType: 'personal' | 'team';
   workspaceId: string;
   workspaceMemberId: string;
+}
+
+export function isAmrBalanceGateScope(value: unknown): value is AmrBalanceGateScope {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.workspaceType === 'personal' || candidate.workspaceType === 'team') &&
+    typeof candidate.workspaceId === 'string' &&
+    candidate.workspaceId.trim().length > 0 &&
+    typeof candidate.workspaceMemberId === 'string' &&
+    candidate.workspaceMemberId.trim().length > 0
+  );
+}
+
+/**
+ * Capture the exact workspace/member authority that an AMR preflight checked.
+ * A successful preflight may only be reused while this witness still matches.
+ */
+export function amrBalanceGateScopeForWorkspaceContext(
+  context:
+    | Pick<
+        WorkspaceCollabContext,
+        'workspaceType' | 'workspaceId' | 'workspaceMemberId'
+      >
+    | null
+    | undefined,
+): AmrBalanceGateScope | undefined {
+  if (!context) return undefined;
+  const workspaceId = context.workspaceId.trim();
+  const workspaceMemberId = context.workspaceMemberId.trim();
+  if (!workspaceId || !workspaceMemberId) return undefined;
+  return {
+    workspaceType: context.workspaceType,
+    workspaceId,
+    workspaceMemberId,
+  };
+}
+
+export function amrBalanceGateScopesMatch(
+  checked: AmrBalanceGateScope | undefined,
+  current: AmrBalanceGateScope | undefined,
+): boolean {
+  if (!checked || !current) return false;
+  return (
+    checked.workspaceType === current.workspaceType &&
+    checked.workspaceId === current.workspaceId &&
+    checked.workspaceMemberId === current.workspaceMemberId
+  );
 }
 
 /** Parse a definitive balance from a snapshot; null when the answer is

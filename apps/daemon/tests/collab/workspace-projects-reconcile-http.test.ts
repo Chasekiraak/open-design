@@ -11,7 +11,7 @@
 // DISPLAY cache. See that file's header comment for the full design.
 import express from 'express';
 import type http from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,10 +20,12 @@ import { registerProjectRoutes } from '../../src/routes/project/index.js';
 import {
   closeDatabase,
   ensureWorkspaceProject,
+  insertConversation,
   getProject,
   getWorkspaceProject,
   getWorkspaceProjectByProjectId,
   insertProject,
+  listConversations,
   listWorkspaceProjectBindings,
   listWorkspaceProjects,
   openDatabase,
@@ -90,7 +92,14 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
   // the reconciler under test writes into — every `projectStore` function is
   // the genuine `db.ts` implementation, matching
   // `tests/routes/project-move-to-personal.test.ts`'s established pattern.
-  function buildProjectRoutesDeps(teamProjectCatalog: { list: () => Promise<unknown[]> } | undefined) {
+  function buildProjectRoutesDeps(
+    teamProjectCatalog: { list: () => Promise<unknown[]> } | undefined,
+    overrides: {
+      ensureWorkspaceProject?: (db: unknown, input: unknown) => unknown;
+      appConfig?: Record<string, unknown>;
+      validateLinkedDirs?: (dirs: string[]) => { dirs: string[]; error?: string };
+    } = {},
+  ) {
     const noop = vi.fn();
     return {
       db,
@@ -103,13 +112,16 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
       paths: {
         DESIGN_SYSTEMS_DIR: '',
         PROJECTS_DIR: projectsRoot,
+        RUNTIME_DATA_DIR: tempDir,
+        RUNTIME_DATA_DIR_CANONICAL: tempDir,
         SKILLS_DIR: '',
         BRANDS_DIR: path.join(tempDir, 'brands'),
         USER_DESIGN_SYSTEMS_DIR: path.join(tempDir, 'user-design-systems'),
       },
       projectStore: {
         insertProject: (row: any) => insertProject(db, row),
-        validateLinkedDirs: () => ({ dirs: [] }),
+        validateLinkedDirs:
+          overrides.validateLinkedDirs ?? (() => ({ dirs: [] })),
         getProject: (_db: unknown, id: string) => getProject(db, id),
         updateProject: noop,
         dbDeleteProject: noop,
@@ -117,7 +129,9 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
         stageProjectDirsForDelete: vi.fn(async () => ({ rollback: vi.fn(async () => {}), commit: vi.fn(async () => {}) })),
         deleteWorkspaceProject: noop,
         countWorkspaceProjectRefs: vi.fn(() => 1),
-        ensureWorkspaceProject: (_db: unknown, input: any) => ensureWorkspaceProject(db, input),
+        ensureWorkspaceProject:
+          overrides.ensureWorkspaceProject
+          ?? ((_db: unknown, input: any) => ensureWorkspaceProject(db, input)),
         getWorkspaceProject: (_db: unknown, workspaceId: string, projectId: string) =>
           getWorkspaceProject(db, workspaceId, projectId),
         getWorkspaceProjectByProjectId: (_db: unknown, projectId: string) =>
@@ -138,7 +152,9 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
         setTabs: noop,
         resolveProjectDir: () => '',
       },
-      conversations: { insertConversation: noop },
+      conversations: {
+        insertConversation: (_db: unknown, input: any) => insertConversation(db, input),
+      },
       templates: {
         getTemplate: noop,
         listTemplates: () => [],
@@ -157,7 +173,10 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
       events: { subscribeFileEvents: noop, activeProjectEventSinks: new Map() },
       ids: { randomId: () => `id-${Math.random().toString(36).slice(2)}` },
       telemetry: { reportFinalizedMessage: noop },
-      appConfig: { readAppConfig: vi.fn(async () => ({})), writeAppConfig: noop },
+      appConfig: {
+        readAppConfig: vi.fn(async () => overrides.appConfig ?? {}),
+        writeAppConfig: noop,
+      },
       agents: {},
       validation: {
         validateProjectDesignSystemId: async () => ({ ok: true, id: null }),
@@ -192,6 +211,95 @@ describe('reconcileWorkspaceProjectsWithRemote, verified through the real worksp
       updatedAt: 20,
     };
   }
+
+  it('rolls back project and conversation rows when workspace binding fails', async () => {
+    const projectId = 'create-bind-failure';
+    const app = express();
+    app.use(express.json());
+    registerProjectRoutes(
+      app,
+      buildProjectRoutesDeps(
+        { list: async () => [] },
+        {
+          ensureWorkspaceProject: () => {
+            throw new Error('injected workspace bind failure');
+          },
+        },
+      ),
+    );
+    const routeServer = await listen(app);
+    try {
+      const response = await fetch(`${routeServer.url}/api/projects`, {
+        method: 'POST',
+        headers: readerTeamHeaders(),
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Must roll back',
+          skillId: null,
+          designSystemId: null,
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(getProject(db, projectId)).toBeNull();
+      expect(listConversations(db, projectId)).toEqual([]);
+      expect(getWorkspaceProjectByProjectId(db, projectId)).toBeUndefined();
+    } finally {
+      await close(routeServer.server);
+    }
+  });
+
+  it('removes an external project directory when workspace binding fails', async () => {
+    const projectId = 'external-create-bind-failure';
+    const externalRoot = await mkdtemp(
+      path.join(tmpdir(), 'od-create-bind-external-'),
+    );
+    const app = express();
+    app.use(express.json());
+    registerProjectRoutes(
+      app,
+      buildProjectRoutesDeps(
+        { list: async () => [] },
+        {
+          appConfig: {
+            projectLocations: [
+              {
+                id: 'external-test',
+                name: 'External test',
+                path: externalRoot,
+              },
+            ],
+          },
+          validateLinkedDirs: (dirs) => ({ dirs }),
+          ensureWorkspaceProject: () => {
+            throw new Error('injected workspace bind failure');
+          },
+        },
+      ),
+    );
+    const routeServer = await listen(app);
+    try {
+      const response = await fetch(`${routeServer.url}/api/projects`, {
+        method: 'POST',
+        headers: readerTeamHeaders(),
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Must clean external dir',
+          skillId: null,
+          designSystemId: null,
+          projectLocationId: 'external-test',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(getProject(db, projectId)).toBeNull();
+      expect(listConversations(db, projectId)).toEqual([]);
+      expect(await readdir(externalRoot)).toEqual([]);
+    } finally {
+      await close(routeServer.server);
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
 
   it('atomically materializes a read-only team mirror that rejects headerless PATCH and DELETE', async () => {
     const projectId = 'fresh-pulled-mirror';

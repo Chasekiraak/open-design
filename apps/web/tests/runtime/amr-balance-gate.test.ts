@@ -4,6 +4,8 @@ import type { AmrWalletSnapshot } from '@open-design/contracts';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
   AMR_LOW_BALANCE_WARN_USD,
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
   amrWalletBalanceInsufficient,
   amrWalletBalanceUsd,
   checkAmrBalanceGate,
@@ -64,6 +66,43 @@ describe('amrWalletBalanceInsufficient', () => {
     expect(amrWalletBalanceInsufficient(snapshot({ balanceUsd: '0.01' }))).toBe(false);
     expect(amrWalletBalanceInsufficient(null)).toBe(false);
     expect(amrWalletBalanceInsufficient(snapshot({ balanceUsd: ' ' }))).toBe(false);
+  });
+});
+
+describe('AMR balance gate workspace witness', () => {
+  const teamA = {
+    workspaceType: 'team' as const,
+    workspaceId: 'ws-team-a',
+    workspaceMemberId: 'wm-a',
+  };
+
+  it('matches only the exact workspace and member epoch', () => {
+    const witness = amrBalanceGateScopeForWorkspaceContext(teamA);
+    expect(witness).toEqual(teamA);
+    expect(amrBalanceGateScopesMatch(witness, { ...teamA })).toBe(true);
+    expect(
+      amrBalanceGateScopesMatch(witness, {
+        ...teamA,
+        workspaceId: 'ws-team-b',
+      }),
+    ).toBe(false);
+    expect(
+      amrBalanceGateScopesMatch(witness, {
+        ...teamA,
+        workspaceMemberId: 'wm-new-epoch',
+      }),
+    ).toBe(false);
+    expect(amrBalanceGateScopesMatch(witness, undefined)).toBe(false);
+  });
+
+  it('does not mint a reusable witness from an unresolved workspace', () => {
+    expect(amrBalanceGateScopeForWorkspaceContext(null)).toBeUndefined();
+    expect(
+      amrBalanceGateScopeForWorkspaceContext({
+        ...teamA,
+        workspaceMemberId: ' ',
+      }),
+    ).toBeUndefined();
   });
 });
 

@@ -2877,6 +2877,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
                 }
               : null;
       const now = Date.now();
+      const cid = randomId();
+      const initialSessionMode = normalizeChatSessionMode(
+        req.body?.conversationMode ?? req.body?.sessionMode,
+      );
       let project;
       try {
         if (externalProjectDir) {
@@ -2890,45 +2894,48 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
             designSystemId: normalizedDesignSystemId,
           });
         }
-        project = insertProject(db, {
-          id,
-          name: name.trim(),
-          skillId: normalizedSkillId,
-          designSystemId: normalizedDesignSystemId,
-          pendingPrompt: pendingPrompt || null,
-          metadata: projectMetadata,
-          customInstructions:
-            typeof customInstructions === 'string'
-              ? customInstructions
-              : null,
-          createdAt: now,
-          updatedAt: now,
-        });
+        project = db.transaction(() => {
+          const createdProject = insertProject(db, {
+            id,
+            name: name.trim(),
+            skillId: normalizedSkillId,
+            designSystemId: normalizedDesignSystemId,
+            pendingPrompt: pendingPrompt || null,
+            metadata: projectMetadata,
+            customInstructions:
+              typeof customInstructions === 'string'
+                ? customInstructions
+                : null,
+            createdAt: now,
+            updatedAt: now,
+          });
+          // Project, seed conversation, and workspace membership form one
+          // ownership record. A binding failure must leave none of them behind.
+          insertConversation(db, {
+            id: cid,
+            projectId: id,
+            title: null,
+            sessionMode: initialSessionMode,
+            createdAt: now,
+            updatedAt: now,
+          });
+          bindCreatedProjectToWorkspace(
+            (input) => ensureWorkspaceProject(db, input),
+            createWorkspace.context,
+            id,
+            now,
+          );
+          return createdProject;
+        })();
       } catch (err) {
+        // External directories cannot participate in SQLite's transaction.
+        // Treat their creation as a recoverable side effect and compensate on
+        // any manifest or database transaction failure.
         if (externalProjectDir) {
           await rm(externalProjectDir, { recursive: true, force: true }).catch(() => {});
         }
         throw err;
       }
-      // Seed a default conversation so the UI always has somewhere to write.
-      const cid = randomId();
-      const initialSessionMode = normalizeChatSessionMode(
-        req.body?.conversationMode ?? req.body?.sessionMode,
-      );
-      insertConversation(db, {
-        id: cid,
-        projectId: id,
-        title: null,
-        sessionMode: initialSessionMode,
-        createdAt: now,
-        updatedAt: now,
-      });
-      bindCreatedProjectToWorkspace(
-        (input) => ensureWorkspaceProject(db, input),
-        createWorkspace.context,
-        id,
-        now,
-      );
       const explicitPlugin =
         typeof req.body?.pluginId === 'string' && req.body.pluginId.trim().length > 0
           ? true
