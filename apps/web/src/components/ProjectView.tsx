@@ -178,6 +178,7 @@ import {
   cacheTabsLocally,
   persistTabsToDaemonNow,
   listPlugins,
+  resolvedWorkspaceContextForWrite,
   type SaveMessageOptions,
   waitGeneratedPluginShareTask,
 } from '../state/projects';
@@ -1469,7 +1470,8 @@ export function ProjectView({
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceContextState = useWorkspaceContext();
+  const { context: workspaceContext } = workspaceContextState;
   const projectWorkspaceScopeState = useProjectWorkspaceScope(project.id);
   const projectRunWorkspaceContext = projectWorkspaceContext(
     projectWorkspaceScopeState.scope,
@@ -8808,7 +8810,7 @@ export function ProjectView({
     try {
       const result = await duplicatePluginAsProject(record.id, {
         name: localizePluginTitle(locale, record),
-      });
+      }, resolvedWorkspaceContextForWrite(workspaceContextState));
       setContextPluginDetails(null);
       navigate({
         kind: 'project',
@@ -8824,7 +8826,7 @@ export function ProjectView({
         ttlMs: 3000,
       });
     }
-  }, [locale, t]);
+  }, [locale, t, workspaceContextState]);
   const handleOpenContextDesignSystemDetails = useCallback((system: DesignSystemSummary) => {
     setContextDesignSystemDetails(system);
   }, []);

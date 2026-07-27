@@ -23,8 +23,16 @@ import { readProjectFileVersion } from './project-file-versions.js';
 import { authorizeReasoningEgress, sendReasoningEgressDenial } from './reasoning-egress.js';
 import { sandboxImportedProjectRootUnavailableReason } from './sandbox-mode.js';
 import { parseOrchestratorWorkspace } from './workspace-contract.js';
+import {
+  authorizeCreatedProjectWorkspace,
+  bindCreatedProjectToWorkspace,
+  sendCreatedProjectWorkspaceError,
+} from './collab/created-project-workspace.js';
+import type { WorkspaceDirectoryFetchResult } from './collab/vela-workspace-context.js';
 
-export interface RegisterImportRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'ids' | 'paths' | 'imports' | 'auth' | 'projectStore' | 'conversations' | 'projectFiles' | 'validation'> {}
+export interface RegisterImportRoutesDeps extends RouteDeps<'db' | 'http' | 'uploads' | 'node' | 'ids' | 'paths' | 'imports' | 'auth' | 'projectStore' | 'conversations' | 'projectFiles' | 'validation'> {
+  fetchProjectCreationWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
+}
 
 export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps) {
   const { db } = ctx;
@@ -63,7 +71,7 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
     pruneExpiredImportNonces,
     verifyDesktopImportToken,
   } = ctx.auth;
-  const { getProject, insertProject, updateProject } = ctx.projectStore;
+  const { getProject, insertProject, updateProject, ensureWorkspaceProject } = ctx.projectStore;
   const { insertConversation } = ctx.conversations;
   const { setTabs } = ctx.projectFiles;
   const { validateProjectDesignSystemId } = ctx.validation;
@@ -71,9 +79,18 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
     '/api/import/claude-design',
     importUpload.single('file'),
     async (req, res) => {
+      let importedProjectDir: string | null = null;
       try {
         if (!req.file)
           return res.status(400).json({ error: 'zip file required' });
+        const createWorkspace = await authorizeCreatedProjectWorkspace(
+          req,
+          ctx.fetchProjectCreationWorkspaceDirectory,
+        );
+        if (!createWorkspace.ok) {
+          fs.promises.unlink(req.file.path).catch(() => {});
+          return sendCreatedProjectWorkspaceError(res, createWorkspace);
+        }
         const originalName =
           req.file.originalname || 'Claude Design export.zip';
         if (!/\.zip$/i.test(originalName)) {
@@ -84,36 +101,46 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
         const now = Date.now();
         const baseName =
           originalName.replace(/\.zip$/i, '').trim() || 'Claude Design import';
+        importedProjectDir = projectDir(PROJECTS_DIR, id);
         const imported = await importClaudeDesignZip(
           req.file.path,
-          projectDir(PROJECTS_DIR, id),
+          importedProjectDir,
         );
         fs.promises.unlink(req.file.path).catch(() => {});
 
-        const project = insertProject(db, {
-          id,
-          name: baseName,
-          skillId: null,
-          designSystemId: null,
-          pendingPrompt: `Imported from Claude Design ZIP: ${originalName}. Continue editing ${imported.entryFile}.`,
-          metadata: {
-            kind: 'prototype',
-            importedFrom: 'claude-design',
-            entryFile: imported.entryFile,
-            sourceFileName: originalName,
-          },
-          createdAt: now,
-          updatedAt: now,
-        });
         const cid = randomId();
-        insertConversation(db, {
-          id: cid,
-          projectId: id,
-          title: 'Imported Claude Design project',
-          createdAt: now,
-          updatedAt: now,
-        });
-        setTabs(db, id, [imported.entryFile], imported.entryFile);
+        const project = db.transaction(() => {
+          const createdProject = insertProject(db, {
+            id,
+            name: baseName,
+            skillId: null,
+            designSystemId: null,
+            pendingPrompt: `Imported from Claude Design ZIP: ${originalName}. Continue editing ${imported.entryFile}.`,
+            metadata: {
+              kind: 'prototype',
+              importedFrom: 'claude-design',
+              entryFile: imported.entryFile,
+              sourceFileName: originalName,
+            },
+            createdAt: now,
+            updatedAt: now,
+          });
+          insertConversation(db, {
+            id: cid,
+            projectId: id,
+            title: 'Imported Claude Design project',
+            createdAt: now,
+            updatedAt: now,
+          });
+          setTabs(db, id, [imported.entryFile], imported.entryFile);
+          bindCreatedProjectToWorkspace(
+            (input) => ensureWorkspaceProject(db, input),
+            createWorkspace.context,
+            id,
+            now,
+          );
+          return createdProject;
+        })();
         res.json({
           project,
           conversationId: cid,
@@ -122,6 +149,9 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
         });
       } catch (err: any) {
         if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {});
+        if (importedProjectDir) {
+          await fs.promises.rm(importedProjectDir, { recursive: true, force: true }).catch(() => {});
+        }
         res.status(400).json({ error: String(err) });
       }
     },
@@ -268,6 +298,13 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
 
   app.post('/api/import/folder', async (req, res) => {
     try {
+      const createWorkspace = await authorizeCreatedProjectWorkspace(
+        req,
+        ctx.fetchProjectCreationWorkspaceDirectory,
+      );
+      if (!createWorkspace.ok) {
+        return sendCreatedProjectWorkspaceError(res, createWorkspace);
+      }
       const { baseDir, name, skillId, designSystemId, orchestratorWorkspace } = req.body || {};
       if (typeof baseDir !== 'string' || !baseDir.trim()) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'baseDir required');
@@ -389,38 +426,46 @@ export function registerImportRoutes(app: Express, ctx: RegisterImportRoutesDeps
           designSystemValidation.message,
         );
       }
-      const project = insertProject(db, {
-        id,
-        name: projectName,
-        skillId: skillId ?? null,
-        designSystemId: designSystemValidation.id,
-        pendingPrompt: null,
-        metadata: {
-          kind: 'prototype',
-          baseDir: normalizedPath,
-          importedFrom: 'folder',
-          entryFile,
-          ...(normalizedOrchestratorWorkspace
-            ? { orchestratorWorkspace: normalizedOrchestratorWorkspace }
-            : {}),
-          ...(trustedPickerImport ? { fromTrustedPicker: true as const } : {}),
-        },
-        createdAt: now,
-        updatedAt: now,
-      });
-
       const cid = randomId();
-      insertConversation(db, {
-        id: cid,
-        projectId: id,
-        title: `Imported from ${projectName}`,
-        createdAt: now,
-        updatedAt: now,
-      });
-      // Folder imports should land on Design Files so users can choose from
-      // the imported folder's artifacts. Persist an empty saved tab state so
-      // ProjectView does not auto-open the detected primary file on hydration.
-      setTabs(db, id, [], null);
+      const project = db.transaction(() => {
+        const createdProject = insertProject(db, {
+          id,
+          name: projectName,
+          skillId: skillId ?? null,
+          designSystemId: designSystemValidation.id,
+          pendingPrompt: null,
+          metadata: {
+            kind: 'prototype',
+            baseDir: normalizedPath,
+            importedFrom: 'folder',
+            entryFile,
+            ...(normalizedOrchestratorWorkspace
+              ? { orchestratorWorkspace: normalizedOrchestratorWorkspace }
+              : {}),
+            ...(trustedPickerImport ? { fromTrustedPicker: true as const } : {}),
+          },
+          createdAt: now,
+          updatedAt: now,
+        });
+        insertConversation(db, {
+          id: cid,
+          projectId: id,
+          title: `Imported from ${projectName}`,
+          createdAt: now,
+          updatedAt: now,
+        });
+        // Folder imports should land on Design Files so users can choose from
+        // the imported folder's artifacts. Persist an empty saved tab state so
+        // ProjectView does not auto-open the detected primary file on hydration.
+        setTabs(db, id, [], null);
+        bindCreatedProjectToWorkspace(
+          (input) => ensureWorkspaceProject(db, input),
+          createWorkspace.context,
+          id,
+          now,
+        );
+        return createdProject;
+      })();
       /** @type {import('@open-design/contracts').ImportFolderResponse} */
       const body = { project, conversationId: cid, entryFile };
       res.json(body);

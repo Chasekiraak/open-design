@@ -1,4 +1,5 @@
 import type { ReleaseChannel } from "@open-design/release";
+import type { WorkspaceCollabContext } from "@open-design/contracts";
 
 /**
  * @module protocol
@@ -43,6 +44,7 @@ export type OpenDesignHostProjectImportInit = {
   designSystemId?: string | null;
   name?: string;
   skillId?: string | null;
+  workspaceContext?: WorkspaceCollabContext | null;
 };
 
 export type OpenDesignHostProjectImportSuccess = {

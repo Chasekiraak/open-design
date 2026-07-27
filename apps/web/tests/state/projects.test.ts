@@ -6,6 +6,7 @@ import {
   createProject,
   createPluginShareProject,
   deleteProject,
+  duplicatePluginAsProject,
   duplicateProject,
   importClaudeDesignZip,
   importFolderProject,
@@ -634,6 +635,38 @@ describe('importClaudeDesignZip', () => {
       }),
     );
   });
+
+  it('sends the exact workspace/member authority with the ZIP import', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'claude-project', name: 'Claude import' },
+        conversationId: 'claude-conversation',
+        entryFile: 'index.html',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const context = teamWorkspaceContext({
+      workspaceId: 'workspace-claude',
+      workspaceMemberId: 'member-claude',
+    });
+    await importClaudeDesignZip(
+      new File(['zip-bytes'], 'claude-design.zip', { type: 'application/zip' }),
+      context,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/import/claude-design',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'workspace-claude',
+          'x-od-workspace-member-id': 'member-claude',
+        }),
+      }),
+    );
+  });
 });
 
 describe('generated plugin share actions', () => {
@@ -773,6 +806,32 @@ describe('importFolderProject', () => {
     expect(result).toMatchObject({ project: { id: 'p-1' }, entryFile: 'index.html' });
   });
 
+  it('sends the exact workspace/member authority with a browser folder import', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'p-workspace', name: 'Workspace folder' },
+        conversationId: 'conv-workspace',
+        entryFile: 'index.html',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await importFolderProject(
+      { baseDir: '/home/user/project' },
+      teamWorkspaceContext({
+        workspaceId: 'workspace-folder',
+        workspaceMemberId: 'member-folder',
+      }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.headers).toMatchObject({
+      'x-od-workspace-id': 'workspace-folder',
+      'x-od-workspace-member-id': 'member-folder',
+    });
+  });
+
   it('throws with daemon error message for filesystem root', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(
       JSON.stringify({ error: { code: 'BAD_REQUEST', message: 'cannot import the filesystem root' } }),
@@ -811,6 +870,40 @@ describe('importFolderProject', () => {
 
     await expect(importFolderProject({ baseDir: '/some/path' }))
       .rejects.toThrow('Failed to import folder');
+  });
+});
+
+describe('duplicatePluginAsProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the exact workspace/member authority with Plugin Remix', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        ok: true,
+        projectId: 'plugin-project',
+        conversationId: 'plugin-conversation',
+        relPath: 'index.html',
+      }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await duplicatePluginAsProject(
+      'plugin-a',
+      { name: 'Plugin A' },
+      teamWorkspaceContext({
+        workspaceId: 'workspace-plugin',
+        workspaceMemberId: 'member-plugin',
+      }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.headers).toMatchObject({
+      'x-od-workspace-id': 'workspace-plugin',
+      'x-od-workspace-member-id': 'member-plugin',
+    });
   });
 });
 

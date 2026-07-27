@@ -123,6 +123,12 @@ export const API_ERROR_CODES = [
   // editable copy — the escape hole that would let a downgraded team keep using
   // frozen content. Enforced server-side by assertTeamResourceCopyAllowed
   // (api/team-resources.ts) at every copy-out route; UI graying is not enough.
+  // Workspace-scoped project creation/import failures. These are public route
+  // errors shared by ordinary project creation, folder/ZIP import, Desktop
+  // host import, and Plugin Remix.
+  'WORKSPACE_CONTEXT_INCOMPLETE',
+  'WORKSPACE_PROJECT_PERMISSION_DENIED',
+  'WORKSPACE_AUTHORITY_UNAVAILABLE',
   'WORKSPACE_RESOURCE_FROZEN',
   'WORKSPACE_RESOURCE_DELETED',
   'INTERNAL_ERROR',

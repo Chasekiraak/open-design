@@ -88,8 +88,9 @@ import {
 import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
 import { resolveProjectWorkspaceScope } from '../../collab/project-workspace-scope.js';
 import {
+  authorizeCreatedProjectWorkspace,
   bindCreatedProjectToWorkspace,
-  resolveCreatedProjectWorkspace,
+  sendCreatedProjectWorkspaceError,
 } from '../../collab/created-project-workspace.js';
 import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
@@ -113,6 +114,12 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
    * ambient active workspace.
    */
   fetchWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
+  /**
+   * Production-only authority for project creation. Kept distinct from the
+   * read-side directory fetcher so local/dev and explicitly anonymous callers
+   * retain their existing behavior.
+   */
+  fetchProjectCreationWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   /**
    * Collab-cloud comment seams, threaded to the nested preview-comment routes.
    * `resolveAuthorMemberId` stamps the server-authoritative author AND identifies
@@ -2729,14 +2736,12 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
 
   app.post('/api/projects', async (req, res) => {
     try {
-      const createWorkspace = resolveCreatedProjectWorkspace(req);
+      const createWorkspace = await authorizeCreatedProjectWorkspace(
+        req,
+        ctx.fetchProjectCreationWorkspaceDirectory,
+      );
       if (!createWorkspace.ok) {
-        return sendApiError(
-          res,
-          createWorkspace.status,
-          createWorkspace.code,
-          createWorkspace.message,
-        );
+        return sendCreatedProjectWorkspaceError(res, createWorkspace);
       }
       const { id, name, projectLocationId, skillId, designSystemId, pendingPrompt, metadata, customInstructions, skipDiscoveryBrief } =
         req.body || {};

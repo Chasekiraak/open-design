@@ -38,7 +38,11 @@ import type {
 import { sessionModeToTracking } from '@open-design/contracts/analytics';
 import { deriveUploadCohort } from '../analytics/upload-tracking';
 import { projectRawUrl, uploadProjectFiles, openFolderDialog, fetchRecentLinkedDirs, pushRecentLinkedDir, dirExists, applyLibraryAsset, fetchLibraryAssetElementHtml } from "../providers/registry";
-import { duplicatePluginAsProject, patchProject } from "../state/projects";
+import {
+  duplicatePluginAsProject,
+  patchProject,
+  resolvedWorkspaceContextForWrite,
+} from "../state/projects";
 import { navigate } from '../router';
 import { fetchMcpServers } from "../state/mcp";
 import type { McpServerConfig, McpTemplate } from "../state/mcp";
@@ -463,7 +467,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
   ) {
     const { locale, t } = useI18n();
     const analytics = useAnalytics();
-    const { context: workspaceContext } = useWorkspaceContext();
+    const workspaceContextState = useWorkspaceContext();
+    const { context: workspaceContext } = workspaceContextState;
     const activeFileContext =
       projectMetadata?.importedFrom === 'folder' && activeProjectFileName
         ? activeProjectFileName
@@ -576,7 +581,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       try {
         const result = await duplicatePluginAsProject(record.id, {
           name: localizePluginTitle(locale, record),
-        });
+        }, resolvedWorkspaceContextForWrite(workspaceContextState));
         setDetailsRecord(null);
         navigate({
           kind: 'project',

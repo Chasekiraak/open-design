@@ -8,6 +8,7 @@ import type {
   OpenDesignHostCaptureResult,
   OpenDesignHostFailure,
   OpenDesignHostProjectImportResult,
+  OpenDesignHostProjectImportInit,
   OpenDesignHostProjectReplaceWorkingDirResult,
   OpenDesignHostPickWorkingDirResult,
   OpenDesignHostUpdaterActionOptions,
@@ -178,7 +179,7 @@ type DesktopDiagnosticsExportResult =
 
 const project = {
   pickAndImport: (
-    init?: { name?: string; skillId?: string | null; designSystemId?: string | null },
+    init?: OpenDesignHostProjectImportInit,
   ): Promise<OpenDesignHostProjectImportResult> =>
     ipcRenderer.invoke('dialog:pick-and-import', init ?? null)
       .then(normalizeProjectImportResult)

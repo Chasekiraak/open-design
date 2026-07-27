@@ -2353,7 +2353,10 @@ function AppInner() {
     file: File,
   ): Promise<ImportClaudeDesignOutcome> => {
     try {
-      const result = await importClaudeDesignZip(file);
+      const result = await importClaudeDesignZip(
+        file,
+        resolvedWorkspaceContextForWrite(workspaceContextStateRef.current),
+      );
       rememberLocalProject(result.project.id);
       setProjects((curr) => [
         result.project,
@@ -2374,7 +2377,10 @@ function AppInner() {
   }, [rememberLocalProject]);
 
   const handleImportFolder = useCallback(async (baseDir: string) => {
-    const result = await importFolderProject({ baseDir });
+    const result = await importFolderProject(
+      { baseDir },
+      resolvedWorkspaceContextForWrite(workspaceContextStateRef.current),
+    );
     rememberLocalProject(result.project.id);
     setProjects((curr) => [result.project, ...curr.filter((p) => p.id !== result.project.id)]);
     navigate({

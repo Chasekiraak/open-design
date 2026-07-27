@@ -22,6 +22,7 @@ import {
 import type {
   OpenDesignHostActionResult,
   OpenDesignHostCaptureResult,
+  OpenDesignHostProjectImportInit,
   OpenDesignHostUpdaterActionOptions,
   OpenDesignHostUpdaterMenuLabels,
   OpenDesignHostUpdaterOpenDialogRequest,
@@ -443,7 +444,7 @@ export type DesktopRuntimeOptions = {
   onUpdateMenuLabels?: (labels: OpenDesignHostUpdaterMenuLabels) => void;
 };
 
-const DESKTOP_IMPORT_TOKEN_HEADER = "X-OD-Desktop-Import-Token";
+const DESKTOP_IMPORT_TOKEN_HEADER = "x-od-desktop-import-token";
 const DESKTOP_IMPORT_TOKEN_TTL_MS = 60_000;
 
 export function mintImportToken(secret: Buffer, baseDir: string): string {
@@ -485,7 +486,7 @@ export type PickAndImportFolderDeps = {
   baseDir: string;
   desktopAuthSecret: Buffer;
   fetchImpl?: typeof globalThis.fetch;
-  init?: { name?: string; skillId?: string | null; designSystemId?: string | null };
+  init?: OpenDesignHostProjectImportInit;
   /** Round-5: lazy re-registration hook. Called once on 503. */
   registerDesktopAuth?: () => Promise<boolean>;
   /** Injected for tests; defaults to the production HMAC mint. */
@@ -517,6 +518,22 @@ export async function pickAndImportFolder(
         headers: {
           "Content-Type": "application/json",
           [DESKTOP_IMPORT_TOKEN_HEADER]: headerValue,
+          ...(deps.init?.workspaceContext
+            ? {
+                "x-od-workspace-id": deps.init.workspaceContext.workspaceId,
+                "x-od-workspace-type": deps.init.workspaceContext.workspaceType,
+                "x-od-workspace-member-id": deps.init.workspaceContext.workspaceMemberId,
+                "x-od-workspace-role": deps.init.workspaceContext.role,
+                "x-od-workspace-lifecycle-state": deps.init.workspaceContext.lifecycleState,
+                "x-od-workspace-member-status": deps.init.workspaceContext.memberStatus,
+                "x-od-workspace-can-share-projects": String(
+                  deps.init.workspaceContext.permissions.canShareProjects,
+                ),
+                "x-od-workspace-can-write-synced-files": String(
+                  deps.init.workspaceContext.permissions.canWriteSyncedFiles,
+                ),
+              }
+            : {}),
         },
         method: "POST",
       });
@@ -2002,7 +2019,7 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
   // import boundary while leaving web-only deployments untouched.
   ipcMain.handle(
     "dialog:pick-and-import",
-    async (event, init?: { name?: string; skillId?: string | null; designSystemId?: string | null }) => {
+    async (event, init?: OpenDesignHostProjectImportInit) => {
       // Defensive failsafe for non-production runtimes (test harnesses
       // that construct createDesktopRuntime without a secret). Round-5
       // production wiring in runDesktopMain ALWAYS passes the per-process

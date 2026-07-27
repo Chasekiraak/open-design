@@ -2765,6 +2765,14 @@ export async function startServer({
       return result;
     },
   });
+  // Project-creation writes must be authorized by AMR in production, while
+  // local/dev and explicitly anonymous clients keep their legacy behavior.
+  // Keep this separate from read-side directory fetches so an unconfigured
+  // daemon never turns ordinary local creation into a network-dependent path.
+  const fetchProjectCreationWorkspaceDirectory =
+    process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() === 'vela'
+      ? fetchWorkspaceDirectory
+      : undefined;
   const listWorkspaceDirectory = async () => {
     const result = await fetchWorkspaceDirectory();
     return result.items;
@@ -5202,6 +5210,7 @@ export async function startServer({
     // workspaceContext) — see the mutation-gate cross-check note above.
     workspaceContext,
     fetchWorkspaceDirectory,
+    fetchProjectCreationWorkspaceDirectory,
     events: projectEventDeps,
     ids: idDeps,
     telemetry: { reportFinalizedMessage },
@@ -5297,6 +5306,7 @@ export async function startServer({
     conversations: conversationDeps,
     projectFiles: projectFileDeps,
     validation: validationDeps,
+    fetchProjectCreationWorkspaceDirectory,
   });
 
   // Whether the caller may mutate (edit / publish-toggle / delete) a design
@@ -5780,6 +5790,7 @@ export async function startServer({
     ids: idDeps,
     projectStore: projectStoreDeps,
     conversations: conversationDeps,
+    fetchProjectCreationWorkspaceDirectory,
     workspaceResources: { getWorkspaceResource, getWorkspaceResourceByResourceId },
     plugins: {
       listInstalledPlugins,

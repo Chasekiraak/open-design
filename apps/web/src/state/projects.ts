@@ -392,10 +392,14 @@ export async function pickLocalFolderPath(): Promise<string | null> {
 
 export async function importFolderProject(
   input: ImportFolderRequest,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ImportFolderResponse> {
   const resp = await fetch('/api/import/folder', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+    },
     body: JSON.stringify(input),
   });
   if (!resp.ok) {
@@ -411,11 +415,13 @@ export async function importFolderProject(
 
 export async function importClaudeDesignZip(
   file: File,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ project: Project; conversationId: string; entryFile: string }> {
   const form = new FormData();
   form.append('file', file);
   const resp = await fetch('/api/import/claude-design', {
     method: 'POST',
+    ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
     body: form,
   });
   if (!resp.ok) {
@@ -1024,12 +1030,16 @@ export function isVisiblePlugin(plugin: InstalledPluginRecord): boolean {
 export async function duplicatePluginAsProject(
   pluginId: string,
   input: { name?: string } = {},
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<PluginDuplicateProjectResponse> {
   const resp = await fetch(
     `/api/plugins/${encodeURIComponent(pluginId)}/duplicate-project`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     },
   );
