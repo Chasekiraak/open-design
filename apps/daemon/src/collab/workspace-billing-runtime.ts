@@ -62,6 +62,8 @@ interface ClientInterest {
 
 interface RuntimeEntry {
   key: WorkspaceBillingRuntimeKey;
+  /** Headerless clients predate explicit interest generations and stay pinned. */
+  legacyInterest: boolean;
   projection: VelaWorkspaceBillingProjection;
   status: WorkspaceBillingRuntimeState['status'];
   revision: bigint;
@@ -147,7 +149,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     this.assertUsable();
     const key = normalizeKey(keyInput);
     const entry = this.entryFor(key);
-    const forceForInterest = this.acceptClientInterest(key, options);
+    const forceForInterest = this.acceptClientInterest(entry, options);
     if (entry.retryTimer && !forceForInterest) {
       return this.result(entry);
     }
@@ -169,6 +171,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     const workspaceMemberId = invalidation.workspaceMemberId?.trim() ?? '';
     for (const entry of this.entries.values()) {
       if (workspaceId && entry.key.workspaceId !== workspaceId) continue;
+      if (!this.hasActiveInterest(entry)) continue;
       if (invalidation.domain === 'wallet') {
         if (!workspaceId || !workspaceMemberId) continue;
         if (entry.key.workspaceMemberId !== workspaceMemberId) continue;
@@ -220,6 +223,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     const requested = workspaceId?.trim() ?? '';
     for (const entry of this.entries.values()) {
       if (requested && entry.key.workspaceId !== requested) continue;
+      if (!this.hasActiveInterest(entry)) continue;
       if (entry.status === 'access-revoked') continue;
       this.markStatus(entry, hasProjection(entry) ? 'stale' : 'loading', 'reconnect');
       this.requestRefresh(entry, 'reconnect', true);
@@ -229,6 +233,7 @@ export class WorkspaceBillingRuntimeCoordinator {
   refreshAll(reason = 'catch-up'): void {
     if (this.disposed) return;
     for (const entry of this.entries.values()) {
+      if (!this.hasActiveInterest(entry)) continue;
       if (entry.status === 'access-revoked') continue;
       if (reason === 'poll-floor' && entry.retryTimer) continue;
       this.markStatus(entry, hasProjection(entry) ? 'stale' : 'loading', reason);
@@ -323,17 +328,20 @@ export class WorkspaceBillingRuntimeCoordinator {
   }
 
   private acceptClientInterest(
-    key: WorkspaceBillingRuntimeKey,
+    entry: RuntimeEntry,
     options: WorkspaceBillingRuntimeReadOptions,
   ): boolean {
     const clientId = options.clientId?.trim() ?? '';
     const generationText = options.clientGeneration?.trim() ?? '';
-    if (!clientId && !generationText) return false;
+    if (!clientId && !generationText) {
+      entry.legacyInterest = true;
+      return false;
+    }
     if (!clientId || !/^(?:0|[1-9]\d*)$/.test(generationText)) {
       throw new WorkspaceBillingInterestError('invalid_generation');
     }
     const generation = BigInt(generationText);
-    const keyText = runtimeKey(key);
+    const keyText = runtimeKey(entry.key);
     const current = this.clients.get(clientId);
     if (current) {
       if (generation < current.generation) {
@@ -353,6 +361,10 @@ export class WorkspaceBillingRuntimeCoordinator {
       }
     }
     this.clients.set(clientId, { generation, key: keyText });
+    if (current && current.key !== keyText) {
+      const previousEntry = this.entries.get(current.key);
+      if (previousEntry) this.quietIfUninterested(previousEntry);
+    }
     return current != null;
   }
 
@@ -362,6 +374,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     if (existing) return existing;
     const entry: RuntimeEntry = {
       key,
+      legacyInterest: false,
       projection: EMPTY_PROJECTION,
       status: 'loading',
       revision: 0n,
@@ -386,6 +399,24 @@ export class WorkspaceBillingRuntimeCoordinator {
     };
     this.entries.set(keyText, entry);
     return entry;
+  }
+
+  private hasActiveInterest(entry: RuntimeEntry): boolean {
+    if (entry.legacyInterest) return true;
+    const keyText = runtimeKey(entry.key);
+    for (const interest of this.clients.values()) {
+      if (interest.key === keyText) return true;
+    }
+    return false;
+  }
+
+  private quietIfUninterested(entry: RuntimeEntry): void {
+    if (this.hasActiveInterest(entry)) return;
+    if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
+    entry.retryTimer = null;
+    entry.retryAt = null;
+    entry.pending = false;
+    entry.pendingReason = null;
   }
 
   private requestRefresh(entry: RuntimeEntry, reason: string, force: boolean): void {

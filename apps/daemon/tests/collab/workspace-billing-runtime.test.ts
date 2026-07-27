@@ -706,6 +706,32 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
     runtime.dispose();
   });
 
+  it('polls only the exact workspace/member interests still owned by clients', async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) => {
+        calls.push(key.workspaceId);
+        return projection(key.workspaceId, key.workspaceMemberId, '1.00');
+      },
+    });
+
+    await runtime.read(KEY_A, {
+      clientId: 'window-1',
+      clientGeneration: '1',
+    });
+    await runtime.read(KEY_B, {
+      clientId: 'window-1',
+      clientGeneration: '2',
+    });
+    expect(calls).toEqual(['workspace-a', 'workspace-b']);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls).toEqual(['workspace-a', 'workspace-b', 'workspace-b']);
+    runtime.dispose();
+  });
+
   it('forces an authoritative catch-up after reconnect', async () => {
     let balance = '1.00';
     let calls = 0;

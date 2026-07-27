@@ -386,16 +386,20 @@ function billingInvalidationToken(event: BillingInvalidation): string {
  * workspace wallet are independently nullable, so a summary outage cannot
  * erase workspace money. Null means the scoped request itself has not resolved.
  */
-export function useWorkspaceBillingResponse(explicitScope?: {
+export interface WorkspaceBillingScopeInput {
   context: WorkspaceCollabContext | null;
   loading?: boolean;
   /**
-   * Identity epoch for a caller whose exact scope can cycle A→B→A. Project
-   * detail normally stays pinned and may omit it; ambient navigation uses the
-   * provider's global context revision below.
+   * Identity epoch for a caller whose exact scope can cycle A→B→A. A project
+   * scope normally stays pinned and may omit it; ambient navigation uses the
+   * provider's global context revision.
    */
   revision?: string | number;
-}): WorkspaceBillingResponse | null {
+}
+
+export function useWorkspaceBillingResponse(
+  explicitScope?: WorkspaceBillingScopeInput,
+): WorkspaceBillingResponse | null {
   const ambient = useWorkspaceContext();
   const context = explicitScope ? explicitScope.context : ambient.context;
   const contextLoading = explicitScope
