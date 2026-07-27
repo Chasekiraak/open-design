@@ -187,10 +187,24 @@ export function createVelaCliResourceAdapter(
 
     async unpublish({ projectId, principal }) {
       await gated(async () => {
-        await run(
-          ['remove', resourceIdFor(projectId, principal), '--json'],
-          principal?.teamId,
-        );
+        try {
+          await run(
+            ['remove', resourceIdFor(projectId, principal), '--json'],
+            principal?.teamId,
+          );
+        } catch (error) {
+          // Unpublish is a retraction toward one end state: "the hub no
+          // longer serves this resource". A hub answer that the resource is
+          // already absent IS that end state, so it must read as success.
+          // Propagating it made retraction non-idempotent: an unshare whose
+          // two hub writes (resource remove → team-projects catalog remove)
+          // half-landed could then NEVER be completed — every retry died
+          // re-removing the already-tombstoned resource, the catalog row
+          // outlived it, and after a reinstall the retracted project revived
+          // as a ghost team card (reproduced live on the feature-test hub,
+          // 2026-07-27; 飞书 recvqA6qhV7St1).
+          if (!isRetractedHubResourceError(error)) throw error;
+        }
       }, undefined);
     },
   };
@@ -199,6 +213,19 @@ export function createVelaCliResourceAdapter(
 function isMissingResourceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /resource_not_found|status\s+404|ref_not_found/u.test(message);
+}
+
+/**
+ * True when the hub itself answered `resource_not_found` — its tombstone gate
+ * refuses every resource-scoped call once `resources.deleted_at` is set (and
+ * answers the same for an id that never existed). Deliberately NARROWER than
+ * {@link isMissingResourceError}: `ref_not_found` / bare-404 shapes can mean
+ * "live resource with nothing published yet", which must never be read as
+ * "this resource was retracted".
+ */
+export function isRetractedHubResourceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /resource_not_found/u.test(message);
 }
 
 /** Parse the `version` field out of a `vela resource` --json line. Returns null

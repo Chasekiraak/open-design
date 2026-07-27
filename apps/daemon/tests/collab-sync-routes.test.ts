@@ -840,6 +840,107 @@ describe('collab sync routes', () => {
     expect(projectStore.projects.get('owned-shared-p')?.name).toBe('Real Owner Project');
   });
 
+  it('owner self-pull hitting a retracted hub resource heals the dangling catalog row instead of leaving a ghost', async () => {
+    // The reinstall-revival shape reproduced live on the feature-test hub
+    // (2026-07-27, workspace res-wipe-0727): an unshare's two hub writes are
+    // resource remove → team-projects catalog remove, and when only the first
+    // landed the hub is left dangling — the catalog still lists the project
+    // while its backing resource row is tombstoned. On a fresh data root the
+    // local `cloudTombstonedAt` suppression is gone, so the retracted project
+    // came back as a normal-looking team card (visibility=team, canOpen) for
+    // every member. Opening it registered a placeholder and the owner
+    // self-pull died with `resource_not_found`, silently — the ghost stayed
+    // in the list forever, and the unshare retry-trap (see
+    // vela-cli-resource-adapter.test.ts) meant no user action could clear it.
+    //
+    // The invariant: the catalog naming this caller as owner WHILE the
+    // published pull answers `resource_not_found` is the hub-authoritative
+    // signature of "曾共享已撤" (a half-landed retraction) — never of a live
+    // share. The owner's daemon must finish the retraction (remove the
+    // dangling catalog row) and retire the just-registered unmaterialized
+    // placeholder, instead of swallowing the pull error.
+    const projectStore = fakeProjectStore();
+    const markSharedProjectPlaceholder = vi.fn(
+      (projectId: string, placeholder: boolean) => {
+        const rec = projectStore.projects.get(projectId);
+        if (!rec) return;
+        const metadata = {
+          ...((rec.metadata as Record<string, unknown> | undefined) ?? {}),
+        };
+        if (placeholder) {
+          metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY] = Date.now();
+        } else {
+          delete metadata[SHARED_PROJECT_PLACEHOLDER_METADATA_KEY];
+        }
+        projectStore.projects.set(projectId, { ...rec, metadata: metadata as never });
+      },
+    );
+    const retireUnmaterializedSharedPlaceholder = vi.fn((projectId: string) => {
+      projectStore.projects.delete(projectId);
+    });
+    const invalidateTeamProjectCatalog = vi.fn();
+    const pullDir = await mkdtemp(path.join(tmpdir(), 'od-owner-ghost-heal-'));
+    tempDirs.push(pullDir);
+    const unpublish = vi.fn(async () => undefined);
+    const catalogRemove = vi.fn(async (_projectId: string, _principal?: unknown) => ({}));
+    const api = await startSyncServer(
+      fixedShareContextProvider(true),
+      {
+        projectStore,
+        markSharedProjectPlaceholder,
+        retireUnmaterializedSharedPlaceholder,
+        invalidateTeamProjectCatalog,
+        resolvePullDir: () => pullDir,
+        // The CALLER (wm-1) is the hub-registered owner: the dangling catalog
+        // row still names them, which is exactly why the ghost renders.
+        resolveSharedProjectOwner: async () => 'wm-1',
+        resolveSharedProject: async () => ({
+          projectId: 'ghost-shared-p',
+          ownerMemberId: 'wm-1',
+          sharedAt: new Date(1).toISOString(),
+          name: 'Ghost Project',
+        }),
+      },
+      {
+        adapter: {
+          publish: async () => {
+            throw new Error('an owner self-pull must never publish');
+          },
+          // `head` on a tombstoned resource reports "no published version".
+          syncLatest: async () => null,
+          // The exact transport failure the live repro surfaced: the hub's
+          // tombstone gate 404s the published-ref pull.
+          pull: async () => {
+            throw new Error(
+              'Command failed: vela resource pull project project-ghost /dir --ref published --json\n' +
+                'Error: pull resource: API request failed with status 404: resource_not_found\n',
+            );
+          },
+          unpublish,
+        },
+        teamProjectCatalog: { upsert: async () => ({}), remove: catalogRemove },
+      },
+    );
+
+    const res = await api.json('/api/projects/ghost-shared-p/collab/status');
+    expect(res.status).toBe(200);
+    expect(markSharedProjectPlaceholder).toHaveBeenCalledWith('ghost-shared-p', true);
+
+    // The heal finishes the half-landed retraction hub-side …
+    await vi.waitFor(() => {
+      expect(catalogRemove).toHaveBeenCalled();
+    });
+    expect(catalogRemove.mock.calls[0]?.[0]).toBe('ghost-shared-p');
+    // … retires the contentless placeholder this same open registered …
+    await vi.waitFor(() => {
+      expect(retireUnmaterializedSharedPlaceholder).toHaveBeenCalledWith('ghost-shared-p');
+    });
+    expect(projectStore.projects.has('ghost-shared-p')).toBe(false);
+    // … and drops the cached catalog so the ghost card leaves the list now,
+    // not one stale-while-revalidate TTL later.
+    expect(invalidateTeamProjectCatalog).toHaveBeenCalled();
+  });
+
   it('reports the durable owner-scoped materialized version for a shared project', async () => {
     const readMaterializedVersion = vi.fn(() => 6);
     const api = await startSyncServer(

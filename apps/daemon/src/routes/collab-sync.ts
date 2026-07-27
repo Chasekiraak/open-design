@@ -38,7 +38,11 @@ import {
   type PromoteAuthorizedTeamProjectStageInput,
 } from '../collab/team-mirror-promotion.js';
 import { isUnmaterializedSharedPlaceholder } from '../collab/shared-project-placeholder.js';
-import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
+import {
+  isRetractedHubResourceError,
+  parseVelaResourceSnapshot,
+  runVelaResourceCommand,
+} from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
 import { redactSecrets } from '../redact.js';
@@ -128,6 +132,19 @@ export interface RegisterCollabSyncRoutesDeps {
    * authority (the recvqzaDvUU6B3 fresh-install wipe guard).
    */
   markSharedProjectPlaceholder?: (projectId: string, placeholder: boolean) => void;
+  /**
+   * Delete a local project record that is still an unmaterialized
+   * shared-project placeholder (and its empty content directory). Called by
+   * the retracted-share heal below ONLY for a record the placeholder stamp
+   * proves contentless — implementations must re-check
+   * `isUnmaterializedSharedPlaceholder` before deleting so a concurrent pull
+   * that just materialized real content can never be destroyed.
+   */
+  retireUnmaterializedSharedPlaceholder?: (projectId: string) => void;
+  /** Drop the daemon's cached team-project catalog listing so a heal that
+   *  removed a catalog row is visible on the next list read, not one
+   *  stale-while-revalidate TTL later. */
+  invalidateTeamProjectCatalog?: () => void;
   resolveOwnerDisplayName?: (
     memberId: string,
   ) => Promise<{ displayName: string; role: 'owner' | 'admin' | 'member' } | null>;
@@ -601,6 +618,8 @@ export function registerCollabSyncRoutes(
     resolveSharedProject,
     markTeamProjectRevoked,
     markSharedProjectPlaceholder,
+    retireUnmaterializedSharedPlaceholder,
+    invalidateTeamProjectCatalog,
     resolveOwnerDisplayName,
     notifyFilesChanged,
     notifyProjectMetadataChanged,
@@ -1883,7 +1902,32 @@ export function registerCollabSyncRoutes(
           { principal, workspaceId: resolvedWorkspaceId ?? null },
         );
         if (!scope) return;
-        await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
+        try {
+          await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
+        } catch (error) {
+          // Retracted-share heal (飞书 recvqA6qhV7St1): the catalog names this
+          // caller as the project's owner (that is what routed us here), yet
+          // the published pull answered `resource_not_found` — the hub's
+          // tombstone gate. A live share can never produce that pair; it is
+          // the hub-authoritative signature of a HALF-LANDED retraction: an
+          // unshare's `resource remove` landed but its `team-projects remove`
+          // did not, leaving a dangling catalog row. On this fresh data root
+          // there is no `cloudTombstonedAt` left to suppress it, so the
+          // retracted project revives as a ghost team card for every member
+          // (reproduced live on the feature-test hub, 2026-07-27). Finish the
+          // retraction from the hub's own state instead of trusting local
+          // memory: complete the catalog removal (unpublish is idempotent
+          // against the tombstone), retire the contentless placeholder this
+          // open registered, and drop the cached listing.
+          if (!isRetractedHubResourceError(error)) throw error;
+          if (
+            !projectStore?.get ||
+            !isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
+          ) return;
+          await requestTeamUnshare(projectId, resourcePrincipal ?? undefined);
+          retireUnmaterializedSharedPlaceholder?.(projectId);
+          invalidateTeamProjectCatalog?.();
+        }
       })().catch(() => undefined);
     }
     // A verified local mirror binding is enough to return shared identity and
