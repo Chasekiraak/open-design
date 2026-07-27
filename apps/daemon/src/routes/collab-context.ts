@@ -410,18 +410,6 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
         requestedWorkspaceId,
         'workspace_directory_unavailable',
       );
-      const unavailable = clientId
-        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
-        : null;
-      if (unavailable?.state.status === 'error') {
-        const body: WorkspaceBillingResponse = {
-          summary: null,
-          workspaceBalance: null,
-          workspaceSnapshot: null,
-          workspaceRuntime: unavailable.state,
-        };
-        return res.json(body);
-      }
       return res.status(503).json({ error: 'workspace_directory_unavailable' });
     }
     const directory = directoryResult.items;
@@ -434,19 +422,7 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     );
     if (!membership) {
       billingRuntime.revokeWorkspace(requestedWorkspaceId);
-      const revoked = clientId
-        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
-        : null;
-      if (revoked?.state.status === 'access-revoked') {
-        const body: WorkspaceBillingResponse = {
-          summary: null,
-          workspaceBalance: null,
-          workspaceSnapshot: null,
-          workspaceRuntime: revoked.state,
-        };
-        return res.json(body);
-      }
-      return res.status(409).json({ error: 'workspace_not_authorized' });
+      return res.status(403).json({ error: 'workspace_not_authorized' });
     }
     billingRuntime.retainWorkspaceMember(
       requestedWorkspaceId,

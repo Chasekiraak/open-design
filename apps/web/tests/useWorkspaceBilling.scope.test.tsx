@@ -463,6 +463,139 @@ describe('useWorkspaceBilling explicit scope', () => {
     );
   }, 7_000);
 
+  it('keeps same-scope last-good money as error on a retryable directory outage', async () => {
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls === 2) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_directory_unavailable' }),
+              {
+                status: 503,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            workspaceRuntime: {
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              status: 'fresh',
+              revision: '7',
+              observedAt: '2026-07-27T00:00:00.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'explicit-billing-read',
+              sourceGapDetected: false,
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25'));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('billing-changed', {
+        type: 'billing-changed',
+        at: 3,
+      });
+    });
+
+    await waitFor(() => {
+      expect(billingCalls).toBe(2);
+      expect(hook.result.current).toMatchObject({
+        workspaceBalance: {
+          workspaceId: 'workspace-a',
+          balanceUsd: '1.25',
+        },
+        workspaceRuntime: {
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          status: 'error',
+          errorCode: 'workspace_directory_unavailable',
+        },
+      });
+    });
+  });
+
+  it('clears same-scope last-good money on a confirmed 403 revocation', async () => {
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls === 2) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_not_authorized' }),
+              {
+                status: 403,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+          return new Response(
+            JSON.stringify(billingResponse('workspace-a', '1.25')),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25'));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('billing-changed', {
+        type: 'billing-changed',
+        at: 4,
+      });
+    });
+
+    await waitFor(() => {
+      expect(billingCalls).toBe(2);
+      expect(hook.result.current).toMatchObject({
+        summary: null,
+        workspaceBalance: null,
+        workspaceSnapshot: null,
+        workspaceRuntime: {
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          status: 'access-revoked',
+          errorCode: 'workspace_not_authorized',
+        },
+      });
+    });
+  });
+
   it('projects the authoritative workspace plan over stale account metadata', async () => {
     vi.stubGlobal(
       'fetch',

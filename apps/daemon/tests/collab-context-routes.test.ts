@@ -302,7 +302,7 @@ describe('workspace billing routes', () => {
     expect(secondResponse.body.workspaceRuntime).toEqual(firstResponse.body.workspaceRuntime);
   });
 
-  it('clears a known client billing snapshot when membership disappears', async () => {
+  it('clears daemon state and returns 403 when membership disappears', async () => {
     let authorized = true;
     const api = await startContextServer({
       listWorkspaceDirectory: async () => authorized ? teamDirectory('wm-1') : [],
@@ -335,18 +335,8 @@ describe('workspace billing routes', () => {
       '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
       { headers },
     );
-    expect(revoked.status).toBe(200);
-    expect(revoked.body).toMatchObject({
-      summary: null,
-      workspaceBalance: null,
-      workspaceSnapshot: null,
-      workspaceRuntime: {
-        workspaceId: 'wm-1',
-        workspaceMemberId: 'member-1',
-        status: 'access-revoked',
-        errorCode: 'workspace_not_authorized',
-      },
-    });
+    expect(revoked.status).toBe(403);
+    expect(revoked.body).toEqual({ error: 'workspace_not_authorized' });
   });
 
   it('retains internal last-good state across a transient directory outage', async () => {
@@ -381,14 +371,8 @@ describe('workspace billing routes', () => {
     expect((await request('1')).body.workspaceBalance.balanceUsd).toBe('7.89');
     directoryAvailable = false;
     const unavailable = await request('1');
-    expect(unavailable.status).toBe(200);
-    expect(unavailable.body).toMatchObject({
-      workspaceBalance: null,
-      workspaceRuntime: {
-        status: 'error',
-        errorCode: 'workspace_directory_unavailable',
-      },
-    });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toEqual({ error: 'workspace_directory_unavailable' });
 
     directoryAvailable = true;
     balance = '8.99';
@@ -449,7 +433,7 @@ describe('workspace billing routes', () => {
 
     const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=other');
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(403);
     expect(res.body).toEqual({ error: 'workspace_not_authorized' });
     expect(calls).toEqual([]);
   });

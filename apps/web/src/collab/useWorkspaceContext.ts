@@ -299,6 +299,47 @@ function workspaceContextIdentity(context: WorkspaceCollabContext | null): strin
 
 const cachedWorkspaceBillingResponses = new Map<string, WorkspaceBillingResponse>();
 
+class WorkspaceBillingHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(`billing ${status}: ${code}`);
+    this.name = 'WorkspaceBillingHttpError';
+  }
+}
+
+function workspaceBillingFailureResponse(
+  lastGood: WorkspaceBillingResponse | undefined,
+  workspaceId: string,
+  workspaceMemberId: string,
+  status: 'error' | 'access-revoked',
+  errorCode: string,
+): WorkspaceBillingResponse {
+  const previousRuntime = lastGood?.workspaceRuntime;
+  return {
+    summary: status === 'access-revoked' ? null : lastGood?.summary ?? null,
+    workspaceBalance:
+      status === 'access-revoked' ? null : lastGood?.workspaceBalance ?? null,
+    workspaceSnapshot:
+      status === 'access-revoked' ? null : lastGood?.workspaceSnapshot ?? null,
+    workspaceRuntime: {
+      workspaceId,
+      workspaceMemberId,
+      status,
+      revision: previousRuntime?.revision ?? '0',
+      observedAt:
+        status === 'access-revoked'
+          ? new Date().toISOString()
+          : previousRuntime?.observedAt ?? null,
+      retryAt: null,
+      errorCode,
+      reason: errorCode,
+      sourceGapDetected: previousRuntime?.sourceGapDetected ?? false,
+    },
+  };
+}
+
 /** Test seam: clear last-good workspace billing snapshots between tests. */
 export function resetWorkspaceBillingCache(): void {
   cachedWorkspaceBillingResponses.clear();
@@ -446,7 +487,19 @@ export function useWorkspaceBillingResponse(explicitScope?: {
           cache: 'no-store',
           ...(runtimeHeaders ? { headers: runtimeHeaders } : {}),
         });
-        if (!res.ok) throw new Error(`billing ${res.status}`);
+        if (!res.ok) {
+          let errorCode = `workspace_billing_http_${res.status}`;
+          try {
+            const errorBody = (await res.json()) as { error?: unknown };
+            if (typeof errorBody.error === 'string' && errorBody.error.trim()) {
+              errorCode = errorBody.error.trim();
+            }
+          } catch {
+            // The status remains authoritative when an older daemon returns
+            // a non-JSON error page.
+          }
+          throw new WorkspaceBillingHttpError(res.status, errorCode);
+        }
         const body = (await res.json()) as WorkspaceBillingResponse;
         return {
           summary: body.summary ?? null,
@@ -474,7 +527,7 @@ export function useWorkspaceBillingResponse(explicitScope?: {
         cachedWorkspaceBillingResponses.set(scopeKey, response);
         setState({ scopeKey, response });
       }
-    } catch {
+    } catch (error) {
       if (
         mountedRef.current &&
         requestEpochRef.current === requestEpoch &&
@@ -482,8 +535,32 @@ export function useWorkspaceBillingResponse(explicitScope?: {
         activeRequestKeyRef.current === requestKey
       ) {
         const lastGood = cachedWorkspaceBillingResponses.get(scopeKey);
-        runtimeManagedRef.current = Boolean(lastGood?.workspaceRuntime);
-        if (lastGood) {
+        const revoked =
+          error instanceof WorkspaceBillingHttpError &&
+          error.status === 403;
+        const errorCode =
+          error instanceof WorkspaceBillingHttpError
+            ? error.code
+            : 'workspace_billing_unavailable';
+        const failureResponse =
+          context?.workspaceType === 'team' && workspaceId && workspaceMemberId
+            ? workspaceBillingFailureResponse(
+                lastGood,
+                workspaceId,
+                workspaceMemberId,
+                revoked ? 'access-revoked' : 'error',
+                errorCode,
+              )
+            : null;
+        runtimeManagedRef.current = Boolean(failureResponse?.workspaceRuntime);
+        if (revoked) {
+          cachedWorkspaceBillingResponses.delete(scopeKey);
+          if (failureResponse) setState({ scopeKey, response: failureResponse });
+          else if (clearOnFailure) setState(null);
+        } else if (failureResponse) {
+          cachedWorkspaceBillingResponses.set(scopeKey, failureResponse);
+          setState({ scopeKey, response: failureResponse });
+        } else if (lastGood) {
           setState({ scopeKey, response: lastGood });
         } else if (clearOnFailure) {
           setState({
@@ -495,7 +572,7 @@ export function useWorkspaceBillingResponse(explicitScope?: {
             },
           });
         }
-        if (!retryTimerRef.current) {
+        if (!revoked && !retryTimerRef.current) {
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             if (
