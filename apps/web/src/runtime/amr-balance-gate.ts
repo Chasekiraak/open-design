@@ -157,11 +157,33 @@ async function fetchTeamWorkspaceWalletSnapshot(
   const workspaceMemberId = scope.workspaceMemberId.trim();
   if (!workspaceId || !workspaceMemberId) return null;
   const response = await fetch(
-    `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}`,
+    `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}&freshness=authoritative`,
     { cache: 'no-store' },
   );
   if (!response.ok) return null;
   const body = (await response.json()) as WorkspaceBillingResponse;
+  const runtime = body.workspaceRuntime;
+  const authoritativeRead = body.authoritativeWorkspaceRead;
+  const hardExpiresAt = runtime?.hardExpiresAt
+    ? Date.parse(runtime.hardExpiresAt)
+    : Number.NaN;
+  if (
+    (
+      !runtime ||
+      !authoritativeRead ||
+      runtime.workspaceId !== workspaceId ||
+      runtime.workspaceMemberId !== workspaceMemberId ||
+      runtime.status !== 'fresh' ||
+      !runtime.observedAt ||
+      !Number.isFinite(hardExpiresAt) ||
+      hardExpiresAt <= Date.now() ||
+      authoritativeRead.workspaceId !== workspaceId ||
+      authoritativeRead.workspaceMemberId !== workspaceMemberId ||
+      authoritativeRead.observedAt !== runtime.observedAt
+    )
+  ) {
+    return null;
+  }
   const workspaceBalance = body.workspaceBalance;
   if (
     !workspaceBalance ||

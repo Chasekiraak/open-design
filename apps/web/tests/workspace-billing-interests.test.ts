@@ -23,7 +23,7 @@ describe('workspace billing renderer interest registry', () => {
 
   it('declares one renderer full set for simultaneous ambient A and project B', async () => {
     const requests: Array<{ method: string; generation: string; interests: unknown[] }> = [];
-    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         generation: string;
         interests: unknown[];
@@ -33,10 +33,9 @@ describe('workspace billing renderer interest registry', () => {
         generation: body.generation,
         interests: body.interests,
       });
+      const clientId = decodeURIComponent(String(input).split('/').at(-1)!);
       return new Response(JSON.stringify({
-        clientId: workspaceBillingInterestHeaders(SCOPE_A)[
-          'x-od-workspace-runtime-client-id'
-        ],
+        clientId,
         acceptedGeneration: body.generation,
         leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       }), {
@@ -108,5 +107,130 @@ describe('workspace billing renderer interest registry', () => {
     await ensureWorkspaceBillingInterestDeclared();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(workspaceBillingInterestHeaders(SCOPE_A)).toEqual({});
+  });
+
+  it('does not expose an unaccepted generation and recovers a failed full-set PUT', async () => {
+    const requests: Array<{ generation: string; interests: unknown[] }> = [];
+    let attempt = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      attempt += 1;
+      const body = JSON.parse(String(init?.body)) as {
+        generation: string;
+        interests: unknown[];
+      };
+      requests.push(body);
+      if (attempt === 2) throw new Error('response lost');
+      const clientId = decodeURIComponent(String(input).split('/').at(-1)!);
+      return new Response(JSON.stringify({
+        clientId,
+        acceptedGeneration: body.generation,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+
+    retainWorkspaceBillingInterest('ambient', SCOPE_A);
+    retainWorkspaceBillingInterest('project', SCOPE_B);
+    await ensureWorkspaceBillingInterestDeclared();
+
+    expect(workspaceBillingInterestHeaders(SCOPE_A)).toEqual({});
+    expect(workspaceBillingInterestHeaders(SCOPE_B)).toEqual({});
+
+    await ensureWorkspaceBillingInterestDeclared();
+    expect(requests).toEqual([
+      { generation: '1', interests: [SCOPE_A] },
+      { generation: '2', interests: [SCOPE_A, SCOPE_B] },
+      { generation: '2', interests: [SCOPE_A, SCOPE_B] },
+    ]);
+    expect(workspaceBillingInterestHeaders(SCOPE_A)[
+      'x-od-workspace-runtime-generation'
+    ]).toBe('2');
+  });
+
+  it('rebases a rejected generation and retries the complete desired set', async () => {
+    const requests: Array<{ generation: string; interests: unknown[] }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        generation: string;
+        interests: unknown[];
+      };
+      requests.push(body);
+      if (requests.length === 2) {
+        return new Response(JSON.stringify({
+          error: 'generation_payload_mismatch',
+          acceptedGeneration: '7',
+        }), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      const clientId = decodeURIComponent(String(input).split('/').at(-1)!);
+      return new Response(JSON.stringify({
+        clientId,
+        acceptedGeneration: body.generation,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+
+    retainWorkspaceBillingInterest('ambient', SCOPE_A);
+    retainWorkspaceBillingInterest('project', SCOPE_B);
+    await ensureWorkspaceBillingInterestDeclared();
+
+    expect(requests).toEqual([
+      { generation: '1', interests: [SCOPE_A] },
+      { generation: '2', interests: [SCOPE_A, SCOPE_B] },
+      { generation: '8', interests: [SCOPE_A, SCOPE_B] },
+    ]);
+    expect(workspaceBillingInterestHeaders(SCOPE_B)[
+      'x-od-workspace-runtime-generation'
+    ]).toBe('8');
+  });
+
+  it('keeps retrying a failed renewal beyond the original lease TTL', async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    let responseCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { generation: string };
+      requests.push(body.generation);
+      responseCount += 1;
+      if (responseCount === 1) {
+        const clientId = decodeURIComponent(String(input).split('/').at(-1)!);
+        return new Response(JSON.stringify({
+          clientId,
+          acceptedGeneration: body.generation,
+          leaseExpiresAt: new Date(Date.now() + 10_000).toISOString(),
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (responseCount < 4) throw new Error('daemon unavailable');
+      const clientId = decodeURIComponent(String(input).split('/').at(-1)!);
+      return new Response(JSON.stringify({
+        clientId,
+        acceptedGeneration: body.generation,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+
+    retainWorkspaceBillingInterest('surface', SCOPE_A);
+    await ensureWorkspaceBillingInterestDeclared();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(requests).toEqual(['1', '1', '1', '1']);
+    expect(workspaceBillingInterestHeaders(SCOPE_A)[
+      'x-od-workspace-runtime-generation'
+    ]).toBe('1');
   });
 });

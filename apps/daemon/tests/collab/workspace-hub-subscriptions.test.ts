@@ -49,4 +49,28 @@ describe('WorkspaceHubSubscriptionManager', () => {
     expect(manager.activeWorkspaceIds()).toEqual([]);
     manager.dispose();
   });
+
+  it('caps live upstream SSE connections and always prioritizes the ambient workspace', () => {
+    const started: string[] = [];
+    const stopped: string[] = [];
+    const manager = createWorkspaceHubSubscriptionManager({
+      maxSubscribers: 2,
+      start: (workspaceId): HubEventsSubscriber => {
+        started.push(workspaceId);
+        return {
+          connected: () => true,
+          refreshEndpoint: vi.fn(),
+          stop: () => stopped.push(workspaceId),
+        };
+      },
+    });
+
+    manager.setBillingInterests(['workspace-a', 'workspace-b', 'workspace-c']);
+    expect(manager.activeWorkspaceIds()).toEqual(['workspace-a', 'workspace-b']);
+    manager.setAmbientWorkspace('workspace-c');
+    expect(manager.activeWorkspaceIds()).toEqual(['workspace-a', 'workspace-c']);
+    expect(started).toEqual(['workspace-a', 'workspace-b', 'workspace-c']);
+    expect(stopped).toEqual(['workspace-b']);
+    manager.dispose();
+  });
 });

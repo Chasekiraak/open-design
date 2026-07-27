@@ -3923,10 +3923,13 @@ export async function startServer({
           workspaceId,
           (verifiedWorkspaceId) =>
             proactiveContentPull.catchUpPublishedHeads(verifiedWorkspaceId),
-          (verifiedWorkspaceId) =>
-            workspaceBillingRuntime.reconnect(verifiedWorkspaceId),
+          (verifiedWorkspaceId) => {
+            // A reconnect is closed exactly once by onReconnect below. Keep
+            // this initial-connect hook from scheduling a duplicate catch-up.
+            if (!reconnect) workspaceBillingRuntime.reconnect(verifiedWorkspaceId);
+          },
         );
-      } else if (workspaceId) {
+      } else if (workspaceId && !reconnect) {
         workspaceBillingRuntime.reconnect(workspaceId);
       }
     },
@@ -4058,7 +4061,7 @@ export async function startServer({
           // Revalidate exact membership before the next billing projection.
           // A removed/rebound member must clear money and entitlement state,
           // even when no billing-specific event accompanies the roster change.
-          workspaceBillingRuntime.refreshAll('workspace-context-changed');
+          workspaceBillingRuntime.reconnect(subscribedWorkspaceId);
           break;
         case 'billing-changed':
           workspaceBillingRuntime.invalidate({

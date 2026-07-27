@@ -10,6 +10,7 @@ import {
   createDevWorkspaceContextProvider,
   parseWorkspaceCollabContext,
 } from '../src/collab/workspace-context.js';
+import { createWorkspaceBillingRuntimeCoordinator } from '../src/collab/workspace-billing-runtime.js';
 
 let server: http.Server | null = null;
 
@@ -205,6 +206,47 @@ describe('workspace billing routes', () => {
     );
     expect(response.status).toBe(403);
     expect(response.body).toEqual({ error: 'workspace_not_authorized' });
+  });
+
+  it('does not revoke another client when a stale member declares the same workspace', async () => {
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async ({ workspaceId, workspaceMemberId }) => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId,
+          workspaceMemberId,
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      billingRuntime: runtime,
+    });
+    const valid = await api.req('/api/workspace/billing/interests/valid-renderer', {
+      method: 'PUT',
+      body: {
+        generation: '1',
+        interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-1' }],
+      },
+    });
+    expect(valid.status).toBe(200);
+
+    const stale = await api.req('/api/workspace/billing/interests/stale-renderer', {
+      method: 'PUT',
+      body: {
+        generation: '1',
+        interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-old' }],
+      },
+    });
+    expect(stale.status).toBe(403);
+    expect(runtime.interestedKeys()).toEqual([
+      { workspaceId: 'wm-1', workspaceMemberId: 'member-1' },
+    ]);
+    runtime.dispose();
   });
 
   // recvqgaMLxEdZX: the URL workspace id is the selection source. Membership
@@ -447,6 +489,74 @@ describe('workspace billing routes', () => {
     expect(recovered.body).toMatchObject({
       workspaceBalance: { balanceUsd: '8.99' },
       workspaceRuntime: { status: 'fresh' },
+    });
+  });
+
+  it('returns 503 instead of last-good money when an authoritative action catch-up fails', async () => {
+    let calls = 0;
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            snapshot: null,
+            workspaceBalance: {
+              workspaceId: 'wm-1',
+              workspaceMemberId: 'member-1',
+              balanceUsd: '7.89',
+              billingScopeVersion: 2,
+              expiresAt: null,
+              updatedAt: '2026-07-27T00:00:00Z',
+            },
+          };
+        }
+        throw Object.assign(new Error('upstream unavailable'), { code: 'temporary' });
+      },
+    });
+
+    expect((await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
+    )).status).toBe(200);
+    const action = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1&freshness=authoritative',
+    );
+    expect(action.status).toBe(503);
+    expect(action.body).toEqual({ error: 'temporary' });
+    expect(calls).toBe(2);
+  });
+
+  it('marks a successful action read with exact authoritative workspace proof', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+
+    const action = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1&freshness=authoritative',
+    );
+    expect(action.status).toBe(200);
+    expect(action.body.workspaceRuntime).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      status: 'fresh',
+    });
+    expect(action.body.authoritativeWorkspaceRead).toEqual({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      observedAt: action.body.workspaceRuntime.observedAt,
     });
   });
 

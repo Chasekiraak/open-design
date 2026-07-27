@@ -474,12 +474,28 @@ export interface WorkspaceBillingRuntimeState {
   /** Daemon-local uint64 rendered as a decimal string. */
   revision: string;
   observedAt: string | null;
+  /** Last-good data becomes stale after this point and must be revalidated. */
+  softExpiresAt: string | null;
+  /** Last-good money/plan data must not be consumed after this point. */
+  hardExpiresAt: string | null;
   retryAt: string | null;
   errorCode: string | null;
   /** Why the most recent state transition or authoritative read occurred. */
   reason: string;
   /** True when an ordered upstream revision skipped at least one value. */
   sourceGapDetected: boolean;
+}
+
+/**
+ * Proof that this exact response completed the caller-requested authoritative
+ * workspace projection refresh. Its absence is intentional compatibility
+ * signaling: a newer client must not treat an older daemon's cached 200 as
+ * execution/precharge authority.
+ */
+export interface WorkspaceBillingAuthoritativeRead {
+  workspaceId: string;
+  workspaceMemberId: string;
+  observedAt: string;
 }
 
 /**
@@ -570,6 +586,11 @@ export interface WorkspaceBillingResponse {
    * daemon predates the runtime coordinator; values above remain authoritative.
    */
   workspaceRuntime?: WorkspaceBillingRuntimeState;
+  /**
+   * Present only for `freshness=authoritative` after a new projection was
+   * observed for the exact workspace/member in this response.
+   */
+  authoritativeWorkspaceRead?: WorkspaceBillingAuthoritativeRead;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

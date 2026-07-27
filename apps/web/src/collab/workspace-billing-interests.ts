@@ -5,6 +5,7 @@ import type {
 
 const RENEW_FLOOR_MS = 5_000;
 const RENEW_CEILING_MS = 20_000;
+const RENEW_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000] as const;
 
 interface OwnerInterest extends WorkspaceBillingInterestScope {
   ownerId: string;
@@ -22,9 +23,13 @@ class WorkspaceBillingInterestRegistry {
   private generation = 0n;
   private signature = '';
   private declaredSignature = '';
+  private acceptedGeneration: bigint | null = null;
   private clientId = createClientId();
   private inFlight: Promise<void> | null = null;
+  private inFlightSignature = '';
+  private inFlightGeneration: bigint | null = null;
   private renewTimer: ReturnType<typeof setTimeout> | null = null;
+  private renewRetryAttempt = 0;
   private unsupported = false;
   private disposed = false;
 
@@ -53,10 +58,15 @@ class WorkspaceBillingInterestRegistry {
       (candidate) =>
         `${candidate.workspaceId}\0${candidate.workspaceMemberId}` === normalized,
     );
-    return declared && !this.unsupported
+    return (
+      declared &&
+      !this.unsupported &&
+      this.declaredSignature === this.signature &&
+      this.acceptedGeneration != null
+    )
       ? {
           'x-od-workspace-runtime-client-id': this.clientId,
-          'x-od-workspace-runtime-generation': this.generation.toString(),
+          'x-od-workspace-runtime-generation': this.acceptedGeneration.toString(),
         }
       : {};
   }
@@ -68,8 +78,12 @@ class WorkspaceBillingInterestRegistry {
     this.generation = 0n;
     this.signature = '';
     this.declaredSignature = '';
+    this.acceptedGeneration = null;
     this.clientId = createClientId();
     this.inFlight = null;
+    this.inFlightSignature = '';
+    this.inFlightGeneration = null;
+    this.renewRetryAttempt = 0;
     this.unsupported = false;
     this.disposed = false;
   }
@@ -108,8 +122,16 @@ class WorkspaceBillingInterestRegistry {
       return Promise.resolve();
     }
     if (this.inFlight) {
-      return this.inFlight.then(() => {
-        if (!this.unsupported && this.declaredSignature !== this.signature) {
+      const active = this.inFlight;
+      const activeSignature = this.inFlightSignature;
+      const activeGeneration = this.inFlightGeneration;
+      return active.then(() => {
+        if (
+          !this.unsupported &&
+          this.declaredSignature !== this.signature &&
+          (activeSignature !== this.signature ||
+            activeGeneration !== this.generation)
+        ) {
           return this.flush();
         }
       });
@@ -117,8 +139,12 @@ class WorkspaceBillingInterestRegistry {
     const generation = this.generation.toString();
     const interests = this.scopes();
     const signature = JSON.stringify(interests);
+    this.inFlightSignature = signature;
+    this.inFlightGeneration = this.generation;
     const url = `/api/workspace/billing/interests/${encodeURIComponent(this.clientId)}`;
-    this.inFlight = fetch(
+    this.clearRenewTimer();
+    let retryImmediately = false;
+    const operation = fetch(
       interests.length > 0 ? url : `${url}?generation=${encodeURIComponent(generation)}`,
       interests.length > 0
         ? {
@@ -139,9 +165,29 @@ class WorkspaceBillingInterestRegistry {
           this.clearRenewTimer();
           return;
         }
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (response.status === 409) {
+            const conflict = await response.json().catch(() => null) as {
+              acceptedGeneration?: unknown;
+            } | null;
+            const accepted =
+              typeof conflict?.acceptedGeneration === 'string' &&
+              /^(?:0|[1-9]\d*)$/.test(conflict.acceptedGeneration)
+                ? BigInt(conflict.acceptedGeneration)
+                : null;
+            if (accepted != null && accepted >= this.generation) {
+              this.generation = accepted + 1n;
+              retryImmediately = true;
+              return;
+            }
+          }
+          this.scheduleRenewRetry();
+          return;
+        }
         if (interests.length === 0) {
           this.declaredSignature = signature;
+          this.acceptedGeneration = null;
+          this.renewRetryAttempt = 0;
           this.clearRenewTimer();
           return;
         }
@@ -151,19 +197,31 @@ class WorkspaceBillingInterestRegistry {
           lease.acceptedGeneration !== generation ||
           signature !== this.signature
         ) {
+          this.scheduleRenewRetry();
           return;
         }
         this.declaredSignature = signature;
+        this.acceptedGeneration = BigInt(lease.acceptedGeneration);
+        this.renewRetryAttempt = 0;
         this.scheduleRenew(lease.leaseExpiresAt);
       })
       .catch(() => {
-        // GET remains the compatibility/catch-up path. Focus, the 30-second
-        // old-daemon floor, or the next lease renewal retries declaration.
-      })
-      .finally(() => {
-        this.inFlight = null;
+        // A declaration is not authoritative until its response is observed.
+        // Keep headers disabled and retry even after the prior lease TTL.
+        this.scheduleRenewRetry();
       });
-    return this.inFlight;
+    const settled = operation.finally(() => {
+      if (this.inFlight !== settled) return;
+      this.inFlight = null;
+      this.inFlightSignature = '';
+      this.inFlightGeneration = null;
+    });
+    this.inFlight = settled;
+    return settled.then(() => {
+      if (retryImmediately && !this.unsupported && !this.disposed) {
+        return this.flush();
+      }
+    });
   }
 
   private scheduleRenew(leaseExpiresAt: string): void {
@@ -173,6 +231,21 @@ class WorkspaceBillingInterestRegistry {
       RENEW_FLOOR_MS,
       Math.min(RENEW_CEILING_MS, Math.floor(remaining / 2)),
     );
+    this.renewTimer = setTimeout(() => {
+      this.renewTimer = null;
+      void this.flush();
+    }, delay);
+  }
+
+  private scheduleRenewRetry(): void {
+    if (this.disposed || this.unsupported || this.scopes().length === 0) return;
+    this.clearRenewTimer();
+    const index = Math.min(
+      this.renewRetryAttempt,
+      RENEW_RETRY_DELAYS_MS.length - 1,
+    );
+    const delay = RENEW_RETRY_DELAYS_MS[index]!;
+    this.renewRetryAttempt += 1;
     this.renewTimer = setTimeout(() => {
       this.renewTimer = null;
       void this.flush();

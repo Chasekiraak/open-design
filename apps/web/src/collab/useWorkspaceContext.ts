@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   TeamProject,
   WorkspaceBillingResponse,
+  WorkspaceBillingRuntimeState,
   WorkspaceBillingSnapshot,
   WorkspaceBillingSummary,
   WorkspaceCollabContext,
@@ -268,6 +269,33 @@ function workspaceContextIdentity(context: WorkspaceCollabContext | null): strin
 }
 
 const cachedWorkspaceBillingResponses = new Map<string, WorkspaceBillingResponse>();
+const MAX_BROWSER_TIMER_DELAY_MS = 2_147_483_647;
+
+function workspaceBillingRuntimeProjectionIsUsable(
+  runtime: WorkspaceBillingRuntimeState,
+  now = Date.now(),
+): boolean {
+  if (runtime.status === 'access-revoked') return false;
+  const hardExpiresAt = runtime.hardExpiresAt
+    ? Date.parse(runtime.hardExpiresAt)
+    : Number.NaN;
+  return Number.isFinite(hardExpiresAt) && hardExpiresAt > now;
+}
+
+function enforceWorkspaceBillingHardExpiry(
+  response: WorkspaceBillingResponse,
+  now = Date.now(),
+): WorkspaceBillingResponse {
+  const runtime = response.workspaceRuntime;
+  if (!runtime || workspaceBillingRuntimeProjectionIsUsable(runtime, now)) {
+    return response;
+  }
+  return {
+    ...response,
+    workspaceBalance: null,
+    workspaceSnapshot: null,
+  };
+}
 
 class WorkspaceBillingHttpError extends Error {
   constructor(
@@ -455,14 +483,14 @@ export function useWorkspaceBillingResponse(
           throw new WorkspaceBillingHttpError(res.status, errorCode);
         }
         const body = (await res.json()) as WorkspaceBillingResponse;
-        return {
+        return enforceWorkspaceBillingHardExpiry({
           summary: body.summary ?? null,
           workspaceBalance: body.workspaceBalance ?? null,
           workspaceSnapshot: body.workspaceSnapshot ?? null,
           ...(body.workspaceRuntime
             ? { workspaceRuntime: body.workspaceRuntime }
             : {}),
-        };
+        });
       };
       const response = force
         ? await forceCoalescedGet(fetchKey, fetchBilling)
@@ -537,6 +565,72 @@ export function useWorkspaceBillingResponse(
   useEffect(() => {
     void loadBilling(true, true);
   }, [loadBilling]);
+
+  useEffect(() => {
+    if (
+      !billingScopeKey ||
+      !billingRequestKey ||
+      state?.scopeKey !== billingScopeKey
+    ) {
+      return;
+    }
+    const runtime = state.response.workspaceRuntime;
+    const hardExpiresAt = runtime?.hardExpiresAt
+      ? Date.parse(runtime.hardExpiresAt)
+      : Number.NaN;
+    if (!runtime || !Number.isFinite(hardExpiresAt)) return;
+    const delay = hardExpiresAt - Date.now();
+    if (delay <= 0) return;
+    const expectedRevision = runtime.revision;
+    const expectedHardExpiresAt = runtime.hardExpiresAt;
+    const scopeKey = billingScopeKey;
+    const requestKey = billingRequestKey;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const expireWhenDue = () => {
+      const remaining = hardExpiresAt - Date.now();
+      if (remaining > 0) {
+        timer = setTimeout(
+          expireWhenDue,
+          Math.min(remaining + 1, MAX_BROWSER_TIMER_DELAY_MS),
+        );
+        return;
+      }
+      if (
+        !mountedRef.current ||
+        activeScopeKeyRef.current !== scopeKey ||
+        activeRequestKeyRef.current !== requestKey
+      ) {
+        return;
+      }
+      const current = cachedWorkspaceBillingResponses.get(scopeKey);
+      if (
+        !current?.workspaceRuntime ||
+        current.workspaceRuntime.revision !== expectedRevision ||
+        current.workspaceRuntime.hardExpiresAt !== expectedHardExpiresAt
+      ) {
+        return;
+      }
+      const expired = enforceWorkspaceBillingHardExpiry(current);
+      cachedWorkspaceBillingResponses.set(scopeKey, expired);
+      setState({ scopeKey, response: expired });
+      window.dispatchEvent(new CustomEvent(WORKSPACE_BILLING_RETRY_EVENT, {
+        detail: { requestKey },
+      }));
+    };
+    timer = setTimeout(
+      expireWhenDue,
+      Math.min(delay + 1, MAX_BROWSER_TIMER_DELAY_MS),
+    );
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [
+    billingRequestKey,
+    billingScopeKey,
+    state?.scopeKey,
+    state?.response.workspaceRuntime?.hardExpiresAt,
+    state?.response.workspaceRuntime?.revision,
+  ]);
 
   // Thin invalidations never carry authoritative money/plan data. Legacy
   // events stay broad; v2 events are rejected unless their explicit workspace
@@ -625,6 +719,18 @@ export function useWorkspaceBilling(): WorkspaceBillingSummary | null {
   if (!response) return null;
   const summary = response.summary;
   const snapshot = response.workspaceSnapshot;
+  const runtime = response.workspaceRuntime;
+  if (
+    runtime &&
+    (
+      !workspaceBillingRuntimeProjectionIsUsable(runtime) ||
+      !snapshot ||
+      snapshot.workspaceId !== runtime.workspaceId ||
+      snapshot.workspaceMemberId !== runtime.workspaceMemberId
+    )
+  ) {
+    return null;
+  }
   const snapshotTier =
     snapshot?.billing.planId?.trim()
     || (snapshot?.billing.billingState === 'free' ? 'free' : '');
@@ -674,6 +780,17 @@ export function workspaceBillingBalanceUsd(
   context: WorkspaceCollabContext | null | undefined,
 ): string | null {
   if (!response || !context) return null;
+  const runtime = response.workspaceRuntime;
+  if (
+    runtime &&
+    (
+      runtime.workspaceId !== context.workspaceId ||
+      runtime.workspaceMemberId !== context.workspaceMemberId ||
+      !workspaceBillingRuntimeProjectionIsUsable(runtime)
+    )
+  ) {
+    return null;
+  }
   if (context.workspaceType !== 'team') {
     const accountBalance = response.summary?.balanceUsd?.trim();
     return accountBalance || null;
@@ -716,8 +833,7 @@ export function workspaceBillingSnapshotForContext(
     (
       runtime.workspaceId !== context.workspaceId ||
       runtime.workspaceMemberId !== context.workspaceMemberId ||
-      runtime.status === 'error' ||
-      runtime.status === 'access-revoked'
+      !workspaceBillingRuntimeProjectionIsUsable(runtime)
     )
   ) {
     return null;

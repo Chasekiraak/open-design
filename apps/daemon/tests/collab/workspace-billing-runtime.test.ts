@@ -998,6 +998,69 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
     runtime.dispose();
   });
 
+  it('requires a live authoritative projection for an execution read', async () => {
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        if (calls === 1) return projection('workspace-a', 'member-a', '9.00');
+        throw Object.assign(new Error('temporary outage'), { code: 'temporary' });
+      },
+      retryDelaysMs: [],
+    });
+
+    await runtime.read(KEY_A);
+    await expect(runtime.read(KEY_A, {
+      reason: 'authoritative-action-read',
+      requireFresh: true,
+    })).rejects.toMatchObject({ code: 'temporary' });
+    expect(runtime.peek(KEY_A)).toMatchObject({
+      state: { status: 'error', errorCode: 'temporary' },
+    });
+    expect(runtime.peek(KEY_A)?.projection.workspaceBalance?.balanceUsd).toBe('9.00');
+    expect(calls).toBe(2);
+    runtime.dispose();
+  });
+
+  it('publishes every freshness transition and expires last-good data at the hard TTL', async () => {
+    vi.useFakeTimers();
+    const statuses: string[] = [];
+    let calls = 0;
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        calls += 1;
+        if (calls === 1) return projection('workspace-a', 'member-a', '9.00');
+        throw Object.assign(new Error('temporary outage'), { code: 'temporary' });
+      },
+      retryDelaysMs: [],
+      softTtlMs: 100,
+      hardTtlMs: 200,
+      onStateChange: (state) => statuses.push(state.status),
+    });
+
+    await runtime.read(KEY_A);
+    await vi.advanceTimersByTimeAsync(101);
+    const softExpired = await runtime.read(KEY_A);
+    expect(softExpired).toMatchObject({
+      projection: { workspaceBalance: { balanceUsd: '9.00' } },
+      state: { status: 'error' },
+    });
+    expect(statuses).toEqual(expect.arrayContaining([
+      'loading',
+      'fresh',
+      'stale',
+      'refreshing',
+      'error',
+    ]));
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(runtime.peek(KEY_A)).toMatchObject({
+      projection: { snapshot: null, workspaceBalance: null },
+      state: { status: 'error' },
+    });
+    runtime.dispose();
+  });
+
   it('does not turn a terminal-state nudge into an event-read-event loop', async () => {
     let calls = 0;
     let revision = '1';
@@ -1009,7 +1072,7 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
         return projection('workspace-a', 'member-a', revision, revision, revision);
       },
       onStateChange: (state) => {
-        if (state.reason !== 'explicit-read') {
+        if (shouldEmitWorkspaceBillingRuntimeNudge(state)) {
           nudgeReads.push(runtime.read(KEY_A));
         }
       },
@@ -1225,6 +1288,151 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
         interests: [KEY_A, KEY_B],
       }),
     ).toThrowError(expect.objectContaining({ code: 'interest_capacity_exceeded' }));
+    runtime.dispose();
+  });
+
+  it('does not let empty full sets consume the client cap', () => {
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) =>
+        projection(key.workspaceId, key.workspaceMemberId, '1.00'),
+      maxClients: 1,
+    });
+    runtime.setClientInterests({
+      clientId: 'empty-renderer',
+      clientGeneration: '1',
+      interests: [],
+    });
+    expect(() => runtime.setClientInterests({
+      clientId: 'real-renderer',
+      clientGeneration: '1',
+      interests: [KEY_A],
+    })).not.toThrow();
+    expect(runtime.interestedKeys()).toEqual([KEY_A]);
+    runtime.dispose();
+  });
+
+  it('resolves a queued read when its declared interest is released', async () => {
+    const active = deferred<VelaWorkspaceBillingProjection>();
+    const starts: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) => {
+        starts.push(key.workspaceId);
+        return key.workspaceId === KEY_A.workspaceId
+          ? active.promise
+          : projection(key.workspaceId, key.workspaceMemberId, '2.00');
+      },
+      maxConcurrentRefreshes: 1,
+    });
+    runtime.setClientInterests({
+      clientId: 'renderer',
+      clientGeneration: '1',
+      interests: [KEY_A, KEY_B],
+    });
+    const first = runtime.read(KEY_A, {
+      clientId: 'renderer',
+      clientGeneration: '1',
+    });
+    await vi.waitFor(() => expect(starts).toEqual(['workspace-a']));
+    const queued = runtime.read(KEY_B, {
+      clientId: 'renderer',
+      clientGeneration: '1',
+    });
+    await Promise.resolve();
+    expect(starts).toEqual(['workspace-a']);
+
+    expect(runtime.releaseClientInterests('renderer', '1')).toBe(true);
+    await expect(queued).resolves.toMatchObject({
+      projection: { snapshot: null, workspaceBalance: null },
+      state: { workspaceId: 'workspace-b', status: 'loading' },
+    });
+    active.resolve(projection('workspace-a', 'member-a', '1.00'));
+    await first;
+    runtime.dispose();
+  });
+
+  it('resolves a queued read when its declared interest lease expires', async () => {
+    vi.useFakeTimers();
+    const active = deferred<VelaWorkspaceBillingProjection>();
+    const starts: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) => {
+        starts.push(key.workspaceId);
+        return key.workspaceId === KEY_A.workspaceId
+          ? active.promise
+          : projection(key.workspaceId, key.workspaceMemberId, '2.00');
+      },
+      maxConcurrentRefreshes: 1,
+      interestLeaseMs: 100,
+      interestSweepIntervalMs: 10,
+    });
+    runtime.setClientInterests({
+      clientId: 'renderer',
+      clientGeneration: '1',
+      interests: [KEY_A, KEY_B],
+    });
+    const first = runtime.read(KEY_A, {
+      clientId: 'renderer',
+      clientGeneration: '1',
+    });
+    await vi.waitFor(() => expect(starts).toEqual(['workspace-a']));
+    const queued = runtime.read(KEY_B, {
+      clientId: 'renderer',
+      clientGeneration: '1',
+    });
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(101);
+    await expect(queued).resolves.toMatchObject({
+      projection: { snapshot: null, workspaceBalance: null },
+      state: { workspaceId: 'workspace-b', status: 'loading' },
+    });
+    active.resolve(projection('workspace-a', 'member-a', '1.00'));
+    await first;
+    runtime.dispose();
+  });
+
+  it('caps global projection concurrency and refresh-start churn', async () => {
+    vi.useFakeTimers();
+    const held = new Map<string, ReturnType<typeof deferred<VelaWorkspaceBillingProjection>>>();
+    let active = 0;
+    let peak = 0;
+    const starts: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) => {
+        starts.push(key.workspaceId);
+        active += 1;
+        peak = Math.max(peak, active);
+        const gate = deferred<VelaWorkspaceBillingProjection>();
+        held.set(key.workspaceId, gate);
+        try {
+          return await gate.promise;
+        } finally {
+          active -= 1;
+        }
+      },
+      maxConcurrentRefreshes: 2,
+      maxRefreshStartsPerWindow: 3,
+      refreshStartWindowMs: 1_000,
+    });
+    const keys = ['a', 'b', 'c', 'd'].map((suffix) => ({
+      workspaceId: `workspace-${suffix}`,
+      workspaceMemberId: `member-${suffix}`,
+    }));
+    const reads = keys.map((key) => runtime.read(key));
+
+    await vi.waitFor(() => expect(starts).toHaveLength(2));
+    held.get('workspace-a')!.resolve(projection('workspace-a', 'member-a', '1'));
+    held.get('workspace-b')!.resolve(projection('workspace-b', 'member-b', '1'));
+    await vi.waitFor(() => expect(starts).toHaveLength(3));
+    held.get('workspace-c')!.resolve(projection('workspace-c', 'member-c', '1'));
+    await Promise.resolve();
+    expect(starts).toHaveLength(3);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(starts).toHaveLength(4));
+    held.get('workspace-d')!.resolve(projection('workspace-d', 'member-d', '1'));
+    await Promise.all(reads);
+    expect(peak).toBeLessThanOrEqual(2);
     runtime.dispose();
   });
 });

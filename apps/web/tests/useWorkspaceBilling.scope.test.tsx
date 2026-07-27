@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WorkspaceCollabContext } from '@open-design/contracts';
+import type {
+  WorkspaceBillingResponse,
+  WorkspaceCollabContext,
+} from '@open-design/contracts';
 
 import { resetCoalescedGet } from '../src/lib/coalesced-get';
 import {
@@ -12,6 +15,8 @@ import {
   shouldRefreshWorkspaceBilling,
   useWorkspaceBilling,
   useWorkspaceBillingResponse,
+  workspaceBillingBalanceUsd,
+  workspaceBillingSnapshotForContext,
 } from '../src/collab/useWorkspaceContext';
 
 function teamContext(workspaceId: string): WorkspaceCollabContext {
@@ -42,11 +47,37 @@ function billingResponse(workspaceId: string, balanceUsd: string) {
       workspaceId,
       workspaceMemberId: `member-${workspaceId}`,
       balanceUsd,
-      billingScopeVersion: 2,
+      billingScopeVersion: 2 as const,
       expiresAt: null,
       updatedAt: '2026-07-26T12:00:00Z',
     },
   };
+}
+
+function billingInterestResponse(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Response | null {
+  const url = String(input);
+  if (!url.startsWith('/api/workspace/billing/interests/')) return null;
+  if (init?.method === 'DELETE') {
+    return new Response(JSON.stringify({ ok: true, released: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  const body = JSON.parse(String(init?.body)) as { generation: string };
+  const clientId = decodeURIComponent(
+    new URL(url, 'http://open-design.test').pathname.split('/').at(-1)!,
+  );
+  return new Response(JSON.stringify({
+    clientId,
+    acceptedGeneration: body.generation,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 type EventSourceListener = (event: unknown) => void;
@@ -79,6 +110,125 @@ class MockWorkspaceEventSource {
 }
 
 describe('useWorkspaceBilling explicit scope', () => {
+  it.each(['fresh', 'stale', 'refreshing', 'error'] as const)(
+    'stops consuming last-good money and plan after a %s runtime reaches hard TTL',
+    (status) => {
+      const response = {
+        ...billingResponse('workspace-a', '1.25'),
+        workspaceSnapshot: {
+          schemaVersion: 1 as const,
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          billingScopeVersion: 2 as const,
+          billing: { billingState: 'active', planId: 'team_pro' },
+          wallet: {
+            balanceUsd: '1.25',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+          revisions: { billing: '1', wallet: '1' },
+        },
+        workspaceRuntime: {
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          status,
+          revision: '8',
+          observedAt: '2020-01-01T00:00:00.000Z',
+          softExpiresAt: '2020-01-01T00:00:30.000Z',
+          hardExpiresAt: '2020-01-01T00:02:00.000Z',
+          retryAt: null,
+          errorCode: status === 'error' ? 'workspace_billing_unavailable' : null,
+          reason: status === 'error' ? 'bounded-retry' : 'poll-floor',
+          sourceGapDetected: false,
+        },
+      } satisfies WorkspaceBillingResponse;
+
+      expect(workspaceBillingBalanceUsd(
+        response,
+        teamContext('workspace-a'),
+      )).toBeNull();
+      expect(workspaceBillingSnapshotForContext(
+        response,
+        teamContext('workspace-a'),
+      )).toBeNull();
+    },
+  );
+
+  it('expires runtime-managed money and plan on a hard-expiry timer and revalidates', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-27T00:00:00.000Z'));
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls > 1) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_billing_unavailable' }),
+              { status: 503, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            workspaceSnapshot: {
+              schemaVersion: 1,
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              billingScopeVersion: 2,
+              billing: { billingState: 'active', planId: 'team_pro' },
+              wallet: {
+                balanceUsd: '1.25',
+                expiresAt: null,
+                updatedAt: '2026-07-27T00:00:00.000Z',
+              },
+              revisions: { billing: '1', wallet: '1' },
+            },
+            workspaceRuntime: {
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              status: 'fresh',
+              revision: '8',
+              observedAt: '2026-07-27T00:00:00.000Z',
+              softExpiresAt: '2026-07-27T00:00:30.000Z',
+              hardExpiresAt: '2026-07-27T00:00:01.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'explicit-billing-read',
+              sourceGapDetected: false,
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await vi.waitFor(() => {
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25');
+      expect(hook.result.current?.workspaceSnapshot?.billing.planId).toBe('team_pro');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_001);
+    });
+    await vi.waitFor(() => expect(billingCalls).toBe(2));
+    expect(hook.result.current?.workspaceBalance).toBeNull();
+    expect(hook.result.current?.workspaceSnapshot).toBeNull();
+  });
+
   beforeEach(() => {
     window.sessionStorage.clear();
     resetCoalescedGet();
@@ -239,6 +389,8 @@ describe('useWorkspaceBilling explicit scope', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
         if (url === '/api/workspace/context') {
           return new Response(
             JSON.stringify({ context: teamContext('workspace-b') }),
@@ -471,6 +623,8 @@ describe('useWorkspaceBilling explicit scope', () => {
               status: 'fresh',
               revision: '7',
               observedAt: '2026-07-27T00:00:00.000Z',
+              softExpiresAt: '2099-07-27T00:00:30.000Z',
+              hardExpiresAt: '2099-07-27T00:02:00.000Z',
               retryAt: null,
               errorCode: null,
               reason: 'explicit-billing-read',
@@ -622,6 +776,8 @@ describe('useWorkspaceBilling explicit scope', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
         if (url === '/api/workspace/context') {
           return new Response(JSON.stringify({ context: currentContext }), {
             status: 200,
@@ -699,6 +855,8 @@ describe('useWorkspaceBilling explicit scope', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
         if (url === '/api/workspace/context') {
           return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
             status: 200,

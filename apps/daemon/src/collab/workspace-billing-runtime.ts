@@ -14,6 +14,11 @@ const DEFAULT_ENTRY_RETENTION_MS = 5 * 60_000;
 const DEFAULT_MAX_CLIENTS = 64;
 const DEFAULT_MAX_INTERESTS_PER_CLIENT = 16;
 const DEFAULT_MAX_ENTRIES = 128;
+const DEFAULT_MAX_CONCURRENT_REFRESHES = 4;
+const DEFAULT_MAX_REFRESH_STARTS_PER_WINDOW = 8;
+const DEFAULT_REFRESH_START_WINDOW_MS = 1_000;
+const DEFAULT_HARD_TTL_MULTIPLIER = 4;
+const MAX_RETIRED_REVISION_EPOCHS = 32;
 
 export interface WorkspaceBillingRuntimeKey {
   workspaceId: string;
@@ -24,6 +29,8 @@ export interface WorkspaceBillingRuntimeReadOptions {
   reason?: string;
   clientId?: string;
   clientGeneration?: string;
+  /** Execution/precharge reads must complete a new authoritative projection. */
+  requireFresh?: boolean;
 }
 
 export interface WorkspaceBillingRuntimeInterestSet {
@@ -77,6 +84,11 @@ export interface WorkspaceBillingRuntimeCoordinatorOptions {
   maxClients?: number;
   maxInterestsPerClient?: number;
   maxEntries?: number;
+  softTtlMs?: number;
+  hardTtlMs?: number;
+  maxConcurrentRefreshes?: number;
+  maxRefreshStartsPerWindow?: number;
+  refreshStartWindowMs?: number;
   onInterestSetChange?: (interests: WorkspaceBillingRuntimeKey[]) => void;
 }
 
@@ -112,6 +124,8 @@ interface RuntimeEntry {
     wallet: Set<string>;
   };
   inFlight: Promise<void> | null;
+  queued: boolean;
+  queuedReason: string | null;
   pending: boolean;
   pendingReason: string | null;
   attempt: bigint;
@@ -167,6 +181,15 @@ export class WorkspaceBillingRuntimeCoordinator {
   private readonly maxClients: number;
   private readonly maxInterestsPerClient: number;
   private readonly maxEntries: number;
+  private readonly softTtlMs: number;
+  private readonly hardTtlMs: number;
+  private readonly maxConcurrentRefreshes: number;
+  private readonly maxRefreshStartsPerWindow: number;
+  private readonly refreshStartWindowMs: number;
+  private readonly refreshQueue: RuntimeEntry[] = [];
+  private readonly refreshStarts: number[] = [];
+  private activeRefreshes = 0;
+  private refreshQueueTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pollTimer: ReturnType<typeof setInterval>;
   private readonly interestSweepTimer: ReturnType<typeof setInterval>;
   private disposed = false;
@@ -185,6 +208,23 @@ export class WorkspaceBillingRuntimeCoordinator {
       options.maxInterestsPerClient ?? DEFAULT_MAX_INTERESTS_PER_CLIENT,
     );
     this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
+    this.softTtlMs = Math.max(1, options.softTtlMs ?? this.pollIntervalMs);
+    this.hardTtlMs = Math.max(
+      this.softTtlMs,
+      options.hardTtlMs ?? this.softTtlMs * DEFAULT_HARD_TTL_MULTIPLIER,
+    );
+    this.maxConcurrentRefreshes = Math.max(
+      1,
+      options.maxConcurrentRefreshes ?? DEFAULT_MAX_CONCURRENT_REFRESHES,
+    );
+    this.maxRefreshStartsPerWindow = Math.max(
+      1,
+      options.maxRefreshStartsPerWindow ?? DEFAULT_MAX_REFRESH_STARTS_PER_WINDOW,
+    );
+    this.refreshStartWindowMs = Math.max(
+      1,
+      options.refreshStartWindowMs ?? DEFAULT_REFRESH_START_WINDOW_MS,
+    );
     this.pollTimer = this.scheduler.setInterval(() => {
       this.refreshAll('poll-floor');
     }, this.pollIntervalMs);
@@ -212,9 +252,6 @@ export class WorkspaceBillingRuntimeCoordinator {
         current.generation.toString(),
       );
     }
-    if (!current && this.clients.size >= this.maxClients) {
-      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
-    }
     const keys = new Map<string, WorkspaceBillingRuntimeKey>();
     for (const interest of input.interests) {
       const key = normalizeKey(interest);
@@ -232,6 +269,20 @@ export class WorkspaceBillingRuntimeCoordinator {
       }
       current.expiresAt = this.scheduler.now() + this.interestLeaseMs;
       return this.interestLease(clientId, current);
+    }
+    if (keys.size === 0) {
+      if (current) {
+        this.clients.delete(clientId);
+        this.handleInterestMutation(current.keys, new Set());
+      }
+      return {
+        clientId,
+        acceptedGeneration: generation.toString(),
+        leaseExpiresAt: new Date(this.scheduler.now()).toISOString(),
+      };
+    }
+    if (!current && this.clients.size >= this.maxClients) {
+      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
     }
 
     const prospectiveKeys = new Set([
@@ -296,17 +347,38 @@ export class WorkspaceBillingRuntimeCoordinator {
     const key = normalizeKey(keyInput);
     const entry = this.entryFor(key);
     const forceForInterest = this.acceptClientInterest(entry, options);
-    if (entry.retryTimer && !forceForInterest) {
+    const requireFresh = options.requireFresh === true;
+    if (
+      entry.status === 'fresh' &&
+      entry.observedAt != null &&
+      this.scheduler.now() - entry.observedAt >= this.softTtlMs
+    ) {
+      this.markStatus(entry, 'stale', 'soft-ttl-expired');
+    }
+    if (entry.retryTimer && !forceForInterest && !requireFresh) {
       return this.result(entry);
     }
     if (
+      requireFresh ||
       entry.status !== 'fresh' ||
       entry.observedAt == null ||
-      this.scheduler.now() - entry.observedAt >= this.pollIntervalMs ||
+      this.scheduler.now() - entry.observedAt >= this.softTtlMs ||
       forceForInterest
     ) {
-      this.requestRefresh(entry, options.reason ?? 'explicit-read', forceForInterest);
+      this.requestRefresh(
+        entry,
+        options.reason ?? 'explicit-read',
+        forceForInterest || requireFresh,
+      );
       await this.waitForIdle(entry);
+    }
+    if (requireFresh && entry.status !== 'fresh') {
+      throw Object.assign(
+        new Error(entry.errorCode ?? 'workspace_billing_authoritative_unavailable'),
+        {
+          code: entry.errorCode ?? 'workspace_billing_authoritative_unavailable',
+        },
+      );
     }
     return this.result(entry);
   }
@@ -443,6 +515,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     entry.reason = 'membership-reauthorized';
     entry.observedAt = null;
     entry.revision += 1n;
+    this.publish(entry);
   }
 
   peek(keyInput: WorkspaceBillingRuntimeKey): WorkspaceBillingRuntimeResult | null {
@@ -469,9 +542,14 @@ export class WorkspaceBillingRuntimeCoordinator {
     this.disposed = true;
     this.scheduler.clearInterval(this.pollTimer);
     this.scheduler.clearInterval(this.interestSweepTimer);
+    if (this.refreshQueueTimer) this.scheduler.clearTimeout(this.refreshQueueTimer);
+    this.refreshQueueTimer = null;
+    this.refreshQueue.length = 0;
     for (const entry of this.entries.values()) {
       if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
       entry.retryTimer = null;
+      entry.queued = false;
+      entry.queuedReason = null;
       entry.pending = false;
       this.resolveWaiters(entry);
     }
@@ -551,6 +629,8 @@ export class WorkspaceBillingRuntimeCoordinator {
         wallet: new Set(),
       },
       inFlight: null,
+      queued: false,
+      queuedReason: null,
       pending: false,
       pendingReason: null,
       attempt: 0n,
@@ -584,9 +664,11 @@ export class WorkspaceBillingRuntimeCoordinator {
     if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
     entry.retryTimer = null;
     entry.retryAt = null;
+    const canceledQueuedRead = this.removeQueuedEntry(entry);
     entry.pending = false;
     entry.pendingReason = null;
     entry.uninterestedAt ??= this.scheduler.now();
+    if (canceledQueuedRead && !entry.inFlight) this.resolveWaiters(entry);
   }
 
   private activeRuntimeKeysExcept(excludedClientId: string): Set<string> {
@@ -650,7 +732,10 @@ export class WorkspaceBillingRuntimeCoordinator {
   private evictUninterestedEntries(): void {
     const now = this.scheduler.now();
     const candidates = [...this.entries.entries()]
-      .filter(([, entry]) => !this.hasActiveInterest(entry) && !entry.inFlight)
+      .filter(
+        ([, entry]) =>
+          !this.hasActiveInterest(entry) && !entry.inFlight && !entry.queued,
+      )
       .sort(([, left], [, right]) =>
         (left.uninterestedAt ?? left.observedAt ?? 0) -
         (right.uninterestedAt ?? right.observedAt ?? 0),
@@ -709,7 +794,63 @@ export class WorkspaceBillingRuntimeCoordinator {
       }
       return;
     }
-    this.startRefresh(entry, reason);
+    if (entry.queued) {
+      entry.queuedReason = strongerReason(entry.queuedReason, reason);
+      return;
+    }
+    entry.queued = true;
+    entry.queuedReason = reason;
+    this.refreshQueue.push(entry);
+    this.drainRefreshQueue();
+  }
+
+  private drainRefreshQueue(): void {
+    if (this.disposed) return;
+    if (this.refreshQueueTimer) {
+      this.scheduler.clearTimeout(this.refreshQueueTimer);
+      this.refreshQueueTimer = null;
+    }
+    const now = this.scheduler.now();
+    while (
+      this.refreshStarts.length > 0 &&
+      now - this.refreshStarts[0]! >= this.refreshStartWindowMs
+    ) {
+      this.refreshStarts.shift();
+    }
+    while (
+      this.activeRefreshes < this.maxConcurrentRefreshes &&
+      this.refreshStarts.length < this.maxRefreshStartsPerWindow
+    ) {
+      const entry = this.refreshQueue.shift();
+      if (!entry) break;
+      if (!entry.queued) continue;
+      entry.queued = false;
+      const reason = entry.queuedReason ?? 'queued-refresh';
+      entry.queuedReason = null;
+      if (entry.status === 'access-revoked' || !this.hasActiveInterest(entry)) {
+        this.resolveWaiters(entry);
+        continue;
+      }
+      this.activeRefreshes += 1;
+      this.refreshStarts.push(this.scheduler.now());
+      this.startRefresh(entry, reason);
+    }
+    if (
+      this.refreshQueue.some((entry) => entry.queued) &&
+      this.activeRefreshes < this.maxConcurrentRefreshes &&
+      this.refreshStarts.length >= this.maxRefreshStartsPerWindow
+    ) {
+      const delay = Math.max(
+        1,
+        this.refreshStartWindowMs -
+          (this.scheduler.now() - this.refreshStarts[0]!),
+      );
+      this.refreshQueueTimer = this.scheduler.setTimeout(() => {
+        this.refreshQueueTimer = null;
+        this.drainRefreshQueue();
+      }, delay);
+      this.refreshQueueTimer.unref?.();
+    }
   }
 
   private startRefresh(entry: RuntimeEntry, reason: string): void {
@@ -720,13 +861,8 @@ export class WorkspaceBillingRuntimeCoordinator {
       entry.retryAt = null;
     }
     const attempt = ++entry.attempt;
-    this.markStatus(
-      entry,
-      hasProjection(entry) ? 'refreshing' : 'loading',
-      reason,
-    );
-    entry.inFlight = this.options
-      .fetchProjection(entry.key)
+    const refresh = Promise.resolve()
+      .then(() => this.options.fetchProjection(entry.key))
       .then((projection) => {
         if (entry.attempt !== attempt || this.disposed) return;
         validateProjectionScope(entry.key, projection);
@@ -757,17 +893,29 @@ export class WorkspaceBillingRuntimeCoordinator {
         this.publish(entry);
       })
       .finally(() => {
-        if (entry.attempt !== attempt) return;
+        this.activeRefreshes = Math.max(0, this.activeRefreshes - 1);
+        if (entry.attempt !== attempt) {
+          this.drainRefreshQueue();
+          return;
+        }
         entry.inFlight = null;
         if (entry.pending && !this.disposed && entry.status !== 'access-revoked') {
           const trailingReason = entry.pendingReason ?? 'trailing-invalidation';
           entry.pending = false;
           entry.pendingReason = null;
-          this.startRefresh(entry, trailingReason);
+          this.requestRefresh(entry, trailingReason, true);
+          this.drainRefreshQueue();
           return;
         }
         this.resolveWaiters(entry);
+        this.drainRefreshQueue();
       });
+    entry.inFlight = refresh;
+    this.markStatus(
+      entry,
+      hasProjection(entry) ? 'refreshing' : 'loading',
+      reason,
+    );
   }
 
   private scheduleRetry(entry: RuntimeEntry): void {
@@ -796,6 +944,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     }
     entry.attempt += 1n;
     entry.inFlight = null;
+    this.removeQueuedEntry(entry);
     entry.pending = false;
     entry.pendingReason = null;
     if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
@@ -813,6 +962,16 @@ export class WorkspaceBillingRuntimeCoordinator {
     if (interestChanged) this.publishInterestSet();
   }
 
+  private removeQueuedEntry(entry: RuntimeEntry): boolean {
+    const wasQueued = entry.queued;
+    entry.queued = false;
+    entry.queuedReason = null;
+    for (let index = this.refreshQueue.length - 1; index >= 0; index -= 1) {
+      if (this.refreshQueue[index] === entry) this.refreshQueue.splice(index, 1);
+    }
+    return wasQueued;
+  }
+
   private markStatus(
     entry: RuntimeEntry,
     status: WorkspaceBillingRuntimeState['status'],
@@ -822,10 +981,11 @@ export class WorkspaceBillingRuntimeCoordinator {
     entry.status = status;
     entry.reason = reason;
     entry.revision += 1n;
+    this.publish(entry);
   }
 
   private waitForIdle(entry: RuntimeEntry): Promise<void> {
-    if (!entry.inFlight && !entry.pending) return Promise.resolve();
+    if (!entry.inFlight && !entry.queued && !entry.pending) return Promise.resolve();
     return new Promise((resolve) => {
       entry.waiters.push(resolve);
     });
@@ -838,7 +998,9 @@ export class WorkspaceBillingRuntimeCoordinator {
 
   private result(entry: RuntimeEntry): WorkspaceBillingRuntimeResult {
     return {
-      projection: cloneProjection(entry.projection),
+      projection: this.isHardExpired(entry)
+        ? EMPTY_PROJECTION
+        : cloneProjection(entry.projection),
       state: this.state(entry),
     };
   }
@@ -850,6 +1012,12 @@ export class WorkspaceBillingRuntimeCoordinator {
       status: entry.status,
       revision: entry.revision.toString(),
       observedAt: timestamp(entry.observedAt),
+      softExpiresAt: timestamp(
+        entry.observedAt == null ? null : entry.observedAt + this.softTtlMs,
+      ),
+      hardExpiresAt: timestamp(
+        entry.observedAt == null ? null : entry.observedAt + this.hardTtlMs,
+      ),
       retryAt: timestamp(entry.retryAt),
       errorCode: entry.errorCode,
       reason: entry.reason,
@@ -859,6 +1027,13 @@ export class WorkspaceBillingRuntimeCoordinator {
 
   private publish(entry: RuntimeEntry): void {
     this.options.onStateChange?.(this.state(entry));
+  }
+
+  private isHardExpired(entry: RuntimeEntry): boolean {
+    return (
+      entry.observedAt != null &&
+      this.scheduler.now() - entry.observedAt >= this.hardTtlMs
+    );
   }
 
   private assertUsable(): void {
@@ -875,6 +1050,13 @@ export function createWorkspaceBillingRuntimeCoordinator(
 export function shouldEmitWorkspaceBillingRuntimeNudge(
   state: WorkspaceBillingRuntimeState,
 ): boolean {
+  if (
+    state.status === 'loading' ||
+    state.status === 'stale' ||
+    state.status === 'refreshing'
+  ) {
+    return false;
+  }
   switch (state.reason) {
     case 'explicit-billing-read':
     case 'vela-billing-changed':
@@ -1111,6 +1293,11 @@ function retireRevisionClockEpoch(
 ): void {
   if (previous && previous.epoch !== authoritative.epoch) {
     retired.add(previous.epoch);
+    while (retired.size > MAX_RETIRED_REVISION_EPOCHS) {
+      const oldest = retired.values().next().value as string | undefined;
+      if (!oldest) break;
+      retired.delete(oldest);
+    }
   }
 }
 

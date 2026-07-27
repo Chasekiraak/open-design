@@ -2,6 +2,8 @@ import type { HubEventsSubscriber } from './hub-events-subscriber.js';
 
 export interface WorkspaceHubSubscriptionManagerOptions {
   start(workspaceId: string): HubEventsSubscriber;
+  /** Hard process cap; overflow workspaces recover through the poll floor. */
+  maxSubscribers?: number;
 }
 
 /**
@@ -16,8 +18,11 @@ export class WorkspaceHubSubscriptionManager {
   private billingWorkspaceIds = new Set<string>();
   private readonly subscribers = new Map<string, HubEventsSubscriber>();
   private disposed = false;
+  private readonly maxSubscribers: number;
 
-  constructor(private readonly options: WorkspaceHubSubscriptionManagerOptions) {}
+  constructor(private readonly options: WorkspaceHubSubscriptionManagerOptions) {
+    this.maxSubscribers = Math.max(1, options.maxSubscribers ?? 8);
+  }
 
   setAmbientWorkspace(workspaceIdInput: string | null | undefined): void {
     this.assertUsable();
@@ -53,8 +58,15 @@ export class WorkspaceHubSubscriptionManager {
   }
 
   private reconcile(): void {
-    const desired = new Set(this.billingWorkspaceIds);
-    if (this.ambientWorkspaceId) desired.add(this.ambientWorkspaceId);
+    const ordered = [
+      ...(this.ambientWorkspaceId ? [this.ambientWorkspaceId] : []),
+      ...this.billingWorkspaceIds,
+    ];
+    const desired = new Set<string>();
+    for (const workspaceId of ordered) {
+      if (desired.size >= this.maxSubscribers) break;
+      desired.add(workspaceId);
+    }
     for (const [workspaceId, subscriber] of this.subscribers) {
       if (desired.has(workspaceId)) continue;
       subscriber.stop();

@@ -36,6 +36,7 @@ export interface HubReadyFrame {
 }
 
 const BILLING_REVISION_CLOCKS_CAPABILITY = 'billing-revision-clocks-v1';
+const MAX_HANDLED_SOURCE_GAP_EPOCHS = 64;
 
 export interface HubWorkspaceEvent {
   type:
@@ -318,6 +319,13 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
           return;
         }
         handledSourceGapEpochs.add(handledKey);
+        while (handledSourceGapEpochs.size > MAX_HANDLED_SOURCE_GAP_EPOCHS) {
+          const oldest = handledSourceGapEpochs.values().next().value as
+            | string
+            | undefined;
+          if (!oldest) break;
+          handledSourceGapEpochs.delete(oldest);
+        }
         if (!suppressCallback) {
           options.onSourceGap?.({
             ...(verifiedWorkspaceId ? { workspaceId: verifiedWorkspaceId } : {}),

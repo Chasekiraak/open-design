@@ -427,9 +427,9 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
           ),
       );
       if (unauthorized.length > 0) {
-        for (const interest of unauthorized) {
-          billingRuntime.revokeWorkspace(interest.workspaceId);
-        }
+        // A stale renderer may still declare an old membership epoch for a
+        // workspace another renderer is legitimately using. Reject this
+        // declaration without mutating process-wide workspace state.
         return res.status(403).json({ error: 'workspace_not_authorized' });
       }
     }
@@ -473,10 +473,14 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
     const requestedWorkspaceId =
       typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    const freshness =
+      typeof req.query.freshness === 'string' ? req.query.freshness.trim() : '';
     if (
       (scope !== 'account' && scope !== 'workspace') ||
       (scope === 'account' && requestedWorkspaceId) ||
-      (scope === 'workspace' && !requestedWorkspaceId)
+      (scope === 'workspace' && !requestedWorkspaceId) ||
+      (freshness !== '' && freshness !== 'authoritative') ||
+      (scope !== 'workspace' && freshness !== '')
     ) {
       return res.status(400).json({ error: 'invalid_billing_scope' });
     }
@@ -530,7 +534,11 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
             workspaceMemberId: membership.workspaceMemberId,
           },
           {
-            reason: 'explicit-billing-read',
+            reason:
+              freshness === 'authoritative'
+                ? 'authoritative-action-read'
+                : 'explicit-billing-read',
+            ...(freshness === 'authoritative' ? { requireFresh: true } : {}),
             ...(clientId ? { clientId } : {}),
             ...(clientGeneration ? { clientGeneration } : {}),
           },
@@ -544,6 +552,13 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
             ? { acceptedGeneration: error.acceptedGeneration }
             : {}),
         });
+      }
+      if (freshness === 'authoritative') {
+        const code =
+          typeof (error as { code?: unknown })?.code === 'string'
+            ? (error as { code: string }).code
+            : 'workspace_billing_authoritative_unavailable';
+        return res.status(503).json({ error: code });
       }
       throw error;
     }
@@ -560,6 +575,16 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       snapshot.workspaceMemberId === membership.workspaceMemberId
         ? snapshot
         : null;
+    const authoritativeObservedAt =
+      freshness === 'authoritative' &&
+      runtimeResult.state.status === 'fresh'
+        ? runtimeResult.state.observedAt
+        : null;
+    if (freshness === 'authoritative' && !authoritativeObservedAt) {
+      return res.status(503).json({
+        error: 'workspace_billing_authoritative_unavailable',
+      });
+    }
     const body: WorkspaceBillingResponse = {
       summary: accountSummary,
       workspaceBalance: authorizedWorkspaceBalance,
@@ -567,6 +592,15 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
         ? { workspaceSnapshot: authorizedWorkspaceSnapshot }
         : {}),
       workspaceRuntime: runtimeResult.state,
+      ...(authoritativeObservedAt
+        ? {
+            authoritativeWorkspaceRead: {
+              workspaceId: requestedWorkspaceId,
+              workspaceMemberId: membership.workspaceMemberId,
+              observedAt: authoritativeObservedAt,
+            },
+          }
+        : {}),
     };
     return res.json(body);
   });
