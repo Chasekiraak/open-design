@@ -4094,8 +4094,13 @@ export async function startServer({
           if (activeProjectEventSinks.has(projectId)) {
             // Project is open here — pull IT now instead of waiting for the
             // next poll tick; the merge emits `comment-changed` to the web.
+            // A consumed dirty mark is only redeemed by a pull that actually
+            // ran; on a no-op/failed pull restore it so the next comment read
+            // retries instead of losing the event outright.
             dirtyCommentProjects.delete(projectId);
-            void collabCloud?.pullProject(projectId).catch(() => undefined);
+            void collabCloud?.pullProject(projectId).then((pulled) => {
+              if (!pulled) dirtyCommentProjects.add(projectId);
+            }).catch(() => dirtyCommentProjects.add(projectId));
           } else {
             // Closed project: just mark dirty. The open-project path pulls
             // immediately, and an unopened project costs zero requests.
@@ -5334,7 +5339,13 @@ export async function startServer({
             // a live events subscriber and this read can arrive before (or
             // without) one.
             if (dirtyCommentProjects.delete(projectId)) {
-              void collabCloud.pullProject(projectId).catch(() => {});
+              // Same unredeemed-mark rule as the hub `comment-changed`
+              // handler: a pull that no-oped (identity/conversation not
+              // ready yet) or failed must put the mark back, so the next
+              // read retries the targeted pull.
+              void collabCloud.pullProject(projectId).then((pulled) => {
+                if (!pulled) dirtyCommentProjects.add(projectId);
+              }).catch(() => dirtyCommentProjects.add(projectId));
             }
           },
           // Both hooks also reconcile pin_seq (recvq5BVsolIxi): a genuinely

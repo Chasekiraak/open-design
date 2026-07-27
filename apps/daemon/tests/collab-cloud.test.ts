@@ -448,6 +448,79 @@ describe('createCollabCloudService', () => {
     expect(await service.listMembers()).toEqual([]);
     service.dispose();
   });
+
+  // —— pullProject redemption contract ——————————————————————————————————————
+  // The hub `comment-changed` handler and `onCommentsRead` both DELETE the
+  // project's dirty mark before firing this targeted pull. A single comment
+  // only ever emits one hub event, so a pull that silently no-ops or fails
+  // must report it (resolve false) — the caller restores the mark and the
+  // next read retries. Without that signal the mark is burned for nothing
+  // and the comment stays invisible until the project gains a live events
+  // subscriber.
+
+  it('pullProject resolves true when the targeted pull actually ran (mark redeemed)', async () => {
+    const { client, seed } = fakeClient();
+    seed(cloudComment('c1'));
+    const merged: string[] = [];
+    const service = createCollabCloudService({
+      client,
+      workspaceContext: fixedContextProvider(teamContext()),
+      listProjectIds: () => [],
+      resolveLocalConversationId: () => 'conv-local',
+      mergeComment: ({ comment }) => { merged.push(comment.id); return true; },
+    });
+    await expect(service.pullProject('p1')).resolves.toBe(true);
+    expect(merged).toEqual(['c1']);
+    // An up-to-date follow-up pull (nothing new) still counts as redeemed.
+    await expect(service.pullProject('p1')).resolves.toBe(true);
+    service.dispose();
+  });
+
+  it('pullProject resolves false when there is no local conversation to merge into', async () => {
+    const { client, seed } = fakeClient();
+    seed(cloudComment('c1'));
+    const service = createCollabCloudService({
+      client,
+      workspaceContext: fixedContextProvider(teamContext()),
+      listProjectIds: () => [],
+      resolveLocalConversationId: () => null,
+      mergeComment: () => true,
+    });
+    await expect(service.pullProject('p1')).resolves.toBe(false);
+    service.dispose();
+  });
+
+  it('pullProject resolves false when the relay pull fails (error to onError, no throw)', async () => {
+    const { client } = fakeClient();
+    (client as { pullComments: unknown }).pullComments = async () => {
+      throw new Error('relay unavailable');
+    };
+    const errors: unknown[] = [];
+    const service = createCollabCloudService({
+      client,
+      workspaceContext: fixedContextProvider(teamContext()),
+      listProjectIds: () => [],
+      resolveLocalConversationId: () => 'conv-local',
+      mergeComment: () => true,
+      onError: (error) => errors.push(error),
+    });
+    await expect(service.pullProject('p1')).resolves.toBe(false);
+    expect(errors).toHaveLength(1);
+    service.dispose();
+  });
+
+  it('pullProject resolves false off-team (no identity, nothing pulled)', async () => {
+    const { client } = fakeClient();
+    const service = createCollabCloudService({
+      client,
+      workspaceContext: fixedContextProvider(null),
+      listProjectIds: () => [],
+      resolveLocalConversationId: () => 'conv-local',
+      mergeComment: () => true,
+    });
+    await expect(service.pullProject('p1')).resolves.toBe(false);
+    service.dispose();
+  });
 });
 
 // —— client wire behavior (injected fetch) ————————————————————————————————————

@@ -125,8 +125,15 @@ export interface CollabCloudService {
    * not in `listProjectIds()` (the poll loop's open-projects scope) — the
    * poll loop otherwise never covers it and the mark would be consumed for
    * nothing. Errors land on `onError`; never throws.
+   *
+   * Resolves `true` only when a pull actually ran against the relay for this
+   * project (a legitimately-empty/not-modified result still counts). Resolves
+   * `false` when it no-oped (no team identity yet, no local conversation to
+   * merge into) or the pull failed — the caller must then treat its consumed
+   * dirty mark as UNREDEEMED and restore it, otherwise a transient miss
+   * silently loses the one signal a single comment ever gets.
    */
-  pullProject(projectId: string): Promise<void>;
+  pullProject(projectId: string): Promise<boolean>;
   /** Start the background poller. */
   start(): void;
   /** Stop the poller. */
@@ -214,14 +221,16 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
     return members.find((m) => m.memberId === memberId) ?? null;
   }
 
+  /** Resolves `true` when a pull ran (even if it returned nothing new),
+   *  `false` when there was no local conversation to merge into. */
   async function pollProject(
     teamId: string,
     projectId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const conversationId = deps.resolveLocalConversationId(projectId);
     // No local conversation to attach to yet (e.g. a member who pulled the
     // project but has not opened a chat) — nothing to merge into.
-    if (!conversationId) return;
+    if (!conversationId) return false;
     const sinceSeq = cursors.get(projectId) ?? 0;
     const result = await deps.client.pullComments(
       teamId,
@@ -230,22 +239,24 @@ export function createCollabCloudService(deps: CollabCloudServiceDeps): CollabCl
       etags.get(projectId),
     );
     etags.set(projectId, result.etag);
-    if (result.notModified) return;
+    if (result.notModified) return true;
     let inserted = 0;
     for (const comment of result.comments) {
       if (deps.mergeComment({ projectId, conversationId, comment })) inserted += 1;
     }
     cursors.set(projectId, result.latestSeq);
     if (inserted > 0) deps.onMerged?.({ projectId, inserted });
+    return true;
   }
 
-  async function pullProject(projectId: string): Promise<void> {
+  async function pullProject(projectId: string): Promise<boolean> {
     const identity = await teamIdentity();
-    if (!identity) return;
+    if (!identity) return false;
     try {
-      await pollProject(identity.teamId, projectId);
+      return await pollProject(identity.teamId, projectId);
     } catch (error) {
       deps.onError?.(error);
+      return false;
     }
   }
 
