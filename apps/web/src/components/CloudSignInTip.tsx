@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { VisuallyHidden } from '@open-design/components';
 import { Icon } from './Icon';
 import { useI18n } from '../i18n';
 import {
@@ -66,23 +67,31 @@ type TipState = 'idle' | 'signing' | 'error';
  * nothing. Deliberately inert (no button semantics, no dismiss, no click
  * handler) — this is a status readout, not another affordance to interact
  * with while the real re-read is already in flight.
+ *
+ * Shaped as a skeleton of the account row it is standing in for
+ * (`.entry-nav-rail__account-trigger`'s avatar + name, see entry-layout.css)
+ * rather than as its own callout card — product feedback (2026-07-24) was
+ * that the previous spinner+"Loading…" card read as a distinct, separate
+ * notification, and visibly jumped in size/position once the real avatar
+ * row landed. Matching the real row's footprint keeps the loading→loaded
+ * swap reading as one continuous element filling in, not two different
+ * elements trading places. The "Loading" text survives for assistive tech
+ * via `VisuallyHidden` — sighted users read the shimmer itself as the status.
  */
 export function RailAccountSyncTip() {
   const { t } = useI18n();
   return (
     <div
-      className="entry-local-mode-tip is-signing"
+      className="entry-rail-account-skeleton"
       role="status"
       aria-live="polite"
       data-testid="entry-rail-account-sync-tip"
     >
-      <div className="entry-local-mode-tip__head">
-        <span className="entry-local-mode-tip__icon" aria-hidden>
-          <Icon name="spinner" size={14} />
-        </span>
-        <strong>{t('entry.cloudCalloutTitle')}</strong>
-      </div>
-      <p>{t('common.loading')}</p>
+      <span className="entry-rail-account-skeleton__avatar" aria-hidden />
+      <span className="entry-rail-account-skeleton__name" aria-hidden />
+      <VisuallyHidden>
+        {t('entry.cloudCalloutTitle')} {t('common.loading')}
+      </VisuallyHidden>
     </div>
   );
 }

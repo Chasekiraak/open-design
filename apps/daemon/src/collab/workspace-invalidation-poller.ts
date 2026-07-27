@@ -37,10 +37,24 @@ export interface WorkspaceInvalidationPollerDeps {
   emit: (payload: WorkspaceInvalidationSsePayload) => void;
   /** Poll cadence; defaults to 15s (matches the web team-projects/members poll). */
   pollIntervalMs?: number;
+  /** Ask the daemon recovery coordinator to inspect locally missing team
+   * projects. This is a fire-and-forget request: a slow recovery must never
+   * block workspace context, catalog, or member polling. `projects` is the
+   * display-cache observation, not pull authorization: the recovery coordinator
+   * must independently re-read authoritative identity + catalog state. */
+  onTeamProjectsObserved?: (input: {
+    workspaceId: string;
+    projects: readonly TeamProject[];
+  }) => void | Promise<void>;
+  /** Minimum cadence for the missing-project recovery request. */
+  recoveryFloorIntervalMs?: number;
+  /** Injectable wall clock for deterministic recovery-floor tests. */
+  now?: () => number;
   onError?: (error: unknown) => void;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
+const DEFAULT_RECOVERY_FLOOR_INTERVAL_MS = 30_000;
 
 /** Stable signature of the workspace context — any change to these fields is a
  *  meaningful `workspace-context-changed`. Whole-object stringify is fine here:
@@ -51,10 +65,32 @@ function contextSignature(context: WorkspaceCollabContext | null): string {
 }
 
 /** Is this a team workspace we should read team projects / members for? */
-function isTeamContext(context: WorkspaceCollabContext | null): boolean {
+function isTeamContext(
+  context: WorkspaceCollabContext | null,
+): context is WorkspaceCollabContext {
   if (!context) return false;
   if (context.workspaceType === 'team') return true;
   return typeof context.teamId === 'string' && context.teamId.trim().length > 0;
+}
+
+/** Fail-closed prefilter for broad recovery. Keep this identity boundary
+ * aligned with `activeTeamWorkspaceIdentity` in proactive-content-pull.ts
+ * without changing `isTeamContext`'s existing invalidation/read semantics. */
+function activeRecoveryWorkspaceId(context: WorkspaceCollabContext): string | null {
+  const workspaceId = context.workspaceId?.trim() ?? '';
+  const resourceTeamId = context.teamId?.trim() ?? '';
+  const workspaceMemberId = context.workspaceMemberId?.trim() ?? '';
+  if (
+    context.workspaceType !== 'team' ||
+    context.memberStatus !== 'active' ||
+    context.lifecycleState !== 'active' ||
+    !workspaceId ||
+    !resourceTeamId ||
+    !workspaceMemberId
+  ) {
+    return null;
+  }
+  return workspaceId;
 }
 
 function teamProjectsSignature(projects: TeamProject[]): string {
@@ -90,8 +126,13 @@ export function createWorkspaceInvalidationPoller(
   deps: WorkspaceInvalidationPollerDeps,
 ): WorkspaceInvalidationPoller {
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const recoveryFloorIntervalMs =
+    deps.recoveryFloorIntervalMs ?? DEFAULT_RECOVERY_FLOOR_INTERVAL_MS;
+  const now = deps.now ?? Date.now;
   let timer: NodeJS.Timeout | null = null;
   let running = false;
+  let recoveryWorkspaceId: string | null = null;
+  let recoveryRequestedAt: number | null = null;
 
   // `undefined` = never observed (first cycle establishes the baseline WITHOUT
   // emitting, so a fresh daemon does not spam a synthetic "changed" on boot).
@@ -108,27 +149,55 @@ export function createWorkspaceInvalidationPoller(
     return next;
   };
 
+  const requestMissingProjectRecovery = (
+    context: WorkspaceCollabContext,
+    projects: readonly TeamProject[],
+    at: number,
+  ): void => {
+    if (!deps.onTeamProjectsObserved) return;
+    const workspaceId = activeRecoveryWorkspaceId(context);
+    if (!workspaceId) return;
+    if (
+      recoveryWorkspaceId === workspaceId &&
+      recoveryRequestedAt != null &&
+      at - recoveryRequestedAt < recoveryFloorIntervalMs
+    ) {
+      return;
+    }
+    recoveryWorkspaceId = workspaceId;
+    recoveryRequestedAt = at;
+    try {
+      void Promise.resolve(
+        deps.onTeamProjectsObserved({ workspaceId, projects }),
+      ).catch((error) => deps.onError?.(error));
+    } catch (error) {
+      deps.onError?.(error);
+    }
+  };
+
   async function pollOnce(): Promise<void> {
-    const now = Date.now();
+    const observedAt = now();
     const context = await deps.getWorkspaceContext().catch((error) => {
       deps.onError?.(error);
       return null;
     });
     contextSig = emitIfChanged(contextSig, contextSignature(context), {
       type: 'workspace-context-changed',
-      at: now,
+      at: observedAt,
     });
 
     if (!isTeamContext(context)) {
+      recoveryWorkspaceId = null;
+      recoveryRequestedAt = null;
       // Off-team: fold team projects / members to empty so RE-entering a team
       // re-emits, but never spawn the team reads for a personal user.
       teamProjectsSig = emitIfChanged(teamProjectsSig, teamProjectsSignature([]), {
         type: 'team-projects-changed',
-        at: now,
+        at: observedAt,
       });
       membersSig = emitIfChanged(membersSig, membersSignature([]), {
         type: 'members-changed',
-        at: now,
+        at: observedAt,
       });
       return;
     }
@@ -148,13 +217,14 @@ export function createWorkspaceInvalidationPoller(
     if (projects) {
       teamProjectsSig = emitIfChanged(teamProjectsSig, teamProjectsSignature(projects), {
         type: 'team-projects-changed',
-        at: now,
+        at: observedAt,
       });
+      requestMissingProjectRecovery(context, projects, observedAt);
     }
     if (members) {
       membersSig = emitIfChanged(membersSig, membersSignature(members), {
         type: 'members-changed',
-        at: now,
+        at: observedAt,
       });
     }
   }

@@ -9,8 +9,23 @@ import {
 export interface UseCollabOptions {
   projectId: string | null | undefined;
   member: CollabPresenceMember | null | undefined;
-  /** When false the client never starts (e.g. a solo, non-shared project). */
+  /**
+   * Presence gate: heartbeat + leave. Requires both this AND a resolved
+   * `member` — sending presence with no identity is meaningless and could
+   * error server-side, so it never runs ahead of `member`.
+   */
   enabled?: boolean;
+  /**
+   * Status-poll gate: GET /collab/status only reads project-keyed sync state,
+   * and the daemon resolves the caller's own identity server-side from
+   * request headers/cookies rather than from this payload — so, unlike
+   * presence, it does not need `member` to have resolved. Defaults to
+   * `enabled` (so callers that don't pass this — CollabDemoView, most tests —
+   * see no behavior change). `useProjectCollab` passes a wider gate here
+   * ("workspace-context read still in flight OR enabled") so the poll can
+   * start in parallel with `/api/workspace/context` instead of waiting for it.
+   */
+  statusEnabled?: boolean;
   baseUrl?: string;
   heartbeatMs?: number;
   statusPollMs?: number;
@@ -21,6 +36,8 @@ export interface UseCollabOptions {
 export interface UseCollabResult {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
+  materializedVersion: number | null;
+  statusPollGeneration: number;
   syncState: CollabSnapshot['syncState'];
   ownerMemberId: CollabSnapshot['ownerMemberId'];
   ownerDisplayName: CollabSnapshot['ownerDisplayName'];
@@ -28,7 +45,7 @@ export interface UseCollabResult {
   reportChange: () => void;
   requestPublish: () => void;
   /** Member side — pull the published head into the local project directory. */
-  pull: () => Promise<void>;
+  pull: () => Promise<number | null>;
   /** Refresh the presence roster now (hub push-channel consumer). */
   refreshPresence: () => void;
   /** Run one status check now (hub push-channel consumer). */
@@ -38,10 +55,22 @@ export interface UseCollabResult {
 const EMPTY: CollabSnapshot = {
   present: [],
   publishedVersion: null,
+  materializedVersion: null,
+  statusPollGeneration: 0,
   syncState: null,
   ownerMemberId: null,
   ownerDisplayName: null,
   ownerRole: null,
+};
+
+interface ProjectScopedSnapshot {
+  sourceProjectId: string | null;
+  snapshot: CollabSnapshot;
+}
+
+const EMPTY_SCOPED_SNAPSHOT: ProjectScopedSnapshot = {
+  sourceProjectId: null,
+  snapshot: EMPTY,
 };
 
 /**
@@ -52,10 +81,26 @@ const EMPTY: CollabSnapshot = {
  */
 export function useCollab(options: UseCollabOptions): UseCollabResult {
   const { projectId, member, enabled = true } = options;
-  const [snapshot, setSnapshot] = useState<CollabSnapshot>(EMPTY);
+  const statusEnabled = options.statusEnabled ?? enabled;
+  const active = Boolean(statusEnabled && projectId);
+  const [scopedSnapshot, setScopedSnapshot] =
+    useState<ProjectScopedSnapshot>(EMPTY_SCOPED_SNAPSHOT);
+  // Effects clean up only after render commits. When projectId changes, the
+  // state still contains the prior client's last snapshot during that render;
+  // synchronously mask it so no consumer can seed a new-project cursor or
+  // start a pull from old-project published/sync state.
+  const snapshot =
+    active && scopedSnapshot.sourceProjectId === (projectId ?? null)
+      ? scopedSnapshot.snapshot
+      : EMPTY;
   const clientRef = useRef<CollabClient | null>(null);
 
-  const active = Boolean(enabled && projectId && member);
+  // The client's lifecycle (create/destroy) is gated on status-poll
+  // eligibility ONLY — `member` is deliberately absent here. Presence
+  // (heartbeat/leave) needs `member` too, but that requirement is enforced
+  // below via CollabClient.setMember, not by delaying client creation, so a
+  // late-resolving identity announces itself without restarting a status poll
+  // that's already progressed.
   // Restart only on identity changes, not on every render of a fresh member object.
   const memberKey = member
     ? JSON.stringify([
@@ -68,11 +113,28 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
     : '';
 
   useEffect(() => {
-    if (!active || !projectId || !member) {
-      setSnapshot(EMPTY);
+    if (!active || !projectId) {
+      setScopedSnapshot(EMPTY_SCOPED_SNAPSHOT);
       return;
     }
-    const clientOptions: CollabClientOptions = { projectId, member, onUpdate: setSnapshot };
+    let disposed = false;
+    // Always start with no identity — see the member-sync effect below,
+    // which runs after this one on every render (including this mount) and
+    // is the single place that calls setMember. This keeps "does presence
+    // have an identity yet" logic in one spot instead of duplicating the
+    // enabled+member check at both construction time and in setMember.
+    const clientOptions: CollabClientOptions = {
+      projectId,
+      member: null,
+      onUpdate: (nextSnapshot) => {
+        // stop() cannot cancel a status request already in flight. Ignore that
+        // old client's late response instead of letting it overwrite the new
+        // project's scoped snapshot.
+        if (!disposed) {
+          setScopedSnapshot({ sourceProjectId: projectId, snapshot: nextSnapshot });
+        }
+      },
+    };
     if (options.baseUrl !== undefined) clientOptions.baseUrl = options.baseUrl;
     if (options.heartbeatMs !== undefined) clientOptions.heartbeatMs = options.heartbeatMs;
     if (options.statusPollMs !== undefined) clientOptions.statusPollMs = options.statusPollMs;
@@ -87,14 +149,35 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
     const onPageHide = () => client.leaveBeacon();
     window.addEventListener('pagehide', onPageHide);
     return () => {
+      disposed = true;
       window.removeEventListener('pagehide', onPageHide);
       client.stop();
       clientRef.current = null;
-      setSnapshot(EMPTY);
+      setScopedSnapshot(EMPTY_SCOPED_SNAPSHOT);
     };
-    // memberKey stands in for `member`; fetch is intentionally not a restart trigger.
+    // fetch is intentionally not a restart trigger (a fresh reference every
+    // render must not tear down a running client).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, projectId, memberKey, options.baseUrl, options.heartbeatMs, options.statusPollMs]);
+  }, [active, projectId, options.baseUrl, options.heartbeatMs, options.statusPollMs]);
+
+  // Presence identity: resolves independently of (and typically later than)
+  // status-poll eligibility above — `member` needs the workspace-context
+  // round-trip to land, while the status client may already be running.
+  // Sync it into the live client instead of tearing the whole client down;
+  // this is what lets presence come online without restarting a status poll
+  // that's already progressed. Both `enabled` (the ORIGINAL, member-gated
+  // condition — not the wider `statusEnabled` above) and a non-null `member`
+  // are required, so a permission-denied decision (member-removed, frozen
+  // workspace, no workspace context) never announces presence even though it
+  // may have briefly kept status polling alive while the decision itself was
+  // still in flight. Deps mirror the client-lifecycle effect's recreation
+  // triggers so a freshly (re)created client is synced in the same commit.
+  useEffect(() => {
+    clientRef.current?.setMember(enabled && member ? member : null);
+    // memberKey stands in for `member`; fetch is intentionally excluded, same
+    // as the client-lifecycle effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, projectId, enabled, memberKey, options.baseUrl, options.heartbeatMs, options.statusPollMs]);
 
   const reportChange = useCallback(() => {
     void clientRef.current?.reportChange();
@@ -105,7 +188,7 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   // Returns the promise (unlike reportChange/requestPublish) so the member
   // auto-pull can await a successful pull before advancing its version cursor.
   const pull = useCallback(async () => {
-    await clientRef.current?.pull();
+    return (await clientRef.current?.pull()) ?? null;
   }, []);
   // Hub push-channel consumers: `presence-changed` / `project-metadata-changed`
   // thin events trigger these instead of waiting for the next 10s heartbeat /
@@ -121,6 +204,8 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   return {
     present: snapshot.present,
     publishedVersion: snapshot.publishedVersion,
+    materializedVersion: snapshot.materializedVersion,
+    statusPollGeneration: snapshot.statusPollGeneration,
     syncState: snapshot.syncState,
     ownerMemberId: snapshot.ownerMemberId,
     ownerDisplayName: snapshot.ownerDisplayName,

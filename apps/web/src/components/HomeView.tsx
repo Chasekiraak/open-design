@@ -441,7 +441,6 @@ export function HomeView({
   const [plugins, setPlugins] = useState<InstalledPluginRecord[]>([]);
   const [pluginsLoading, setPluginsLoading] = useState(true);
   const [pendingApplyId, setPendingApplyId] = useState<string | null>(null);
-  const [pendingDuplicatePluginId, setPendingDuplicatePluginId] = useState<string | null>(null);
   const [pendingChipId, setPendingChipId] = useState<string | null>(null);
   const [pendingAuthoringChipId, setPendingAuthoringChipId] = useState<string | null>(null);
   const [pendingAuthoringPrompt, setPendingAuthoringPrompt] = useState(PLUGIN_AUTHORING_PROMPT);
@@ -1420,13 +1419,17 @@ export function HomeView({
 
   async function duplicateExamplePlugin(record: InstalledPluginRecord) {
     setError(null);
-    // P0 ui_click area=chat_composer element=example_open_project: the one-click
-    // "Remix" on an example card — creates and enters a project seeded from the
-    // example (for site-clone cards it drops the pre-built clone straight in as
+    // P0 ui_click area=chat_composer element=example_open_project: the
+    // "Remix" action on the plugin details modal (`PluginDetailsModal`'s
+    // `onDuplicate`) — creates and enters a project seeded from the example
+    // (for site-clone cards it drops the pre-built clone straight in as
     // index.html) instead of only seeding the composer. Same chip_id/plugin_id
     // attribution as `example_prompt`; `chip_id` from the active task type since
     // preset cards only render under an active chip. The created project's own
     // `project_kind` (web_clone) still rides project_create_result separately.
+    // (The Home preset rail's own hover Use/Remix overlay was removed in
+    // 2026-07 — this is the surviving Remix entry point, unrelated to that
+    // card.)
     trackHomeChatComposerClick(analytics.track, {
       page_name: 'home',
       area: 'chat_composer',
@@ -1435,7 +1438,6 @@ export function HomeView({
       plugin_id: record.sourceMarketplaceEntryName ?? record.id,
       plugin_type: record.marketplaceTrust ?? 'official',
     });
-    setPendingDuplicatePluginId(record.id);
     try {
       const result = await duplicatePluginAsProject(record.id, {
         name: localizePluginTitle(locale, record),
@@ -1443,8 +1445,6 @@ export function HomeView({
       onOpenProject(result.projectId, result.relPath);
     } catch {
       setError(t('pluginCard.duplicateFailed'));
-    } finally {
-      setPendingDuplicatePluginId(null);
     }
   }
 
@@ -2329,8 +2329,6 @@ export function HomeView({
         }
         onPickPlugin={(record, nextPrompt) => addPluginContext(record, nextPrompt)}
         onPickExamplePlugin={useExamplePlugin}
-        onDuplicateExamplePlugin={duplicateExamplePlugin}
-        pendingDuplicatePluginId={pendingDuplicatePluginId}
         onPickSkill={useSkill}
         onPickMcp={useMcpServer}
         onPickConnector={useConnector}
@@ -2370,6 +2368,7 @@ export function HomeView({
 
       {recentProjectsEmpty ? null : (
       <RecentProjectsStrip
+        isActive={isActive}
         projects={projects}
         designSystems={designSystems}
         heading={t('recentProjects.title')}

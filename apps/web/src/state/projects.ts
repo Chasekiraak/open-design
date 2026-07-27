@@ -93,32 +93,71 @@ export async function listProjects(options?: {
   workspaceView?: WorkspaceProjectListView;
 }): Promise<Project[]> {
   const context = options?.workspaceContext ?? null;
+  if (context) {
+    const summaries = await listWorkspaceProjectSummaries({
+      context,
+      workspaceView: options?.workspaceView,
+      throwOnError: options?.throwOnError,
+    });
+    const seenProjectIds = new Set<string>();
+    return summaries.flatMap((summary) => {
+      const project = summary.project as Project;
+      // Workspace summaries have resource-level identities, so the same
+      // logical project can legitimately appear more than once when local and
+      // remote catalog records overlap. Project cards are opened by project.id;
+      // keep the first (the daemon orders local summaries before remote ones)
+      // instead of rendering duplicate cards with duplicate React keys.
+      if (seenProjectIds.has(project.id)) return [];
+      seenProjectIds.add(project.id);
+      return [project];
+    });
+  }
   // Coalesce identical in-flight reads: a burst of tab switches or several
   // separately-mounted grids asking for the same workspace+view collapses to a
   // single vela-backed request instead of spawning one CLI subprocess each.
-  const key = context
-    ? `workspace-projects:${context.workspaceId}:${options?.workspaceView ?? 'drafts'}`
-    : 'local-projects';
   try {
-    return await coalescedGet(key, async () => {
-      const resp = context
-        ? await fetch(
-            `/api/workspaces/${encodeURIComponent(context.workspaceId)}/projects?view=${encodeURIComponent(options?.workspaceView ?? 'drafts')}`,
-            { headers: workspaceProjectHeaders(context) },
-          )
-        : await fetch('/api/projects');
+    return await coalescedGet('local-projects', async () => {
+      const resp = await fetch('/api/projects');
       // Throw inside the coalesced run so a failed read is not cached — the next
       // caller/poll retries immediately (see coalesced-get.ts).
       if (!resp.ok) throw new Error(`projects ${resp.status}`);
-      if (context) {
-        const json = (await resp.json()) as WorkspaceProjectsResponse;
-        return (json.projects ?? []).map((summary) => summary.project as Project);
-      }
       const json = (await resp.json()) as { projects: Project[] };
       return json.projects ?? [];
     });
   } catch (err) {
     if (options?.throwOnError) throw err;
+    return [];
+  }
+}
+
+export async function listWorkspaceProjectSummaries(options: {
+  context: WorkspaceCollabContext;
+  throwOnError?: boolean;
+  workspaceView?: WorkspaceProjectListView;
+}): Promise<WorkspaceProjectSummary[]> {
+  const { context } = options;
+  const workspaceView = options.workspaceView ?? 'drafts';
+  const key = [
+    'workspace-projects',
+    context.workspaceId,
+    context.workspaceMemberId,
+    context.role,
+    context.memberStatus,
+    context.lifecycleState,
+    workspaceView,
+  ].join(':');
+  try {
+    return await coalescedGet(key, async () => {
+      const resp = await fetch(
+        `/api/workspaces/${encodeURIComponent(context.workspaceId)}/projects?view=${encodeURIComponent(workspaceView)}`,
+        { headers: workspaceProjectHeaders(context) },
+      );
+      if (!resp.ok) throw new Error(`projects ${resp.status}`);
+      const json = (await resp.json()) as WorkspaceProjectsResponse;
+      return json.projects ?? [];
+    });
+  } catch (err) {
+    if (options.throwOnError) throw err;
     return [];
   }
 }

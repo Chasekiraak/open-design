@@ -29,7 +29,8 @@ interface VelaCliTeamProjectCatalogOptions {
 }
 
 export interface VelaTeamProjectCatalog {
-  list(): Promise<TeamProject[]>;
+  list(workspaceId?: string): Promise<TeamProject[]>;
+  get(projectId: string, workspaceId?: string): Promise<TeamProject | null>;
   upsert(input: {
     projectId: string;
     resourceId?: string;
@@ -88,26 +89,60 @@ export function createVelaCliTeamProjectCatalog(
     getWorkspaceId,
   );
 
-  async function runJson<T>(args: string[]): Promise<T> {
-    const stdout = await run(args, getWorkspaceId());
+  async function runJson<T>(
+    args: string[],
+    workspaceId = getWorkspaceId(),
+  ): Promise<T> {
+    const stdout = await run(args, workspaceId);
     const trimmed = stdout.trim();
     if (!trimmed) return {} as T;
     return JSON.parse(trimmed) as T;
   }
 
+  async function list(workspaceId?: string): Promise<TeamProject[]> {
+    const resolvedWorkspaceId = workspaceId?.trim() || getWorkspaceId();
+    if (!(await supportsTeamProjects())) {
+      const resources = await listSharedProjectResources(
+        runResource,
+        resolvedWorkspaceId,
+      );
+      return resources.map(toFallbackTeamProject);
+    }
+    const stdout = await run(['list'], resolvedWorkspaceId);
+    const payload = stdout.trim()
+      ? JSON.parse(stdout.trim()) as TeamProjectsListWire
+      : {};
+    return Array.isArray(payload.projects)
+      ? payload.projects.map(toTeamProject).filter((project): project is TeamProject => project != null)
+      : [];
+  }
+
+  let exactLookupUnavailable = false;
+
   return {
-    async list(): Promise<TeamProject[]> {
-      if (!(await supportsTeamProjects())) {
-        const resources = await listSharedProjectResources(
-          runResource,
-          getWorkspaceId(),
-        );
-        return resources.map(toFallbackTeamProject);
+    list,
+
+    async get(projectId, workspaceId): Promise<TeamProject | null> {
+      const resolvedWorkspaceId = workspaceId?.trim() || getWorkspaceId();
+      if (exactLookupUnavailable) {
+        return (await list(resolvedWorkspaceId))
+          .find((project) => project.projectId === projectId) ?? null;
       }
-      const payload = await runJson<TeamProjectsListWire>(['list']);
-      return Array.isArray(payload.projects)
-        ? payload.projects.map(toTeamProject).filter((project): project is TeamProject => project != null)
-        : [];
+
+      try {
+        const payload = await runJson<TeamProjectWire>([
+          'get',
+          projectId,
+          '--json',
+        ], resolvedWorkspaceId);
+        return toTeamProject(payload);
+      } catch (error) {
+        if (isAuthoritativeTeamProjectNotFound(error)) return null;
+        if (!isExactTeamProjectLookupUnavailable(error)) throw error;
+        exactLookupUnavailable = true;
+        return (await list(resolvedWorkspaceId))
+          .find((project) => project.projectId === projectId) ?? null;
+      }
     },
 
     async upsert(input): Promise<void> {
@@ -315,6 +350,28 @@ function recordObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function isAuthoritativeTeamProjectNotFound(error: unknown): boolean {
+  return errorMessage(error).includes('team_project_not_found');
+}
+
+/**
+ * Compatibility is deliberately narrow. Only a CLI that lacks `get` (or its
+ * `--json` flag), or a pre-endpoint API returning an untyped 404, may fall back
+ * to the full catalog. Auth, permission, server, and network failures remain
+ * hard failures so a pull can never authorize itself from stale/partial data.
+ */
+function isExactTeamProjectLookupUnavailable(error: unknown): boolean {
+  const message = errorMessage(error);
+  if (isAuthoritativeTeamProjectNotFound(error)) return false;
+  return /unknown command ["']?(?:get|team-projects)["']?/i.test(message) ||
+    /unknown flag:\s*--json/i.test(message) ||
+    /API request failed with status 404(?!\s*:)/i.test(message);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createTeamProjectsCapabilityCheck(

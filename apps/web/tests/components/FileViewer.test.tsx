@@ -951,7 +951,10 @@ describe('FileViewer SVG artifacts', () => {
       expect(frame.getAttribute('srcDoc')).toContain('Imported filesystem app');
     });
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/projects/project-1/text-preview/index.html'), { cache: 'no-store' });
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/projects/project-1/raw/index.html?cacheBust='), {});
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/projects/project-1/raw/index.html?cacheBust='),
+      { cache: 'no-store' },
+    );
 
     fullHtml = `${previewText}<body><main>Updated filesystem app</main></body></html>`;
     rerender(

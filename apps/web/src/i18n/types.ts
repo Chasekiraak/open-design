@@ -1210,6 +1210,12 @@ export interface Dict {
   'entry.accountFeatureRequest': string;
   'entry.accountAddAccount': string;
   'entry.accountSignOut': string;
+  // Sign-out confirmation dialog (recvqgMWpJZqhL) — shared by every logout
+  // entry point (nav-rail account menu + AMR account pill) so a stray click
+  // can never sign the user out without an explicit confirm.
+  'signOut.confirmTitle': string;
+  'signOut.confirmMessage': string;
+  'signOut.confirmAction': string;
   'entry.navRecents': string;
   'entry.navDashboard': string;
   'entry.blankDraftsTitle': string;
@@ -1692,6 +1698,7 @@ export interface Dict {
   'pluginsView.sharing': string;
   'pluginsView.unsharing': string;
   'pluginsView.shareToTeam': string;
+  'pluginsView.syncToTeam': string;
   'pluginsView.unshareFromTeam': string;
   'pluginsView.moreActions': string;
   'pluginsView.skillUrlUnsupported': string;
@@ -1703,6 +1710,9 @@ export interface Dict {
   'pluginsView.shareSuccess': string;
   'pluginsView.shareUnavailable': string;
   'pluginsView.shareFailed': string;
+  'pluginsView.syncSuccess': string;
+  'pluginsView.syncUnavailable': string;
+  'pluginsView.syncFailed': string;
   'pluginsView.unshareSuccess': string;
   'pluginsView.unshareUnavailable': string;
   'pluginsView.unshareFailed': string;
@@ -2145,6 +2155,8 @@ export interface Dict {
   'dsManager.officialPresets': string;
   'dsManager.shareToTeam': string;
   'dsManager.shareToTeamFailed': string;
+  'dsManager.syncToTeam': string;
+  'dsManager.syncToTeamFailed': string;
   'dsManager.unshareFromTeam': string;
   'dsManager.unshareFromTeamFailed': string;
   'dsManager.teamSyncedReadOnly': string;
@@ -2499,6 +2511,7 @@ export interface Dict {
   'designs.deleteSelectedPartial': string;
   'designs.tagPrototype': string;
   'designs.tagLiveArtifact': string;
+  'designs.tagWebClone': string;
   'designs.tagSlide': string;
   'designs.tagMedia': string;
   'designs.renameTitle': string;
@@ -2795,6 +2808,8 @@ export interface Dict {
   'project.brandReadyAiOptimize': string;
   'project.brandReadyEditManually': string;
   'project.brandReadyPreviewOpened': string;
+  'project.previewCommentSaveFailed': string;
+  'project.previewCommentReorderFailed': string;
   'project.metaFreeform': string;
   'project.typePrototype': string;
   'project.typeDeck': string;
@@ -5335,5 +5350,20 @@ export interface Dict {
   'dsFlow.workspaceUpdatedSynced': string;
   'dsFlow.workspaceUpdatedWithAudit': string;
   'dsFlow.yes': string;
+  'pluginDetail.backToList': string;
+  'pluginDetail.quickCommands': string;
+  'pluginDetail.noQuickCommands': string;
+  'pluginDetail.dataConnections': string;
+  'pluginDetail.noDataConnections': string;
+  'pluginDetail.knowledgeSkills': string;
+  'pluginDetail.noKnowledgeSkills': string;
+  'pluginDetail.officialBadge': string;
+  'pluginDetail.loadFailed': string;
+  'pluginDetail.applyFailed': string;
+  'pluginDetail.examples': string;
+  'skillDetail.providedBy': string;
+  'skillDetail.markdownNotice': string;
+  'skillDetail.loadFailed': string;
+  'skillDetail.previewAria': string;
   'common.dismiss': string;
 }

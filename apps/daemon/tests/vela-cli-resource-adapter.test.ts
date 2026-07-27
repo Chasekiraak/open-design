@@ -198,7 +198,7 @@ describe('createVelaCliResourceAdapter', () => {
     const { run, workspaces } = recordingRun({
       push: JSON.stringify({ version: 7 }),
       head: JSON.stringify({ version: 7 }),
-      pull: '{}',
+      pull: JSON.stringify({ version: 7, versionId: 'v7' }),
       remove: '{}',
     });
     const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
@@ -244,10 +244,17 @@ describe('createVelaCliResourceAdapter', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('pulls into the pull dir', async () => {
-    const { run, calls } = recordingRun({ pull: '{}' });
+  it('returns the exact version materialized by `pull --json`', async () => {
+    const { run, calls } = recordingRun({
+      pull: JSON.stringify({
+        version: 1,
+        versionId: 'v1',
+        manifestDigest: 'd1',
+      }),
+    });
     const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
-    await adapter.pull!({ projectId: 'p1' });
+    const result = await adapter.pull!({ projectId: 'p1' });
+    expect(result).toEqual({ version: 1, versionId: 'v1' });
     expect(calls[0]).toEqual(['pull', 'design_system', 'project-p1', '/copies/p1', '--ref', 'published', '--json']);
   });
 
@@ -260,7 +267,7 @@ describe('createVelaCliResourceAdapter', () => {
       },
       {
         match: ['pull', 'design_system', 'project-p1', '/copies/p1', '--ref', 'published', '--json'],
-        output: '{}',
+        output: JSON.stringify({ version: 9, versionId: 'v9' }),
       },
     ]);
     const adapter = createVelaCliResourceAdapter({
@@ -271,6 +278,21 @@ describe('createVelaCliResourceAdapter', () => {
     });
     await adapter.pull!({ projectId: 'p1', principal });
     expect(calls).toHaveLength(2);
+  });
+
+  it('fails closed when a successful pull response omits the materialized version', async () => {
+    const { run } = recordingRun({
+      pull: JSON.stringify({
+        resourceId: 'project-p1',
+        ref: 'published',
+        dir: '/copies/p1',
+      }),
+    });
+    const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
+
+    await expect(adapter.pull!({ projectId: 'p1' })).rejects.toThrow(
+      'missing the materialized version',
+    );
   });
 
   it('does not hide authentication failures behind a legacy pull fallback', async () => {

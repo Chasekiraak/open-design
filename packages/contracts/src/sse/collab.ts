@@ -65,6 +65,14 @@ export interface TeamProjectsChangedSsePayload {
   at?: number;
 }
 
+/** One team project's pulled content and local read-only binding are ready. */
+export interface TeamProjectContentReadySsePayload {
+  type: 'team-project-content-ready';
+  projectId: string;
+  workspaceId: string;
+  at?: number;
+}
+
 /** A member joined / left / changed role in the team. */
 export interface WorkspaceMembersChangedSsePayload {
   type: 'members-changed';
@@ -80,26 +88,56 @@ export interface WorkspaceContextChangedSsePayload {
 /** Subscription / seat billing changed. */
 export interface WorkspaceBillingChangedSsePayload {
   type: 'billing-changed';
+  /** Present on newer Vela versions; absent on legacy broad invalidations. */
+  workspaceId?: string;
+  /** Opaque revision shared with the additive v2 alias when both are emitted. */
+  revision?: string;
+  at?: number;
+}
+
+/** A workspace subscription/plan changed; re-read the scoped snapshot. */
+export interface WorkspaceBillingSubscriptionChangedSsePayload {
+  type: 'billing-subscription-changed';
+  workspaceId: string;
+  /** Opaque Vela revision; advisory dedupe only. */
+  revision?: string;
+  at?: number;
+}
+
+/** This authenticated member's sponsored workspace wallet changed. */
+export interface WorkspaceWalletBalanceChangedSsePayload {
+  type: 'wallet-balance-changed';
+  workspaceId: string;
+  workspaceMemberId: string;
+  /** Opaque Vela revision; advisory dedupe only. */
+  revision?: string;
   at?: number;
 }
 
 /**
  * Workspace-scoped invalidation events carried on `/api/workspace/events`.
- * Workspace scope is singular per daemon (one signed-in identity), so these
- * carry no id.
+ * Workspace scope is singular per daemon (one signed-in identity). Broad
+ * invalidations carry no id; project-content readiness names the one card
+ * whose local files just became readable.
  */
 export type WorkspaceInvalidationSsePayload =
   | TeamProjectsChangedSsePayload
+  | TeamProjectContentReadySsePayload
   | WorkspaceMembersChangedSsePayload
   | WorkspaceContextChangedSsePayload
-  | WorkspaceBillingChangedSsePayload;
+  | WorkspaceBillingChangedSsePayload
+  | WorkspaceBillingSubscriptionChangedSsePayload
+  | WorkspaceWalletBalanceChangedSsePayload;
 
 /** The SSE `event:` names for the workspace-scoped invalidations. */
 export const WORKSPACE_INVALIDATION_EVENTS = [
   'team-projects-changed',
+  'team-project-content-ready',
   'members-changed',
   'workspace-context-changed',
   'billing-changed',
+  'billing-subscription-changed',
+  'wallet-balance-changed',
 ] as const;
 
 export type WorkspaceInvalidationEventName =

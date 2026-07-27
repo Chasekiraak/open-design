@@ -65,6 +65,16 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
   const db = openDatabase(tempDir, { dataDir: tempDir });
   const updateUserDesignSystem = vi.fn(async () => ({ ...designSystemSummary, status: 'published' as const }));
   const deleteUserDesignSystem = vi.fn(async () => true);
+  const updateUserDesignSystemRevisionStatus = vi.fn(async (_root: string, _id: string, revisionId: string, status: 'accepted' | 'rejected') => ({
+    id: revisionId,
+    designSystemId: designSystemSummary.id,
+    status,
+    feedback: 'Tighten the spacing scale.',
+    baseBody: designSystemSummary.body,
+    proposedBody: `${designSystemSummary.body}\nMore.`,
+    createdAt: '2026-07-24T00:00:00.000Z',
+    updatedAt: '2026-07-24T00:00:00.000Z',
+  }));
   registerDesignSystemRoutes(app, {
     db,
     paths: {
@@ -83,7 +93,7 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
       listUserDesignSystemFiles: async () => null,
       listUserDesignSystemRevisions: async () => null,
       prepareDesignTokenContractRebuild: async () => ({ decision: { available: false } }) as never,
-      readAvailableDesignSystem: async () => null,
+      readAvailableDesignSystem: async () => designSystemSummary.body,
       readAvailableDesignSystemPackageInfo: async () => null,
       readAvailableDesignSystemStaticFile: async () => null,
       readDesignSystemWorkspaceTextFile: async () => null,
@@ -93,7 +103,7 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
       syncUserDesignSystemAssetsFromWorkspace: async () => ({ ok: false, reason: 'not-found' }),
       unshareTeamDesignSystemIfShared: async () => false,
       updateUserDesignSystem,
-      updateUserDesignSystemRevisionStatus: async () => null,
+      updateUserDesignSystemRevisionStatus,
     },
     generationJobs: {
       get: () => null,
@@ -102,7 +112,7 @@ function registerRoutes(app: express.Express, canMutate: (root: string, id: stri
       start: () => ({}) as never,
     },
   });
-  return { updateUserDesignSystem, deleteUserDesignSystem };
+  return { updateUserDesignSystem, deleteUserDesignSystem, updateUserDesignSystemRevisionStatus };
 }
 
 describe('design system PATCH/DELETE team-share mutation guard', () => {
@@ -164,6 +174,101 @@ describe('design system PATCH/DELETE team-share mutation guard', () => {
 
     expect(res.status).toBe(204);
     expect(deleteUserDesignSystem).toHaveBeenCalledOnce();
+  });
+
+  // recvqb6mfyqXLD: the single-item GET decorates its response with the same
+  // verdict, so any detail surface that reads off this endpoint (not just
+  // DesignSystemsTab's own separate `/team` share lookup) can gate its own
+  // Publish toggle / Save button / delete affordance on it.
+  it('decorates GET /api/design-systems/:id with canMutate=false when the caller may not manage the share', async () => {
+    const app = express();
+    app.use(express.json());
+    registerRoutes(app, async () => false);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:teammate-ds`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { canMutate?: boolean; designSystem?: { canMutate?: boolean } };
+    expect(body.canMutate).toBe(false);
+    expect(body.designSystem?.canMutate).toBe(false);
+  });
+
+  it('decorates GET /api/design-systems/:id with canMutate=true when the caller can manage the share', async () => {
+    const app = express();
+    app.use(express.json());
+    registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:teammate-ds`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { canMutate?: boolean };
+    expect(body.canMutate).toBe(true);
+  });
+});
+
+// recvqb6mfyqXLD: accepting/rejecting a design system revision commits (or
+// discards) its proposed body onto the canonical design system — the same
+// "edit" this route family gates everywhere else. Before this, a plain
+// member viewing a teammate's team-synced design system could accept/reject
+// its pending revision with no server-side check at all.
+describe('design system revision accept/reject team-share mutation guard', () => {
+  it('rejects resolving a pending revision on a team-synced design system the caller may not manage', async () => {
+    const app = express();
+    app.use(express.json());
+    const { updateUserDesignSystemRevisionStatus } = registerRoutes(app, async () => false);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:teammate-ds/revisions/rev-1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'accepted' }),
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('WORKSPACE_RESOURCE_MANAGE_DENIED');
+    expect(updateUserDesignSystemRevisionStatus).not.toHaveBeenCalled();
+  });
+
+  it('still allows resolving a pending revision when the caller can manage the shared system', async () => {
+    const app = express();
+    app.use(express.json());
+    const { updateUserDesignSystemRevisionStatus } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:teammate-ds/revisions/rev-1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'accepted' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(updateUserDesignSystemRevisionStatus).toHaveBeenCalledOnce();
+  });
+
+  it('rejects resolving a revision when the caller workspace is locked, even if otherwise permitted', async () => {
+    const app = express();
+    app.use(express.json());
+    const { updateUserDesignSystemRevisionStatus } = registerRoutes(app, async () => true);
+    const baseUrl = await listen(app);
+
+    const res = await fetch(`${baseUrl}/api/design-systems/user:mine/revisions/rev-1`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-od-workspace-id': 'ws-locked',
+        'x-od-workspace-member-id': 'member-1',
+        'x-od-workspace-lifecycle-state': 'locked',
+      },
+      body: JSON.stringify({ status: 'accepted' }),
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('WORKSPACE_LOCKED');
+    expect(updateUserDesignSystemRevisionStatus).not.toHaveBeenCalled();
   });
 });
 

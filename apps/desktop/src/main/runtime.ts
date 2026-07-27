@@ -28,6 +28,7 @@ import type {
 } from "@open-design/host";
 
 import { renderDeckSlides } from "./deck-capture.js";
+import { openFirstPartyMailto } from "./mailto-open.js";
 import { openValidatedDirectory } from "./open-path.js";
 import { exportArtifact as exportArtifactFromHtml } from "./artifact-export.js";
 import { createElectronPdfTarget, exportPdfFromHtml, savePrintReadyDocumentAsPdf } from "./pdf-export.js";
@@ -1976,7 +1977,8 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
   ipcMain.handle("shell:open-external", async (_event, url: string) => {
     // http(s) as before, plus a mailto strictly to our support address (the
     // crash screen's "Email us"); no other scheme opens.
-    if (!isHttpUrl(url) && !isSupportMailtoUrl(url)) return false;
+    if (isSupportMailtoUrl(url)) return openFirstPartyMailto(url);
+    if (!isHttpUrl(url)) return false;
     try {
       await shell.openExternal(url);
       return true;
@@ -2548,17 +2550,21 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedChildWindowUrl(url)) return { action: "allow" };
-    if (isHttpUrl(url) || isFirstPartyMailtoUrl(url)) void shell.openExternal(url);
+    if (isHttpUrl(url)) void shell.openExternal(url);
+    else if (isFirstPartyMailtoUrl(url)) void openFirstPartyMailto(url);
     return { action: "deny" };
   });
 
   window.webContents.on("will-navigate", (event, url) => {
-    // A `mailto:` never belongs in this window. Hand it to the OS mail client
-    // and cancel the navigation, otherwise Electron drops it and the user sees
-    // the page sit there unchanged.
+    // A `mailto:` never belongs in this window. Hand it to the local mail
+    // client and cancel the navigation, otherwise Electron drops it and the
+    // user sees the page sit there unchanged. `openFirstPartyMailto` also
+    // covers the machine whose OS-level mailto handler is a web browser —
+    // recvpZzUroEPUT: `shell.openExternal(mailto:)` there just focuses the
+    // browser on its current page and no compose window ever opens.
     if (isFirstPartyMailtoUrl(url)) {
       event.preventDefault();
-      void shell.openExternal(url);
+      void openFirstPartyMailto(url);
       return;
     }
     if (!isHttpUrl(url) || url === currentUrl) return;

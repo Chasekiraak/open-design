@@ -850,6 +850,63 @@ describe('workspace project routes', () => {
     });
   });
 
+  // recvqbhor3pai2 (remaining gap) — `bindDuplicateIntoRequestWorkspace`'s own
+  // doc comment admits a headerless duplicate (no `x-od-workspace-*` headers —
+  // a legitimate legacy/pre-context caller, e.g. the web client's
+  // `workspaceContext` has not resolved yet on the very first click) leaves
+  // the copy permanently UNBOUND, "same as before" its fix. Before
+  // `reconcileUnboundProjectBeforeMutation`, the first LATER mutation that DID
+  // carry real headers — duplicating that same still-unbound copy again once
+  // the client's workspace context settled — hit
+  // `workspaceResourceMutationAllowed`'s `if (!row) return false;` guard and
+  // 403'd with "workspace project mutation is not allowed", even though no
+  // other workspace had ever claimed the project. This reproduces the exact
+  // reported shape end to end and confirms the copy gets claimed into the
+  // duplicating member's own workspace instead of staying stuck.
+  it('allows duplicating a copy that a prior headerless duplicate left unbound', async () => {
+    const suffix = Date.now();
+    const projectId = `dup-unbound-source-${suffix}`;
+    await createProject(projectId, 'Duplicate-of-unbound-copy fixture');
+
+    // First duplicate: no workspace headers at all (legacy / pre-context
+    // caller). Source is itself unbound, so this is allowed today — but it
+    // leaves the COPY unbound too.
+    const firstDuplicateResp = await fetch(`${baseUrl}/api/projects/${projectId}/duplicate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Duplicate-of-unbound-copy copy 1' }),
+    });
+    expect(firstDuplicateResp.status).toBe(200);
+    const firstDuplicateBody = (await firstDuplicateResp.json()) as { project: { id: string } };
+    const copy1Id = firstDuplicateBody.project.id;
+
+    // Second duplicate: this time with real workspace headers, as if the
+    // client's workspace context has since resolved — exactly what the
+    // report's repro (open the copy, "···" → duplicate again) exercised.
+    const memberHeaders = headers('member-dup-unbound-owner', { 'x-od-workspace-role': 'owner' });
+    const secondDuplicateResp = await fetch(`${baseUrl}/api/projects/${copy1Id}/duplicate`, {
+      method: 'POST',
+      headers: memberHeaders,
+      body: JSON.stringify({ name: 'Duplicate-of-unbound-copy copy 2' }),
+    });
+    expect(secondDuplicateResp.status).toBe(200);
+    const secondDuplicateBody = (await secondDuplicateResp.json()) as { project: { id: string } };
+    const copy2Id = secondDuplicateBody.project.id;
+
+    // The reconciliation claimed copy1 (the source of the second duplicate)
+    // into the duplicating member's own workspace rather than leaving it — or
+    // copy2 — unbound.
+    const ownList = await list('member-dup-unbound-owner', '?view=all');
+    expect(ownList.projects.find((item) => item.id === copy1Id)).toMatchObject({
+      id: copy1Id,
+      createdByWorkspaceMemberId: 'member-dup-unbound-owner',
+    });
+    expect(ownList.projects.find((item) => item.id === copy2Id)).toMatchObject({
+      id: copy2Id,
+      createdByWorkspaceMemberId: 'member-dup-unbound-owner',
+    });
+  });
+
   it('blocks direct project and file writes when the workspace is locked', async () => {
     const projectId = `workspace-direct-locked-${Date.now()}`;
     await createProject(projectId, 'Locked direct write project');

@@ -186,6 +186,9 @@ describe('reconcileWorkspaceProjectsWithRemote (orchestrator, fake deps)', () =>
     return {
       getWorkspaceIdentity: async () => ({ workspaceId: WORKSPACE_ID, workspaceMemberId: READER_MEMBER_ID }),
       listRemoteTeamProjects: async () => [],
+      // Materialized by default: these tests exercise binding/demoting logic,
+      // not the materialization gate (covered by its own tests below).
+      hasLocalProject: () => true,
       listLocalTeamRows: () => [] as LocalTeamProjectBinding[],
       getLocalBinding: () => null,
       applyBind: vi.fn(),
@@ -262,6 +265,52 @@ describe('reconcileWorkspaceProjectsWithRemote (orchestrator, fake deps)', () =>
     expect(result).toEqual({ bound: 1, demoted: 1 });
     expect(applyBind).toHaveBeenCalledWith('new', expect.objectContaining({ visibility: 'team' }));
     expect(applyDemote).toHaveBeenCalledWith(WORKSPACE_ID, 'gone', expect.objectContaining({ visibility: 'personal' }));
+  });
+
+  // recvqmnuxxKHaI: `workspace_projects.project_id` is a FOREIGN KEY into
+  // `projects(id)`, so a bind for a project this daemon never materialized
+  // (no `projects` row — e.g. a teammate's share the member never opened)
+  // can never be written. The reconciler must skip it silently — the pull
+  // path owns materialization — not throw SQLITE_CONSTRAINT_FOREIGNKEY on
+  // every pass forever.
+  it('skips the bind for a remote project with no local binding and no local projects row', async () => {
+    const applyBind = vi.fn();
+    const onError = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listRemoteTeamProjects: async () => [
+          { projectId: 'never-materialized', ownerMemberId: OWNER_MEMBER_ID },
+          { projectId: 'materialized', ownerMemberId: OWNER_MEMBER_ID },
+        ],
+        hasLocalProject: (projectId) => projectId === 'materialized',
+        applyBind,
+        onError,
+      }),
+    );
+    expect(result).toEqual({ bound: 1, demoted: 0 });
+    expect(applyBind).toHaveBeenCalledTimes(1);
+    expect(applyBind).toHaveBeenCalledWith('materialized', expect.objectContaining({ visibility: 'team' }));
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('still corrects (and can demote) a project whose binding exists even when hasLocalProject is consulted for others only', async () => {
+    // A bound row always implies a projects row (the FK guarantees it), so
+    // the materialization gate must never suppress the demote direction: a
+    // team row remote no longer lists still collapses back to personal.
+    const hasLocalProject = vi.fn(() => false);
+    const applyDemote = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'gone-remote', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: 'r1' },
+        ],
+        listRemoteTeamProjects: async () => [],
+        hasLocalProject,
+        applyDemote,
+      }),
+    );
+    expect(result).toEqual({ bound: 0, demoted: 1 });
+    expect(applyDemote).toHaveBeenCalledWith(WORKSPACE_ID, 'gone-remote', expect.objectContaining({ visibility: 'personal' }));
   });
 
   it('reports one writer failure through onError without aborting the rest of the pass', async () => {

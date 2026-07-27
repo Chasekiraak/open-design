@@ -886,6 +886,48 @@ test('[P0] simple deck keeps the active slide stable in preview-only mode', asyn
   await expect(frame.getByText('Slide Three')).toBeVisible();
 });
 
+test('[P1] deck thumbnail rail keeps complete 16:9 slides separated and aligned', async ({ page }) => {
+  await routeMockAgents(page);
+  const projectId = await createEmptyProject(page, 'Deck thumbnail rail layout');
+  await seedDeckArtifact(
+    page,
+    projectId,
+    'thumbnail-rail.html',
+    'Thumbnail Rail',
+    ['Slide One', 'Slide Two', 'Slide Three'],
+    { frameworkDeck: true },
+  );
+  await page.goto(`/projects/${projectId}/files/thumbnail-rail.html`);
+  await openDesignFile(page, 'thumbnail-rail.html');
+
+  const rail = page.locator('.deck-thumbnail-rail');
+  const frames = rail.locator('.deck-thumbnail-frame');
+  const numbers = rail.locator('.deck-thumbnail-number');
+  await expect(rail).toBeVisible();
+  await expect(frames).toHaveCount(3);
+
+  const [railBox, firstFrame, secondFrame, firstNumber] = await Promise.all([
+    rail.boundingBox(),
+    frames.nth(0).boundingBox(),
+    frames.nth(1).boundingBox(),
+    numbers.nth(0).boundingBox(),
+  ]);
+  expect(railBox).not.toBeNull();
+  expect(firstFrame).not.toBeNull();
+  expect(secondFrame).not.toBeNull();
+  expect(firstNumber).not.toBeNull();
+  if (!railBox || !firstFrame || !secondFrame || !firstNumber) return;
+
+  expect(firstFrame.width / firstFrame.height).toBeCloseTo(16 / 9, 1);
+  expect(secondFrame.width / secondFrame.height).toBeCloseTo(16 / 9, 1);
+  expect(secondFrame.y).toBeGreaterThanOrEqual(firstFrame.y + firstFrame.height + 8);
+  expect(firstNumber.y).toBeGreaterThanOrEqual(firstFrame.y);
+  expect(firstNumber.y).toBeLessThan(firstFrame.y + firstFrame.height);
+  expect(firstFrame.x + firstFrame.width).toBeLessThanOrEqual(
+    railBox.x + railBox.width,
+  );
+});
+
 test('[P0] @critical HTML viewer stays rendered without a code toggle', async ({ page }) => {
   await routeMockAgents(page);
   const projectId = await createEmptyProject(page, 'HTML preview toggle regression');

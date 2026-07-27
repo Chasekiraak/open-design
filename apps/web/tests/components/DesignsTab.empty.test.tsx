@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DesignsTab } from '../../src/components/DesignsTab';
+import { fetchLiveArtifacts, fetchProjectFiles } from '../../src/providers/registry';
 
 vi.mock('../../src/providers/registry', () => ({
   deleteLiveArtifact: vi.fn(),
@@ -32,6 +33,8 @@ describe('DesignsTab empty state', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    vi.mocked(fetchLiveArtifacts).mockReset().mockResolvedValue([]);
+    vi.mocked(fetchProjectFiles).mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -117,5 +120,57 @@ describe('DesignsTab empty state', () => {
     expect(screen.getByText('No projects match your search.')).toBeTruthy();
     expect(screen.queryByText('No projects yet.')).toBeNull();
     expect(screen.queryByRole('button', { name: 'New project' })).toBeNull();
+  });
+
+  it('does not scan while hidden and aborts both background scan types when deactivated', async () => {
+    let liveSignal: AbortSignal | undefined;
+    let filesSignal: AbortSignal | undefined;
+    vi.mocked(fetchLiveArtifacts).mockImplementation((_projectId, options) => {
+      liveSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve([]), { once: true });
+      });
+    });
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      filesSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve([]), { once: true });
+      });
+    });
+    const project = {
+      id: 'project-reopen',
+      name: 'Reopen project',
+      skillId: null,
+      designSystemId: null,
+      createdAt: 1,
+      updatedAt: 2,
+      status: { value: 'not_started' as const },
+    };
+    const props = {
+      projects: [project],
+      skills: [],
+      designSystems: [],
+      onOpen: vi.fn(),
+      onOpenLiveArtifact: vi.fn(),
+      onDelete: vi.fn(),
+      onRename: vi.fn(),
+    };
+    const { rerender } = render(<DesignsTab {...props} isActive={false} />);
+
+    expect(fetchLiveArtifacts).not.toHaveBeenCalled();
+    expect(fetchProjectFiles).not.toHaveBeenCalled();
+
+    rerender(<DesignsTab {...props} isActive />);
+    await vi.waitFor(() => {
+      expect(fetchLiveArtifacts).toHaveBeenCalledTimes(1);
+      expect(fetchProjectFiles).toHaveBeenCalledTimes(1);
+    });
+    expect(liveSignal).toBeDefined();
+    expect(filesSignal).toBeDefined();
+
+    rerender(<DesignsTab {...props} isActive={false} />);
+
+    expect(liveSignal?.aborted).toBe(true);
+    expect(filesSignal?.aborted).toBe(true);
   });
 });

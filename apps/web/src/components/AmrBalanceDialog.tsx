@@ -9,9 +9,8 @@ import {
   attributedAmrUrl,
   recordAmrEntry,
 } from '../analytics/amr-attribution';
-import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
-import { useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { teamConsoleUrl } from './EntryNavRail';
+import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import { workspaceUpgradeUrl } from './EntryNavRail';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
   amrWalletBalanceUsd,
@@ -96,20 +95,27 @@ export function AmrBalanceDialog({
   // resume the parked task via onResolved. Bounded so an abandoned recharge
   // doesn't poll forever; guarded against double-fires.
   const [watchingWallet, setWatchingWallet] = useState(false);
-  // Where 「升级套餐」 goes. `teamConsoleUrl(_, 'upgrade')` is the one place that
-  // knows B's deep link: it targets the team DASHBOARD (not the settings page)
-  // and appends `billing=checkout`, which B's `team-dashboard` route reads to
-  // auto-open its checkout dialog. Falls back to `amrPlansUrlForProfile` (the
-  // same `view=plans` deep link every other Upgrade affordance uses — ChatPane,
-  // SettingsDialog, AvatarMenu, InlineModelSwitcher) when the console URL is
-  // unavailable (personal workspace, or the context read has not landed), so
-  // the CTA still auto-opens AMR's own pricing modal instead of landing the
-  // user on the bare wallet page with no popup (acceptance regression).
-  const { context: workspaceContext } = useWorkspaceContext();
-  const workspaceSettingsUrl = workspaceContext?.workspaceSettingsUrl?.trim() || null;
-  const upgradeUrl = workspaceSettingsUrl
-    ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade')
-    : amrPlansUrlForProfile(profile);
+  // Where 「升级套餐」 goes. `workspaceUpgradeUrl` is the one decision point for
+  // every upgrade affordance: personal workspace → B's wallet pricing modal
+  // (`view=plans`); team → `billing=checkout` vs `billing=plan` by whether the
+  // team ever completed a first checkout. Getting either branch wrong opens
+  // the wrong dialog — or an error-state one: routing a personal workspace
+  // onto the team `billing=checkout` deep link opened the Upgrade-to-Team
+  // dialog with "Team plan unavailable" / a 3-seat minimum (recvpYEiH019cD,
+  // failed acceptance round). The profile fallback keeps the CTA alive after
+  // a signed-out/no-context read (but not while that read is pending) — same
+  // `view=plans` deep link every other Upgrade affordance uses (ChatPane,
+  // AvatarMenu, InlineModelSwitcher).
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
+  const upgradeUrl = workspaceContextLoading
+    ? null
+    : workspaceUpgradeUrl(workspaceContext, workspaceBilling, {
+        fallbackProfile: profile,
+      });
   const resolvedRef = useRef(false);
   const resolveOnce = () => {
     if (resolvedRef.current) return;
@@ -142,6 +148,7 @@ export function AmrBalanceDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchingWallet]);
   const openUpgrade = () => {
+    if (!upgradeUrl) return;
     setWatchingWallet(true);
     // Same attribution handshake as the other Open Design Cloud handoffs
     // (ChatPane recharge, AvatarMenu upgrade): record the amr_entry, forward
@@ -228,7 +235,7 @@ export function AmrBalanceDialog({
               if (loginStatus?.loggedIn === true) resolveOnce();
             }}
           />
-        ) : (
+        ) : upgradeUrl ? (
           <Button
             variant="primary"
             className={styles.cta}
@@ -237,7 +244,7 @@ export function AmrBalanceDialog({
           >
             {t('chat.amrBalanceGate.plansCta')}
           </Button>
-        )}
+        ) : null}
         <Button variant="ghost" className={styles.later} onClick={onClose}>
           {t('chat.amrBalanceGate.laterCta')}
         </Button>

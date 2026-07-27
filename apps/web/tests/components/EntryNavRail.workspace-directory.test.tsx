@@ -26,7 +26,14 @@ function teamContext(): WorkspaceCollabContext {
     role: 'owner',
     memberStatus: 'active',
     lifecycleState: 'active',
-    permissions: { canInviteMembers: true, canViewWorkspaceSettings: true },
+    billingState: 'active',
+    seatSummary: { availableSeats: 2 },
+    permissions: {
+      canInviteMembers: true,
+      canManageBilling: true,
+      canViewWorkspaceSettings: true,
+    },
+    workspaceSettingsUrl: 'https://example.com/console/settings?workspaceId=ws-team',
   } as unknown as WorkspaceCollabContext;
 }
 
@@ -86,6 +93,49 @@ afterEach(() => {
 });
 
 describe('workspace switcher directory', () => {
+  it('keeps actions outside the scrollable workspace list when the directory exceeds five items', async () => {
+    const manyWorkspaces = Array.from({ length: 7 }, (_, index) => ({
+      workspaceId: `ws-${index + 1}`,
+      workspaceName: `Workspace ${index + 1}`,
+      workspaceType: index === 0 ? 'personal' : 'team',
+      role: 'owner',
+    }));
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/workspace/directory')) {
+        return new Response(JSON.stringify({ items: manyWorkspaces }), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as typeof fetch;
+
+    renderRail();
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+
+    await waitFor(() => expect(menu().getByText('Workspace 7')).toBeTruthy());
+
+    const list = screen.getByTestId('workspace-switcher-list');
+    const actions = screen.getByTestId('workspace-switcher-actions');
+    const invite = menu().getByRole('menuitem', { name: /Invite/ });
+    const createTeam = menu().getByRole('menuitem', { name: /New team/ });
+
+    expect(list.contains(invite)).toBe(false);
+    expect(list.contains(createTeam)).toBe(false);
+    expect(actions.contains(invite)).toBe(true);
+    expect(actions.contains(createTeam)).toBe(true);
+
+    Object.defineProperty(list, 'scrollTop', { configurable: true, value: 68, writable: true });
+    fireEvent.scroll(list);
+    expect(actions.isConnected).toBe(true);
+    expect(invite.isConnected).toBe(true);
+    expect(createTeam.isConnected).toBe(true);
+
+    const lastWorkspace = menu().getByRole('menuitem', { name: 'Workspace 7' });
+    lastWorkspace.focus();
+    fireEvent.keyDown(lastWorkspace, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(invite);
+    fireEvent.keyDown(invite, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(createTeam);
+  });
+
   it('shows the last known list immediately on a later open, with no loading row', async () => {
     const gate = installGatedFetch();
     const view = renderRail();

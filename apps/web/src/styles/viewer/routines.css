@@ -107,7 +107,16 @@
   left: 50%;
   transform: translateX(-50%);
   max-width: 480px;
-  padding: 10px 14px;
+  /* Right padding must clear the absolutely-positioned .od-toast-close
+     footprint (right: 8px, width: 26px → 34px inset from the edge), plus a
+     breathing buffer equal to the toast's own left padding — the same ratio
+     the .od-toast-browser-snapshot variant below already uses (52px right
+     padding = 34px close-button footprint + 18px left padding). Without
+     this, the toast's shrink-to-fit width sizes to content + 14px padding
+     on every side, so the message text's right edge always lands inside the
+     close button's 8–34px inset range and gets visually covered by it,
+     regardless of message length (recvqaZAbIdfz1). */
+  padding: 10px 48px 10px 14px;
   border-radius: var(--radius-sm, 4px);
   background: color-mix(in srgb, var(--text-strong, #1f2328) 78%, transparent);
   -webkit-backdrop-filter: var(--glass-backdrop);
@@ -1254,12 +1263,6 @@
      wash / window vibrancy shows through (veil tokens in app-wash.css). */
   background: var(--veil-page, transparent);
 }
-.app .split:not(.split-focus) {
-  grid-template-columns: minmax(320px, var(--chat-panel-width, 460px)) 8px minmax(400px, 1fr);
-}
-.app .split.split-focus {
-  grid-template-columns: minmax(0, 1fr);
-}
 .app .split-chat-slot {
   /* Inset the pane so it reads as a floating card (same treatment as the home
      sidebar's .entry-nav-rail__panel). Top inset is 0 so the card sits 8px
@@ -1651,8 +1654,7 @@
   background: transparent;
   pointer-events: none;
 }
-.app .task-activity-current-row .op-card-head,
-.app .task-activity-current-thinking {
+.app .task-activity-current-row .op-card-head {
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -1669,8 +1671,11 @@
 .app .task-activity-current-row .op-meta {
   color: var(--text-muted);
 }
+/* Strip tool-card disclosures from the compact current row, but keep the
+   thinking block's accordion: streamed reasoning must stay expandable while
+   the run is in progress (incident recvqgLmAkUM6G). */
 .app .task-activity-current-row .op-expand-chev,
-.app .task-activity-current-row .accordion-collapsible,
+.app .task-activity-current-row .op-card .accordion-collapsible,
 .app .task-activity-current-row .live-code-pre,
 .app .task-activity-current-row .op-output {
   display: none;
@@ -2241,6 +2246,18 @@
   background: transparent;
   box-shadow: none;
   outline: none;
+}
+/* recvqg3CzK8GcT: the model mark floats between two solid capsules whose ink
+   sits inset from their boxes — to the LEFT the mode pill's × glyph is ~17px
+   of whitespace away (× button slack + pill trailing padding), while to the
+   RIGHT only the 4px row gap + 4px trigger padding (~9px) separated the mark
+   from the run/send capsule's edge, so the icon read as glued to the button.
+   The trigger never paints its hitbox (hover stays transparent above), so ink
+   distance is the only spacing the eye can see; this margin makes the right
+   ink gap match the left one (17px ↔ 17px). */
+.app .composer-row .avatar-agent-trigger,
+.chat-composer-fixed-layer .composer-row .avatar-agent-trigger {
+  margin-inline-end: 8px;
 }
 /* Hide the dropdown chevron so only the agent mark / model name shows. The
    chevron is RemixIcon's trailing glyph — this app renders Remix glyphs as
@@ -3876,4 +3893,3 @@ body.od-quick-switcher-open .chat-composer-fixed-layer .composer-send:disabled {
    360px track plus the row-density overrides that came with it — was
    removed. Leaving the grid rule behind reserved an empty 360px column and
    the panel content stopped short of the panel edge. */
-

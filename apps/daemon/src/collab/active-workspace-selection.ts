@@ -7,8 +7,43 @@ interface ActiveWorkspaceSelectionFile {
 
 export interface ActiveWorkspaceSelectionStore {
   get(): string | null;
+  snapshot(): { workspaceId: string | null; generation: number };
   set(workspaceId: string): Promise<void>;
   clear(): Promise<void>;
+}
+
+interface AuthorizationWorkspaceContextSnapshot {
+  context: {
+    workspaceId: string;
+    teamId?: string | undefined;
+    workspaceMemberId: string;
+    workspaceType: string;
+    memberStatus: string;
+    lifecycleState: string;
+  } | null;
+  generation: number;
+}
+
+export function resolveAuthorizedActiveTeamWorkspaceSnapshot(
+  selection: { workspaceId: string | null; generation: number },
+  observed: AuthorizationWorkspaceContextSnapshot,
+): { workspaceId: string | null; generation: number } {
+  const context = observed.context;
+  const activeTeamWorkspaceId =
+    context?.workspaceType === 'team' &&
+    context.memberStatus === 'active' &&
+    context.lifecycleState === 'active' &&
+    Boolean(context.teamId?.trim()) &&
+    Boolean(context.workspaceMemberId.trim())
+      ? context.workspaceId
+      : null;
+  const pinMatches =
+    selection.workspaceId == null ||
+    selection.workspaceId === activeTeamWorkspaceId;
+  return {
+    workspaceId: pinMatches ? activeTeamWorkspaceId : null,
+    generation: selection.generation + observed.generation,
+  };
 }
 
 export function createActiveWorkspaceSelectionStore(
@@ -16,6 +51,7 @@ export function createActiveWorkspaceSelectionStore(
 ): ActiveWorkspaceSelectionStore {
   const filePath = path.join(dataDir, 'workspace-selection.json');
   let cached: string | null | undefined;
+  let generation = 0;
 
   const read = (): string | null => {
     if (cached !== undefined) return cached;
@@ -33,10 +69,14 @@ export function createActiveWorkspaceSelectionStore(
 
   return {
     get: read,
+    snapshot() {
+      return { workspaceId: read(), generation };
+    },
     async set(workspaceId: string) {
       const next = workspaceId.trim();
       if (!next) throw new Error('workspaceId is required');
       cached = next;
+      generation += 1;
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       await fs.promises.writeFile(
         filePath,
@@ -46,6 +86,7 @@ export function createActiveWorkspaceSelectionStore(
     },
     async clear() {
       cached = null;
+      generation += 1;
       await fs.promises.rm(filePath, { force: true });
     },
   };

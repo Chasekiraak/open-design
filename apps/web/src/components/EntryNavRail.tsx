@@ -10,8 +10,8 @@
 //     language live in 设置·通用 only, matching #5517).
 //     Falls back to the brand logo when there is no cloud identity
 //     (context === null).
-//   • Credits chip — real plan tier + balance when A's vela CLI billing summary
-//     is available, with upgrade linking out to Vela Web.
+//   • Billing chip — real plan tier + explicitly scoped USD balance when Vela
+//     billing is available, with upgrade linking out to Vela Web.
 //   • Search box (opens the ⌘K project search palette via `onOpenSearch`).
 //   • 最近 (Recents) → home, Community → community.
 //   • Team block (only when `context.workspaceType === 'team'`): an inline team
@@ -23,7 +23,13 @@
 // The gate is `workspaceType` + permissions, never the billing/provider axis — a
 // personal_byok workspace still has full team features.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { coalescedGet } from '../lib/coalesced-get';
 import type {
   WorkspaceActiveResponse,
@@ -32,8 +38,13 @@ import type {
   WorkspaceDirectoryItem,
   WorkspaceDirectoryResponse,
 } from '@open-design/contracts';
-import { fetchVelaLoginStatus, velaLogout } from '../providers/daemon';
+import {
+  fetchVelaLoginStatus,
+  formatVelaBalanceUsd,
+  velaLogout,
+} from '../providers/daemon';
 import { resetCloudSignInTipDismissal } from './CloudSignInTip';
+import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
@@ -47,7 +58,8 @@ import {
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
 } from '../collab/useWorkspaceContext';
-import { resolvePlanLabelTier } from '../collab/team-plan';
+import { hasTeamPlan, resolvePlanLabelTier } from '../collab/team-plan';
+import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
 import type { EntryHomeView } from '../router';
 
 const REPO_URL = 'https://github.com/nexu-io/open-design';
@@ -86,9 +98,12 @@ interface Props {
   onClose: () => void;
   /** The one shared workspace context; null → local (no cloud identity) state. */
   context: WorkspaceCollabContext | null;
-  /** Real billing summary (A-lane, via the vela CLI 收口). Null → the credits
-   *  chip falls back to the context plan-tier hint with no balance. */
+  /** Account billing metadata (via the vela CLI 收口). Null → the billing
+   *  chip falls back to the context plan-tier hint. */
   billing?: WorkspaceBillingSummary | null;
+  /** Explicitly scoped balance in USD for `context`. Team callers must pass
+   *  only a backend-proven v2 workspace wallet, never account credits. */
+  balanceUsd?: string | null;
   /** Open the app settings dialog. */
   onOpenSettings?: () => void;
   /** Open the members / invite slot (B's InviteDialog). */
@@ -129,13 +144,47 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
   );
 }
 
+function handleWorkspaceMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const items = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'),
+  );
+  if (items.length === 0) return;
+
+  const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+  let nextIndex: number;
+  if (event.key === 'Home') {
+    nextIndex = 0;
+  } else if (event.key === 'End') {
+    nextIndex = items.length - 1;
+  } else if (event.key === 'ArrowUp') {
+    nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+  } else {
+    nextIndex = currentIndex < 0 || currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
+  }
+
+  event.preventDefault();
+  items[nextIndex]?.focus();
+}
+
 // Team management (members, dashboard, settings) lives in B's vela/web console,
 // not the local client. We link out to it, deriving the section path from the one
 // workspace-settings URL the context carries. Best-effort: swap/append the section
 // segment, falling back to the raw settings URL when the path can't be rewritten.
 export function teamConsoleUrl(
   base: string,
-  section: 'members' | 'dashboard' | 'settings' | 'billing' | 'upgrade' | 'create-team',
+  section:
+    | 'members'
+    | 'dashboard'
+    | 'settings'
+    | 'billing'
+    | 'upgrade'
+    | 'create-team'
+    | 'plans'
+    | 'invite',
+  // Only consulted for `section: 'upgrade'` — see the comment below on why the
+  // deep-link param depends on it.
+  options?: { hasActivePlan?: boolean },
 ): string {
   // B's console routes: members live at /team, the (global) wallet backs the
   // billing entry. The settings URL the context carries includes the
@@ -143,16 +192,34 @@ export function teamConsoleUrl(
   // opens on the SAME workspace this client is pinned to (B asks the user to
   // confirm if their account-level selection differs).
   //
-  // `upgrade` lands on the team dashboard AND opens the plan-change dialog,
-  // because sending someone to a billing page to hunt for the upgrade control
-  // is a worse answer to "I want to upgrade". B already honors the deep link:
-  // both `routes/workspace-settings.tsx` and `routes/team-dashboard.tsx` open
-  // their checkout dialog when `billing=checkout` is present.
+  // `upgrade` lands on the team dashboard AND opens a subscription dialog, but
+  // WHICH dialog depends on whether the team has ever checked out before — B's
+  // `team-dashboard.tsx` gates them on mutually exclusive conditions:
+  //   - `billing=checkout` opens the first-subscription dialog, gated by
+  //     `canUpgradeTeam`, which requires the team's `subscriptionSummary
+  //     .billingState` to be one of free/inactive/locked (never subscribed, or
+  //     lapsed). For a team that already has an active plan this gate is
+  //     false, so `billing=checkout` silently opens nothing — confirmed via a
+  //     real recording (recvpSQKna0LwR) landing on the bare Overview page for
+  //     an already-subscribed "Team Pro" workspace.
+  //   - `billing=plan` opens the CHANGE-plan dialog, gated by
+  //     `ownerBillingActionsAvailable`, which requires `billingState ===
+  //     'active'` — the mirror-image condition, for a team that already pays.
+  // `options.hasActivePlan` (callers pass `hasTeamPlan(context, billing)` from
+  // `collab/team-plan.ts`) picks the branch that actually matches the team's
+  // current subscription state instead of hardcoding the never-subscribed one.
+  // `plans` is the PERSONAL upgrade deep link: the wallet page with B's
+  // pricing modal auto-opened (`view=plans`) — verified live to auto-open for
+  // a personal-workspace session (recvpYEiH019cD). For a TEAM workspace B
+  // redirects this exact URL into `dashboard?billing=checkout` itself
+  // (vela wallet.tsx `teamWalletCheckoutRedirectPath`), so even a misrouted
+  // team session degrades to the first-checkout dialog, not a dead page.
   const path =
     section === 'members' ? 'team'
     : section === 'billing' ? 'wallet'
+    : section === 'plans' ? 'wallet'
     : section === 'upgrade' ? 'dashboard'
-    : section === 'create-team' ? 'dashboard'
+    : section === 'create-team' || section === 'invite' ? 'dashboard'
     : section;
   try {
     const url = new URL(base);
@@ -163,23 +230,163 @@ export function teamConsoleUrl(
       segments.push(path);
     }
     url.pathname = `/${segments.join('/')}`;
-    if (section === 'upgrade') url.searchParams.set('billing', 'checkout');
-    // recvq725Kx0rM4: `create-team` used to set `?workspace=create` on the
-    // premise that B's dashboard honors it as a deep link into the
-    // create-workspace dialog, the same way `billing=checkout` opens the
-    // upgrade dialog. Checked against B's actual route source
-    // (routes/team-dashboard.tsx, routes/workspace-settings.tsx): neither
-    // reads a `workspace` search param at all — the dialog is opened by
-    // clicking a sidebar button (`sidebar-actions.tsx`'s `openCreateWorkspace`),
-    // pure client state with no URL hook. The stale param made this entry
-    // look like "nothing happened" (dashboard loads, no dialog) rather than a
-    // broken link, which is why it read as "路径丢失" instead of "先跳个页面
-    // 自己找按钮". Land on the plain dashboard — no dead deep-link param —
-    // until B exposes a real one to replace this comment and the omission.
+    if (section === 'upgrade') {
+      url.searchParams.set('billing', options?.hasActivePlan ? 'plan' : 'checkout');
+    }
+    if (section === 'plans') url.searchParams.set('view', 'plans');
+    // Vela owns the final invite action because only its dashboard has the
+    // authoritative subscription + seat state needed to choose between
+    // upgrading to Team, buying seats, and sending an invite. `invite=auto`
+    // is consumed one-shot by that dashboard and then removed from the URL.
+    if (section === 'invite') url.searchParams.set('invite', 'auto');
+    // recvq725Kx0rM4 / recvqfXzHtY5wg: `create-team` opens B's create-workspace
+    // dialog via `?workspace=create`. A prior fix (675878434) removed this,
+    // reasoning that B's route source had no handler for it — true of the repo
+    // checkout that fix read at the time, but B's `sidebar-actions.tsx` (PR
+    // #905, commit 501c0069, authored 2026-07-21) added exactly this handler,
+    // and it is live on `origin/feat/workspace-team` (the branch the
+    // feature-test deployment serves) as of this fix. Re-verified directly
+    // against that branch's current source before restoring the param.
+    if (section === 'create-team') url.searchParams.set('workspace', 'create');
     return url.toString();
   } catch {
     return base;
   }
+}
+
+/**
+ * Where an 「升级」/「升级套餐」 affordance sends THIS workspace — the one
+ * decision point shared by every upgrade entry (EntryNavRail's credits chip
+ * and invite dialog, AmrBalanceDialog's balance-gate CTA, RecentProjectsStrip's
+ * invite dialog, SettingsDialog's AMR-card upgrade buttons), so the three
+ * subscription states cannot drift apart per entry point.
+ *
+ * The axis is the WORKSPACE TYPE, never "does a console URL exist": B returns
+ * `workspaceSettingsUrl` for a personal workspace too (it has a settings page
+ * like any other), so URL-presence stopped implying "team" — that premise
+ * routed a $0-balance personal account onto the team dashboard's
+ * `billing=checkout` deep link, which opens the Upgrade-to-Team dialog in an
+ * error state ("Team plan unavailable" / 3-seat minimum). recvpYEiH019cD,
+ * verified live with a real personal-workspace session.
+ *
+ *   - personal (or type unknown) → `wallet?view=plans`, B's personal pricing
+ *     modal — verified live to auto-open for the same session.
+ *   - team, never subscribed → `dashboard?billing=checkout` (first-checkout
+ *     dialog); team, already subscribed → `dashboard?billing=plan`
+ *     (change-plan dialog). See `teamConsoleUrl` for why B needs the split.
+ *   - a resolved workspace without `canManageBilling` → null. Billing is
+ *     owner-only, so admin/member surfaces hide the action rather than linking
+ *     to an operation B will reject.
+ *
+ * Dialog callers pass `fallbackProfile` and receive the profile-keyed personal
+ * plans deep link when no workspace context exists after loading. An existing
+ * workspace without billing permission still returns null; callers hide the
+ * affordance.
+ */
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+  options: { fallbackProfile: string | null | undefined },
+): string | null;
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+): string | null;
+export function workspaceUpgradeUrl(
+  context: WorkspaceCollabContext | null | undefined,
+  billing: WorkspaceBillingSummary | null | undefined,
+  options?: { fallbackProfile: string | null | undefined },
+): string | null {
+  // Team billing is owner-only. Keep the permission check in the shared
+  // resolver so every upgrade surface (including dialogs that pass a profile
+  // fallback) fails closed for admins/members instead of accidentally linking
+  // them to an action B will reject. A missing context still uses the fallback
+  // because there is no workspace identity to authorize yet.
+  if (context && context.permissions?.canManageBilling !== true) return null;
+  const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
+  if (settingsUrl) {
+    return context?.workspaceType === 'team'
+      ? teamConsoleUrl(settingsUrl, 'upgrade', { hasActivePlan: hasTeamPlan(context, billing) })
+      : teamConsoleUrl(settingsUrl, 'plans');
+  }
+  return options ? amrPlansUrlForProfile(options.fallbackProfile) : null;
+}
+
+export type WorkspaceInviteTarget =
+  | { kind: 'local' }
+  | { kind: 'vela'; url: string }
+  | { kind: 'unavailable' };
+
+/**
+ * Whether this member should discover the invite flow.
+ *
+ * Direct invites and billing recovery are separate capabilities. A Personal
+ * Free owner (or a full Team owner) can still enter Vela's upgrade/seat flow
+ * without direct invite capability, but an admin never acquires billing power
+ * from role alone. Unknown seat state fails closed until the context refresh
+ * supplies an authoritative answer.
+ */
+export function canAccessWorkspaceInviteFlow(
+  context: WorkspaceCollabContext | null | undefined,
+): boolean {
+  if (
+    !context ||
+    context.memberStatus !== 'active' ||
+    context.lifecycleState !== 'active' ||
+    (context.role !== 'owner' && context.role !== 'admin')
+  ) {
+    return false;
+  }
+
+  const canInviteMembers = context.permissions?.canInviteMembers === true;
+  const canManageBilling = context.permissions?.canManageBilling === true;
+  const needsTeamUpgrade =
+    context.billingState === 'free' || context.billingState === 'inactive';
+  if (needsTeamUpgrade) {
+    return context.role === 'owner' && canManageBilling;
+  }
+  if (context.workspaceType === 'personal') return canInviteMembers;
+
+  const isSeatFull = workspaceSeatFull(context);
+  if (isSeatFull === undefined) return false;
+  if (!isSeatFull) return canInviteMembers;
+  return context.role === 'owner' && canManageBilling;
+}
+
+function workspaceSeatFull(
+  context: WorkspaceCollabContext,
+): boolean | undefined {
+  const availableSeats = context.seatSummary?.availableSeats;
+  if (availableSeats !== undefined) return availableSeats <= 0;
+  return context.seatSummary?.isSeatFull;
+}
+
+/**
+ * Chooses the first safe invite surface. The local form is only valid when a
+ * team is positively known to have direct invite capability and capacity.
+ * Personal, Free-plan, and full-seat owner states go to Vela, whose dashboard
+ * owns the authoritative upgrade/seat/invite decision. Missing routing or seat
+ * data fails closed.
+ */
+export function resolveWorkspaceInviteTarget(
+  context: WorkspaceCollabContext | null | undefined,
+): WorkspaceInviteTarget {
+  if (!context || !canAccessWorkspaceInviteFlow(context)) {
+    return { kind: 'unavailable' };
+  }
+  const needsTeamUpgrade =
+    context.billingState === 'free' || context.billingState === 'inactive';
+  if (
+    context.workspaceType === 'team' &&
+    !needsTeamUpgrade &&
+    workspaceSeatFull(context) === false &&
+    context.permissions.canInviteMembers === true
+  ) {
+    return { kind: 'local' };
+  }
+  const settingsUrl = context?.workspaceSettingsUrl?.trim() || null;
+  if (!settingsUrl) return { kind: 'unavailable' };
+  return { kind: 'vela', url: teamConsoleUrl(settingsUrl, 'invite') };
 }
 
 /**
@@ -225,6 +432,7 @@ export function EntryNavRail({
   onClose,
   context,
   billing,
+  balanceUsd,
   onOpenSettings,
   footerExtra,
   footerNotice,
@@ -244,6 +452,7 @@ export function EntryNavRail({
   // re-derive from role — the permission bits already fold role + lifecycle in.
   const canViewWorkspaceSettings = Boolean(permissions?.canViewWorkspaceSettings);
   const canInviteMembers = Boolean(permissions?.canInviteMembers);
+  const canAccessInviteFlow = canAccessWorkspaceInviteFlow(context);
   const workspaceSettingsUrl = context?.workspaceSettingsUrl?.trim() || null;
 
   // Account identity (real). No email field on the context → the head shows the
@@ -252,9 +461,9 @@ export function EntryNavRail({
   const accountName = displayName || brandLabel;
   const accountInitial = accountName.charAt(0).toUpperCase() || '·';
 
-  // Credits chip: prefer the real billing summary (A-lane, via the vela CLI
-  // 收口); fall back to the context plan-tier hint with no balance when billing
-  // hasn't loaded / no session.
+  // Billing chip: prefer the real summary metadata; fall back to the context
+  // plan-tier hint when metadata has not loaded. Money is a separate,
+  // explicitly scoped `balanceUsd` input below.
   // The plan id from either source goes through the same formatter — the
   // context hint is a raw id too (`team_plus`), and it used to reach the card
   // unformatted whenever billing reported an empty tier (which it does today).
@@ -271,7 +480,7 @@ export function EntryNavRail({
     : isTeam
       ? t('entry.billingTierTeam')
       : t('entry.billingTierFree');
-  const creditsBalance = billing ? billing.totalAvailableCredits : null;
+  const balanceLabel = formatVelaBalanceUsd(balanceUsd);
   // #5517: wordmark badge on the account row (replaces the chevron) and a
   // small twin inside the menu's billing card. Derive from the raw tier id
   // first so "team_plus" maps to the plus badge regardless of display label.
@@ -282,6 +491,9 @@ export function EntryNavRail({
   const planTier = planBadgeTierForLabel(rawTier || tierLabel);
 
   const [accountOpen, setAccountOpen] = useState(false);
+  // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
+  // confirmation dialog; the real logout chain runs on explicit confirm.
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const githubStars = useGithubStars();
   // Signed-in account email for the menu head (#5517 shows it under the
   // display name). The workspace context carries no email, so lazily read the
@@ -355,9 +567,14 @@ export function EntryNavRail({
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const inviteTarget = resolveWorkspaceInviteTarget(context);
+  // One decision for both of this rail's upgrade entries (credits chip and
+  // the invite dialog's seat-gate): personal → the wallet pricing modal,
+  // team → checkout vs change-plan by subscription state. See
+  // `workspaceUpgradeUrl` for why the axis is the workspace TYPE.
+  const upgradeUrl = workspaceUpgradeUrl(context, billing);
   const billingUpgradeUrl =
-    context?.billingRecovery?.recoveryUrl?.trim() ||
-    (workspaceSettingsUrl ? teamConsoleUrl(workspaceSettingsUrl, 'upgrade') : null);
+    context?.billingRecovery?.recoveryUrl?.trim() || upgradeUrl;
   // #62: the 积分 row links straight OUT to B's wallet page (usage detail lives
   // there) — no intermediate credits popover in the client, matching #5517.
   const billingWalletUrl = workspaceSettingsUrl
@@ -511,12 +728,11 @@ export function EntryNavRail({
                       <span className="entry-nav-rail__account-head-email">{accountEmail}</span>
                     ) : null}
                   </div>
-                  {/* #5517 billing card: plan (+badge) + 升级 CTA + credits row.
-                      Credits are real billing data. The credits row links out
-                      to B's wallet page. Product ruling (2026-07-22): we do
-                      not have a separate "附加积分" (bonus/top-up credits)
-                      concept to show — 积分 is the one number that matters. */}
-                  {billing ? (
+                  {/* #5517 billing card: plan (+badge) + 升级 CTA + USD balance.
+                      The balance row links out to B's wallet page. It receives
+                      only an explicitly scoped money value; raw credits are
+                      never formatted as dollars here. */}
+                  {billing || balanceLabel ? (
                     <div className="entry-nav-rail__menu-credits">
                       <div className="entry-nav-rail__menu-credits-head">
                         <span className="entry-nav-rail__menu-credits-plan">
@@ -536,7 +752,7 @@ export function EntryNavRail({
                           </button>
                         ) : null}
                       </div>
-                      {/* #62 (product ruling): clicking 积分 jumps straight to
+                      {/* #62 (product ruling): clicking the balance jumps straight to
                           B's web wallet page for the usage detail — there is
                           NO intermediate credits popover in the client. */}
                       <button
@@ -554,7 +770,7 @@ export function EntryNavRail({
                           <RemixIcon name="battery-charge-line" size={14} /> {t('entry.credits')}
                         </span>
                         <span className="entry-nav-rail__menu-credits-value">
-                          {creditsBalance != null ? creditsBalance.toLocaleString('en-US') : '—'}
+                          {balanceLabel ?? '—'}
                           <Icon name="chevron-right" size={14} />
                         </span>
                       </button>
@@ -651,27 +867,38 @@ export function EntryNavRail({
                     role="menuitem"
                     onClick={() => {
                       setAccountOpen(false);
-                      // Real sign-out: clear the vela profile auth on the
-                      // daemon, then nudge every workspace surface to re-read
-                      // (the context read now resolves to null → the shell
-                      // falls back to the signed-out local form).
-                      void velaLogout().then(() => {
-                        // recvqbkcLqIFH7: a stale "dismissed" flag on the
-                        // footer's CloudSignInTip must not survive a real
-                        // sign-out, or the rail's only sign-in entry point
-                        // silently disappears with nothing left in its place.
-                        resetCloudSignInTipDismissal();
-                        notifyAmrLoginStatusChanged();
-                        notifyWorkspaceContextRefresh();
-                        notifyWorkspaceBillingRefresh();
-                        notifyTeamProjectsChanged();
-                      });
+                      // recvqgMWpJZqhL: never sign out on this click alone —
+                      // arm the confirmation dialog and let it run the logout.
+                      setConfirmSignOut(true);
                     }}
                   >
                     <Icon name="log-out" size={15} /> {t('entry.accountSignOut')}
                   </button>
                 </div>
               </>
+            ) : null}
+            {confirmSignOut ? (
+              <SignOutConfirmDialog
+                onCancel={() => setConfirmSignOut(false)}
+                onConfirm={() => {
+                  setConfirmSignOut(false);
+                  // Real sign-out: clear the vela profile auth on the
+                  // daemon, then nudge every workspace surface to re-read
+                  // (the context read now resolves to null → the shell
+                  // falls back to the signed-out local form).
+                  void velaLogout().then(() => {
+                    // recvqbkcLqIFH7: a stale "dismissed" flag on the
+                    // footer's CloudSignInTip must not survive a real
+                    // sign-out, or the rail's only sign-in entry point
+                    // silently disappears with nothing left in its place.
+                    resetCloudSignInTipDismissal();
+                    notifyAmrLoginStatusChanged();
+                    notifyWorkspaceContextRefresh();
+                    notifyWorkspaceBillingRefresh();
+                    notifyTeamProjectsChanged();
+                  });
+                }}
+              />
             ) : null}
           </div>
         ) : (
@@ -749,71 +976,89 @@ export function EntryNavRail({
               {teamOpen ? (
                 <>
                   <div className="entry-nav-rail__menu-backdrop" onClick={() => setTeamOpen(false)} />
-                  <div className="entry-nav-rail__team-menu" role="menu">
-                    {visibleWorkspaceItems.map((item) => {
-                      const active = item.workspaceId === context.workspaceId;
-                      const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
-                      return (
+                  <div
+                    className="entry-nav-rail__team-menu"
+                    role="menu"
+                    onKeyDown={handleWorkspaceMenuKeyDown}
+                  >
+                    <div
+                      className="entry-nav-rail__workspace-list"
+                      data-testid="workspace-switcher-list"
+                    >
+                      {visibleWorkspaceItems.map((item) => {
+                        const active = item.workspaceId === context.workspaceId;
+                        const initial = item.workspaceName.trim().charAt(0).toUpperCase() || 'W';
+                        return (
+                          <button
+                            key={item.workspaceId}
+                            type="button"
+                            className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                            role="menuitem"
+                            aria-current={active ? 'true' : undefined}
+                            // Only the in-flight switch disables a row. Disabling the
+                            // CURRENT one made the UA grey it out, so the selected
+                            // workspace read as the inactive one and vice versa;
+                            // `.is-current` (bold + accent ✓) is the selected signal.
+                            disabled={workspaceSwitchingId === item.workspaceId}
+                            onClick={() => {
+                              void switchWorkspace(item.workspaceId);
+                            }}
+                          >
+                            <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
+                            {/* #5517's switcher rows are avatar + full name + ✓ only.
+                                The raw role word ate the name's width and truncated
+                                it; the role is already on 设置·工作区. */}
+                            <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
+                            {active ? <Icon name="check" size={14} /> : null}
+                          </button>
+                        );
+                      })}
+                      {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
+                        <div className="entry-nav-rail__menu-item is-muted" role="status">
+                          {t('common.loading')}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div
+                      className="entry-nav-rail__workspace-actions"
+                      data-testid="workspace-switcher-actions"
+                    >
+                      <div className="entry-nav-rail__menu-divider" />
+                      {canAccessInviteFlow && inviteTarget.kind !== 'unavailable' ? (
                         <button
-                          key={item.workspaceId}
                           type="button"
-                          className={`entry-nav-rail__menu-item${active ? ' is-current' : ''}`}
+                          className="entry-nav-rail__menu-item"
                           role="menuitem"
-                          aria-current={active ? 'true' : undefined}
-                          // Only the in-flight switch disables a row. Disabling the
-                          // CURRENT one made the UA grey it out, so the selected
-                          // workspace read as the inactive one and vice versa;
-                          // `.is-current` (bold + accent ✓) is the selected signal.
-                          disabled={workspaceSwitchingId === item.workspaceId}
                           onClick={() => {
-                            void switchWorkspace(item.workspaceId);
+                            setTeamOpen(false);
+                            if (inviteTarget.kind === 'vela') {
+                              window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
+                            } else if (inviteTarget.kind === 'local') {
+                              setInviteOpen(true);
+                            }
                           }}
                         >
-                          <span className="entry-nav-rail__team-avatar" aria-hidden>{initial}</span>
-                          {/* #5517's switcher rows are avatar + full name + ✓ only.
-                              The raw role word ate the name's width and truncated
-                              it; the role is already on 设置·工作区. */}
-                          <span className="entry-nav-rail__workspace-menu-name">{item.workspaceName}</span>
-                          {active ? <Icon name="check" size={14} /> : null}
+                          <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
                         </button>
-                      );
-                    })}
-                    {workspaceDirectoryLoading && visibleWorkspaceItems.length === 0 ? (
-                      <div className="entry-nav-rail__menu-item is-muted" role="status">
-                        {t('common.loading')}
-                      </div>
-                    ) : null}
-                    <div className="entry-nav-rail__menu-divider" />
-                    {canInviteMembers ? (
-                      <button
-                        type="button"
-                        className="entry-nav-rail__menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          setTeamOpen(false);
-                          setInviteOpen(true);
-                        }}
-                      >
-                        <Icon name="share" size={15} /> {t('workspaceSwitcher.invite')}
-                      </button>
-                    ) : null}
-                    {/* Creating a workspace is a B console flow (its sidebar owns the
-                        create dialog; there is no route or query param that opens it
-                        directly), so this entry links OUT instead of doing local work.
-                        With no console URL there is nowhere to send the user — render
-                        nothing rather than a control that silently does nothing. */}
-                    {workspaceSettingsUrl ? (
-                      <a
-                        className="entry-nav-rail__menu-item"
-                        role="menuitem"
-                        href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
-                        {...externalLinkProps}
-                        data-testid="entry-nav-create-team"
-                        onClick={() => setTeamOpen(false)}
-                      >
-                        <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
-                      </a>
-                    ) : null}
+                      ) : null}
+                      {/* Creating a workspace is a B console flow (its sidebar owns the
+                          create dialog; there is no route or query param that opens it
+                          directly), so this entry links OUT instead of doing local work.
+                          With no console URL there is nowhere to send the user — render
+                          nothing rather than a control that silently does nothing. */}
+                      {workspaceSettingsUrl ? (
+                        <a
+                          className="entry-nav-rail__menu-item"
+                          role="menuitem"
+                          href={teamConsoleUrl(workspaceSettingsUrl, 'create-team')}
+                          {...externalLinkProps}
+                          data-testid="entry-nav-create-team"
+                          onClick={() => setTeamOpen(false)}
+                        >
+                          <Icon name="plus" size={15} /> {t('workspaceSwitcher.createTeam')}
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 </>
               ) : null}
@@ -935,13 +1180,9 @@ export function EntryNavRail({
         canAssignRoles={canInviteMembers}
         availableSeats={context?.seatSummary?.availableSeats}
         onUpgrade={
-          workspaceSettingsUrl
+          upgradeUrl
             ? () => {
-                window.open(
-                  teamConsoleUrl(workspaceSettingsUrl, 'upgrade'),
-                  '_blank',
-                  'noopener,noreferrer',
-                );
+                window.open(upgradeUrl, '_blank', 'noopener,noreferrer');
               }
             : undefined
         }

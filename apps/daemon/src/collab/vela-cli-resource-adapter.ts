@@ -8,6 +8,10 @@ import {
 } from '../integrations/vela-command.js';
 import { projectResourceIdFor } from '../integrations/vela-team-projects.js';
 import type { ResourcePublishAdapter } from './publish-scheduler.js';
+import {
+  emitVelaResourcePullProfile,
+  sharedProjectPullProfileEnabled,
+} from './pull-profile.js';
 import type { ResourceHubPrincipal } from './resource-principal.js';
 
 // The `vela resource` transport for the publish/pull machinery (T7c). Instead of
@@ -22,6 +26,10 @@ import type { ResourceHubPrincipal } from './resource-principal.js';
 
 const PUBLISHED_REF = 'published';
 const PROJECT_KIND = 'project';
+// A normal feature-test pull is expected to finish in roughly five seconds.
+// Give the transport a generous 6x envelope for large snapshots, but never
+// let a wedged Vela child hold the per-project materialization lock forever.
+const RESOURCE_PULL_TIMEOUT_MS = 30_000;
 const MEMBER_MIRROR_EXCLUDED_ENTRIES = [
   '.file-versions',
   '.live-artifacts',
@@ -78,6 +86,7 @@ export interface VelaCliResourceAdapterOptions {
 interface VelaVersionRecord {
   id?: string;
   version?: number;
+  versionId?: string;
 }
 
 export interface VelaResourceSnapshotRecord {
@@ -147,17 +156,23 @@ export function createVelaCliResourceAdapter(
     },
 
     async pull({ projectId, principal }) {
-      await gated(async () => {
+      return gated(async () => {
         const dir = await resolvePullDir(projectId);
         let lastError: unknown;
         const resourceIds = resourceIdsFor(projectId, principal);
         for (const [index, resourceId] of resourceIds.entries()) {
           try {
-            await run(
+            const out = await run(
               ['pull', kind, resourceId, dir, '--ref', PUBLISHED_REF, '--json'],
               principal?.teamId,
             );
-            return;
+            const materialized = parseVersion(out);
+            if (!materialized) {
+              throw new Error(
+                'vela resource pull response is missing the materialized version',
+              );
+            }
+            return materialized;
           } catch (error) {
             lastError = error;
             if (
@@ -167,7 +182,7 @@ export function createVelaCliResourceAdapter(
           }
         }
         throw lastError;
-      }, undefined);
+      }, null);
     },
 
     async unpublish({ projectId, principal }) {
@@ -199,11 +214,14 @@ function parseVersion(
   if (typeof parsed.version !== 'number') {
     throw new Error('vela resource response has an invalid version');
   }
+  const versionId = typeof parsed.versionId === 'string' && parsed.versionId.trim()
+    ? parsed.versionId.trim()
+    : typeof parsed.id === 'string' && parsed.id.trim()
+      ? parsed.id.trim()
+      : null;
   return {
     version: parsed.version,
-    ...(typeof parsed.id === 'string' && parsed.id.trim()
-      ? { versionId: parsed.id.trim() }
-      : {}),
+    ...(versionId ? { versionId } : {}),
   };
 }
 
@@ -226,11 +244,28 @@ export function parseVelaResourceSnapshot(stdout: string): VelaResourceSnapshotR
   }
 }
 
-export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) =>
-  runVelaCommand(
+export const runVelaResourceCommand: RunVelaResource = (args, workspaceId) => {
+  const workspaceOptions = velaWorkspaceCommandOptions(workspaceId);
+  const profilePull =
+    args[0] === 'pull' && sharedProjectPullProfileEnabled(process.env);
+  return runVelaCommand(
     ['resource', ...args],
-    velaWorkspaceCommandOptions(workspaceId),
+    {
+      ...workspaceOptions,
+      configuredEnv: {
+        ...workspaceOptions.configuredEnv,
+        ...(profilePull ? { VELA_RESOURCE_PULL_PROFILE: '1' } : {}),
+      },
+      ...(args[0] === 'pull' ? { timeoutMs: RESOURCE_PULL_TIMEOUT_MS } : {}),
+      ...(profilePull
+        ? {
+            onStderr: (stderr: string) =>
+              emitVelaResourcePullProfile(stderr, process.env),
+          }
+        : {}),
+    },
   );
+};
 
 const defaultRunVelaResource: RunVelaResource = runVelaResourceCommand;
 

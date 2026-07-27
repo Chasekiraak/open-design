@@ -15,6 +15,19 @@ function typeAnInvite() {
   fireEvent.change(email, { target: { value: 'teammate@example.com' } });
 }
 
+async function submitWithError(error: string) {
+  const fetchSpy = vi.fn(async () =>
+    new Response(JSON.stringify({ results: [{ ok: false, error }] }), { status: 200 }),
+  );
+  vi.stubGlobal('fetch', fetchSpy);
+
+  render(<InviteDialog open onClose={() => {}} />);
+  typeAnInvite();
+  fireEvent.click(screen.getByRole('button', { name: /确认并邀请|invite/i }));
+  await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+  return screen.findByRole('alert');
+}
+
 describe('InviteDialog — seat gate (#115)', () => {
   it('refuses to send and offers the upgrade path when the workspace is out of seats', () => {
     const fetchSpy = vi.fn();
@@ -64,4 +77,31 @@ describe('InviteDialog — seat gate (#115)', () => {
     const confirm = screen.getByRole('button', { name: /确认并邀请|invite/i });
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it.each(['already_member', 'active_pending_invite'])(
+    'shows duplicate copy only for explicit %s',
+    async (error) => {
+      expect(await submitWithError(error)).toHaveTextContent(
+        /已有待处理的邀请|pending invitation/i,
+      );
+    },
+  );
+
+  it.each([
+    'workspace_seat_limit_reached',
+    'workspace_subscription_seat_allocation_unavailable',
+  ])('shows actionable seat copy for %s', async (error) => {
+    expect(await submitWithError(error)).toHaveTextContent(
+      /席位已用完|no seats left/i,
+    );
+  });
+
+  it.each(['create_409', 'unknown_conflict'])(
+    'keeps unknown conflict %s generic instead of claiming a duplicate',
+    async (error) => {
+      const alert = await submitWithError(error);
+      expect(alert).toHaveTextContent(/发送失败|failed to send/i);
+      expect(alert).not.toHaveTextContent(/已有待处理的邀请|pending invitation/i);
+    },
+  );
 });

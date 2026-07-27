@@ -429,11 +429,11 @@ function synthesizeContext(item: WorkspaceDirectoryItem): WorkspaceCollabContext
       memberStatus: item.memberStatus,
     }),
   };
+  const settingsUrl = resolveWorkspaceSettingsUrl(item.workspaceId, undefined);
+  if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   if (item.workspaceType === 'team') {
     context.teamId = item.workspaceId;
     context.teamName = item.workspaceName;
-    const settingsUrl = resolveWorkspaceSettingsUrl(item.workspaceId, undefined);
-    if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   }
   return context;
 }
@@ -464,12 +464,12 @@ function velaUserDisplayName(user: VelaUser | null): string {
  * 2xx — false for a network error, an abort/timeout, or any non-2xx status,
  * regardless of what (if anything) `items` ends up holding.
  */
-interface WorkspaceDirectoryFetchResult {
+export interface WorkspaceDirectoryFetchResult {
   ok: boolean;
   items: WorkspaceDirectoryItem[];
 }
 
-async function fetchVelaWorkspaceDirectory(
+export async function fetchVelaWorkspaceDirectory(
   options: VelaWorkspaceContextOptions = {},
 ): Promise<WorkspaceDirectoryFetchResult> {
   const fetchImpl = options.fetch ?? fetch;

@@ -26,6 +26,45 @@ export type WorkspaceInviteStatus = 'pending' | 'accepted' | 'declined' | 'revok
  */
 export type WorkspaceInviteRole = Extract<CollabMemberRole, 'admin' | 'member'>;
 
+/**
+ * Safe, user-actionable invite-create failures that may cross the B → daemon
+ * → web boundary. The daemon must keep every other upstream body detail
+ * private and fall back to its transport-shaped `create_<status>` error.
+ */
+export const WORKSPACE_INVITE_CREATE_ERROR_CODES = [
+  'already_member',
+  'active_pending_invite',
+  'workspace_seat_limit_reached',
+  'workspace_subscription_seat_allocation_unavailable',
+] as const;
+
+export type WorkspaceInviteCreateErrorCode =
+  (typeof WORKSPACE_INVITE_CREATE_ERROR_CODES)[number];
+
+const WORKSPACE_INVITE_CREATE_ERROR_ALIASES: Readonly<
+  Record<string, WorkspaceInviteCreateErrorCode>
+> = {
+  already_member: 'already_member',
+  active_pending_invite: 'active_pending_invite',
+  invite_duplicate: 'active_pending_invite',
+  workspace_seat_limit_reached: 'workspace_seat_limit_reached',
+  workspace_subscription_seat_allocation_unavailable:
+    'workspace_subscription_seat_allocation_unavailable',
+};
+
+/**
+ * Normalize only explicitly allowlisted B codes. In particular, HTTP 409 by
+ * itself never implies a duplicate: it can also mean no seat, a locked
+ * subscription, or another conflict the client does not understand yet.
+ */
+export function normalizeWorkspaceInviteCreateErrorCode(
+  value: unknown,
+): WorkspaceInviteCreateErrorCode | null {
+  return typeof value === 'string'
+    ? WORKSPACE_INVITE_CREATE_ERROR_ALIASES[value] ?? null
+    : null;
+}
+
 /** The custom URL scheme the desktop client registers for continuation deeplinks. */
 export const INVITE_DEEPLINK_SCHEME = 'opendesign' as const;
 export type InviteDeeplinkScheme = typeof INVITE_DEEPLINK_SCHEME;

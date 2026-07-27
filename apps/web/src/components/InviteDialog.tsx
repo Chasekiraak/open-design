@@ -11,7 +11,10 @@
 // error and stays open. The UI never blocks on the backend being present.
 
 import { useEffect, useId, useRef, useState } from 'react';
-import type { WorkspaceInviteRole } from '@open-design/contracts';
+import {
+  normalizeWorkspaceInviteCreateErrorCode,
+  type WorkspaceInviteRole,
+} from '@open-design/contracts';
 import { Button } from '@open-design/components';
 import { Icon } from './Icon';
 import { useI18n } from '../i18n';
@@ -128,14 +131,20 @@ export function InviteDialog({
   const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   const hasValidEmail = rows.some((r) => isEmail(r.email));
 
-  // Map the daemon's typed per-invite failure code to a reason-specific
-  // message. `create_409` means the person is already a member (or already
-  // invited), for which "retry later" is misleading; only an unreachable relay
-  // is actually worth retrying.
+  // Map only the daemon's allowlisted per-invite failure codes to
+  // reason-specific copy. A bare create_409 is deliberately generic: the
+  // conflict may be a duplicate, exhausted seats, a locked subscription, or a
+  // newer B error this client does not understand yet.
   function inviteErrorMessage(code: string | undefined): string {
-    switch (code) {
-      case 'create_409':
+    switch (normalizeWorkspaceInviteCreateErrorCode(code)) {
+      case 'already_member':
+      case 'active_pending_invite':
         return t('workspaceInvite.errorAlreadyMember');
+      case 'workspace_seat_limit_reached':
+      case 'workspace_subscription_seat_allocation_unavailable':
+        return t('workspaceInvite.seatsExhaustedBody');
+    }
+    switch (code) {
       case 'no_session':
         return t('workspaceInvite.errorNoSession');
       case 'no_workspace':

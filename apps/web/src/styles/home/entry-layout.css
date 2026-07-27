@@ -551,6 +551,88 @@
   color: var(--text);
 }
 
+/* ---------- Rail account skeleton (RailAccountSyncTip) ----------
+   Stand-in for the account row (`.entry-nav-rail__account-trigger` below)
+   while the just-signed-in `GET /api/workspace/context` re-read is still in
+   flight. Unlike `.entry-local-mode-tip` (absolutely positioned with a fixed
+   `bottom` so its card shape never collides with the rail-actions row below
+   it), this is a normal flex child of `.entry-nav-rail__footer` — the same
+   flow `.entry-rail-actions` already uses (`width: calc(100% - 18px); margin:
+   0 auto;`). That keeps it clear of the actions row through ordinary flex
+   stacking instead of a guessed pixel offset, AND lands its bottom edge
+   close to the panel's bottom padding the same way the real account-trigger
+   does once it mounts in `.entry-nav-rail__group` — so the loading→loaded
+   swap reads as one row filling in, not a card jumping to a different slot
+   (recvqgpXSYFNTq follow-up, 2026-07-24 product feedback). */
+.entry-rail-account-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 18px);
+  margin: 0 auto;
+  min-height: 34px;
+  padding: 4px 6px;
+  box-sizing: border-box;
+}
+.entry-rail-account-skeleton__avatar,
+.entry-rail-account-skeleton__name {
+  display: block;
+  /* House skeleton sweep (matches DesignSystemsTab's `.skeletonBlock`): a
+     soft highlight passing over a muted base, timed with the repo's default
+     UI ease-out (AGENTS.md "UI animation philosophy") rather than a linear
+     or ease-in-out sweep. */
+  background:
+    linear-gradient(
+      110deg,
+      transparent 28%,
+      color-mix(in srgb, #fff 34%, transparent) 50%,
+      transparent 72%
+    ) 0 0 / 200% 100%,
+    color-mix(in srgb, var(--bg-muted) 84%, var(--bg-panel));
+  animation: entry-rail-account-skeleton-sheen 1.55s cubic-bezier(0.23, 1, 0.32, 1) infinite;
+}
+[data-theme="dark"] .entry-rail-account-skeleton__avatar,
+[data-theme="dark"] .entry-rail-account-skeleton__name {
+  background:
+    linear-gradient(
+      110deg,
+      transparent 28%,
+      color-mix(in srgb, #fff 13%, transparent) 50%,
+      transparent 72%
+    ) 0 0 / 200% 100%,
+    color-mix(in srgb, var(--bg-elevated) 68%, var(--bg-muted));
+}
+.entry-rail-account-skeleton__avatar {
+  /* Mirrors `.entry-nav-rail__account-avatar`'s 24×25 box. That box's own
+     `clip-path: url(#od-avatar-squircle)` currently has no matching SVG
+     `<clipPath>` in the tree, so the real avatar renders as a plain square —
+     this placeholder stays a plain rounded square too rather than chasing a
+     squircle the live row does not actually show. */
+  width: 24px;
+  height: 25px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+}
+.entry-rail-account-skeleton__name {
+  /* A representative name-length bar, sized to the real row's 13px/500 text
+     (`.entry-nav-rail__account-name`) rather than stretching full width —
+     the real row's name is short and left-aligned, not a full-width line. */
+  width: 62px;
+  height: 13px;
+  border-radius: 4px;
+}
+@keyframes entry-rail-account-skeleton-sheen {
+  to {
+    background-position: -200% 0, 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry-rail-account-skeleton__avatar,
+  .entry-rail-account-skeleton__name {
+    animation: none;
+  }
+}
+
 /* ---------- Right-side hover tooltip (rail items only) ----------
    The rail is icon-only, so each button advertises its label via a
    `data-tooltip` attribute. The label slides in from the right on
@@ -5863,6 +5945,10 @@
   right: 0;
   width: auto;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(306px, 45vh);
+  overflow: hidden;
 }
 .entry-nav-rail__account-menu {
   padding: 6px;
@@ -5909,6 +5995,21 @@
   height: 8px;
 }
 .entry-nav-rail__team-menu { min-width: 0; }
+.entry-nav-rail__workspace-list {
+  min-height: 0;
+  max-height: 170px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.entry-nav-rail__workspace-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--bg-elevated);
+}
 /* Left-aligned identity header (small avatar beside the name/email stack),
    closed off by a dashed rule — mirrors the reference account menu. */
 .entry-nav-rail__account-head {

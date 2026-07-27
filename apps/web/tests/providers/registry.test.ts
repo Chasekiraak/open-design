@@ -21,12 +21,16 @@ import {
   fetchPluginExampleHtml,
   fetchPluginPreviewHtml,
   fetchProjectDesignSystemPackageAudit,
+  fetchProjectFiles,
   fetchProjectFileText,
+  fetchLiveArtifacts,
   fetchSkillExample,
   isDeployProviderId,
   openFolderDialog,
+  patchPreviewCommentSortKey,
   updateDeployConfig,
   uploadProjectFiles,
+  upsertPreviewComment,
   writeProjectTextFileDetailed,
 } from '../../src/providers/registry';
 
@@ -152,6 +156,84 @@ describe('fetchAppVersionInfo', () => {
   });
 });
 
+describe('fetchProjectFiles', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not make a foreground reopen join a cancellable background read', async () => {
+    const files = [{
+      name: 'index.html',
+      path: 'index.html',
+      kind: 'html',
+      mtime: 1,
+      size: 1,
+      mime: 'text/html',
+    }];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ files }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const background = fetchProjectFiles('project-reopen', {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    const foreground = fetchProjectFiles('project-reopen');
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await expect(background).resolves.toEqual([]);
+    await expect(foreground).resolves.toEqual(files);
+  });
+
+  it('keeps ordinary live-artifact reads independent from cancellable card scans', async () => {
+    const artifacts = [{
+      id: 'artifact-1',
+      projectId: 'project-reopen',
+      name: 'Dashboard',
+      createdAt: 1,
+      updatedAt: 2,
+    }];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockImplementationOnce((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ liveArtifacts: artifacts }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const background = fetchLiveArtifacts('project-reopen', {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    const foreground = fetchLiveArtifacts('project-reopen');
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await expect(background).resolves.toEqual([]);
+    await expect(foreground).resolves.toEqual(artifacts);
+  });
+});
+
 describe('writeProjectTextFileDetailed', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -210,6 +292,121 @@ describe('writeProjectTextFileDetailed', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await writeProjectTextFileDetailed('project-1', 'preview.html', '<html></html>');
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+// A minimal PreviewCommentTarget — only the fields the contract requires,
+// the values themselves are irrelevant to the header-attachment behavior
+// under test here.
+const PREVIEW_COMMENT_TARGET = {
+  filePath: 'index.html',
+  elementId: 'el-1',
+  selector: '#el-1',
+  label: 'Hero',
+  text: '',
+  position: { x: 0, y: 0, width: 10, height: 10 },
+  htmlHint: '<div>hero</div>',
+};
+
+function previewCommentResponse(overrides: Record<string, unknown> = {}): Response {
+  return new Response(
+    JSON.stringify({
+      comment: {
+        id: 'cmt_1',
+        projectId: 'project-1',
+        conversationId: 'conv-1',
+        ...PREVIEW_COMMENT_TARGET,
+        note: 'hi',
+        status: 'open',
+        createdAt: 0,
+        updatedAt: 0,
+        ...overrides,
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+describe('upsertPreviewComment', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  // recvq5BVsolIxi follow-up: this call used to omit `x-od-workspace-*`
+  // entirely, so a team-bound project's daemon-side
+  // `enforceCommentWorkspaceMutation` gate 401'd with
+  // `WORKSPACE_CONTEXT_REQUIRED` on every real click — silently, since the
+  // caller collapsed any non-ok response to `null`. Reproduced against the
+  // real dogfood daemon via curl before this fix landed.
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await upsertPreviewComment(
+      'project-1',
+      'conv-1',
+      { target: PREVIEW_COMMENT_TARGET, note: 'hi' },
+      personalWorkspaceContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await upsertPreviewComment('project-1', 'conv-1', { target: PREVIEW_COMMENT_TARGET, note: 'hi' });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+describe('patchPreviewCommentSortKey', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers when a workspace context is passed', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse({ sortKey: 42 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchPreviewCommentSortKey('project-1', 'conv-1', 'cmt_1', 42, personalWorkspaceContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments/cmt_1/reorder',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('omits workspace headers when there is no workspace context (legacy local mode)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse({ sortKey: 42 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchPreviewCommentSortKey('project-1', 'conv-1', 'cmt_1', 42);
 
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
@@ -463,6 +660,27 @@ describe('fetchProjectFileText', () => {
         url: '/api/projects/project-1/raw/diagram.svg',
       }),
     );
+  });
+
+  it('silently returns null when a background source read is aborted', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('Aborted', 'AbortError')),
+        { once: true },
+      );
+    })));
+
+    const pending = fetchProjectFileText('project-1', 'brand.json', {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(pending).resolves.toBeNull();
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

@@ -82,9 +82,11 @@ export interface AttachAcpSessionOptions {
   // `onCliReady` fires once on the first well-formed ACP JSON-RPC message
   // (the CLI is up and speaking the protocol); `onSessionInit` fires once when
   // the `session/new` handshake is acknowledged (a session id is established).
-  // Both are best-effort and the caller dedupes, so extra calls are harmless.
+  // `onPromptComplete` fires once when a clean `session/prompt` result is
+  // accepted. Error paths never invoke it.
   onCliReady?: () => void;
   onSessionInit?: () => void;
+  onPromptComplete?: () => void;
 }
 /**
  * Attaches an ACP protocol session to an already-spawned child process and
@@ -127,6 +129,7 @@ export function attachAcpSession({
   resumeSessionId,
   onCliReady,
   onSessionInit,
+  onPromptComplete,
 }: AttachAcpSessionOptions) {
   const runStartedAt = Date.now();
   const effectiveCwd = path.resolve(cwd || process.cwd());
@@ -411,6 +414,10 @@ export function attachAcpSession({
 
   const finishCleanPrompt = (usageSource?: unknown) => {
     if (finished) return;
+    // Mark the prompt finished before notifying observers so duplicate results
+    // and callback re-entry cannot report clean completion more than once.
+    finished = true;
+    onPromptComplete?.();
     const flushedToolText = toolCallTextSuppressor.flush();
     noteToolCallTextSuppression('tool_call_xml_flush');
     const flushedText = flushedToolText ? (dsmlArtifactSuppressor?.strip(flushedToolText) ?? flushedToolText) : '';
@@ -428,7 +435,6 @@ export function attachAcpSession({
         durationMs: Date.now() - runStartedAt,
       });
     }
-    finished = true;
     clearStageTimer();
     stdin.end();
     // Some ACP agents keep the child process alive after stdin closes,

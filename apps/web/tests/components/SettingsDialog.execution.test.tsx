@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenDesignHostUpdaterStatusSnapshot } from '@open-design/host';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { en } from '../../src/i18n/locales/en';
 
 function optionNames(container: HTMLElement): string[] {
@@ -158,6 +159,74 @@ const amrAgent: AgentInfo = {
   supportsCustomModel: false,
 };
 
+// recvqfYKutwWlQ: the AMR upgrade entry point must only render for a caller
+// who can actually act on it (`permissions.canManageBilling`), never just a
+// caller whose plan tier happens to be upgradeable. Personal workspaces
+// resolve `canManageBilling` true because the user is always their own owner
+// there (`buildWorkspacePermissions`: `canManageBilling: readable && isOwner`),
+// so this fixture doubles as the "personal identity keeps the upgrade entry"
+// control case.
+function personalWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'personal_byok',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: false },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+// A team MEMBER (not owner/admin) — `canManageBilling` folds in role, so this
+// is the "cannot act on billing" case the upgrade entry must hide for.
+function teamMemberWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    teamName: 'OD Feature Team',
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+function workspaceContextResponse(context: WorkspaceCollabContext | null) {
+  return new Response(JSON.stringify({ context }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 type OnRefreshAgents = (
   options?: AgentRefreshOptions,
 ) => void | AgentInfo[] | Promise<void | AgentInfo[]>;
@@ -274,10 +343,12 @@ function renderSettingsDialog(
     daemonLive?: boolean;
     onRefreshAgents?: OnRefreshAgents;
     initialSection?: SettingsSection;
+    locale?: Parameters<typeof I18nProvider>[0]['initial'];
     appVersionInfo?: AppVersionInfo | null;
     providerModelsCache?: Record<string, ProviderModelOption[]>;
     welcome?: boolean;
     onSilentUpdatePreferenceChange?: (allowSilentUpdates: boolean) => Promise<void>;
+    onResetOnboarding?: (next: AppConfig) => void;
   } = {},
 ) {
   const onPersist = vi.fn();
@@ -288,7 +359,7 @@ function renderSettingsDialog(
   const onClose = vi.fn();
   const onRefreshAgents = options.onRefreshAgents ?? vi.fn<OnRefreshAgents>();
 
-  const view = render(
+  const dialog = (
     <SettingsDialog
       initial={{ ...baseConfig, ...initial }}
       agents={options.agents ?? availableAgents}
@@ -301,8 +372,14 @@ function renderSettingsDialog(
       onSilentUpdatePreferenceChange={onSilentUpdatePreferenceChange}
       onPersistComposioKey={onPersistComposioKey}
       onClose={onClose}
+      onResetOnboarding={options.onResetOnboarding}
       onRefreshAgents={onRefreshAgents}
-    />,
+    />
+  );
+  const view = render(
+    options.locale
+      ? <I18nProvider initial={options.locale}>{dialog}</I18nProvider>
+      : dialog,
   );
 
   return {
@@ -2322,7 +2399,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (url === '/api/workspace/billing') {
+      if (url.startsWith('/api/workspace/billing?')) {
         return new Response(JSON.stringify({ summary: null }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -3187,6 +3264,106 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
   });
 
+  // recvqfYKutwWlQ: a personal workspace always resolves `canManageBilling`
+  // true (the user is their own owner), so the upgrade entry stays visible
+  // for a signed-in, upgrade-eligible AMR account with no team involved.
+  it('shows the AMR upgrade action for a personal identity with an upgradeable plan', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext());
+      }
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'default',
+            user: { id: 'u1', email: 'solo@example.com' },
+            account: { plan: 'plus', balanceUsd: '10.0000' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    expect(
+      await screen.findByTestId('settings-agent-card-amr-upgrade'),
+    ).toBeTruthy();
+  });
+
+  // recvqfYKutwWlQ: a team member's plan tier can be upgradeable while the
+  // member itself cannot act on billing (owner-only) — the AMR card's
+  // upgrade entry must stay hidden for them even with a fully signed-in,
+  // upgrade-eligible account, matching the fix for
+  // "团队的成员没有升级权限，是不是可以在客户端隐藏升级入口".
+  it('hides the AMR upgrade action for a team member without billing permission', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(teamMemberWorkspaceContext());
+      }
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url === '/api/integrations/vela/status') {
+        return new Response(
+          JSON.stringify({
+            loggedIn: true,
+            profile: 'default',
+            user: { id: 'u2', email: 'member@example.com' },
+            account: { plan: 'plus', balanceUsd: '10.0000' },
+            configPath: '/Users/test/.amr/config.json',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    // Let both identity sources resolve before checking the action. The $10
+    // value is account-scoped and must NOT be shown as this team workspace's
+    // balance while its explicit wallet response is unavailable.
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([i]) =>
+        i.toString() === '/api/workspace/context')).toBe(true);
+      expect(fetchMock.mock.calls.some(([i]) =>
+        i.toString() === '/api/integrations/vela/status')).toBe(true);
+    });
+    expect(screen.queryByText('$10.00')).toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('settings-agent-card-amr-upgrade')).toBeNull();
+  });
+
   it('reveals AMR cancel only while hovering the active card during sign-in', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -3578,7 +3755,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(benefits?.contains(planBadge)).toBe(false);
   });
 
-  it('loads the Settings AMR wallet fallback balance without a manual card refresh button', async () => {
+  it('loads the Settings AMR wallet fallback balance in canonical USD format without a manual card refresh button', async () => {
     let walletCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -3631,12 +3808,13 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     renderSettingsDialog(
       { mode: 'daemon', agentId: 'amr' },
-      { agents: [amrAgent] },
+      { agents: [amrAgent], locale: 'de' },
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /Lokale CLI.*1 installiert/i }));
 
     expect(await screen.findByText('$1.00')).toBeTruthy();
+    expect(screen.queryByText(/1,00/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Refresh AMR wallet balance' })).toBeNull();
     expect(walletCalls).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/integrations/vela/wallet', {
@@ -3648,8 +3826,8 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
   // card read ONLY vela's account-scoped balance (`account.balanceUsd`, then
   // the `/api/integrations/vela/wallet` snapshot) — the same account-scoped
   // projection `resolvePlanTier` already exists to override for the plan badge
-  // on this exact card. `useWorkspaceBilling` (the same source EntryNavRail's
-  // credits chip reads) must win once it has loaded.
+  // on this exact card. The explicit workspace balance from
+  // `useWorkspaceBillingResponse` must win once it has loaded.
   it('prefers the workspace billing balance over the account-scoped wallet snapshot', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -3657,7 +3835,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
         return new Response(
           JSON.stringify({
             context: {
+              workspaceId: 'ws-team',
               workspaceType: 'team',
+              workspaceMemberId: 'member-team',
               role: 'member',
               permissions: { canViewWorkspaceSettings: false },
             },
@@ -3665,18 +3845,34 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      if (url === '/api/workspace/billing') {
+      if (url.startsWith('/api/workspace/billing?')) {
         return new Response(
           JSON.stringify({
             summary: {
-              workspaceId: 'ws-team',
+              workspaceId: null,
               membershipTier: 'team',
-              totalAvailableCredits: 21.01,
-              subscriptionCredits: 21.01,
+              // recvqakgSc1Pwd: B reports credits and USD on separate scales
+              // (thousands of credits per dollar) — a real workspace read
+              // 99933 credits / $9.9933. Earlier fixture data used a
+              // fractional credits count that coincidentally equaled its own
+              // balanceUsd string, which let a totalAvailableCredits-as-USD
+              // regression pass silently. These numbers are deliberately far
+              // apart so only reading `balanceUsd` can produce '$9.99'.
+              totalAvailableCredits: 99933,
+              subscriptionCredits: 99933,
               rechargeCredits: 0,
-              balanceUsd: '21.01',
+              balanceUsd: '131.23',
               subscriptionStatus: 'active',
               availableActions: [],
+              workspaceBalance: null,
+            },
+            workspaceBalance: {
+              workspaceId: 'ws-team',
+              workspaceMemberId: 'member-team',
+              balanceUsd: '9.9933',
+              billingScopeVersion: 2,
+              expiresAt: null,
+              updatedAt: '2026-07-26T12:00:00Z',
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -3728,7 +3924,13 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
-    expect(await screen.findByText('$21.01')).toBeTruthy();
+    // recvqakgSc1Pwd: the card must format `balanceUsd` (a real dollar
+    // figure vela reports), never `totalAvailableCredits` (a raw credits
+    // count) — feeding the credits count through the USD formatter is how a
+    // FEATURE TEST workspace with 388307 credits rendered "Balance
+    // $388307.00" in Settings > Models & providers > Local CLI.
+    expect(await screen.findByText('$9.99')).toBeTruthy();
+    expect(screen.queryByText('$99933.00')).toBeNull();
     expect(screen.queryByText('$138.63')).toBeNull();
   });
 
@@ -3882,6 +4084,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    // recvqgMWpJZqhL: sign-out is gated behind an explicit confirmation
+    // dialog; the real logout only runs after confirming.
+    fireEvent.click(screen.getByTestId('sign-out-confirm-accept'));
 
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
     expect(screen.getByTestId('settings-agent-select-amr')).toBeTruthy();
@@ -5407,6 +5612,43 @@ describe('SettingsDialog design systems section', () => {
 describe('SettingsDialog about interactions', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
+  });
+
+  it('drops a pending autosave when explicit onboarding reset unmounts Settings', () => {
+    vi.useFakeTimers();
+    const onResetOnboarding = vi.fn();
+    const view = renderSettingsDialog(
+      {
+        mode: 'daemon',
+        agentId: 'codex',
+        onboardingCompleted: true,
+        theme: 'system',
+      },
+      {
+        initialSection: 'appearance',
+        onResetOnboarding,
+      },
+    );
+
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Appearance' })).getByRole('button', {
+        name: 'Dark',
+      }),
+    );
+    expect(screen.getByText('Saving…')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /About/i }));
+    fireEvent.click(screen.getByRole('button', { name: en['settings.resetOnboardingButton'] }));
+    view.unmount();
+
+    expect(view.onPersist).not.toHaveBeenCalled();
+    expect(onResetOnboarding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onboardingCompleted: false,
+        theme: 'dark',
+      }),
+    );
   });
 
   it('renders app version and runtime details when version info is available', () => {

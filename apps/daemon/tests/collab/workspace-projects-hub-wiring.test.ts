@@ -69,9 +69,15 @@ describe('handleHubTeamProjectsChanged', () => {
       resolveDone = resolve;
     });
 
-    const frame = 'event: workspace-event\ndata: {"type":"team-projects-changed","at":123}\n\n';
+    const readyFrame = 'event: ready\ndata: {"workspaceId":"w1"}\n\n';
+    const frame =
+      'event: workspace-event\ndata: {"type":"team-projects-changed","workspaceId":"w1","at":123}\n\n';
     const subscriber = startHubEventsSubscriber({
-      resolveEndpoint: async () => ({ url: 'https://hub/api/v1/collab/events', headers: {} }),
+      resolveEndpoint: async () => ({
+        url: 'https://hub/api/v1/collab/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
       onEvent: (event) => {
         expect(parseHubWorkspaceEvent(JSON.stringify(event))).toEqual(event);
         if (event.type === 'team-projects-changed') {
@@ -79,7 +85,7 @@ describe('handleHubTeamProjectsChanged', () => {
           resolveDone();
         }
       },
-      fetchImpl: async () => sseResponse([frame]),
+      fetchImpl: async () => sseResponse([readyFrame, frame]),
     });
 
     try {
@@ -171,7 +177,30 @@ describe('server.ts wiring (source boundary)', () => {
     expect(caseNames).toEqual(['team-projects-changed']);
   });
 
-  it('wires the workspace-invalidation poller emit through handlePolledWorkspaceInvalidation', () => {
+  it('only starts hub missing-project recovery for a targeted project id', () => {
+    const switchBody = extractOnEventSwitchBody();
+    const teamProjectsCase = switchBody
+      .split(/(?=case '[a-z-]+':)/g)
+      .find((chunk) => chunk.startsWith("case 'team-projects-changed':"));
+
+    expect(teamProjectsCase).toContain(
+      'if (event.workspaceId && event.projectId) {',
+    );
+    expect(teamProjectsCase).toContain(
+      'proactiveContentPull.materializeMissingProjects(\n' +
+        '              event.workspaceId,\n' +
+        '              event.projectId,\n' +
+        '            );',
+    );
+  });
+
+  it('logs broad-head cooldown deferrals in catch-up completion diagnostics', () => {
+    expect(source).toContain(
+      '`suppressed=${event.suppressed ?? 0} complete=${event.complete === true}`',
+    );
+  });
+
+  it('wires poller invalidations through reconciliation and stable catalog observations through bounded full recovery', () => {
     const anchor = 'createWorkspaceInvalidationPoller({';
     const start = source.indexOf(anchor);
     expect(start, 'expected to find createWorkspaceInvalidationPoller(...) in server.ts').toBeGreaterThan(-1);
@@ -189,6 +218,113 @@ describe('server.ts wiring (source boundary)', () => {
     }
     expect(depth, 'expected createWorkspaceInvalidationPoller({...}) braces to balance').toBe(0);
     const configBody = source.slice(start, i + 1);
-    expect(configBody).toMatch(/emit:\s*\(payload\)\s*=>\s*handlePolledWorkspaceInvalidation\(/);
+    expect(configBody).toContain(
+      'handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote);',
+    );
+    expect(configBody).toContain(
+      'onTeamProjectsObserved: ({ workspaceId }) =>\n' +
+        '      proactiveContentPull.advanceRecoveryFloor(workspaceId),',
+    );
+    expect(configBody).not.toContain('activeWorkspace.get()');
+    const emitStart = configBody.indexOf('emit: (payload) => {');
+    const emitEnd = configBody.indexOf('\n    },', emitStart);
+    expect(emitStart).toBeGreaterThan(-1);
+    expect(emitEnd).toBeGreaterThan(emitStart);
+    expect(configBody.slice(emitStart, emitEnd)).not.toContain(
+      'proactiveContentPull.advanceRecoveryFloor',
+    );
+  });
+
+  it('disposes proactive pull retry timers during daemon shutdown', () => {
+    const anchor = 'const cleanupDaemonBackgroundWork = () => {';
+    const start = source.indexOf(anchor);
+    expect(start, 'expected daemon background cleanup in server.ts').toBeGreaterThan(-1);
+    const end = source.indexOf('};', start);
+    expect(end, 'expected daemon background cleanup to close').toBeGreaterThan(start);
+    const cleanupBody = source.slice(start, end + 2);
+    expect(cleanupBody).toContain('proactiveContentPull.dispose();');
+  });
+
+  it('recovers promotion journals before registering collaboration pull routes', () => {
+    const recovery = source.indexOf(
+      'await recoverAuthorizedTeamProjectPromotions({',
+    );
+    const routes = source.indexOf(
+      'const collabSyncRoutes = registerCollabSyncRoutes(app, {',
+    );
+    expect(recovery).toBeGreaterThan(-1);
+    expect(routes).toBeGreaterThan(recovery);
+    expect(source.slice(recovery, routes)).toContain(
+      'allowedProjectsRoot: PROJECTS_DIR',
+    );
+    expect(source.slice(recovery, routes)).toContain(
+      'getTeamProjectMaterialization(',
+    );
+  });
+
+  it('wires the exact proactive invocation and transactional receipt materializer', () => {
+    expect(source).toContain(
+      'materializeAuthorizedTeamMirror: (input, scope, receipt) =>\n' +
+        '        materializePulledTeamMirror(db, input, scope, receipt)',
+    );
+    expect(source).toContain(
+      '}, target.authorizationWitness, expectedVersion, target.authorizedStageInvocation)',
+    );
+    expect(source).toContain(
+      'getActiveWorkspaceSnapshot: authorizedActiveWorkspaceSnapshot',
+    );
+  });
+
+  it('authorizes no-pin reconnect catch-up from verified workspace identity', () => {
+    const anchor = 'listSharedProjects: async (workspaceId) => {';
+    const start = source.indexOf(anchor);
+    const end = source.indexOf('hasMaterializedProject:', start);
+    const body = source.slice(start, end);
+    expect(body).not.toContain('activeWorkspace.get()');
+    expect(body).toContain('collab.workspaceContext.current({})');
+    expect(body).toContain('const before = authorizedActiveWorkspaceSnapshot()');
+    expect(body).toContain('const after = authorizedActiveWorkspaceSnapshot()');
+    expect(body).toContain('after.generation !== before.generation');
+  });
+
+  it('recognizes an authorized remote mirror from exact version and a real live directory, not a local project manifest', () => {
+    const helperStart = source.indexOf(
+      'const proactiveTeamProjectMaterializedVersion = (',
+    );
+    const configStart = source.indexOf(
+      'const proactiveContentPull = createProactiveContentPull({',
+      helperStart,
+    );
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(configStart).toBeGreaterThan(helperStart);
+    const helperBody = source.slice(helperStart, configStart);
+    expect(helperBody).toContain('getTeamProjectMaterialization(');
+    expect(helperBody).toContain('target.workspaceId');
+    expect(helperBody).toContain(
+      'teamProjectContentResourceId(target.projectId, target)',
+    );
+    expect(helperBody).toContain(
+      'latestTeamProjectMaterializationVersion(',
+    );
+
+    const probeStart = source.indexOf(
+      'hasMaterializedProject: async (projectId, target) => {',
+      configStart,
+    );
+    const probeEnd = source.indexOf(
+      'materializedVersion: proactiveTeamProjectMaterializedVersion,',
+      probeStart,
+    );
+    expect(probeStart).toBeGreaterThan(configStart);
+    expect(probeEnd).toBeGreaterThan(probeStart);
+    const probeBody = source.slice(probeStart, probeEnd);
+    expect(probeBody).toContain('const project = getProject(db, projectId);');
+    expect(probeBody).toContain(
+      'proactiveTeamProjectMaterializedVersion(target)',
+    );
+    expect(probeBody).toContain('fs.promises.lstat(projectDir)');
+    expect(probeBody).toContain('entry.isDirectory()');
+    expect(probeBody).toContain('!entry.isSymbolicLink()');
+    expect(probeBody).not.toContain('readProjectManifest');
   });
 });

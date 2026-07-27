@@ -671,7 +671,13 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
       }
     },
     async pullLatest(projectId, principal) {
-      if (baseAdapter.pull) await baseAdapter.pull({ projectId, ...(principal ? { principal } : {}) });
+      if (baseAdapter.pull) {
+        const materialized = await baseAdapter.pull({
+          projectId,
+          ...(principal ? { principal } : {}),
+        });
+        return { version: materialized?.version ?? null };
+      }
       const head = baseAdapter.syncLatest
         ? await baseAdapter.syncLatest({ projectId, ...(principal ? { principal } : {}) })
         : { version: principal ? published.get(scopedProjectKey(projectId, principal)) ?? null : published.get(projectId) ?? null };

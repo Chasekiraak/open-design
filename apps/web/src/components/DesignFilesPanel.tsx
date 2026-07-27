@@ -36,10 +36,9 @@ interface Props {
   viewerOnly?: boolean;
   /**
    * True while a non-owner member's local mirror has not yet caught up to the
-   * project's published head — the file-list read below is honest (it reads
-   * local disk directly), but an empty result here can mean either "nothing
-   * was ever shared" or "the pull just hasn't landed yet". Swaps the empty
-   * state for a syncing notice so the two cannot look identical.
+   * project's published head. Existing files belong to the last complete
+   * local materialization and remain useful while the next version downloads;
+   * only an empty local result swaps the creation CTAs for a syncing notice.
    */
   downloadPending?: boolean;
   // Basename of the project's working directory when the user has chosen a

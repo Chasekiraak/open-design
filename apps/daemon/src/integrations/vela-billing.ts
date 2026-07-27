@@ -1,9 +1,12 @@
 import type {
   WorkspaceBillingCatalog,
+  WorkspaceBillingSnapshot,
+  WorkspaceBillingState,
   WorkspaceBillingSummary,
   WorkspaceTeamBillingPlanId,
+  WorkspaceWalletBalance,
 } from '@open-design/contracts';
-import { runVelaCommand, velaWorkspaceCommandOptions } from './vela-command.js';
+import { runVelaCommand } from './vela-command.js';
 
 // A-lane billing 收口. Instead of the daemon holding billing credentials, it
 // shells out to `vela billing summary --format json`, which authenticates with
@@ -23,38 +26,126 @@ export interface FetchVelaBillingOptions {
   run?: RunVelaBilling;
 }
 
-/**
- * Fetch the billing summary for `workspaceId` via the CLI 收口. Returns null
- * when the CLI is missing, the user has no billing session, or the payload
- * can't be parsed — every failure is a clean "no summary", never a throw, so
- * the route can always answer and the client falls back to its context tier
- * hint.
- *
- * The workspace travels to vela the same way it does for collab, resources,
- * and team projects: as `VELA_WORKSPACE_ID` on the child environment, which
- * vela's `workspaceScopedClient` turns into the `x-vela-workspace-id` header.
- * Passing it here is what makes the read a WORKSPACE question rather than an
- * account one — the summary used to go out with no scope whatsoever, so an
- * account saw identical credits and an identical tier in every workspace.
- *
- * An empty `workspaceId` is allowed and means "no workspace context": the
- * account-level read still answers (B's wallet does not require a workspace),
- * it is simply left unstamped rather than being attributed to a workspace the
- * daemon could not name.
- */
+export class VelaWorkspaceBillingSnapshotUnsupportedError extends Error {
+  readonly code = 'billing_workspace_snapshot_unsupported';
+
+  constructor() {
+    super('workspace billing snapshot unsupported');
+    this.name = 'VelaWorkspaceBillingSnapshotUnsupportedError';
+  }
+}
+
+export interface VelaWorkspaceBillingProjection {
+  snapshot: WorkspaceBillingSnapshot | null;
+  workspaceBalance: WorkspaceWalletBalance | null;
+}
+
+/** Fetch Vela's account-scoped billing summary through the CLI 收口. */
 export async function fetchVelaBillingSummary(
-  workspaceId: string,
   options: FetchVelaBillingOptions = {},
 ): Promise<WorkspaceBillingSummary | null> {
-  const trimmedWorkspaceId = workspaceId.trim();
-  const run = options.run ?? runVelaBillingForWorkspace(trimmedWorkspaceId);
+  const run = options.run ?? defaultRunVelaBilling;
   let stdout: string;
   try {
     stdout = await run(['summary', '--format', 'json']);
   } catch {
     return null;
   }
-  return parseBillingSummary(stdout, trimmedWorkspaceId);
+  return parseBillingSummary(stdout);
+}
+
+/**
+ * Fetch one explicit workspace wallet. The requested id travels as a CLI
+ * argument, never as ambient active-workspace state, and the parser requires
+ * Vela to return the same identity with billing-scope v2.
+ */
+export async function fetchVelaWorkspaceBalance(
+  workspaceId: string,
+  options: FetchVelaBillingOptions = {},
+): Promise<WorkspaceWalletBalance | null> {
+  const requestedWorkspaceId = workspaceId.trim();
+  if (!requestedWorkspaceId) return null;
+  const run = options.run ?? defaultRunVelaBilling;
+  let stdout: string;
+  try {
+    stdout = await run([
+      'workspace-balance',
+      '--workspace-id',
+      requestedWorkspaceId,
+      '--format',
+      'json',
+    ]);
+  } catch {
+    return null;
+  }
+  return parseWorkspaceWalletBalance(stdout, requestedWorkspaceId);
+}
+
+/**
+ * Prefer Vela's atomic plan+wallet snapshot. An old CLI/server may report the
+ * typed unsupported sentinel. Older Cobra builds instead reject the first new
+ * command flag before resolving the unknown subcommand; both compatibility
+ * cases fall back to the legacy wallet command. Auth/network/parse failures
+ * stay unavailable instead of being misclassified as an old server.
+ */
+export async function fetchVelaWorkspaceBillingProjection(
+  workspaceId: string,
+  options: FetchVelaBillingOptions = {},
+): Promise<VelaWorkspaceBillingProjection> {
+  const requestedWorkspaceId = workspaceId.trim();
+  if (!requestedWorkspaceId) {
+    return { snapshot: null, workspaceBalance: null };
+  }
+  const run = options.run ?? defaultRunVelaBilling;
+  try {
+    const stdout = await run([
+      'workspace-snapshot',
+      '--workspace-id',
+      requestedWorkspaceId,
+      '--format',
+      'json',
+    ]);
+    const snapshot = parseWorkspaceBillingSnapshot(stdout, requestedWorkspaceId);
+    if (!snapshot) {
+      throw new Error(`workspace billing snapshot is invalid for ${requestedWorkspaceId}`);
+    }
+    return {
+      snapshot,
+      workspaceBalance: {
+        workspaceId: snapshot.workspaceId,
+        workspaceMemberId: snapshot.workspaceMemberId,
+        balanceUsd: snapshot.wallet.balanceUsd,
+        billingScopeVersion: 2,
+        expiresAt: snapshot.wallet.expiresAt,
+        updatedAt: snapshot.wallet.updatedAt,
+      },
+    };
+  } catch (error) {
+    if (
+      !(error instanceof VelaWorkspaceBillingSnapshotUnsupportedError) &&
+      !isWorkspaceBillingSnapshotUnsupported(error, '')
+    ) {
+      throw error;
+    }
+    const legacyStdout = await run([
+      'workspace-balance',
+      '--workspace-id',
+      requestedWorkspaceId,
+      '--format',
+      'json',
+    ]);
+    const workspaceBalance = parseWorkspaceWalletBalance(
+      legacyStdout,
+      requestedWorkspaceId,
+    );
+    if (!workspaceBalance) {
+      throw new Error(`workspace balance response is invalid for ${requestedWorkspaceId}`);
+    }
+    return {
+      snapshot: null,
+      workspaceBalance,
+    };
+  }
 }
 
 export interface BillingCheckoutOptions {
@@ -137,19 +228,8 @@ export async function fetchVelaBillingCatalog(
   return parseBillingCatalog(stdout);
 }
 
-/**
- * Map the `vela billing summary` JSON into the client-facing summary, stamped
- * with the workspace the read was scoped to.
- *
- * B reports the wallet as three numbers under `balances`: the subscription
- * grant bucket, the top-up bucket, and their total. Keeping only the total is
- * what left the account menu's 附加积分 row with nothing to read — carry all
- * three so the UI shows B's real split instead of a constant.
- */
-export function parseBillingSummary(
-  stdout: string,
-  workspaceId: string,
-): WorkspaceBillingSummary | null {
+/** Map `vela billing summary` without inventing a workspace identity. */
+export function parseBillingSummary(stdout: string): WorkspaceBillingSummary | null {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   let raw: Record<string, unknown>;
@@ -160,7 +240,7 @@ export function parseBillingSummary(
   }
   const balances = (raw.balances ?? {}) as Record<string, unknown>;
   return {
-    workspaceId: workspaceId.trim() || null,
+    workspaceId: null,
     membershipTier: str(raw.membershipTier),
     totalAvailableCredits: credits(balances.totalAvailableCredits),
     subscriptionCredits: credits(balances.subscriptionCredits),
@@ -170,6 +250,104 @@ export function parseBillingSummary(
     availableActions: Array.isArray(raw.availableActions)
       ? raw.availableActions.filter((a): a is string => typeof a === 'string')
       : [],
+    workspaceBalance: null,
+  };
+}
+
+/** Parse only a backend-proven balance for the exact requested workspace. */
+export function parseWorkspaceWalletBalance(
+  stdout: string,
+  requestedWorkspaceId: string,
+): WorkspaceWalletBalance | null {
+  const requested = requestedWorkspaceId.trim();
+  const trimmed = stdout.trim();
+  if (!requested || !trimmed) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const workspaceId = str(raw.workspaceId).trim();
+  const workspaceMemberId = str(raw.workspaceMemberId).trim();
+  const balanceUsd = str(raw.balanceUsd).trim();
+  if (
+    raw.billingScopeVersion !== 2 ||
+    workspaceId !== requested ||
+    !workspaceMemberId ||
+    !balanceUsd
+  ) {
+    return null;
+  }
+  return {
+    workspaceId,
+    workspaceMemberId,
+    balanceUsd,
+    billingScopeVersion: 2,
+    expiresAt: nullableString(raw.expiresAt),
+    updatedAt: nullableString(raw.updatedAt),
+  };
+}
+
+/** Parse only a backend-proven snapshot for the exact requested workspace. */
+export function parseWorkspaceBillingSnapshot(
+  stdout: string,
+  requestedWorkspaceId: string,
+): WorkspaceBillingSnapshot | null {
+  const requested = requestedWorkspaceId.trim();
+  const trimmed = stdout.trim();
+  if (!requested || !trimmed) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const workspaceId = str(raw.workspaceId).trim();
+  const workspaceMemberId = str(raw.workspaceMemberId).trim();
+  const billing = objectRecord(raw.billing);
+  const wallet = objectRecord(raw.wallet);
+  const revisions = objectRecord(raw.revisions);
+  const billingState = nullableBillingState(billing.billingState);
+  const balanceUsd = str(wallet.balanceUsd).trim();
+  const billingRevision = str(revisions.billing).trim();
+  const walletRevision = str(revisions.wallet).trim();
+  if (
+    raw.schemaVersion !== 1 ||
+    raw.billingScopeVersion !== 2 ||
+    !isObjectRecord(raw.billing) ||
+    !isObjectRecord(raw.wallet) ||
+    !isObjectRecord(raw.revisions) ||
+    workspaceId !== requested ||
+    !workspaceMemberId ||
+    !balanceUsd ||
+    !billingRevision ||
+    !walletRevision ||
+    !isNullableBillingState(billing.billingState) ||
+    !isNullableNonEmptyString(billing.planId) ||
+    !isNullableNonEmptyString(wallet.expiresAt) ||
+    !isNullableNonEmptyString(wallet.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    schemaVersion: 1,
+    workspaceId,
+    workspaceMemberId,
+    billingScopeVersion: 2,
+    billing: {
+      billingState,
+      planId: nullableString(billing.planId),
+    },
+    wallet: {
+      balanceUsd,
+      expiresAt: nullableString(wallet.expiresAt),
+      updatedAt: nullableString(wallet.updatedAt),
+    },
+    revisions: {
+      billing: billingRevision,
+      wallet: walletRevision,
+    },
   };
 }
 
@@ -230,28 +408,85 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return isObjectRecord(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+const WORKSPACE_BILLING_STATES: ReadonlySet<WorkspaceBillingState> = new Set([
+  'free',
+  'active',
+  'past_due',
+  'canceled',
+  'inactive',
+  'locked',
+]);
+
+function nullableBillingState(value: unknown): WorkspaceBillingState | null {
+  return typeof value === 'string' &&
+    WORKSPACE_BILLING_STATES.has(value as WorkspaceBillingState)
+    ? value as WorkspaceBillingState
+    : null;
+}
+
+function isNullableBillingState(value: unknown): boolean {
+  return value == null ||
+    (typeof value === 'string' &&
+      WORKSPACE_BILLING_STATES.has(value as WorkspaceBillingState));
+}
+
+function isNullableNonEmptyString(value: unknown): boolean {
+  return value == null || (typeof value === 'string' && value.trim().length > 0);
+}
+
 function parseTeamPlanId(value: unknown): WorkspaceTeamBillingPlanId | null {
   return value === 'team_plus' || value === 'team_pro' || value === 'team_max'
     ? value
     : null;
 }
 
-const defaultRunVelaBilling: RunVelaBilling = (args) => runVelaBillingForWorkspace('')(args);
-
-/**
- * A `vela billing` runner scoped to one workspace, using the same env carrier
- * as the collab / resource / team-project adapters.
- *
- * `velaWorkspaceCommandOptions` omits `VELA_WORKSPACE_ID` entirely for an empty
- * id, so an unscoped call still reaches vela unscoped. It does also add the
- * `VELA_INVOCATION_SOURCE=open-design` tag those adapters already send, which
- * billing previously did not — a source label, not a behavioral input.
- */
-function runVelaBillingForWorkspace(workspaceId: string): RunVelaBilling {
-  const workspaceOptions = velaWorkspaceCommandOptions(workspaceId);
-  return (args) =>
-    runVelaCommand(['billing', ...args], {
-      ...workspaceOptions,
+const defaultRunVelaBilling: RunVelaBilling = async (args) => {
+  let stderr = '';
+  try {
+    return await runVelaCommand(['billing', ...args], {
+      configuredEnv: { VELA_INVOCATION_SOURCE: 'open-design' },
       maxBuffer: 4 * 1024 * 1024,
+      onStderr: (value) => {
+        stderr = value;
+      },
     });
+  } catch (error) {
+    if (
+      args[0] === 'workspace-snapshot' &&
+      isWorkspaceBillingSnapshotUnsupported(error, stderr)
+    ) {
+      throw new VelaWorkspaceBillingSnapshotUnsupportedError();
+    }
+    throw error;
+  }
+};
+
+function isWorkspaceBillingSnapshotUnsupported(error: unknown, stderr: string): boolean {
+  const detail = [
+    stderr,
+    error instanceof Error ? error.message : String(error),
+  ].join('\n').toLowerCase();
+  return (
+    detail.includes('billing_workspace_snapshot_unsupported') ||
+    detail.includes('workspace billing snapshot unsupported') ||
+    detail.includes('unknown flag: --workspace-id') ||
+    (
+      detail.includes('unknown command') &&
+      detail.includes('workspace-snapshot')
+    )
+  );
 }

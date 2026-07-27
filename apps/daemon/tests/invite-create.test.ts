@@ -66,6 +66,62 @@ describe('createWorkspaceInvite', () => {
     }
   });
 
+  it.each([
+    ['invite_duplicate', 'active_pending_invite'],
+    ['already_member', 'already_member'],
+    ['active_pending_invite', 'active_pending_invite'],
+    ['workspace_seat_limit_reached', 'workspace_seat_limit_reached'],
+    [
+      'workspace_subscription_seat_allocation_unavailable',
+      'workspace_subscription_seat_allocation_unavailable',
+    ],
+  ])('preserves allowlisted B error %s as %s', async (upstreamError, expectedError) => {
+    const out = await createWorkspaceInvite(
+      { email: 'new@company.com', role: 'member', workspaceId: 'ws-team-1' },
+      {
+        fetch: (async () => jsonResponse(409, { error: upstreamError })) as unknown as typeof fetch,
+        readSession: () => SESSION,
+      },
+    );
+
+    expect(out).toEqual({ ok: false, status: 409, error: expectedError });
+  });
+
+  it.each([
+    { error: 'database_constraint_details' },
+    { code: 'unrecognized_conflict' },
+    { error: { private: 'not-a-string' } },
+  ])('does not expose an unknown B error body: %j', async (body) => {
+    const out = await createWorkspaceInvite(
+      { email: 'new@company.com', role: 'member', workspaceId: 'ws-team-1' },
+      {
+        fetch: (async () => jsonResponse(409, body)) as unknown as typeof fetch,
+        readSession: () => SESSION,
+      },
+    );
+
+    expect(out).toEqual({ ok: false, status: 409, error: 'create_409' });
+  });
+
+  it('keeps a non-JSON 409 generic instead of inventing a duplicate', async () => {
+    const out = await createWorkspaceInvite(
+      { email: 'new@company.com', role: 'member', workspaceId: 'ws-team-1' },
+      {
+        fetch: (async () =>
+          ({
+            ok: false,
+            status: 409,
+            json: async () => {
+              throw new SyntaxError('not JSON');
+            },
+          }) as unknown as Response) as unknown as typeof fetch,
+        readSession: () => SESSION,
+      },
+    );
+
+    expect(out).toEqual({ ok: false, status: 409, error: 'create_409' });
+  });
+
   it('degrades to create_unreachable on a transport error, never throwing', async () => {
     const out = await createWorkspaceInvite(
       { email: 'new@company.com', role: 'member', workspaceId: 'ws-team-1' },

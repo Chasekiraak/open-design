@@ -3676,6 +3676,7 @@ function TaskActivityCard({
             entry={currentEntry}
             projectFileNames={projectFileNames}
             onRequestOpenFile={onRequestOpenFile}
+            onThinkingLinkClick={onThinkingLinkClick}
           />
         </div>
       </div>
@@ -3747,20 +3748,26 @@ function CurrentTaskActivityRow({
   entry,
   projectFileNames,
   onRequestOpenFile,
+  onThinkingLinkClick,
 }: {
   entry: TaskActivityEntry;
   projectFileNames?: Set<string>;
   onRequestOpenFile?: (name: string) => void;
+  onThinkingLinkClick?: MarkdownLinkClickHandler;
 }) {
-  const t = useT();
   if (entry.kind === "thinking") {
+    // The compact running view keeps one current row (#5667), but thinking
+    // must stay expandable mid-run: a user parked on a long "Thinking…" (or a
+    // hung provider, incident recvqgLmAkUM6G) needs to open the streamed
+    // reasoning to judge progress. ThinkingBlock is the same disclosure the
+    // settled card uses, so the affordance matches before and after the run
+    // completes.
     return (
-      <div className="task-activity-current-thinking">
-        <span className="op-status op-status-category" aria-hidden>
-          <Icon name="sparkles" size={14} />
-        </span>
-        <span className="op-title shimmer-text">{t("assistant.thinking")}</span>
-      </div>
+      <ThinkingBlock
+        text={entry.text}
+        streaming
+        onLinkClick={onThinkingLinkClick}
+      />
     );
   }
   if (entry.kind === "live-tool") {

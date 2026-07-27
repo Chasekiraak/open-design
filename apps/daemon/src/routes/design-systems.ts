@@ -253,6 +253,19 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
 
   app.patch('/api/design-systems/:id/revisions/:revisionId', async (req, res) => {
     try {
+      // recvqb6mfyqXLD: accepting a revision commits its proposed body onto
+      // the canonical design system — the same "edit" this route family
+      // gates everywhere else (PATCH/DELETE/sync-assets above). Without this,
+      // a plain member viewing a teammate's team-synced design system could
+      // accept/reject its pending revision (surfaced to anyone who can read
+      // the system, not just the owner) with no server-side check at all,
+      // even after the UI stopped showing it as editable.
+      if (isRequestWorkspaceLocked(req)) {
+        return res.status(403).json({ error: 'WORKSPACE_LOCKED' });
+      }
+      if (!(await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req))) {
+        return res.status(403).json({ error: 'WORKSPACE_RESOURCE_MANAGE_DENIED' });
+      }
       const status = typeof req.body?.status === 'string' ? req.body.status : '';
       if (status !== 'accepted' && status !== 'rejected') {
         return res.status(400).json({ error: 'status must be accepted or rejected' });
@@ -282,7 +295,21 @@ export function registerDesignSystemRoutes(app: Express, ctx: RegisterDesignSyst
         return res.status(404).json({ error: 'design system not found' });
       }
       const packageInfo = await readAvailableDesignSystemPackageInfo(req.params.id);
-      const detail = { ...summary, body, ...(packageInfo ? { packageInfo } : {}) };
+      // recvqb6mfyqXLD: mirror the exact PATCH/DELETE verdict onto the read
+      // path too. `DesignSystemsTab` already re-derives an equivalent verdict
+      // from the separate `/team` share listing for its own list+detail pane,
+      // but a design system reached any other way — e.g. the direct
+      // `/design-systems/:id` route the Library's "Open design system" link
+      // and `LibrarySection` navigate to, which renders `DesignSystemFlow`
+      // directly — had no ownership signal at all and fell back to treating
+      // any non-built-in system as fully editable. Computing it once here,
+      // from the same `canMutateUserDesignSystem` the mutation routes below
+      // already gate on, means every detail surface can hide/disable its
+      // Publish toggle and Save button on the same authority the backend
+      // enforces, instead of each surface re-deriving (or forgetting to
+      // derive) its own verdict.
+      const canMutate = await canMutateUserDesignSystem(USER_DESIGN_SYSTEMS_DIR, req.params.id, req);
+      const detail = { ...summary, body, canMutate, ...(packageInfo ? { packageInfo } : {}) };
       res.json({ ...detail, designSystem: detail });
     } catch (err) {
       res.status(500).json({ error: String(err) });

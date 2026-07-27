@@ -57,6 +57,7 @@ function billing(overrides: Partial<WorkspaceBillingSummary> = {}): WorkspaceBil
 function renderRail(props: {
   context: WorkspaceCollabContext;
   billing: WorkspaceBillingSummary | null;
+  balanceUsd?: string | null;
 }) {
   return render(
     <I18nProvider initial="zh-CN">
@@ -68,6 +69,7 @@ function renderRail(props: {
         onClose={() => {}}
         context={props.context}
         billing={props.billing}
+        balanceUsd={props.balanceUsd}
       />
     </I18nProvider>,
   );
@@ -127,6 +129,93 @@ describe('account menu billing card — plan label (#146)', () => {
   });
 });
 
+describe('account menu billing card — workspace-aware upgrade routing', () => {
+  it.each([
+    {
+      name: 'personal owner',
+      context: {
+        workspaceType: 'personal',
+        billingState: 'free',
+        planId: null,
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: { membershipTier: '', subscriptionStatus: '' } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/wallet',
+      param: ['view', 'plans'],
+    },
+    {
+      name: 'free team owner',
+      context: {
+        workspaceType: 'team',
+        billingState: 'free',
+        planId: null,
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: { membershipTier: '', subscriptionStatus: '' } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/dashboard',
+      param: ['billing', 'checkout'],
+    },
+    {
+      name: 'paid team owner',
+      context: {
+        workspaceType: 'team',
+        billingState: 'active',
+        planId: 'team_plus',
+      } satisfies Partial<WorkspaceCollabContext>,
+      billing: {
+        membershipTier: 'team_plus',
+        subscriptionStatus: 'active',
+      } satisfies Partial<WorkspaceBillingSummary>,
+      path: '/console/dashboard',
+      param: ['billing', 'plan'],
+    },
+  ])(
+    'routes a $name through the matching Vela dialog',
+    ({ context: contextOverrides, billing: billingOverrides, path, param }) => {
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+      renderRail({
+        context: context({
+          ...contextOverrides,
+          permissions: {
+            canInviteMembers: true,
+            canManageBilling: true,
+            canViewWorkspaceSettings: true,
+          },
+          workspaceSettingsUrl:
+            'https://web.example.com/console/settings?workspaceId=ws-new',
+        } as Partial<WorkspaceCollabContext>),
+        billing: billing(billingOverrides),
+      });
+
+      fireEvent.click(billingCard().getByRole('button', { name: '升级' }));
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      const target = new URL(String(openSpy.mock.calls[0]![0]));
+      expect(target.pathname).toBe(path);
+      expect(target.searchParams.get(param[0]!)).toBe(param[1]);
+      expect(target.searchParams.get('workspaceId')).toBe('ws-new');
+    },
+  );
+
+  it.each(['admin', 'member'] as const)(
+    'hides the upgrade action for a %s without billing permission',
+    (role) => {
+      renderRail({
+        context: context({
+          role,
+          permissions: {
+            canInviteMembers: true,
+            canManageBilling: false,
+            canViewWorkspaceSettings: true,
+          },
+          workspaceSettingsUrl: 'https://web.example.com/console/settings?workspaceId=ws-new',
+        } as Partial<WorkspaceCollabContext>),
+        billing: billing(),
+      });
+
+      expect(billingCard().queryByRole('button', { name: '升级' })).toBeNull();
+    },
+  );
+});
+
 describe('account menu billing card — 积分 row opens the web wallet (#62)', () => {
   // Product ruling: clicking 积分 must jump straight to B's wallet page for the
   // usage detail — there is NO intermediate credits popover in the client
@@ -168,5 +257,32 @@ describe('account menu billing card — no 附加积分 row (#112 superseded)', 
     });
 
     expect(billingCard().queryByText('附加积分')).toBeNull();
+  });
+});
+
+describe('account menu billing card — scoped USD balance (recvqgaMLxEdZX)', () => {
+  it('shows the explicit workspace USD balance instead of raw credits', () => {
+    renderRail({
+      context: context(),
+      billing: billing({ totalAvailableCredits: 999_330 }),
+      balanceUsd: '9.9933',
+    });
+
+    const card = billingCard();
+    expect(card.getByText('额度')).toBeTruthy();
+    expect(card.getByText('$9.99')).toBeTruthy();
+    expect(card.queryByText('999,330')).toBeNull();
+    expect(card.queryByText('余额')).toBeNull();
+    expect(card.queryByText(/积分/)).toBeNull();
+  });
+
+  it('keeps a proven zero visible as $0.00', () => {
+    renderRail({
+      context: context(),
+      billing: billing({ totalAvailableCredits: 600_000 }),
+      balanceUsd: '0',
+    });
+
+    expect(billingCard().getByText('$0.00')).toBeTruthy();
   });
 });

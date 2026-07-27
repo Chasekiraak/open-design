@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import { buildWorkspacePermissions, buildWorkspaceSeatSummary } from '@open-design/contracts';
@@ -72,10 +72,14 @@ async function startContextServer(
   if (!address || typeof address === 'string') throw new Error('server did not bind to a TCP port');
   const base = `http://127.0.0.1:${address.port}`;
   return {
-    async req(route: string, options: { method?: string; body?: unknown } = {}) {
+    async req(
+      route: string,
+      options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
+    ) {
       const init: RequestInit = { method: options.method ?? 'GET' };
+      if (options.headers) init.headers = options.headers;
       if (options.body !== undefined) {
-        init.headers = { 'content-type': 'application/json' };
+        init.headers = { ...options.headers, 'content-type': 'application/json' };
         init.body = JSON.stringify(options.body);
       }
       const response = await fetch(`${base}${route}`, init);
@@ -126,19 +130,29 @@ describe('collab context routes', () => {
 });
 
 describe('workspace billing routes', () => {
-  // Acceptance #134: the summary was fetched with NO workspace at all — the
-  // handler took `_req`, so one account read the same credits and the same
-  // tier in every workspace it switched into. The summary must be requested
-  // FOR the active workspace, exactly like the catalog route beside it, and
-  // the response must say which workspace it describes so a stale read from
-  // the previous workspace is identifiable rather than silently displayed.
-  it('requests the ACTIVE workspace’s billing summary and stamps it with that workspace', async () => {
-    const calls: string[] = [];
+  const teamDirectory = (workspaceId = 'wm-1') => [{
+    workspaceId,
+    workspaceName: 'Workspace',
+    workspaceType: 'team' as const,
+    workspaceMemberId: 'member-1',
+    role: 'member' as const,
+    memberStatus: 'active' as const,
+    lifecycleState: 'active' as const,
+  }];
+
+  // recvqgaMLxEdZX: the URL workspace id is the selection source. Membership
+  // authorization comes from the independently fetched directory, not from
+  // daemon-global active/current state: two clients may address different
+  // workspaces through the same daemon without switching each other.
+  it('returns the explicit backend-scoped balance even when current points elsewhere', async () => {
+    const accountCalls: string[] = [];
+    const workspaceCalls: string[] = [];
     const api = await startContextServer({
-      fetchBilling: async (workspaceId) => {
-        calls.push(workspaceId);
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => {
+        accountCalls.push('account');
         return {
-          workspaceId,
+          workspaceId: null,
           membershipTier: 'team_plus',
           totalAvailableCredits: 1_386_294,
           subscriptionCredits: 1_000_000,
@@ -146,26 +160,251 @@ describe('workspace billing routes', () => {
           balanceUsd: '13.86',
           subscriptionStatus: 'active',
           availableActions: ['billing_portal'],
+          workspaceBalance: null,
+        };
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        workspaceCalls.push(workspaceId);
+        return {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-26T12:00:00Z',
         };
       },
     });
-    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+    await api.req('/api/workspace/context', {
+      method: 'PUT',
+      body: { ...TEAM_CONTEXT, workspaceMemberId: 'wm-other' },
+    });
 
-    const res = await api.req('/api/workspace/billing');
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
 
     expect(res.status).toBe(200);
-    expect(calls).toEqual(['wm-1']);
-    expect(res.body.summary).toMatchObject({ workspaceId: 'wm-1', membershipTier: 'team_plus' });
+    expect(accountCalls).toEqual(['account']);
+    expect(workspaceCalls).toEqual(['wm-1']);
+    expect(res.body.summary).toMatchObject({
+      workspaceId: null,
+      membershipTier: 'team_plus',
+      workspaceBalance: null,
+    });
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      balanceUsd: '7.89',
+      billingScopeVersion: 2,
+    });
   });
 
-  // No workspace context (signed out of collab, or a plain local run) must NOT
-  // become a 500 or a null summary: B's wallet is reachable without a
-  // workspace, so the account-level read still answers — it is just unstamped.
-  it('still answers with an unstamped summary when no workspace context is set', async () => {
-    const calls: string[] = [];
+  it('returns an authorized atomic workspace plan and wallet snapshot additively', async () => {
     const api = await startContextServer({
-      fetchBilling: async (workspaceId) => {
-        calls.push(workspaceId);
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: {
+          schemaVersion: 1,
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          billingScopeVersion: 2,
+          billing: { billingState: 'active', planId: 'team_plus' },
+          wallet: {
+            balanceUsd: '7.89',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00Z',
+          },
+          revisions: { billing: 'billing-2', wallet: 'wallet-2' },
+        },
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.workspaceSnapshot).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      billing: { billingState: 'active', planId: 'team_plus' },
+      revisions: { billing: 'billing-2', wallet: 'wallet-2' },
+    });
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      balanceUsd: '7.89',
+    });
+  });
+
+  it('single-flights simultaneous exact-scope billing reads in the daemon', async () => {
+    let projectionCalls = 0;
+    let releaseProjection!: () => void;
+    const projectionGate = new Promise<void>((resolve) => {
+      releaseProjection = resolve;
+    });
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => {
+        projectionCalls += 1;
+        await projectionGate;
+        return {
+          snapshot: {
+            schemaVersion: 1,
+            workspaceId: 'wm-1',
+            workspaceMemberId: 'member-1',
+            billingScopeVersion: 2,
+            billing: { billingState: 'active', planId: 'team_plus' },
+            wallet: {
+              balanceUsd: '7.89',
+              expiresAt: null,
+              updatedAt: '2026-07-27T00:00:00Z',
+            },
+            revisions: { billing: 'billing-2', wallet: 'wallet-2' },
+          },
+          workspaceBalance: {
+            workspaceId: 'wm-1',
+            workspaceMemberId: 'member-1',
+            balanceUsd: '7.89',
+            billingScopeVersion: 2,
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00Z',
+          },
+        };
+      },
+    });
+
+    const first = api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+    const second = api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+    await vi.waitFor(() => expect(projectionCalls).toBeGreaterThan(0));
+    try {
+      expect(projectionCalls).toBe(1);
+    } finally {
+      releaseProjection();
+    }
+
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(projectionCalls).toBe(1);
+    expect(firstResponse.body.workspaceRuntime).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      status: 'fresh',
+      revision: '2',
+    });
+    expect(secondResponse.body.workspaceRuntime).toEqual(firstResponse.body.workspaceRuntime);
+  });
+
+  it('clears a known client billing snapshot when membership disappears', async () => {
+    let authorized = true;
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => authorized ? teamDirectory('wm-1') : [],
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+    const headers = {
+      'x-od-workspace-runtime-client-id': 'window-1',
+      'x-od-workspace-runtime-generation': '1',
+    };
+
+    const initial = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
+      { headers },
+    );
+    expect(initial.body.workspaceBalance.balanceUsd).toBe('7.89');
+    authorized = false;
+
+    const revoked = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
+      { headers },
+    );
+    expect(revoked.status).toBe(200);
+    expect(revoked.body).toMatchObject({
+      summary: null,
+      workspaceBalance: null,
+      workspaceSnapshot: null,
+      workspaceRuntime: {
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'member-1',
+        status: 'access-revoked',
+        errorCode: 'workspace_not_authorized',
+      },
+    });
+  });
+
+  it('retains internal last-good state across a transient directory outage', async () => {
+    let directoryAvailable = true;
+    let balance = '7.89';
+    const api = await startContextServer({
+      fetchWorkspaceDirectory: async () => ({
+        ok: directoryAvailable,
+        items: directoryAvailable ? teamDirectory('wm-1') : [],
+      }),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: balance,
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+    const request = (generation: string) =>
+      api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1', {
+        headers: {
+          'x-od-workspace-runtime-client-id': 'window-1',
+          'x-od-workspace-runtime-generation': generation,
+        },
+      });
+
+    expect((await request('1')).body.workspaceBalance.balanceUsd).toBe('7.89');
+    directoryAvailable = false;
+    const unavailable = await request('1');
+    expect(unavailable.status).toBe(200);
+    expect(unavailable.body).toMatchObject({
+      workspaceBalance: null,
+      workspaceRuntime: {
+        status: 'error',
+        errorCode: 'workspace_directory_unavailable',
+      },
+    });
+
+    directoryAvailable = true;
+    balance = '8.99';
+    const recovered = await request('2');
+    expect(recovered.body).toMatchObject({
+      workspaceBalance: { balanceUsd: '8.99' },
+      workspaceRuntime: { status: 'fresh' },
+    });
+  });
+
+  it('reads the account summary explicitly without requesting a workspace balance', async () => {
+    const accountCalls: string[] = [];
+    const workspaceCalls: string[] = [];
+    const api = await startContextServer({
+      fetchBilling: async () => {
+        accountCalls.push('account');
         return {
           workspaceId: null,
           membershipTier: '',
@@ -175,15 +414,136 @@ describe('workspace billing routes', () => {
           balanceUsd: '0',
           subscriptionStatus: '',
           availableActions: [],
+          workspaceBalance: null,
         };
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        workspaceCalls.push(workspaceId);
+        return null;
       },
     });
 
-    const res = await api.req('/api/workspace/billing');
+    const res = await api.req('/api/workspace/billing?scope=account');
 
     expect(res.status).toBe(200);
-    expect(calls).toEqual(['']);
-    expect(res.body.summary).toMatchObject({ workspaceId: null });
+    expect(accountCalls).toEqual(['account']);
+    expect(workspaceCalls).toEqual([]);
+    expect(res.body.summary).toMatchObject({ workspaceId: null, workspaceBalance: null });
+    expect(res.body.workspaceBalance).toBeNull();
+  });
+
+  it('fails closed when the explicit workspace is absent from the membership directory', async () => {
+    const calls: string[] = [];
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => {
+        calls.push('account');
+        return null;
+      },
+      fetchWorkspaceBalance: async (workspaceId) => {
+        calls.push(workspaceId);
+        return null;
+      },
+    });
+    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=other');
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'workspace_not_authorized' });
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects missing or contradictory billing scope parameters', async () => {
+    const api = await startContextServer();
+    expect((await api.req('/api/workspace/billing')).status).toBe(400);
+    expect((await api.req('/api/workspace/billing?scope=workspace')).status).toBe(400);
+    expect(
+      (await api.req('/api/workspace/billing?scope=account&workspaceId=wm-1')).status,
+    ).toBe(400);
+  });
+
+  it('keeps account metadata separate when the scoped balance is unavailable', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
+      fetchBilling: async () => ({
+        workspaceId: null,
+        membershipTier: 'team_plus',
+        totalAvailableCredits: 10,
+        subscriptionCredits: 10,
+        rechargeCredits: 0,
+        balanceUsd: '999.00',
+        subscriptionStatus: 'active',
+        availableActions: [],
+        workspaceBalance: null,
+      }),
+      fetchWorkspaceBalance: async () => null,
+    });
+    await api.req('/api/workspace/context', { method: 'PUT', body: TEAM_CONTEXT });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toMatchObject({
+      membershipTier: 'team_plus',
+      balanceUsd: '999.00',
+      workspaceBalance: null,
+    });
+    expect(res.body.workspaceBalance).toBeNull();
+  });
+
+  it('preserves a proven workspace balance when the account summary is unavailable', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
+      fetchBilling: async () => null,
+      fetchWorkspaceBalance: async () => ({
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'member-1',
+        balanceUsd: '7.89',
+        billingScopeVersion: 2,
+        expiresAt: null,
+        updatedAt: null,
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBeNull();
+    expect(res.body.workspaceBalance).toMatchObject({
+      workspaceId: 'wm-1',
+      balanceUsd: '7.89',
+      billingScopeVersion: 2,
+    });
+  });
+
+  it('rejects a workspace wallet issued to a different directory membership', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory(),
+      fetchBilling: async () => null,
+      fetchWorkspaceBalance: async () => ({
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'different-member',
+        balanceUsd: '7.89',
+        billingScopeVersion: 2,
+        expiresAt: null,
+        updatedAt: null,
+      }),
+    });
+
+    const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=wm-1');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      summary: null,
+      workspaceBalance: null,
+      workspaceRuntime: {
+        workspaceId: 'wm-1',
+        workspaceMemberId: 'member-1',
+        status: 'error',
+        errorCode: 'workspace_billing_scope_mismatch',
+      },
+    });
   });
 
   it('returns the real team billing catalog for the current workspace', async () => {

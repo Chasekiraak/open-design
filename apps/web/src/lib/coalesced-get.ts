@@ -85,6 +85,56 @@ export function evictCoalescedGet(key: string): void {
   entries.delete(key);
 }
 
+// Last time `forceCoalescedGet` actually evicted+refetched a given key, keyed
+// the same way as `entries`. See `forceCoalescedGet` for why this exists.
+const forcedAt = new Map<string, number>();
+
+// A broadcast identity-change event (sign-in success) is heard by every
+// mounted consumer of a hook in the SAME synchronous `dispatchEvent` pass —
+// e.g. `useWorkspaceContext()` is called from a dozen components that can all
+// be mounted at once, and AmrLoginPill alone can mount twice (the Settings
+// agent-card instance and the cloud sign-in callout instance both listen and
+// both react). Two calls to `forceCoalescedGet` for the same key inside this
+// window are the same burst, not two independent identity changes; the
+// second must join the first's fetch rather than evict it. Measured in a
+// real browser (not jsdom) the two reactions land within single-digit ms of
+// each other, but 250ms leaves generous headroom for a loaded machine
+// without meaningfully delaying a genuinely later, separate identity change
+// (still an order of magnitude under `DEFAULT_TTL_MS`).
+const FORCE_BURST_MS = 250;
+
+/**
+ * Like `coalescedGet`, but the caller is announcing the cached answer for
+ * `key` is void (an identity change) and must be replaced by a fresh read —
+ * the forced counterpart of `evictCoalescedGet` + `coalescedGet`.
+ *
+ * Calling `evictCoalescedGet` then `coalescedGet` directly at every call site
+ * that reacts to one broadcast event is unsafe: because those call sites fire
+ * synchronously back-to-back within the same event-dispatch pass, each one's
+ * eviction destroys the in-flight entry the PREVIOUS call site just started,
+ * so N mounted consumers produce N real network requests instead of one
+ * shared request for the whole burst — the exact thundering-herd shape
+ * `coalescedGet` exists to prevent for ordinary concurrent calls.
+ *
+ * `forceCoalescedGet` only evicts once per `key` per `FORCE_BURST_MS`; every
+ * other forced call for that key inside the window joins the fetch the first
+ * call already kicked off. A force call outside the window (a genuinely
+ * later, separate identity change) still gets a full evict + fresh fetch.
+ */
+export function forceCoalescedGet<T>(
+  key: string,
+  run: () => Promise<T>,
+  ttlMs: number = DEFAULT_TTL_MS,
+): Promise<T> {
+  const now = nowMs();
+  const last = forcedAt.get(key);
+  if (last === undefined || now - last >= FORCE_BURST_MS) {
+    forcedAt.set(key, now);
+    evictCoalescedGet(key);
+  }
+  return coalescedGet(key, run, ttlMs);
+}
+
 /**
  * Drop every in-flight/settled entry. The module-level cache would otherwise
  * leak a settled result from one test into the next same-key call within the
@@ -92,4 +142,5 @@ export function evictCoalescedGet(key: string): void {
  */
 export function resetCoalescedGet(): void {
   entries.clear();
+  forcedAt.clear();
 }

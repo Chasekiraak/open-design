@@ -32,6 +32,7 @@ import {
   type RegistryRoots,
 } from './registry.js';
 import { deleteWorkspaceResourceByResourceId } from '../db.js';
+import { resolveGithubRepositoryUrl } from '../github-install-source.js';
 import type {
   InstalledPluginRecord,
   MarketplaceTrust,
@@ -139,15 +140,23 @@ export async function* installPlugin(
   db: SqliteDb,
   opts: InstallOptions,
 ): AsyncGenerator<InstallEvent, void, void> {
-  if (opts.source.startsWith('github:')) {
-    yield* installFromGithub(db, opts);
+  const browserGithub = resolveGithubRepositoryUrl(opts.source);
+  if (browserGithub.kind === 'invalid') {
+    yield { kind: 'error', message: browserGithub.error, warnings: [] };
     return;
   }
-  if (HTTPS_SOURCE_RE.test(opts.source)) {
-    yield* installFromHttpsArchive(db, opts);
+  const normalizedOpts = browserGithub.kind === 'repository'
+    ? { ...opts, source: browserGithub.source }
+    : opts;
+  if (normalizedOpts.source.startsWith('github:')) {
+    yield* installFromGithub(db, normalizedOpts);
     return;
   }
-  yield* installFromLocalFolder(db, opts);
+  if (HTTPS_SOURCE_RE.test(normalizedOpts.source)) {
+    yield* installFromHttpsArchive(db, normalizedOpts);
+    return;
+  }
+  yield* installFromLocalFolder(db, normalizedOpts);
 }
 
 // `github:owner/repo[@ref][/subpath]` → codeload tarball.

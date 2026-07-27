@@ -38,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mockedFetch.mockReset();
+  vi.unstubAllGlobals();
 });
 
 describe('amrWalletBalanceUsd', () => {
@@ -189,5 +190,120 @@ describe('checkAmrBalanceGate', () => {
       reason: 'signed_out',
       snapshot: signedOut,
     });
+  });
+
+  it('gates a team run from its explicit workspace balance, not the healthy account balance', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        expect(input.toString()).toBe(
+          '/api/workspace/billing?scope=workspace&workspaceId=ws-team-a',
+        );
+        return new Response(
+          JSON.stringify({
+            summary: null,
+            workspaceBalance: {
+              billingScopeVersion: 2,
+              workspaceId: 'ws-team-a',
+              workspaceMemberId: 'wm-a',
+              balanceUsd: '1.25',
+              expiresAt: null,
+              updatedAt: '2026-07-26T00:00:00.000Z',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+
+    const result = await checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+    });
+    expect(result.kind).toBe('soft');
+    if (result.kind === 'soft') {
+      expect(result.snapshot.balanceUsd).toBe('1.25');
+    }
+  });
+
+  it('fails open for an unavailable team workspace balance without using account zero', async () => {
+    const emptyAccount = snapshot({ balanceUsd: '0' });
+    mockedFetch.mockResolvedValueOnce(emptyAccount).mockResolvedValueOnce(emptyAccount);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 503 })),
+    );
+
+    await expect(
+      checkAmrBalanceGate({
+        workspaceType: 'team',
+        workspaceId: 'ws-team-a',
+      }),
+    ).resolves.toEqual({ kind: 'allow' });
+  });
+
+  it('keeps concurrent team A/B checks keyed by explicit workspace id', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    let resolveA!: (response: Response) => void;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('workspaceId=ws-team-a')) {
+        return new Promise<Response>((resolve) => {
+          resolveA = resolve;
+        });
+      }
+      if (url.includes('workspaceId=ws-team-b')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              summary: null,
+              workspaceBalance: {
+                billingScopeVersion: 2,
+                workspaceId: 'ws-team-b',
+                workspaceMemberId: 'wm-b',
+                balanceUsd: '50',
+                expiresAt: null,
+                updatedAt: '2026-07-26T00:00:00.000Z',
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const teamA = checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+    });
+    const teamB = checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-b',
+    });
+
+    await expect(teamB).resolves.toEqual({ kind: 'allow' });
+    expect(resolveA).toBeTypeOf('function');
+    resolveA(
+      new Response(
+        JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'ws-team-a',
+            workspaceMemberId: 'wm-a',
+            balanceUsd: '1.50',
+            expiresAt: null,
+            updatedAt: '2026-07-26T00:00:00.000Z',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const resultA = await teamA;
+    expect(resultA.kind).toBe('soft');
+    if (resultA.kind === 'soft') expect(resultA.snapshot.balanceUsd).toBe('1.50');
   });
 });

@@ -63,6 +63,17 @@ vi.mock('../../src/components/ManualEditPanel', async (importOriginal) => {
   };
 });
 
+// These tests exercise FileViewer's local-project preview path. Keep the
+// authorization scope resolved from the first render so cache assertions do
+// not depend on the asynchronous workspace-context probe.
+vi.mock('../../src/collab/useWorkspaceContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/collab/useWorkspaceContext')>();
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ context: null, loading: false }),
+  };
+});
+
 import { FileViewer } from '../../src/components/FileViewer';
 
 afterEach(() => {
@@ -209,7 +220,7 @@ function deferredFetch(): { handle: FetchHandle; stub: typeof fetch } {
 
 // Fetches that resolve immediately with a fixed response.
 function fetchReturning(html: string) {
-  return vi.fn(async (input: string | URL | Request) => {
+  return vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
     const url =
       typeof input === 'string'
         ? input
@@ -224,6 +235,154 @@ function fetchReturning(html: string) {
 }
 
 describe('FileViewer srcDoc reload — prevSourceBeforeReloadRef race conditions', () => {
+  it('seeds a same-version remount from the settled source while revalidating in the background', async () => {
+    const v1 = deckHtml('REVISIT-CACHED-V1');
+    vi.stubGlobal('fetch', fetchReturning(v1));
+
+    const first = render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'revisit.html', path: 'revisit.html' })}
+        isDeck
+      />,
+    );
+
+    await waitFor(() => {
+      expect(srcDocFrame().getAttribute('srcDoc')).toContain('REVISIT-CACHED-V1');
+    });
+    first.unmount();
+
+    const { handle: heldRevalidationHandle, stub: heldRevalidation } = deferredFetch();
+    vi.stubGlobal('fetch', heldRevalidation);
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'revisit.html', path: 'revisit.html' })}
+        isDeck
+      />,
+    );
+
+    expect(srcDocFrame().getAttribute('srcDoc')).toContain('REVISIT-CACHED-V1');
+    expect(screen.queryByRole('status', { name: /loading/i })).not.toBeInTheDocument();
+    expect(heldRevalidation).toHaveBeenCalled();
+
+    await act(async () => {
+      heldRevalidationHandle.resolve(null, 500);
+      await Promise.resolve();
+    });
+    expect(srcDocFrame().getAttribute('srcDoc')).toContain('REVISIT-CACHED-V1');
+    expect(screen.queryByRole('status', { name: /loading/i })).not.toBeInTheDocument();
+  });
+
+  it('replaces an immediate cached v1 seed with no-store background v2 even when metadata is unchanged', async () => {
+    const file = deckFile({ name: 'remote-update.html', path: 'remote-update.html' });
+    vi.stubGlobal('fetch', fetchReturning(deckHtml('REMOTE-CACHED-V1')));
+
+    const first = render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={file}
+        isDeck
+      />,
+    );
+    await waitFor(() => {
+      expect(srcDocFrame().getAttribute('srcDoc')).toContain('REMOTE-CACHED-V1');
+    });
+    first.unmount();
+
+    const v2Fetch = fetchReturning(deckHtml('REMOTE-ORIGIN-V2'));
+    vi.stubGlobal('fetch', v2Fetch);
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={file}
+        isDeck
+      />,
+    );
+
+    expect(srcDocFrame().getAttribute('srcDoc')).toContain('REMOTE-CACHED-V1');
+    expect(screen.queryByRole('status', { name: /loading/i })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(srcDocFrame().getAttribute('srcDoc')).toContain('REMOTE-ORIGIN-V2');
+    });
+    expect(srcDocFrame().getAttribute('srcDoc')).not.toContain('REMOTE-CACHED-V1');
+
+    const rawCall = v2Fetch.mock.calls.find(([input]) => String(input).startsWith(RAW_URL_PREFIX));
+    expect(rawCall?.[1]).toMatchObject({ cache: 'no-store' });
+  });
+
+  it('does not seed a changed-version remount with the previous HTML', async () => {
+    const v1 = deckHtml('VERSION-BEFORE-MTIME-CHANGE');
+    vi.stubGlobal('fetch', fetchReturning(v1));
+
+    const first = render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'versioned.html', path: 'versioned.html', mtime: 1 })}
+        isDeck
+      />,
+    );
+    await waitFor(() => {
+      expect(srcDocFrame().getAttribute('srcDoc')).toContain('VERSION-BEFORE-MTIME-CHANGE');
+    });
+    first.unmount();
+
+    const { stub: heldChangedVersion } = deferredFetch();
+    vi.stubGlobal('fetch', heldChangedVersion);
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'versioned.html', path: 'versioned.html', mtime: 2 })}
+        isDeck
+      />,
+    );
+
+    expect(screen.queryByTestId('artifact-preview-frame')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('VERSION-BEFORE-MTIME-CHANGE');
+  });
+
+  it('invalidates the settled snapshot when Reload is requested', async () => {
+    const v1 = deckHtml('BEFORE-EXPLICIT-RELOAD');
+    vi.stubGlobal('fetch', fetchReturning(v1));
+
+    const first = render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'reload-invalidates.html', path: 'reload-invalidates.html' })}
+        isDeck
+      />,
+    );
+    await waitFor(() => {
+      expect(srcDocFrame().getAttribute('srcDoc')).toContain('BEFORE-EXPLICIT-RELOAD');
+    });
+
+    const { stub: heldReload } = deferredFetch();
+    vi.stubGlobal('fetch', heldReload);
+    fireEvent.click(screen.getByRole('button', { name: /reload preview/i }));
+    first.unmount();
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={deckFile({ name: 'reload-invalidates.html', path: 'reload-invalidates.html' })}
+        isDeck
+      />,
+    );
+
+    expect(screen.queryByTestId('artifact-preview-frame')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('BEFORE-EXPLICIT-RELOAD');
+  });
+
   // ---------------------------------------------------------------------------
   // Race 1: double-click wipes the fallback ref before the first fetch fails
   // ---------------------------------------------------------------------------
