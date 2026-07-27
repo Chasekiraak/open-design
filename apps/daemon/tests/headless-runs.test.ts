@@ -119,8 +119,74 @@ describe('POST /api/runs headless fallbacks', () => {
       }),
     });
     expect(runResponse.status).toBe(202);
-    const runBody = await runResponse.json() as { conversationId: string | null };
+    const runBody = await runResponse.json() as {
+      conversationId: string | null;
+      assistantMessageId: string | null;
+    };
     expect(runBody.conversationId).toBe(seededConversationId);
+    // Headless omit path must still mint a pin id for session resume cursor.
+    expect(typeof runBody.assistantMessageId).toBe('string');
+    expect(runBody.assistantMessageId).toBeTruthy();
+  });
+
+  it('mints assistantMessageId when conversationId is present but pin id is omitted', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'API client omitted assistantMessageId',
+    );
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: 'Eval multi-turn prompt without client pin',
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+    const runBody = await runResponse.json() as {
+      runId: string;
+      conversationId: string | null;
+      assistantMessageId: string | null;
+    };
+    expect(runBody.conversationId).toBe(conversationId);
+    expect(typeof runBody.assistantMessageId).toBe('string');
+    expect(runBody.assistantMessageId).toBeTruthy();
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{ id: string; role: string; content: string; runId?: string | null }>;
+    };
+    const assistant = messagesBody.messages.find((m) => m.id === runBody.assistantMessageId);
+    expect(assistant?.role).toBe('assistant');
+    expect(assistant?.runId).toBe(runBody.runId);
+    const user = messagesBody.messages.find(
+      (m) => m.role === 'user' && m.content.includes('Eval multi-turn prompt without client pin'),
+    );
+    expect(user).toBeTruthy();
+
+    // Client-supplied id must still win (no double-mint overwrite).
+    const clientId = `client-pin-${randomUUID()}`;
+    const run2 = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: 'second turn with client pin',
+        assistantMessageId: clientId,
+      }),
+    });
+    expect(run2.status).toBe(202);
+    const run2Body = await run2.json() as { assistantMessageId: string | null };
+    expect(run2Body.assistantMessageId).toBe(clientId);
   });
 
   it('falls back past a stale saved agent to the first detected available runtime', async () => {

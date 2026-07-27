@@ -680,6 +680,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     if (runProject?.metadata) {
       meta.projectMetadata = runProject.metadata;
     }
+    // Headless / MCP clients often omit conversationId; bind the project's
+    // earliest conversation so the run has a chat home.
     if (
       typeof meta.projectId === 'string' &&
       meta.projectId &&
@@ -699,25 +701,38 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
           : null;
         if (defaultConv && typeof defaultConv.id === 'string' && defaultConv.id) {
           meta.conversationId = defaultConv.id;
-          if (typeof meta.assistantMessageId !== 'string' || !meta.assistantMessageId) {
-            meta.assistantMessageId = randomUUID();
-          }
-          const promptForUserMessage =
-            typeof meta.message === 'string' && meta.message.trim().length > 0
-              ? meta.message
-              : null;
-          if (promptForUserMessage) {
-            upsertMessage(db, defaultConv.id, {
-              id: randomUUID(),
-              role: 'user',
-              content: promptForUserMessage,
-              startedAt: Date.now(),
-              endedAt: Date.now(),
-            });
-          }
         }
       } catch (err) {
         console.warn('[runs] mcp conversation fallback failed', err);
+      }
+    }
+    // Web always mints assistantMessageId client-side. API clients that already
+    // know conversationId (eval runners, scripts, MCP after the bind above) may
+    // omit it. Without a server-side pin, pinAssistantMessageOnRunCreate no-ops,
+    // lastMessageId stays null, and multi-turn native session resume is skipped
+    // (missing_cursor / resume_skipped).
+    if (
+      typeof meta.conversationId === 'string' &&
+      meta.conversationId &&
+      (typeof meta.assistantMessageId !== 'string' || !meta.assistantMessageId)
+    ) {
+      meta.assistantMessageId = randomUUID();
+      const promptForUserMessage =
+        typeof meta.message === 'string' && meta.message.trim().length > 0
+          ? meta.message
+          : null;
+      if (promptForUserMessage) {
+        try {
+          upsertMessage(db, meta.conversationId, {
+            id: randomUUID(),
+            role: 'user',
+            content: promptForUserMessage,
+            startedAt: Date.now(),
+            endedAt: Date.now(),
+          });
+        } catch (err) {
+          console.warn('[runs] api client user message pin failed', err);
+        }
       }
     }
     const conversationSession =
