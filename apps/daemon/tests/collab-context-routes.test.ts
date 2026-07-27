@@ -140,6 +140,73 @@ describe('workspace billing routes', () => {
     lifecycleState: 'active' as const,
   }];
 
+  it('authorizes and atomically replaces a renderer full billing interest set', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => [
+        ...teamDirectory('wm-1'),
+        {
+          ...teamDirectory('wm-2')[0]!,
+          workspaceMemberId: 'member-2',
+        },
+      ],
+    });
+    const declared = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '1',
+          interests: [
+            { workspaceId: 'wm-1', workspaceMemberId: 'member-1' },
+            { workspaceId: 'wm-2', workspaceMemberId: 'member-2' },
+          ],
+        },
+      },
+    );
+    expect(declared.status).toBe(200);
+    expect(declared.body).toMatchObject({
+      clientId: 'renderer-1',
+      acceptedGeneration: '1',
+    });
+
+    const replaced = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '2',
+          interests: [{ workspaceId: 'wm-2', workspaceMemberId: 'member-2' }],
+        },
+      },
+    );
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.acceptedGeneration).toBe('2');
+
+    const released = await api.req(
+      '/api/workspace/billing/interests/renderer-1?generation=2',
+      { method: 'DELETE' },
+    );
+    expect(released.body).toEqual({ ok: true, released: true });
+  });
+
+  it('rejects an interest whose exact workspace/member pair is not authorized', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+    });
+    const response = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '1',
+          interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-other' }],
+        },
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: 'workspace_not_authorized' });
+  });
+
   // recvqgaMLxEdZX: the URL workspace id is the selection source. Membership
   // authorization comes from the independently fetched directory, not from
   // daemon-global active/current state: two clients may address different

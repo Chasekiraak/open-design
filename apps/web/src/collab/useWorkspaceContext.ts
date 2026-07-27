@@ -11,6 +11,13 @@ import type {
 } from '@open-design/contracts';
 import { coalescedGet, forceCoalescedGet } from '../lib/coalesced-get';
 import { useWorkspaceInvalidation } from './workspace-events';
+import {
+  createWorkspaceBillingInterestOwnerId,
+  ensureWorkspaceBillingInterestDeclared,
+  resetWorkspaceBillingInterestRegistry,
+  retainWorkspaceBillingInterest,
+  workspaceBillingInterestHeaders,
+} from './workspace-billing-interests';
 
 // One shared read of the workspace context (`GET /api/workspace/context`) for the
 // navigation shell. The daemon proxies B's `CurrentWorkspaceContext`; `context`
@@ -43,48 +50,11 @@ const WORKSPACE_CONTEXT_COALESCE_KEY = 'workspace-context';
 // last-known signed-in state instantly while the background read revalidates.
 let cachedWorkspaceContext: WorkspaceContextState['context'] = null;
 let workspaceContextRevision = 0;
-let volatileWorkspaceRuntimeClientId: string | null = null;
-let workspaceRuntimeInterestSequence = 0n;
-const workspaceRuntimeInterests = new Map<
-  string,
-  { clientId: string; generation: string }
->();
 
 /** Test seam: clear the module-level context cache between tests. */
 export function resetWorkspaceContextCache(): void {
   cachedWorkspaceContext = null;
   workspaceContextRevision = 0;
-  volatileWorkspaceRuntimeClientId = null;
-  workspaceRuntimeInterestSequence = 0n;
-  workspaceRuntimeInterests.clear();
-}
-
-function workspaceRuntimeClientId(): string {
-  if (volatileWorkspaceRuntimeClientId) return volatileWorkspaceRuntimeClientId;
-  // Deliberately renderer-lifetime only. Duplicate Tab/window.open may copy
-  // sessionStorage, so persisting this id can make two windows submit
-  // independent generation streams under one daemon client identity.
-  const generated =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `runtime-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  volatileWorkspaceRuntimeClientId = generated;
-  return generated;
-}
-
-function workspaceRuntimeInterestFor(
-  interestKey: string,
-): { clientId: string; generation: string } {
-  const existing = workspaceRuntimeInterests.get(interestKey);
-  if (existing) return existing;
-  workspaceRuntimeInterestSequence += 1n;
-  const interest = {
-    clientId:
-      `${workspaceRuntimeClientId()}:billing:${workspaceRuntimeInterestSequence}`,
-    generation: '1',
-  };
-  workspaceRuntimeInterests.set(interestKey, interest);
-  return interest;
 }
 
 /**
@@ -309,40 +279,10 @@ class WorkspaceBillingHttpError extends Error {
   }
 }
 
-function workspaceBillingFailureResponse(
-  lastGood: WorkspaceBillingResponse | undefined,
-  workspaceId: string,
-  workspaceMemberId: string,
-  status: 'error' | 'access-revoked',
-  errorCode: string,
-): WorkspaceBillingResponse {
-  const previousRuntime = lastGood?.workspaceRuntime;
-  return {
-    summary: status === 'access-revoked' ? null : lastGood?.summary ?? null,
-    workspaceBalance:
-      status === 'access-revoked' ? null : lastGood?.workspaceBalance ?? null,
-    workspaceSnapshot:
-      status === 'access-revoked' ? null : lastGood?.workspaceSnapshot ?? null,
-    workspaceRuntime: {
-      workspaceId,
-      workspaceMemberId,
-      status,
-      revision: previousRuntime?.revision ?? '0',
-      observedAt:
-        status === 'access-revoked'
-          ? new Date().toISOString()
-          : previousRuntime?.observedAt ?? null,
-      retryAt: null,
-      errorCode,
-      reason: errorCode,
-      sourceGapDetected: previousRuntime?.sourceGapDetected ?? false,
-    },
-  };
-}
-
 /** Test seam: clear last-good workspace billing snapshots between tests. */
 export function resetWorkspaceBillingCache(): void {
   cachedWorkspaceBillingResponses.clear();
+  resetWorkspaceBillingInterestRegistry();
 }
 
 type BillingInvalidation = Extract<
@@ -428,9 +368,9 @@ export function useWorkspaceBillingResponse(
         explicitScope?.revision ?? workspaceContextRevision
       }`
     : null;
-  const billingRuntimeInterest =
+  const billingInterestScope =
     billingRequestKey && context?.workspaceType === 'team'
-      ? workspaceRuntimeInterestFor(billingRequestKey)
+      ? { workspaceId, workspaceMemberId }
       : null;
   const [state, setState] = useState<{
     scopeKey: string;
@@ -442,6 +382,10 @@ export function useWorkspaceBillingResponse(
   const requestEpochRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runtimeManagedRef = useRef(false);
+  const interestOwnerIdRef = useRef('');
+  if (!interestOwnerIdRef.current) {
+    interestOwnerIdRef.current = createWorkspaceBillingInterestOwnerId();
+  }
   activeScopeKeyRef.current = billingScopeKey;
   activeRequestKeyRef.current = billingRequestKey;
 
@@ -453,6 +397,14 @@ export function useWorkspaceBillingResponse(
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!billingInterestScope) return;
+    return retainWorkspaceBillingInterest(
+      interestOwnerIdRef.current,
+      billingInterestScope,
+    );
+  }, [billingInterestScope?.workspaceId, billingInterestScope?.workspaceMemberId]);
 
   // `force` mirrors `loadContext`'s `markLoading`/`loadFull`'s `force`: an
   // explicit identity-change refresh (sign-in) must bypass a settled cached
@@ -478,14 +430,12 @@ export function useWorkspaceBillingResponse(
     const requestEpoch = ++requestEpochRef.current;
     try {
       const fetchBilling = async () => {
+        if (billingInterestScope) {
+          await ensureWorkspaceBillingInterestDeclared();
+        }
         const runtimeHeaders =
-          context?.workspaceType === 'team'
-            ? {
-                'x-od-workspace-runtime-client-id':
-                  billingRuntimeInterest?.clientId ?? '',
-                'x-od-workspace-runtime-generation':
-                  billingRuntimeInterest?.generation ?? '0',
-              }
+          billingInterestScope
+            ? workspaceBillingInterestHeaders(billingInterestScope)
             : undefined;
         const res = await fetch(billingUrl, {
           cache: 'no-store',
@@ -542,31 +492,15 @@ export function useWorkspaceBillingResponse(
         const revoked =
           error instanceof WorkspaceBillingHttpError &&
           error.status === 403;
-        const errorCode =
-          error instanceof WorkspaceBillingHttpError
-            ? error.code
-            : 'workspace_billing_unavailable';
-        const failureResponse =
-          context?.workspaceType === 'team' && workspaceId && workspaceMemberId
-            ? workspaceBillingFailureResponse(
-                lastGood,
-                workspaceId,
-                workspaceMemberId,
-                revoked ? 'access-revoked' : 'error',
-                errorCode,
-              )
-            : null;
-        runtimeManagedRef.current = Boolean(failureResponse?.workspaceRuntime);
         if (revoked) {
           cachedWorkspaceBillingResponses.delete(scopeKey);
-          if (failureResponse) setState({ scopeKey, response: failureResponse });
-          else if (clearOnFailure) setState(null);
-        } else if (failureResponse) {
-          cachedWorkspaceBillingResponses.set(scopeKey, failureResponse);
-          setState({ scopeKey, response: failureResponse });
+          runtimeManagedRef.current = false;
+          setState(null);
         } else if (lastGood) {
+          runtimeManagedRef.current = Boolean(lastGood.workspaceRuntime);
           setState({ scopeKey, response: lastGood });
         } else if (clearOnFailure) {
+          runtimeManagedRef.current = false;
           setState({
             scopeKey,
             response: {
@@ -593,11 +527,11 @@ export function useWorkspaceBillingResponse(
       }
     }
   }, [
+    billingInterestScope?.workspaceId,
+    billingInterestScope?.workspaceMemberId,
     billingRequestKey,
-    billingRuntimeInterest,
     billingScopeKey,
     billingUrl,
-    context?.workspaceType,
   ]);
 
   useEffect(() => {

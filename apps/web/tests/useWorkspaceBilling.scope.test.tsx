@@ -231,13 +231,9 @@ describe('useWorkspaceBilling explicit scope', () => {
     expect(billingCalls.length - beforeAliases).toBe(1);
   });
 
-  it('keeps ambient B and explicit project A as independent daemon interests', async () => {
+  it('keeps ambient B and explicit project A in one renderer interest set', async () => {
     const projectA = teamContext('workspace-a');
     let ambientBalance = '1.25';
-    const acceptedByClient = new Map<
-      string,
-      { generation: bigint; workspaceId: string }
-    >();
     const observedClientIds = new Map<string, string>();
     vi.stubGlobal(
       'fetch',
@@ -257,26 +253,6 @@ describe('useWorkspaceBilling explicit scope', () => {
           const headers = new Headers(init?.headers);
           const clientId =
             headers.get('x-od-workspace-runtime-client-id') ?? '';
-          const generation = BigInt(
-            headers.get('x-od-workspace-runtime-generation') ?? '0',
-          );
-          const current = acceptedByClient.get(clientId);
-          if (
-            current &&
-            (
-              generation < current.generation ||
-              (
-                generation === current.generation &&
-                current.workspaceId !== workspaceId
-              )
-            )
-          ) {
-            return new Response(
-              JSON.stringify({ error: 'stale_generation' }),
-              { status: 409, headers: { 'content-type': 'application/json' } },
-            );
-          }
-          acceptedByClient.set(clientId, { generation, workspaceId });
           observedClientIds.set(workspaceId, clientId);
           return new Response(
             JSON.stringify(billingResponse(
@@ -308,7 +284,7 @@ describe('useWorkspaceBilling explicit scope', () => {
     });
     expect(observedClientIds.get('workspace-a')).toBeTruthy();
     expect(observedClientIds.get('workspace-b')).toBeTruthy();
-    expect(observedClientIds.get('workspace-a')).not.toBe(
+    expect(observedClientIds.get('workspace-a')).toBe(
       observedClientIds.get('workspace-b'),
     );
 
@@ -464,7 +440,7 @@ describe('useWorkspaceBilling explicit scope', () => {
     );
   }, 7_000);
 
-  it('keeps same-scope last-good money as error on a retryable directory outage', async () => {
+  it('keeps daemon-authored last-good state on a retryable directory outage', async () => {
     let billingCalls = 0;
     vi.stubGlobal(
       'fetch',
@@ -529,8 +505,8 @@ describe('useWorkspaceBilling explicit scope', () => {
         workspaceRuntime: {
           workspaceId: 'workspace-a',
           workspaceMemberId: 'member-workspace-a',
-          status: 'error',
-          errorCode: 'workspace_directory_unavailable',
+          status: 'fresh',
+          errorCode: null,
         },
       });
     });
@@ -583,17 +559,7 @@ describe('useWorkspaceBilling explicit scope', () => {
 
     await waitFor(() => {
       expect(billingCalls).toBe(2);
-      expect(hook.result.current).toMatchObject({
-        summary: null,
-        workspaceBalance: null,
-        workspaceSnapshot: null,
-        workspaceRuntime: {
-          workspaceId: 'workspace-a',
-          workspaceMemberId: 'member-workspace-a',
-          status: 'access-revoked',
-          errorCode: 'workspace_not_authorized',
-        },
-      });
+      expect(hook.result.current).toBeNull();
     });
   });
 
@@ -721,8 +687,10 @@ describe('useWorkspaceBilling explicit scope', () => {
     ]);
     expect(runtimeHeaders).toHaveLength(2);
     expect(runtimeHeaders[0]!.clientId).not.toBe('');
-    expect(runtimeHeaders[1]!.clientId).not.toBe(runtimeHeaders[0]!.clientId);
-    expect(runtimeHeaders.map((header) => header.generation)).toEqual(['1', '1']);
+    expect(runtimeHeaders[1]!.clientId).toBe(runtimeHeaders[0]!.clientId);
+    expect(BigInt(runtimeHeaders[1]!.generation)).toBeGreaterThan(
+      BigInt(runtimeHeaders[0]!.generation),
+    );
   });
 
   it('gives each renderer page lifecycle an independent runtime client id', async () => {

@@ -6,6 +6,8 @@ import type {
   WorkspaceBillingCatalog,
   WorkspaceBillingCatalogResponse,
   WorkspaceBillingCheckoutResponse,
+  WorkspaceBillingInterestRequest,
+  WorkspaceBillingInterestResponse,
   WorkspaceBillingSnapshot,
   WorkspaceTeamBillingPlanId,
   WorkspaceBillingResponse,
@@ -382,6 +384,91 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   // membership lookup — never daemon-global active/current state — so two
   // clients can address different workspaces without switching each other.
   // Account metadata and workspace money remain independently nullable.
+  app.put('/api/workspace/billing/interests/:clientId', async (req, res) => {
+    const clientId = req.params.clientId?.trim() ?? '';
+    const body = (req.body ?? {}) as Partial<WorkspaceBillingInterestRequest>;
+    const generation = typeof body.generation === 'string' ? body.generation.trim() : '';
+    if (
+      !clientId ||
+      clientId.length > 160 ||
+      !/^(?:0|[1-9]\d*)$/.test(generation) ||
+      !Array.isArray(body.interests)
+    ) {
+      return res.status(400).json({ error: 'invalid_billing_interest' });
+    }
+    const interests = body.interests.map((interest) => ({
+      workspaceId:
+        typeof interest?.workspaceId === 'string' ? interest.workspaceId.trim() : '',
+      workspaceMemberId:
+        typeof interest?.workspaceMemberId === 'string'
+          ? interest.workspaceMemberId.trim()
+          : '',
+    }));
+    if (interests.some((interest) => !interest.workspaceId || !interest.workspaceMemberId)) {
+      return res.status(400).json({ error: 'invalid_billing_interest' });
+    }
+
+    if (interests.length > 0) {
+      const directoryResult = await fetchWorkspaceDirectory().catch(
+        (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+      );
+      if (!directoryResult.ok) {
+        return res.status(503).json({ error: 'workspace_directory_unavailable' });
+      }
+      const unauthorized = interests.filter(
+        (interest) =>
+          !directoryResult.items.some(
+            (item) =>
+              item.workspaceId === interest.workspaceId &&
+              item.workspaceMemberId === interest.workspaceMemberId &&
+              item.workspaceType === 'team' &&
+              item.memberStatus === 'active' &&
+              item.lifecycleState === 'active',
+          ),
+      );
+      if (unauthorized.length > 0) {
+        for (const interest of unauthorized) {
+          billingRuntime.revokeWorkspace(interest.workspaceId);
+        }
+        return res.status(403).json({ error: 'workspace_not_authorized' });
+      }
+    }
+
+    try {
+      const lease: WorkspaceBillingInterestResponse =
+        billingRuntime.setClientInterests({
+          clientId,
+          clientGeneration: generation,
+          interests,
+        });
+      return res.json(lease);
+    } catch (error) {
+      if (!(error instanceof WorkspaceBillingInterestError)) throw error;
+      return res
+        .status(error.code === 'interest_capacity_exceeded' ? 429 : 409)
+        .json({
+          error: error.code,
+          ...(error.acceptedGeneration
+            ? { acceptedGeneration: error.acceptedGeneration }
+            : {}),
+        });
+    }
+  });
+
+  app.delete('/api/workspace/billing/interests/:clientId', (req, res) => {
+    const clientId = req.params.clientId?.trim() ?? '';
+    const generation =
+      typeof req.query.generation === 'string' ? req.query.generation.trim() : undefined;
+    if (!clientId) return res.status(400).json({ error: 'invalid_billing_interest' });
+    try {
+      const released = billingRuntime.releaseClientInterests(clientId, generation);
+      return res.json({ ok: true, released });
+    } catch (error) {
+      if (!(error instanceof WorkspaceBillingInterestError)) throw error;
+      return res.status(400).json({ error: error.code });
+    }
+  });
+
   app.get('/api/workspace/billing', async (req, res) => {
     const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
     const requestedWorkspaceId =

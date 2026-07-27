@@ -860,6 +860,7 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
       projection: { snapshot: null, workspaceBalance: null },
       state: { status: 'access-revoked', errorCode: 'workspace_not_authorized' },
     });
+    expect(runtime.interestedKeys()).toEqual([]);
 
     runtime.authorizeWorkspaceMember(KEY_A);
     await runtime.read(KEY_A);
@@ -1125,6 +1126,105 @@ describe('WorkspaceBillingRuntimeCoordinator', () => {
         errorCode: 'workspace_billing_scope_mismatch',
       },
     });
+    runtime.dispose();
+  });
+
+  it('retains a renderer full A + B interest set and replaces it atomically', async () => {
+    const interestSets: string[][] = [];
+    const calls: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) => {
+        calls.push(key.workspaceId);
+        return projection(key.workspaceId, key.workspaceMemberId, '1.00');
+      },
+      onInterestSetChange: (interests) => {
+        interestSets.push(interests.map((interest) => interest.workspaceId).sort());
+      },
+    });
+
+    const lease = runtime.setClientInterests({
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+      interests: [KEY_A, KEY_B],
+    });
+    expect(lease).toMatchObject({
+      clientId: 'renderer-1',
+      acceptedGeneration: '1',
+    });
+    await runtime.read(KEY_A, {
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+    });
+    await runtime.read(KEY_B, {
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+    });
+    expect(calls).toEqual(['workspace-a', 'workspace-b']);
+
+    runtime.setClientInterests({
+      clientId: 'renderer-1',
+      clientGeneration: '2',
+      interests: [KEY_B],
+    });
+    expect(runtime.interestedKeys()).toEqual([KEY_B]);
+    expect(interestSets).toContainEqual(['workspace-a', 'workspace-b']);
+    expect(interestSets.at(-1)).toEqual(['workspace-b']);
+    runtime.dispose();
+  });
+
+  it('expires a crashed renderer lease and evicts its inactive snapshot', async () => {
+    vi.useFakeTimers();
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) =>
+        projection(key.workspaceId, key.workspaceMemberId, '1.00'),
+      interestLeaseMs: 100,
+      interestSweepIntervalMs: 10,
+      entryRetentionMs: 20,
+    });
+    runtime.setClientInterests({
+      clientId: 'crashed-renderer',
+      clientGeneration: '1',
+      interests: [KEY_A],
+    });
+    await runtime.read(KEY_A, {
+      clientId: 'crashed-renderer',
+      clientGeneration: '1',
+    });
+    expect(runtime.interestedKeys()).toEqual([KEY_A]);
+
+    await vi.advanceTimersByTimeAsync(121);
+    expect(runtime.interestedKeys()).toEqual([]);
+    expect(runtime.peek(KEY_A)).toBeNull();
+    runtime.dispose();
+  });
+
+  it('bounds clients, per-client scopes, and retained runtime entries', () => {
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async (key) =>
+        projection(key.workspaceId, key.workspaceMemberId, '1.00'),
+      maxClients: 1,
+      maxInterestsPerClient: 1,
+      maxEntries: 1,
+    });
+    runtime.setClientInterests({
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+      interests: [KEY_A],
+    });
+    expect(() =>
+      runtime.setClientInterests({
+        clientId: 'renderer-2',
+        clientGeneration: '1',
+        interests: [KEY_B],
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'interest_capacity_exceeded' }));
+    expect(() =>
+      runtime.setClientInterests({
+        clientId: 'renderer-1',
+        clientGeneration: '2',
+        interests: [KEY_A, KEY_B],
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'interest_capacity_exceeded' }));
     runtime.dispose();
   });
 });

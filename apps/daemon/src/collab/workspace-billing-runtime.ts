@@ -8,6 +8,12 @@ import type { VelaWorkspaceBillingProjection } from '../integrations/vela-billin
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000] as const;
+const DEFAULT_INTEREST_LEASE_MS = 60_000;
+const DEFAULT_INTEREST_SWEEP_INTERVAL_MS = 5_000;
+const DEFAULT_ENTRY_RETENTION_MS = 5 * 60_000;
+const DEFAULT_MAX_CLIENTS = 64;
+const DEFAULT_MAX_INTERESTS_PER_CLIENT = 16;
+const DEFAULT_MAX_ENTRIES = 128;
 
 export interface WorkspaceBillingRuntimeKey {
   workspaceId: string;
@@ -18,6 +24,18 @@ export interface WorkspaceBillingRuntimeReadOptions {
   reason?: string;
   clientId?: string;
   clientGeneration?: string;
+}
+
+export interface WorkspaceBillingRuntimeInterestSet {
+  clientId: string;
+  clientGeneration: string;
+  interests: WorkspaceBillingRuntimeKey[];
+}
+
+export interface WorkspaceBillingRuntimeInterestLease {
+  clientId: string;
+  acceptedGeneration: string;
+  leaseExpiresAt: string;
 }
 
 export interface WorkspaceBillingRuntimeResult {
@@ -53,17 +71,30 @@ export interface WorkspaceBillingRuntimeCoordinatorOptions {
   pollIntervalMs?: number;
   retryDelaysMs?: readonly number[];
   onStateChange?: (state: WorkspaceBillingRuntimeState) => void;
+  interestLeaseMs?: number;
+  interestSweepIntervalMs?: number;
+  entryRetentionMs?: number;
+  maxClients?: number;
+  maxInterestsPerClient?: number;
+  maxEntries?: number;
+  onInterestSetChange?: (interests: WorkspaceBillingRuntimeKey[]) => void;
 }
 
 interface ClientInterest {
   generation: bigint;
-  key: string;
+  keys: Set<string>;
+  expiresAt: number;
 }
 
 interface RuntimeEntry {
   key: WorkspaceBillingRuntimeKey;
-  /** Headerless clients predate explicit interest generations and stay pinned. */
-  legacyInterest: boolean;
+  /**
+   * Headerless clients predate explicit leases. Their successful reads renew a
+   * bounded compatibility lease instead of pinning this entry until process
+   * exit.
+   */
+  legacyInterestExpiresAt: number | null;
+  uninterestedAt: number | null;
   projection: VelaWorkspaceBillingProjection;
   status: WorkspaceBillingRuntimeState['status'];
   revision: bigint;
@@ -96,7 +127,11 @@ const EMPTY_PROJECTION: VelaWorkspaceBillingProjection = {
 
 export class WorkspaceBillingInterestError extends Error {
   constructor(
-    readonly code: 'invalid_generation' | 'stale_generation' | 'generation_payload_mismatch',
+    readonly code:
+      | 'invalid_generation'
+      | 'stale_generation'
+      | 'generation_payload_mismatch'
+      | 'interest_capacity_exceeded',
     readonly acceptedGeneration?: string,
   ) {
     super(code);
@@ -127,7 +162,13 @@ export class WorkspaceBillingRuntimeCoordinator {
   private readonly scheduler: WorkspaceBillingRuntimeScheduler;
   private readonly pollIntervalMs: number;
   private readonly retryDelaysMs: readonly number[];
+  private readonly interestLeaseMs: number;
+  private readonly entryRetentionMs: number;
+  private readonly maxClients: number;
+  private readonly maxInterestsPerClient: number;
+  private readonly maxEntries: number;
   private readonly pollTimer: ReturnType<typeof setInterval>;
+  private readonly interestSweepTimer: ReturnType<typeof setInterval>;
   private disposed = false;
 
   constructor(private readonly options: WorkspaceBillingRuntimeCoordinatorOptions) {
@@ -136,10 +177,115 @@ export class WorkspaceBillingRuntimeCoordinator {
     this.retryDelaysMs =
       options.retryDelaysMs?.map((delay) => Math.max(0, delay)) ??
       DEFAULT_RETRY_DELAYS_MS;
+    this.interestLeaseMs = Math.max(1, options.interestLeaseMs ?? DEFAULT_INTEREST_LEASE_MS);
+    this.entryRetentionMs = Math.max(0, options.entryRetentionMs ?? DEFAULT_ENTRY_RETENTION_MS);
+    this.maxClients = Math.max(1, options.maxClients ?? DEFAULT_MAX_CLIENTS);
+    this.maxInterestsPerClient = Math.max(
+      1,
+      options.maxInterestsPerClient ?? DEFAULT_MAX_INTERESTS_PER_CLIENT,
+    );
+    this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
     this.pollTimer = this.scheduler.setInterval(() => {
       this.refreshAll('poll-floor');
     }, this.pollIntervalMs);
     this.pollTimer.unref?.();
+    this.interestSweepTimer = this.scheduler.setInterval(() => {
+      this.sweepExpiredInterests();
+    }, Math.max(1, options.interestSweepIntervalMs ?? DEFAULT_INTEREST_SWEEP_INTERVAL_MS));
+    this.interestSweepTimer.unref?.();
+  }
+
+  setClientInterests(
+    input: WorkspaceBillingRuntimeInterestSet,
+  ): WorkspaceBillingRuntimeInterestLease {
+    this.assertUsable();
+    const clientId = input.clientId.trim();
+    const generationText = input.clientGeneration.trim();
+    if (!clientId || !/^(?:0|[1-9]\d*)$/.test(generationText)) {
+      throw new WorkspaceBillingInterestError('invalid_generation');
+    }
+    const generation = BigInt(generationText);
+    const current = this.clients.get(clientId);
+    if (current && generation < current.generation) {
+      throw new WorkspaceBillingInterestError(
+        'stale_generation',
+        current.generation.toString(),
+      );
+    }
+    if (!current && this.clients.size >= this.maxClients) {
+      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
+    }
+    const keys = new Map<string, WorkspaceBillingRuntimeKey>();
+    for (const interest of input.interests) {
+      const key = normalizeKey(interest);
+      keys.set(runtimeKey(key), key);
+    }
+    if (keys.size > this.maxInterestsPerClient) {
+      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
+    }
+    if (current && generation === current.generation) {
+      if (!sameStringSet(current.keys, new Set(keys.keys()))) {
+        throw new WorkspaceBillingInterestError(
+          'generation_payload_mismatch',
+          current.generation.toString(),
+        );
+      }
+      current.expiresAt = this.scheduler.now() + this.interestLeaseMs;
+      return this.interestLease(clientId, current);
+    }
+
+    const prospectiveKeys = new Set([
+      ...this.activeRuntimeKeysExcept(clientId),
+      ...keys.keys(),
+    ]);
+    if (prospectiveKeys.size > this.maxEntries) {
+      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
+    }
+    for (const key of keys.values()) this.entryFor(key);
+    this.clients.set(clientId, {
+      generation,
+      keys: new Set(keys.keys()),
+      expiresAt: this.scheduler.now() + this.interestLeaseMs,
+    });
+    this.handleInterestMutation(current?.keys ?? new Set(), new Set(keys.keys()));
+    return this.interestLease(clientId, this.clients.get(clientId)!);
+  }
+
+  releaseClientInterests(clientIdInput: string, generationText?: string): boolean {
+    this.assertUsable();
+    const clientId = clientIdInput.trim();
+    const current = this.clients.get(clientId);
+    if (!current) return false;
+    if (generationText != null) {
+      const requested = generationText.trim();
+      if (!/^(?:0|[1-9]\d*)$/.test(requested)) {
+        throw new WorkspaceBillingInterestError('invalid_generation');
+      }
+      if (BigInt(requested) < current.generation) return false;
+    }
+    this.clients.delete(clientId);
+    this.handleInterestMutation(current.keys, new Set());
+    return true;
+  }
+
+  interestedKeys(): WorkspaceBillingRuntimeKey[] {
+    this.sweepExpiredInterests();
+    const keys = new Set<string>();
+    for (const interest of this.clients.values()) {
+      for (const key of interest.keys) keys.add(key);
+    }
+    for (const entry of this.entries.values()) {
+      if (
+        entry.legacyInterestExpiresAt != null &&
+        entry.legacyInterestExpiresAt > this.scheduler.now()
+      ) {
+        keys.add(runtimeKey(entry.key));
+      }
+    }
+    return [...keys]
+      .map((key) => this.entries.get(key)?.key)
+      .filter((key): key is WorkspaceBillingRuntimeKey => Boolean(key))
+      .map((key) => ({ ...key }));
   }
 
   async read(
@@ -308,8 +454,13 @@ export class WorkspaceBillingRuntimeCoordinator {
   peekForClient(clientId: string, workspaceId: string): WorkspaceBillingRuntimeResult | null {
     const interest = this.clients.get(clientId.trim());
     if (!interest) return null;
-    const entry = this.entries.get(interest.key);
-    if (!entry || entry.key.workspaceId !== workspaceId.trim()) return null;
+    const requestedWorkspaceId = workspaceId.trim();
+    const key = [...interest.keys].find(
+      (candidate) =>
+        this.entries.get(candidate)?.key.workspaceId === requestedWorkspaceId,
+    );
+    const entry = key ? this.entries.get(key) : null;
+    if (!entry) return null;
     return this.result(entry);
   }
 
@@ -317,6 +468,7 @@ export class WorkspaceBillingRuntimeCoordinator {
     if (this.disposed) return;
     this.disposed = true;
     this.scheduler.clearInterval(this.pollTimer);
+    this.scheduler.clearInterval(this.interestSweepTimer);
     for (const entry of this.entries.values()) {
       if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
       entry.retryTimer = null;
@@ -334,7 +486,10 @@ export class WorkspaceBillingRuntimeCoordinator {
     const clientId = options.clientId?.trim() ?? '';
     const generationText = options.clientGeneration?.trim() ?? '';
     if (!clientId && !generationText) {
-      entry.legacyInterest = true;
+      const wasInterested = this.hasActiveInterest(entry);
+      entry.legacyInterestExpiresAt = this.scheduler.now() + this.interestLeaseMs;
+      entry.uninterestedAt = null;
+      if (!wasInterested) this.publishInterestSet();
       return false;
     }
     if (!clientId || !/^(?:0|[1-9]\d*)$/.test(generationText)) {
@@ -351,20 +506,21 @@ export class WorkspaceBillingRuntimeCoordinator {
         );
       }
       if (generation === current.generation) {
-        if (current.key !== keyText) {
+        if (!current.keys.has(keyText)) {
           throw new WorkspaceBillingInterestError(
             'generation_payload_mismatch',
             current.generation.toString(),
           );
         }
+        current.expiresAt = this.scheduler.now() + this.interestLeaseMs;
         return false;
       }
     }
-    this.clients.set(clientId, { generation, key: keyText });
-    if (current && current.key !== keyText) {
-      const previousEntry = this.entries.get(current.key);
-      if (previousEntry) this.quietIfUninterested(previousEntry);
-    }
+    this.setClientInterests({
+      clientId,
+      clientGeneration: generationText,
+      interests: [entry.key],
+    });
     return current != null;
   }
 
@@ -372,9 +528,14 @@ export class WorkspaceBillingRuntimeCoordinator {
     const keyText = runtimeKey(key);
     const existing = this.entries.get(keyText);
     if (existing) return existing;
+    this.evictUninterestedEntries();
+    if (this.entries.size >= this.maxEntries) {
+      throw new WorkspaceBillingInterestError('interest_capacity_exceeded');
+    }
     const entry: RuntimeEntry = {
       key,
-      legacyInterest: false,
+      legacyInterestExpiresAt: null,
+      uninterestedAt: this.scheduler.now(),
       projection: EMPTY_PROJECTION,
       status: 'loading',
       revision: 0n,
@@ -402,10 +563,18 @@ export class WorkspaceBillingRuntimeCoordinator {
   }
 
   private hasActiveInterest(entry: RuntimeEntry): boolean {
-    if (entry.legacyInterest) return true;
+    if (
+      entry.legacyInterestExpiresAt != null &&
+      entry.legacyInterestExpiresAt > this.scheduler.now()
+    ) {
+      return true;
+    }
     const keyText = runtimeKey(entry.key);
     for (const interest of this.clients.values()) {
-      if (interest.key === keyText) return true;
+      if (
+        interest.expiresAt > this.scheduler.now() &&
+        interest.keys.has(keyText)
+      ) return true;
     }
     return false;
   }
@@ -417,6 +586,118 @@ export class WorkspaceBillingRuntimeCoordinator {
     entry.retryAt = null;
     entry.pending = false;
     entry.pendingReason = null;
+    entry.uninterestedAt ??= this.scheduler.now();
+  }
+
+  private activeRuntimeKeysExcept(excludedClientId: string): Set<string> {
+    const keys = new Set<string>();
+    const now = this.scheduler.now();
+    for (const [clientId, interest] of this.clients) {
+      if (clientId === excludedClientId || interest.expiresAt <= now) continue;
+      for (const key of interest.keys) keys.add(key);
+    }
+    for (const entry of this.entries.values()) {
+      if (
+        entry.legacyInterestExpiresAt != null &&
+        entry.legacyInterestExpiresAt > now
+      ) {
+        keys.add(runtimeKey(entry.key));
+      }
+    }
+    return keys;
+  }
+
+  private handleInterestMutation(previous: Set<string>, next: Set<string>): void {
+    for (const key of previous) {
+      if (next.has(key)) continue;
+      const entry = this.entries.get(key);
+      if (entry) this.quietIfUninterested(entry);
+    }
+    for (const key of next) {
+      const entry = this.entries.get(key);
+      if (entry) entry.uninterestedAt = null;
+    }
+    this.publishInterestSet();
+  }
+
+  private sweepExpiredInterests(): void {
+    if (this.disposed) return;
+    const now = this.scheduler.now();
+    let mutated = false;
+    for (const [clientId, interest] of this.clients) {
+      if (interest.expiresAt > now) continue;
+      this.clients.delete(clientId);
+      for (const key of interest.keys) {
+        const entry = this.entries.get(key);
+        if (entry) this.quietIfUninterested(entry);
+      }
+      mutated = true;
+    }
+    for (const entry of this.entries.values()) {
+      if (
+        entry.legacyInterestExpiresAt != null &&
+        entry.legacyInterestExpiresAt <= now
+      ) {
+        entry.legacyInterestExpiresAt = null;
+        this.quietIfUninterested(entry);
+        mutated = true;
+      }
+    }
+    this.evictUninterestedEntries();
+    if (mutated) this.publishInterestSet();
+  }
+
+  private evictUninterestedEntries(): void {
+    const now = this.scheduler.now();
+    const candidates = [...this.entries.entries()]
+      .filter(([, entry]) => !this.hasActiveInterest(entry) && !entry.inFlight)
+      .sort(([, left], [, right]) =>
+        (left.uninterestedAt ?? left.observedAt ?? 0) -
+        (right.uninterestedAt ?? right.observedAt ?? 0),
+      );
+    for (const [key, entry] of candidates) {
+      const inactiveAt = entry.uninterestedAt ?? entry.observedAt ?? now;
+      const overCapacity = this.entries.size >= this.maxEntries;
+      if (!overCapacity && now - inactiveAt < this.entryRetentionMs) continue;
+      if (entry.retryTimer) this.scheduler.clearTimeout(entry.retryTimer);
+      this.entries.delete(key);
+    }
+  }
+
+  private publishInterestSet(): void {
+    this.options.onInterestSetChange?.(this.interestedKeysWithoutSweep());
+  }
+
+  private interestedKeysWithoutSweep(): WorkspaceBillingRuntimeKey[] {
+    const keys = new Set<string>();
+    const now = this.scheduler.now();
+    for (const interest of this.clients.values()) {
+      if (interest.expiresAt <= now) continue;
+      for (const key of interest.keys) keys.add(key);
+    }
+    for (const entry of this.entries.values()) {
+      if (
+        entry.legacyInterestExpiresAt != null &&
+        entry.legacyInterestExpiresAt > now
+      ) {
+        keys.add(runtimeKey(entry.key));
+      }
+    }
+    return [...keys]
+      .map((key) => this.entries.get(key)?.key)
+      .filter((key): key is WorkspaceBillingRuntimeKey => Boolean(key))
+      .map((key) => ({ ...key }));
+  }
+
+  private interestLease(
+    clientId: string,
+    interest: ClientInterest,
+  ): WorkspaceBillingRuntimeInterestLease {
+    return {
+      clientId,
+      acceptedGeneration: interest.generation.toString(),
+      leaseExpiresAt: new Date(interest.expiresAt).toISOString(),
+    };
   }
 
   private requestRefresh(entry: RuntimeEntry, reason: string, force: boolean): void {
@@ -505,6 +786,14 @@ export class WorkspaceBillingRuntimeCoordinator {
   }
 
   private revokeEntry(entry: RuntimeEntry, reason: string): void {
+    const keyText = runtimeKey(entry.key);
+    let interestChanged = entry.legacyInterestExpiresAt != null;
+    entry.legacyInterestExpiresAt = null;
+    for (const [clientId, interest] of this.clients) {
+      if (!interest.keys.delete(keyText)) continue;
+      interestChanged = true;
+      if (interest.keys.size === 0) this.clients.delete(clientId);
+    }
     entry.attempt += 1n;
     entry.inFlight = null;
     entry.pending = false;
@@ -520,6 +809,8 @@ export class WorkspaceBillingRuntimeCoordinator {
     entry.revision += 1n;
     this.publish(entry);
     this.resolveWaiters(entry);
+    this.quietIfUninterested(entry);
+    if (interestChanged) this.publishInterestSet();
   }
 
   private markStatus(
@@ -616,6 +907,14 @@ function normalizeKey(input: WorkspaceBillingRuntimeKey): WorkspaceBillingRuntim
 
 function runtimeKey(key: WorkspaceBillingRuntimeKey): string {
   return `${key.workspaceId}\0${key.workspaceMemberId}`;
+}
+
+function sameStringSet(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
 }
 
 function hasProjection(entry: RuntimeEntry): boolean {

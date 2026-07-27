@@ -702,6 +702,10 @@ import {
 } from './collab/workspace-billing-runtime.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
 import {
+  createWorkspaceHubSubscriptionManager,
+  type WorkspaceHubSubscriptionManager,
+} from './collab/workspace-hub-subscriptions.js';
+import {
   activeTeamWorkspaceIdentity,
   createProactiveContentPull,
   type ProactiveContentPullTarget,
@@ -3773,6 +3777,7 @@ export async function startServer({
         3000,
       )
     : null;
+  let workspaceHubSubscriptions: WorkspaceHubSubscriptionManager | null = null;
   const workspaceBillingRuntime = createWorkspaceBillingRuntimeCoordinator({
     fetchProjection: async ({ workspaceId, workspaceMemberId }) => {
       const directory = await fetchWorkspaceDirectory();
@@ -3803,6 +3808,11 @@ export async function startServer({
         revision: `runtime:${state.revision}`,
         at: Date.now(),
       });
+    },
+    onInterestSetChange: (interests) => {
+      workspaceHubSubscriptions?.setBillingInterests(
+        interests.map((interest) => interest.workspaceId),
+      );
     },
   });
   registerCollabContextRoutes(app, {
@@ -3884,21 +3894,20 @@ export async function startServer({
     void teamProjectsDisplayCache().catch(() => undefined);
     emitWorkspaceEvent({ type: 'team-projects-changed', at: now });
   };
-  const hubEventsSubscriber = startHubEventsSubscriber({
+  const startWorkspaceHubSubscriber = (subscribedWorkspaceId: string) =>
+    startHubEventsSubscriber({
     resolveEndpoint: async () => {
       // Same gating as the workspace-context provider: only the vela source
       // has a hub to subscribe to (dev daemons must not dial production).
       if (process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() !== 'vela') return null;
       const session = readVelaControlApiContext(process.env);
       if (!session?.controlKey || !session.apiUrl) return null;
-      const workspaceId = activeWorkspace.get()?.trim();
-      if (!workspaceId) return null;
       return {
         url: new URL('/api/v1/collab/events', session.apiUrl).toString(),
-        workspaceId,
+        workspaceId: subscribedWorkspaceId,
         headers: {
           authorization: `Bearer ${session.controlKey}`,
-          'x-vela-workspace-id': workspaceId,
+          'x-vela-workspace-id': subscribedWorkspaceId,
         },
       };
     },
@@ -3909,13 +3918,17 @@ export async function startServer({
       console.info(
         `[od] hub events workspace verified workspaceId=${workspaceId ?? 'unknown'} reconnect=${reconnect}`,
       );
-      handleHubVerifiedConnection(
-        workspaceId,
-        (verifiedWorkspaceId) =>
-          proactiveContentPull.catchUpPublishedHeads(verifiedWorkspaceId),
-        (verifiedWorkspaceId) =>
-          workspaceBillingRuntime.reconnect(verifiedWorkspaceId),
-      );
+      if (workspaceId === activeWorkspace.get()?.trim()) {
+        handleHubVerifiedConnection(
+          workspaceId,
+          (verifiedWorkspaceId) =>
+            proactiveContentPull.catchUpPublishedHeads(verifiedWorkspaceId),
+          (verifiedWorkspaceId) =>
+            workspaceBillingRuntime.reconnect(verifiedWorkspaceId),
+        );
+      } else if (workspaceId) {
+        workspaceBillingRuntime.reconnect(workspaceId);
+      }
     },
     onDrop: ({ reason, eventName, expectedWorkspaceId, actualWorkspaceId }) => {
       console.warn(
@@ -3930,6 +3943,19 @@ export async function startServer({
           `workspaceId=${event.workspaceId ?? 'unknown'} ` +
           `projectId=${event.projectId ?? 'unknown'} version=${event.version ?? 'unknown'}`,
       );
+      const isAmbientWorkspace =
+        subscribedWorkspaceId === activeWorkspace.get()?.trim();
+      const isBillingEvent =
+        event.type === 'billing-changed' ||
+        event.type === 'billing-subscription-changed' ||
+        event.type === 'wallet-balance-changed';
+      // Explicit billing interests must not make an inactive workspace run
+      // project/catalog/comment reconciliation. The shared subscriber is
+      // retained so ambient + billing interest in the same workspace still
+      // dedupes to one upstream SSE connection.
+      if (!isAmbientWorkspace && !isBillingEvent && event.type !== 'workspace-context-changed') {
+        return;
+      }
       switch (event.type) {
         case 'team-projects-changed': {
           // Catalog changed (share/unshare). Refresh the display cache and
@@ -4026,7 +4052,9 @@ export async function startServer({
           break;
         }
         case 'workspace-context-changed':
-          handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
+          if (isAmbientWorkspace) {
+            handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
+          }
           // Revalidate exact membership before the next billing projection.
           // A removed/rebound member must clear money and entitlement state,
           // even when no billing-specific event accompanies the roster change.
@@ -4099,30 +4127,46 @@ export async function startServer({
     onReconnect: () => {
       // Close the disconnect gap: one catch-up cycle over the same reads the
       // pollers watch, plus a comment pull for open projects.
-      void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
-      void collabCloud?.pollOnce().catch(() => undefined);
+      if (subscribedWorkspaceId === activeWorkspace.get()?.trim()) {
+        void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+        void collabCloud?.pollOnce().catch(() => undefined);
+      }
+      workspaceBillingRuntime.reconnect(subscribedWorkspaceId);
       // Same catch-up principle for the design-system/skill resource
       // reconciler: a missed 'team-resources-changed' push during the
       // disconnect window is closed by one full re-check across every kind
       // this daemon drives it for (no resourceKind => reconcile all).
-      void reconcileTeamResourcesFromRemote().catch(() => undefined);
+      if (subscribedWorkspaceId === activeWorkspace.get()?.trim()) {
+        void reconcileTeamResourcesFromRemote().catch(() => undefined);
+      }
     },
     onSourceGap: ({ workspaceId, listenerEpoch }) => {
       console.warn(
         `[od] hub source gap detected listenerEpoch=${listenerEpoch} ` +
           `workspaceId=${workspaceId ?? 'unknown'}`,
       );
-      void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+      if (subscribedWorkspaceId === activeWorkspace.get()?.trim()) {
+        void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+      }
       workspaceBillingRuntime.reconnect(workspaceId);
-      void collabCloud?.pollOnce().catch(() => undefined);
-      void reconcileTeamResourcesFromRemote().catch(() => undefined);
+      if (subscribedWorkspaceId === activeWorkspace.get()?.trim()) {
+        void collabCloud?.pollOnce().catch(() => undefined);
+        void reconcileTeamResourcesFromRemote().catch(() => undefined);
+      }
     },
     onError: (error) => {
       console.warn('[od] hub events channel error (will reconnect):', String(error));
     },
   });
+  workspaceHubSubscriptions = createWorkspaceHubSubscriptionManager({
+    start: startWorkspaceHubSubscriber,
+  });
+  workspaceHubSubscriptions.setBillingInterests(
+    workspaceBillingRuntime.interestedKeys().map((interest) => interest.workspaceId),
+  );
+  workspaceHubSubscriptions.setAmbientWorkspace(activeWorkspace.get());
   const unsubscribeHubEventsEndpointRefresh = activeWorkspace.subscribe(() => {
-    hubEventsSubscriber.refreshEndpoint();
+    workspaceHubSubscriptions?.setAmbientWorkspace(activeWorkspace.get());
   });
 
   registerTeamResourceRoutes(app, { teamResources: collab.teamResources });
@@ -11172,7 +11216,7 @@ export async function startServer({
       routineService?.stop();
       workspaceInvalidationPoller.stop();
       unsubscribeHubEventsEndpointRefresh();
-      hubEventsSubscriber.stop();
+      workspaceHubSubscriptions?.dispose();
       workspaceBillingRuntime.dispose();
       proactiveContentPull.dispose();
     };

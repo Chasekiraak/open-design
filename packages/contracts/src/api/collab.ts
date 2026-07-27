@@ -483,6 +483,31 @@ export interface WorkspaceBillingRuntimeState {
 }
 
 /**
+ * One exact workspace/member projection a renderer wants the daemon to keep
+ * warm. Renderers replace their whole set atomically; the daemon owns
+ * authorization, refresh, retries, upstream subscriptions, and expiry.
+ */
+export interface WorkspaceBillingInterestScope {
+  workspaceId: string;
+  workspaceMemberId: string;
+}
+
+/** PUT /api/workspace/billing/interests/:clientId request body. */
+export interface WorkspaceBillingInterestRequest {
+  /** Monotonic unsigned decimal scoped to this renderer-lifetime client id. */
+  generation: string;
+  /** Full replacement set, not a delta. */
+  interests: WorkspaceBillingInterestScope[];
+}
+
+/** Successful interest declaration/renewal response. */
+export interface WorkspaceBillingInterestResponse {
+  clientId: string;
+  acceptedGeneration: string;
+  leaseExpiresAt: string;
+}
+
+/**
  * The caller's Vela account billing summary.
  *
  * `vela billing summary` remains account-scoped. The daemon must never turn it
