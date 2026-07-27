@@ -304,6 +304,90 @@ describe('POST /api/runs headless fallbacks', () => {
     );
   });
 
+  it('preserves sessionMode and runContext on omit-pin seeded user turns', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Omit-pin seeds turn metadata',
+    );
+    const prompt = `omit-pin turn metadata ${randomUUID()}`;
+    const runContext = {
+      files: ['src/app.ts'],
+      designSystemId: 'ds_test',
+    };
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId,
+        message: prompt,
+        sessionMode: 'chat',
+        context: runContext,
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{
+        role: string;
+        content: string;
+        sessionMode?: string;
+        runContext?: Record<string, unknown>;
+      }>;
+    };
+    const user = messagesBody.messages.find(
+      (m) => m.role === 'user' && m.content.includes(prompt),
+    );
+    expect(user).toBeTruthy();
+    expect(user?.sessionMode).toBe('chat');
+    expect(user?.runContext).toEqual(runContext);
+  });
+
+  it('bumps project updatedAt after omit-pin user message seed', async () => {
+    started = await startTestServer();
+    const older = await createProject(started.url, 'Older project for activity order');
+    await delay(5);
+    const newer = await createProject(started.url, 'Newer project for activity order');
+
+    // Confirm newer project currently sorts first.
+    const beforeResponse = await fetch(`${started.url}/api/projects`);
+    expect(beforeResponse.status).toBe(200);
+    const beforeBody = await beforeResponse.json() as {
+      projects: Array<{ id: string }>;
+    };
+    const beforeIds = beforeBody.projects.map((p) => p.id);
+    expect(beforeIds.indexOf(newer.projectId)).toBeLessThan(beforeIds.indexOf(older.projectId));
+
+    await delay(5);
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId: older.projectId,
+        conversationId: older.conversationId,
+        message: `activity bump seed ${randomUUID()}`,
+      }),
+    });
+    expect(runResponse.status).toBe(202);
+
+    const afterResponse = await fetch(`${started.url}/api/projects`);
+    expect(afterResponse.status).toBe(200);
+    const afterBody = await afterResponse.json() as {
+      projects: Array<{ id: string }>;
+    };
+    const afterIds = afterBody.projects.map((p) => p.id);
+    // Seeding the older project's user turn must promote it above the newer one.
+    expect(afterIds.indexOf(older.projectId)).toBeLessThan(afterIds.indexOf(newer.projectId));
+  });
+
   it('preserves empty currentPrompt for attachments-only omit-pin sends', async () => {
     started = await startTestServer();
     const { projectId, conversationId } = await createProject(

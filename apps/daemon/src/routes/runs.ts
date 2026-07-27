@@ -156,6 +156,33 @@ function seededUserMessageAttachmentFields(meta: JsonRecord): {
   };
 }
 
+/**
+ * Map request/run turn metadata onto the ChatMessage fields the web client
+ * writes via PUT /messages. ChatPane and ProjectView retry both re-read
+ * sessionMode / runContext / appliedPluginSnapshot from the user message after
+ * reload, so omit-pin seeds must persist the same columns.
+ */
+function seededUserMessageTurnMetadataFields(
+  meta: JsonRecord,
+  appliedPluginSnapshot?: AppliedPluginSnapshot | null,
+): {
+  sessionMode?: string;
+  runContext?: Record<string, unknown>;
+  appliedPluginSnapshot?: AppliedPluginSnapshot;
+} {
+  const runContext =
+    meta.context && typeof meta.context === 'object' && !Array.isArray(meta.context)
+      ? (meta.context as Record<string, unknown>)
+      : undefined;
+  return {
+    ...(typeof meta.sessionMode === 'string' && meta.sessionMode
+      ? { sessionMode: meta.sessionMode }
+      : {}),
+    ...(runContext ? { runContext } : {}),
+    ...(appliedPluginSnapshot ? { appliedPluginSnapshot } : {}),
+  };
+}
+
 interface ProjectRecord {
   id: string;
   name: string;
@@ -789,6 +816,12 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
       }
     }
+    // Resolve session mode before omit-pin seed so the user turn stores the
+    // same mode the run will use (matches web PUT /messages persistence).
+    meta.sessionMode =
+      meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
+        ? normalizeConversationSessionMode(meta.sessionMode)
+        : normalizeConversationSessionMode(conversationSession?.sessionMode);
     // Web always mints assistantMessageId client-side. API clients that already
     // know conversationId (eval runners, scripts, MCP after the bind above) may
     // omit it. Without a server-side pin, pinAssistantMessageOnRunCreate no-ops,
@@ -827,20 +860,28 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
             content: promptForUserMessage,
             startedAt: now,
             endedAt: now,
+            // Same turn metadata the web client writes via PUT /messages so
+            // reload/retry keep sessionMode, runContext, and applied plugin.
+            ...seededUserMessageTurnMetadataFields(
+              meta,
+              resolvedSnapshot?.ok ? resolvedSnapshot.snapshot : null,
+            ),
             // Preserve request attachments/commentAttachments on the seeded user
             // turn so reload/listMessages still show chips and annotation context
             // for omit-pin / headless clients (same columns as PUT /messages).
             ...seededUserMessageAttachmentFields(meta),
           });
+          // Bump parent project updatedAt so listProjects reorders (same as
+          // PUT /messages). Headless/API turns that never hit that route would
+          // otherwise leave the project buried under more recent activity.
+          if (typeof meta.projectId === 'string' && meta.projectId) {
+            updateProject(db, meta.projectId, {});
+          }
         } catch (err) {
           console.warn('[runs] api client user message pin failed', err);
         }
       }
     }
-    meta.sessionMode =
-      meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
-        ? normalizeConversationSessionMode(meta.sessionMode)
-        : normalizeConversationSessionMode(conversationSession?.sessionMode);
     const run = design.runs.create(meta);
     try {
       pinAssistantMessageOnRunCreate(db, run);
