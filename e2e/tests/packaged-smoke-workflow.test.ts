@@ -945,6 +945,21 @@ process.stdin.on("end", () => {
     }
   });
 
+  it("[P2] closes packaged-leaf coverage without duplicating the broad E2E lane", async () => {
+    const workflow = await readFile(ciWorkflowPath, "utf8");
+    const workspaceUnit = sectionBetween(workflow, "  workspace_unit_tests:", "  windows_tools_pack_payload_tests:");
+
+    expect(workspaceUnit).toContain(`if [ "\${{ needs.scopes.outputs.tools_pack_tests_required }}" = "true" ]; then
+            pnpm --filter @open-design/desktop build
+            pnpm --filter @open-design/desktop test
+            pnpm --filter @open-design/packaged test
+            pnpm --filter @open-design/tools-pack test
+            if [ "\${{ needs.scopes.outputs.run_e2e_vitest }}" != "true" ]; then
+              pnpm --filter @open-design/e2e test tests/packaged-launcher-update-loop.test.ts
+            fi
+          fi`);
+  });
+
   it("[P2] skips the critical fallback for pure packaged-leaf changes and stays fail-closed elsewhere", async () => {
     const hot = { inputs: { ci_mode: "hot" } };
 

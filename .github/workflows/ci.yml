@@ -304,7 +304,13 @@ jobs:
             pnpm --filter @open-design/tools-dev test
           fi
           if [ "${{ needs.scopes.outputs.tools_pack_tests_required }}" = "true" ]; then
+            pnpm --filter @open-design/desktop build
+            pnpm --filter @open-design/desktop test
+            pnpm --filter @open-design/packaged test
             pnpm --filter @open-design/tools-pack test
+            if [ "${{ needs.scopes.outputs.run_e2e_vitest }}" != "true" ]; then
+              pnpm --filter @open-design/e2e test tests/packaged-launcher-update-loop.test.ts
+            fi
           fi
 
       - name: Probe watcher environment
