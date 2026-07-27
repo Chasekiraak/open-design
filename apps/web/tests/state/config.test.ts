@@ -157,8 +157,8 @@ describe('syncConfigToDaemon', () => {
     expect(url).toBe('/api/app-config');
     expect(init.method).toBe('PUT');
     expect(init.headers).toEqual({ 'content-type': 'application/json' });
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      onboardingCompleted: DEFAULT_CONFIG.onboardingCompleted,
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({
       agentId: DEFAULT_CONFIG.agentId,
       agentModels: DEFAULT_CONFIG.agentModels,
       skillId: DEFAULT_CONFIG.skillId,
@@ -168,6 +168,7 @@ describe('syncConfigToDaemon', () => {
         codex: { CODEX_HOME: '~/.codex-alt', CODEX_BIN: '~/bin/codex-next' },
       },
     });
+    expect(body).not.toHaveProperty('onboardingCompleted');
   });
 
   it('syncs CLI API key env values and intent to daemon app config while localStorage strips them', async () => {

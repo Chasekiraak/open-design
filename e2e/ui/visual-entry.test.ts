@@ -142,13 +142,9 @@ test('[P2] captures the home plugin use staged surface', async ({ page }) => {
   await configureVisualPage(page);
   const plugins = await openVisualPluginsCatalog(page);
 
-  const home = page.getByTestId('entry-view-home');
-  await home.getByTestId('plugins-home-pill-category-prototype').click();
-  const card = home.locator('article.plugins-home__card[data-plugin-id="visual-prototype-starter"]');
+  const card = pluginMarketplaceCard(plugins, 'Prototype Starter');
   await expect(card).toBeVisible();
-  await home.getByTestId('plugins-home-details-visual-prototype-starter').click({ force: true });
-  await expect(page.getByRole('dialog', { name: /Prototype Starter details/i })).toBeVisible();
-  await page.getByTestId('plugin-details-use-visual-prototype-starter').click();
+  await card.getByRole('button', { name: 'Try it' }).click();
   await expect(page.getByTestId('home-hero-active-plugin')).toContainText('Prototype Starter');
   await expect(page.getByTestId('home-hero-input')).toBeVisible();
 
@@ -187,8 +183,7 @@ async function openVisualPluginsCatalog(page: import('@playwright/test').Page) {
   await page.getByTestId('entry-nav-plugins').click();
   await expect(page).toHaveURL(/\/plugins$/);
   const plugins = page.getByTestId('entry-view-plugins');
-  // #5517 renamed the surface: the view renders `entry.navExtensions`.
-  await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
+  await expect(plugins.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   // The marketplace opens on the 官方 scope, which is fed by `/api/marketplaces`
   // — empty in this harness. The visual fixture plugins are user-installed, so
   // switch to 个人; it is also the only scope whose cards carry the per-card

@@ -159,7 +159,8 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
   const restoredArtifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
   if ((await restoredArtifactTab.count()) === 0) {
     const turnCard = page.locator('.msg.assistant').filter({ hasText: 'workspace-artifact.html' }).first();
-    const openButton = turnCard.getByRole('button', { name: /^Open$/ });
+    const artifactRow = turnCard.locator('.produced-file', { hasText: 'workspace-artifact.html' });
+    const openButton = artifactRow.getByRole('button', { name: /^Open$/ });
     await expect(openButton).toBeVisible();
     await openButton.click();
 
@@ -213,7 +214,6 @@ test('[P0] switching between projects restores each project workspace to its las
     buffer: pngBytes,
   });
   await expect((await alphaPrimaryUpload).ok()).toBeTruthy();
-  await expect(tabBySuffix(page, 'alpha-primary.png')).toBeVisible();
   const alphaSecondaryUpload = page.waitForResponse(
     (resp: Response) => resp.url().includes('/upload') && resp.request().method() === 'POST',
     { timeout: 5000 },
@@ -233,7 +233,7 @@ test('[P0] switching between projects restores each project workspace to its las
   await expect(alphaPrimaryTab).toHaveAttribute('aria-selected', 'true');
   await expect(alphaSecondaryTab).toHaveAttribute('aria-selected', 'false');
 
-  await page.getByRole('button', { name: /back to projects/i }).click();
+  await gotoEntryHome(page);
   await expectProjectsView(page);
 
   await createPrototypeProject(page, betaName);
@@ -249,7 +249,6 @@ test('[P0] switching between projects restores each project workspace to its las
     buffer: pngBytes,
   });
   await expect((await betaPrimaryUpload).ok()).toBeTruthy();
-  await expect(tabBySuffix(page, 'beta-primary.png')).toBeVisible();
   const betaSecondaryUpload = page.waitForResponse(
     (resp: Response) => resp.url().includes('/upload') && resp.request().method() === 'POST',
     { timeout: 5000 },
@@ -316,13 +315,10 @@ test('[P0] @critical visiting an uploaded design file route restores its tab and
   expect(uploadedName).toBeTruthy();
 
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'deep-linked-reference.png',
-  });
+  const fileRow = designFileRow(page, 'deep-linked-reference.png');
   await expect(fileRow).toBeVisible();
   await fileRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
-  await expect(page.getByTestId('design-file-preview').getByText(/deep-linked-reference\.png/i)).toBeVisible();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
 
   const current = new URL(page.url());
   const [, projects, projectId] = current.pathname.split('/');
@@ -374,12 +370,10 @@ test('[P0] returning from an uploaded design file route to the project root keep
   expect(uploadedName).toBeTruthy();
 
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'root-design-reference.png',
-  });
+  const fileRow = designFileRow(page, 'root-design-reference.png');
   await expect(fileRow).toBeVisible();
   await fileRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
 
   const current = new URL(page.url());
   const [, projects, projectId] = current.pathname.split('/');
@@ -1751,17 +1745,8 @@ test('[P0] reloading a project keeps the Design Files entry reachable when it wa
   await openAllProjectFiles(page);
   await expectAllProjectFilesActive(page);
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'restore-me.png',
-  });
+  const fileRow = designFileRow(page, 'restore-me.png');
   await expect(fileRow).toBeVisible();
-  const rowButton = fileRow.getByRole('button').first();
-  await rowButton.click();
-  await expect(
-    page.locator('[data-testid^="design-file-row-"]', {
-      hasText: 'restore-me.png',
-    }),
-  ).toBeVisible();
 
   await page.reload();
   await expect(page.getByTestId('file-workspace')).toBeVisible({ timeout: 20_000 });
@@ -1836,13 +1821,14 @@ test('[P0] @critical daemon error details persist between failed sends', async (
     'error-cross-tab.html',
     '<!doctype html><html><body><h1>Error cross tab</h1></body></html>',
   );
+  // The seed writes behind the browser registry, so reload before asserting
+  // the Design Files surface rather than reusing its just-settled empty list.
+  await page.reload();
+  await expectWorkspaceReady(page);
   await openAllProjectFiles(page);
-  const crossFileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'error-cross-tab.html',
-  });
+  const crossFileRow = designFileRow(page, 'error-cross-tab.html');
   await expect(crossFileRow).toBeVisible();
   await crossFileRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
   await expect(page.getByRole('tab', { name: /error-cross-tab\.html/i })).toHaveAttribute('aria-selected', 'true');
   await expect(artifactPreviewFrame(page).getByRole('heading', { name: 'Error cross tab' })).toBeVisible();
 
@@ -3334,7 +3320,7 @@ test('[P1] project composer working directory replace and clear update linked di
 
   await page.getByTestId('working-dir-trigger').click();
   await page.getByTestId('working-dir-clear').click();
-  await expect(page.getByTestId('working-dir-trigger')).toContainText('Select working directory');
+  await expect(page.getByTestId('working-dir-trigger')).toContainText('Working directory');
   await expect
     .poll(() => patchBodies.at(-1)?.metadata)
     .toMatchObject({ linkedDirs: [] });
@@ -3389,7 +3375,7 @@ test('[P1] project composer working directory rejects stale folder without promo
   await page.getByTestId('working-dir-trigger').click();
   await page.getByTestId('working-dir-pick').click();
 
-  await expect(page.getByTestId('working-dir-trigger')).toContainText('Select working directory');
+  await expect(page.getByTestId('working-dir-trigger')).toContainText('Working directory');
   await expect(page.getByText("Couldn't set the working directory")).toBeVisible();
   await expect
     .poll(() => patchBodies.at(-1)?.metadata)
@@ -3616,10 +3602,26 @@ async function sendPrompt(page: Page, prompt: string) {
 }
 
 async function startNewConversation(page: Page) {
+  const previousConversationId = routedConversationId(page);
   await page.getByTestId('conversation-history-trigger').click();
   await expect(page.getByTestId('conversation-list')).toBeVisible();
   await page.getByTestId('conversation-history-new').click();
   await expect(page.getByTestId('conversation-list')).toHaveCount(0);
+  await expect
+    .poll(() => {
+      const nextConversationId = routedConversationId(page);
+      return nextConversationId && nextConversationId !== previousConversationId
+        ? nextConversationId
+        : null;
+    })
+    .not.toBeNull();
+}
+
+function routedConversationId(page: Page): string | null {
+  const [, projects, , maybeConversations, conversationId] = new URL(page.url()).pathname.split('/');
+  return projects === 'projects' && maybeConversations === 'conversations' && conversationId
+    ? conversationId
+    : null;
 }
 
 function tabBySuffix(page: Page, name: string): Locator {
@@ -3627,6 +3629,10 @@ function tabBySuffix(page: Page, name: string): Locator {
     .locator('.ws-tab[role="tab"]')
     .filter({ has: page.locator('.ws-tab-label', { hasText: name }) })
     .first();
+}
+
+function designFileRow(page: Page, name: string): Locator {
+  return page.getByTestId(`design-file-row-${name}`);
 }
 
 async function ensureFileTabOpen(page: Page, name: string): Promise<Locator> {
@@ -4187,9 +4193,7 @@ async function runDesignFilesUploadFlow(
 
   await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'moodboard.png',
-  });
+  const fileRow = designFileRow(page, 'moodboard.png');
   await expect(fileRow).toBeVisible();
   const nameBtn = fileRow.getByRole('button').first();
   await nameBtn.click();
@@ -4232,9 +4236,7 @@ async function runDesignFilesDeleteFlow(
   await expect(page.getByRole('tab', { name: /trash-me\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'trash-me.png',
-  });
+  const fileRow = designFileRow(page, 'trash-me.png');
   await expect(fileRow).toBeVisible();
   await fileRow.hover();
   await fileRow.locator('[data-testid^="design-file-menu-"]').click();

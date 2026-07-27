@@ -1,9 +1,11 @@
 import { mkdir } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@/playwright/suite';
+import { expect, test as baseTest } from '@/playwright/suite';
 import type { Page } from '@playwright/test';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 
 import { writeFakeVelaBin, seedVelaLoginConfig } from '@/amr';
 import { runErrorCard } from '@/playwright/chat';
@@ -48,6 +50,101 @@ const ANTIGRAVITY_AGENT = {
   version: 'test',
   models: [{ id: 'default', label: 'Default' }],
 };
+const PERSONAL_PROJECT_WORKSPACE_CONTEXT = {
+  workspaceId: 'workspace-personal',
+  workspaceType: 'personal',
+  workspaceMemberId: 'member-personal',
+  role: 'owner',
+  memberStatus: 'active',
+  lifecycleState: 'active',
+  billingState: 'active',
+  planId: null,
+  providerMode: 'platform_credits',
+  seatSummary: {
+    seatLimit: 0,
+    usedSeats: 0,
+    availableSeats: 0,
+    isSeatFull: false,
+  },
+  permissions: {
+    canManageMembers: true,
+    canManageBilling: true,
+    canInviteMembers: true,
+    canManageAutoRecharge: true,
+    canShareProjects: true,
+    canWriteSyncedFiles: true,
+    canViewWorkspaceSettings: true,
+    canManageSharedResources: true,
+  },
+} satisfies WorkspaceCollabContext;
+const PERSONAL_PROJECT_WORKSPACE_HEADERS = {
+  'x-od-workspace-id': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
+  'x-od-workspace-type': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceType,
+  'x-od-workspace-member-id': PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceMemberId,
+  'x-od-workspace-role': PERSONAL_PROJECT_WORKSPACE_CONTEXT.role,
+  'x-od-workspace-member-status': PERSONAL_PROJECT_WORKSPACE_CONTEXT.memberStatus,
+  'x-od-workspace-lifecycle-state': PERSONAL_PROJECT_WORKSPACE_CONTEXT.lifecycleState,
+  'x-od-workspace-can-share-projects': String(
+    PERSONAL_PROJECT_WORKSPACE_CONTEXT.permissions.canShareProjects,
+  ),
+  'x-od-workspace-can-write-synced-files': String(
+    PERSONAL_PROJECT_WORKSPACE_CONTEXT.permissions.canWriteSyncedFiles,
+  ),
+};
+
+const test = baseTest.extend<{}, { _fakeWorkspaceApi: void }>({
+  _fakeWorkspaceApi: [
+    async ({}, use) => {
+      const server = createServer((request, response) => {
+        const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+        if (request.method === 'GET' && pathname === '/api/v1/workspaces') {
+          response.statusCode = 200;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({
+            items: [{
+              workspaceId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
+              workspaceName: 'Personal',
+              workspaceType: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceType,
+              workspaceMemberId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceMemberId,
+              role: PERSONAL_PROJECT_WORKSPACE_CONTEXT.role,
+              memberStatus: PERSONAL_PROJECT_WORKSPACE_CONTEXT.memberStatus,
+              lifecycleState: PERSONAL_PROJECT_WORKSPACE_CONTEXT.lifecycleState,
+            }],
+          }));
+          return;
+        }
+        response.statusCode = 404;
+        response.end();
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      const address = server.address();
+      if (address == null || typeof address === 'string') {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        throw new Error('fake workspace API did not receive a TCP port');
+      }
+      const previousControlKey = process.env.VELA_CONTROL_KEY;
+      const previousApiUrl = process.env.VELA_API_URL;
+      process.env.VELA_CONTROL_KEY = 'fake-control-key';
+      process.env.VELA_API_URL = `http://127.0.0.1:${address.port}`;
+      try {
+        await use();
+      } finally {
+        if (previousControlKey === undefined) delete process.env.VELA_CONTROL_KEY;
+        else process.env.VELA_CONTROL_KEY = previousControlKey;
+        if (previousApiUrl === undefined) delete process.env.VELA_API_URL;
+        else process.env.VELA_API_URL = previousApiUrl;
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+    },
+    { auto: true, scope: 'worker' },
+  ],
+});
 
 async function openExecutionSettingsDialog(page: Page) {
   const settings = await openSettingsDialog(page);
@@ -87,6 +184,22 @@ async function stubRuntimeAgents(page: Page) {
     CLAUDE_AGENT,
     ANTIGRAVITY_AGENT,
   ]);
+}
+
+async function stubPersonalProjectWorkspaceScope(page: Page, projectId: string) {
+  await page.route(`**/api/projects/${projectId}/workspace-scope`, async (route) => {
+    await route.fulfill({
+      json: {
+        scope: {
+          kind: 'personal',
+          projectId,
+          workspaceId: PERSONAL_PROJECT_WORKSPACE_CONTEXT.workspaceId,
+          visibility: 'personal',
+          context: PERSONAL_PROJECT_WORKSPACE_CONTEXT,
+        },
+      },
+    });
+  });
 }
 
 function artifactPreview(page: Page) {
@@ -168,7 +281,7 @@ test('[P0] @critical AMR insufficient-balance failures surface Top up AMR and re
   await expect(page.getByText('AMR balance retry recovered.').first()).toBeVisible({ timeout: T.long });
 });
 
-test('[P0] @critical AMR auth failures offer inline Authorize & retry sign-in and auto-recover', async ({ page }) => {
+test('[P0] @critical AMR auth failures remain retryable after inline sign-in changes identity scope', async ({ page }) => {
   await stubCatalogsEmpty(page);
   await stubRuntimeAgents(page);
   let loggedIn = false;
@@ -217,15 +330,19 @@ test('[P0] @critical AMR auth failures offer inline Authorize & retry sign-in an
   await expect(authorizeAndRetry).toBeVisible({ timeout: T.long });
   await authorizeAndRetry.click();
 
-  // New inline flow: clicking Authorize & retry starts vela login in place (it
-  // POSTs /login directly) instead of bouncing the user out to the Settings
-  // dialog. The run then auto-retries once /status reports signed in.
+  // Clicking Authorize & retry starts vela login inline (without opening
+  // Settings). Resolving anon -> account intentionally resets workspace tabs
+  // to the new identity's Home scope; reopening the project must leave the
+  // failed run recoverable after that security boundary.
   await expect.poll(() => loginRequested, { timeout: T.medium }).toBe(true);
   await expect(settingsSurface(page)).toHaveCount(0);
+  await expect(page.getByTestId('home-hero')).toBeVisible({ timeout: T.long });
+  await gotoProject(page, amr.projectId);
+  await page.getByRole('button', { name: /^Retry$|^重试$|^重試$/i }).first().click();
   await expect(page.getByText('AMR auth auto retry recovered.').first()).toBeVisible({ timeout: T.long });
 });
 
-test('[P0] @critical AMR model catalog invalid-key failures authorize and auto-recover', async ({ page }) => {
+test('[P0] @critical AMR model catalog invalid-key failures remain retryable after authorization', async ({ page }) => {
   await stubCatalogsEmpty(page);
   await stubRuntimeAgents(page);
   let loggedIn = false;
@@ -321,10 +438,13 @@ test('[P0] @critical AMR model catalog invalid-key failures authorize and auto-r
   await authorizeAndRetry.click();
   await expect.poll(() => loginRequested, { timeout: T.medium }).toBe(true);
   await expect(settingsSurface(page)).toHaveCount(0);
+  await expect(page.getByTestId('home-hero')).toBeVisible({ timeout: T.long });
+  await gotoProject(page, projectId);
+  await page.getByRole('button', { name: /^Retry$|^重试$|^重試$/i }).first().click();
   await expect(page.getByText('AMR model catalog auth retry recovered.').first()).toBeVisible({ timeout: T.long });
 });
 
-test('[P0] @critical non-AMR model failures promote Open Design AMR and auto-retry after sign-in', async ({ page }) => {
+test('[P0] @critical non-AMR model failures recover with Open Design AMR after sign-in changes identity scope', async ({ page }) => {
   await stubCatalogsEmpty(page);
   await stubRuntimeAgents(page);
   let loggedIn = false;
@@ -435,6 +555,9 @@ test('[P0] @critical non-AMR model failures promote Open Design AMR and auto-ret
   await settings.getByRole('button', { name: /^(Authorize|Sign in)$/ }).first().click();
 
   await expect.poll(() => loginRequested, { timeout: T.medium }).toBe(true);
+  await expect(page.getByTestId('home-hero')).toBeVisible({ timeout: T.long });
+  await gotoProject(page, projectId);
+  await page.getByRole('button', { name: /^Retry$|^重试$|^重試$/i }).first().click();
   await expect.poll(() => runRequestBodies.some((body) => body.agentId === 'amr'), { timeout: T.long }).toBe(true);
   await expect(page.getByText('AMR promotion retry recovered.').first()).toBeVisible({ timeout: T.long });
 });
@@ -486,8 +609,9 @@ test('[P0] @critical Settings reopens AMR with the configured profile, account b
   const modelPopover = page.getByTestId('settings-agent-model-popover-amr');
   await expect(modelPopover).toBeVisible();
   await expect(modelPopover.getByRole('option', { name: /glm-5/i })).toBeVisible();
-  await settings.getByRole('heading', { name: /Execution/i }).click();
-  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await settings.getByTestId('settings-nav-execution').click();
+  await expect(modelPopover).toHaveCount(0);
+  await settings.getByRole('button', { name: /Back to home/i }).click();
   await expect(settingsSurface(page)).toHaveCount(0);
 
   const reopened = await openExecutionSettingsDialog(page);
@@ -643,7 +767,7 @@ test('[P0] @critical Settings preserves AMR account, recharge shortcut, and mode
   let modelPopover = page.getByTestId('settings-agent-model-popover-amr');
   await expect(modelPopover).toBeVisible();
   await expect(modelPopover.getByRole('option', { name: /glm-5/i })).toBeVisible();
-  await settings.getByRole('heading', { name: /Execution/i }).click();
+  await settings.getByTestId('settings-nav-execution').click();
   await expect(modelPopover).toHaveCount(0);
 
   await settings.getByTestId('settings-agent-select-codex').click();
@@ -717,6 +841,7 @@ test('[P0] after an AMR failure the user can switch to Codex and complete a fres
   await page.keyboard.press('Escape');
   await expect(settings).toHaveCount(0);
 
+  await gotoProject(page, amr.projectId);
   await sendPrompt(page, 'Create a deterministic smoke artifact');
   await expect(artifactPreview(page)).toBeVisible({ timeout: 20_000 });
   await expect(
@@ -1012,7 +1137,10 @@ async function setupAmrWorkspace(
   });
   await mkdir(homeDir, { recursive: true });
   if (options.seedLoginConfig !== false) {
-    await seedVelaLoginConfig(homeDir, { email: 'ui-amr@example.com', profile: options.profile ?? 'local' });
+    await seedVelaLoginConfig(homeDir, {
+      email: 'ui-amr@example.com',
+      profile: options.profile ?? 'local',
+    });
   }
 
   const config = {
@@ -1048,6 +1176,12 @@ async function setupAmrWorkspace(
   await putAppConfig(page, config);
 
   const projectId = `amr-ui-${Date.now()}`.replace(/[^A-Za-z0-9._-]/g, '-');
-  const { conversationId } = await createProjectViaApi(page, projectId, 'AMR UI failure smoke');
+  const { conversationId } = await createProjectViaApi(
+    page,
+    projectId,
+    'AMR UI failure smoke',
+    { headers: PERSONAL_PROJECT_WORKSPACE_HEADERS },
+  );
+  await stubPersonalProjectWorkspaceScope(page, projectId);
   return { projectId, conversationId, homeDir, root, velaBin };
 }

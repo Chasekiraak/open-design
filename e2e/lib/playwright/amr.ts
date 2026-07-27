@@ -110,10 +110,11 @@ async function ensureEntryRailOpenIfPresent(page: Page) {
  * (`role="dialog"`), but from the entry #5517 routes to `/settings` and
  * `SettingsDialog` renders in `presentation="page"` mode — same markup, but
  * `role="region"` and no `aria-modal`. `.modal-settings` is the class both
- * presentations share, so match on it and keep the dialog role as a fallback.
+ * presentations share. Keep this selector specific: the account/model popover
+ * also uses `role="dialog"` but is not the full settings surface.
  */
 export function settingsSurface(page: Page) {
-  return page.locator('.modal-settings').or(page.getByRole('dialog')).first();
+  return page.locator('.modal-settings').first();
 }
 
 export async function openSettingsDialog(page: Page) {
@@ -122,7 +123,7 @@ export async function openSettingsDialog(page: Page) {
   await ensureEntryRailOpenIfPresent(page);
   const dialog = settingsSurface(page);
   const settingsTrigger = page
-    .getByTestId('entry-settings-button')
+    .getByTestId('entry-nav-settings')
     .or(page.getByTestId('entry-settings-menu-trigger'))
     .or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL }))
     .first();
@@ -142,6 +143,10 @@ export async function openSettingsDialog(page: Page) {
     const detailsTrigger = page.getByTestId('entry-settings-open-details').first();
     if (await detailsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await detailsTrigger.click();
+    }
+    const executionSettingsTrigger = page.getByTestId('avatar-open-execution-settings').first();
+    if (await executionSettingsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await executionSettingsTrigger.click();
     }
 
     await expect
@@ -171,8 +176,14 @@ export async function sendPrompt(page: Page, prompt: string) {
   await input.press('Enter');
 }
 
-export async function createProjectViaApi(page: Page, projectId: string, name: string) {
+export async function createProjectViaApi(
+  page: Page,
+  projectId: string,
+  name: string,
+  options: { headers?: Record<string, string> } = {},
+) {
   const response = await page.request.post('/api/projects', {
+    ...(options.headers ? { headers: options.headers } : {}),
     data: {
       id: projectId,
       name,

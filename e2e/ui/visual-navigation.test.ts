@@ -103,9 +103,8 @@ test('[P2] captures the plugins page surface', async ({ page }) => {
   await page.getByTestId('entry-nav-plugins').click();
   await expect(page).toHaveURL(/\/plugins$/);
   const plugins = page.getByTestId('entry-view-plugins');
-  // #5517 renamed the surface: the view renders `entry.navExtensions`.
-  await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
-  await expect(plugins.getByTestId('plugins-tab-installed')).toBeVisible();
+  await expect(plugins.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
+  await plugins.getByTestId('plugins-tab-installed').click();
   await expect(plugins.getByText('Prototype Starter').first()).toBeVisible();
   await waitForVisualFonts(page);
 
@@ -167,10 +166,10 @@ test('[P2] captures the tasks page surface', async ({ page }) => {
 });
 
 async function openSettingsSection(page: import('@playwright/test').Page, testId: string) {
-  // The settings chip moved into the rail footer (#5517); collapsed, the rail
-  // is `inert`, so even a programmatic click is swallowed.
+  // The settings entry lives in the rail; collapsed, the rail is `inert`, so
+  // even a programmatic click is swallowed.
   await ensureRailOpen(page);
-  const settingsButton = page.getByTestId('entry-settings-button');
+  const settingsButton = page.getByTestId('entry-nav-settings');
   await expect(settingsButton).toBeVisible();
   await settingsButton.evaluate((element: HTMLElement) => element.click());
   const dialog = settingsSurface(page);

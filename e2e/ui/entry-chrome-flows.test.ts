@@ -167,7 +167,7 @@ test('[P0] @critical entry chrome exposes the primary home creation surface and 
   // entry layout.
   await expect(page.locator('.pet-rail')).toHaveCount(0);
 
-  await page.getByTestId('entry-settings-button').click();
+  await page.getByTestId('entry-nav-settings').click();
   // From the entry, settings routes to a page surface rather than a modal.
   const settingsDialog = settingsSurface(page);
   await expect(settingsDialog).toBeVisible();
@@ -341,10 +341,11 @@ test('[P1] entry top navigation matches the current home tab structure', async (
   await expect(page.getByTestId('entry-nav-projects')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-tasks')).toHaveCount(0);
   await expect(page.getByTestId('entry-nav-integrations')).toHaveCount(0);
-  // Settings is the rail's own control (footer chip when signed out), never a
-  // duplicate of the nav group's destinations.
+  // Settings is the rail's own signed-out control, never a duplicate of the
+  // footer or another destination.
   await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-nav-plugins')).toHaveCount(0);
-  await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-settings-button')).toBeVisible();
+  await expect(page.locator('.entry-nav-rail__footer').getByTestId('entry-nav-settings')).toHaveCount(0);
+  await expect(page.getByTestId('entry-nav-settings')).toBeVisible();
 
   await expect(page.getByTestId('home-hero-template-picker')).toBeVisible();
   // Nothing is applied on a fresh Home: no template pill reset, no plugin
@@ -798,9 +799,9 @@ test('[P2] home topbar overlays close on outside click, Escape, and Settings ope
   await pill.click();
   await expect(executionPopover).toBeVisible();
 
-  // Settings lives in the rail footer now, and the collapsed rail is `inert`.
+  // Settings lives in the rail, and the collapsed rail is `inert`.
   await ensureRailOpen(page);
-  await page.getByTestId('entry-settings-button').click();
+  await page.getByTestId('entry-nav-settings').click();
   await expect(executionPopover).toHaveCount(0);
   await expect(settingsSurface(page)).toBeVisible();
   await page.keyboard.press('Escape');
@@ -1956,7 +1957,7 @@ test('[P2] required home plugin prompt parameters gate submit and bind the proje
 test('[P0] @critical home composer routes free-form prompts through the design router by default', async ({ page }) => {
   await gotoEntryHome(page);
 
-  await expect(page.getByTestId('composer-mode-trigger')).toHaveAttribute('aria-label', 'Choose a mode');
+  await expect(page.getByTestId('composer-mode-trigger')).toHaveAttribute('aria-label', 'Mode: Design');
 
   const input = page.getByTestId('home-hero-input');
   const prompt =
@@ -2058,7 +2059,7 @@ test('[P0] @critical clearing the home working directory removes linked dirs fro
 
   await page.getByTestId('working-dir-trigger').click();
   await page.getByTestId('working-dir-clear').click();
-  await expect(page.getByTestId('working-dir-trigger')).toContainText('Select working directory');
+  await expect(page.getByTestId('working-dir-trigger')).toContainText('Working directory');
 
   await page.getByTestId('home-hero-input').fill('Create a premium dashboard without local folder context.');
 

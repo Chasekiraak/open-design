@@ -88,30 +88,30 @@ test('[P0] manual edit inspector previews and persists page and selected element
   await expect(inspectorRow(page, 'Font').locator('select')).toHaveValue('Georgia, serif');
   await expect(inspectorRow(page, 'Base size').locator('input')).toHaveValue('18');
 
-  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY');
+  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'Parameters');
   const selectedTitleMarker = frame.locator('[data-od-id="hero-title"][data-od-edit-selected="true"]');
   await expect(selectedTitleMarker).toHaveCount(1);
-  const fontSizeInput = inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Size' }).locator('input');
+  const fontSizeInput = inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Font size' }).locator('input');
   await fontSizeInput.click();
   await expect(selectedTitleMarker).toHaveCount(1);
   await expect(fontSizeInput).not.toHaveValue('');
   await expect(fontSizeInput).not.toHaveValue(/px/i);
-  await expect(inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Color' }).locator('input')).toHaveValue(/^#[0-9a-f]{6}$/);
-  const lineInput = inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Line' }).locator('input');
+  await expect(inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Text color' }).locator('input')).toHaveValue(/^#[0-9a-f]{6}$/);
+  const lineInput = inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Line height' }).locator('input');
   await lineInput.click();
   await lineInput.blur();
   await expect(page.locator('.manual-edit-error')).toHaveCount(0);
   await frame.locator('body').evaluate(() => {
     window.parent.postMessage({ type: 'od-edit-targets', targets: [] }, '*');
   });
-  await expect(page.locator('.manual-edit-modal')).toContainText('TYPOGRAPHY');
+  await expect(page.locator('.manual-edit-modal')).toContainText('Parameters');
   await expect(page.locator('.manual-edit-modal')).not.toContainText('PAGE');
   await frame.locator('body').evaluate(() => {
     (window as Window & typeof globalThis & { __manualEditSmokeMarker?: string }).__manualEditSmokeMarker = 'stable-frame';
   });
 
   await fontSizeInput.fill('48');
-  await inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Color' }).locator('input').fill('#ef4444');
+  await inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Text color' }).locator('input').fill('#ef4444');
   await expect(fontSizeInput).toHaveValue('48');
 
   const title = frame.getByRole('heading', { name: 'Original Hero' });
@@ -141,8 +141,8 @@ test('[P0] manual edit mode preserves preview actions after style edits', async 
   await expect(frame.getByRole('heading', { name: 'Original Hero' })).toBeVisible();
 
   await page.getByTestId('manual-edit-mode-toggle').click();
-  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY');
-  const fontSizeInput = await selectStyleRowInput(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY', 'Size');
+  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'Parameters');
+  const fontSizeInput = await selectStyleRowInput(page, frame, '[data-od-id="hero-title"]', 'Parameters', 'Font size');
   await fontSizeInput.fill('48');
   await inspectSaveButton(page).click({ force: true });
   await expectFileSource(page, projectId, 'manual-edit.html', ['font-size: 48px']);
@@ -252,13 +252,15 @@ test('[P0] @critical preview toolbar keeps share, download, comment, and zoom ac
   await openDesignFile(page, 'toolbar-preview.html');
 
   await expect(page.getByTestId('artifact-preview-frame')).toBeVisible();
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  const viewMode = page.getByRole('tablist', { name: 'View mode' });
+  await expect(viewMode).toBeVisible();
+  await expect(viewMode.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
 
   await page.getByRole('button', { name: /^Share$/ }).click();
   const shareMenu = page.locator('.share-menu-popover[role="menu"]');
   await expect(shareMenu).toBeVisible();
   await expect(shareMenu.getByRole('tab', { name: /^Share$/ })).toHaveAttribute('aria-selected', 'true');
-  await expect(shareMenu).toContainText(/Share project in workspace|Publish this file/i);
+  await expect(shareMenu.getByRole('tab', { name: /^Send to\.\.\.$/ })).toBeVisible();
   await shareMenu.getByRole('tab', { name: /^Export$/ }).click();
   await expect(shareMenu.getByRole('menuitem', { name: /Export as PDF/i })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -464,9 +466,9 @@ test('[P1] HTML preview toolbar exposes screenshot, comments, mark, and edit wor
 
   await page.getByTestId('manual-edit-mode-toggle').click();
   await expect(page.getByTestId('manual-edit-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
-  await selectPreviewElementThroughBridge(page, artifactPreviewFrame(page), '[data-od-id="hero-title"]', 'TYPOGRAPHY');
+  await selectPreviewElementThroughBridge(page, artifactPreviewFrame(page), '[data-od-id="hero-title"]', 'Parameters');
   await expect(page.locator('.manual-edit-modal')).toContainText('Hero title');
-  await expect(page.locator('.manual-edit-modal')).toContainText('TYPOGRAPHY');
+  await expect(page.locator('.manual-edit-modal')).toContainText('Parameters');
   await expect(page.getByRole('button', { name: /^Save$/ })).toBeVisible();
 });
 
@@ -681,7 +683,7 @@ async function selectStyleRowInput(
       },
     }, '*');
   });
-  await expect(page.locator('.manual-edit-modal')).toContainText('TYPOGRAPHY');
+  await expect(page.locator('.manual-edit-modal')).toContainText(section);
   const row = inspectorSection(page, section).locator('.cc-row').filter({ hasText: label }).locator('input');
   await expect(row).toBeVisible();
   return row;
@@ -880,7 +882,9 @@ test('[P0] simple deck keeps the active slide stable in preview-only mode', asyn
   await clickDeckNextSlide(page);
   await expect(frame.getByText('Slide Two')).toBeVisible();
 
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  const viewMode = page.getByRole('tablist', { name: 'View mode' });
+  await expect(viewMode).toBeVisible();
+  await expect(viewMode.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
   await expect(frame.getByText('Slide Two')).toBeVisible();
   await clickDeckNextSlide(page);
   await expect(frame.getByText('Slide Three')).toBeVisible();
@@ -928,7 +932,7 @@ test('[P1] deck thumbnail rail keeps complete 16:9 slides separated and aligned'
   );
 });
 
-test('[P0] @critical HTML viewer stays rendered without a code toggle', async ({ page }) => {
+test('[P0] @critical HTML viewer stays rendered with Preview selected', async ({ page }) => {
   await routeMockAgents(page);
   const projectId = await createEmptyProject(page, 'HTML preview toggle regression');
   await seedHtmlArtifact(
@@ -946,7 +950,9 @@ test('[P0] @critical HTML viewer stays rendered without a code toggle', async ({
     artifactPreviewFrame(page).getByRole('heading', { name: 'Toggle Preview Stable' }),
   ).toBeVisible();
 
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  const viewMode = page.getByRole('tablist', { name: 'View mode' });
+  await expect(viewMode).toBeVisible();
+  await expect(viewMode.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.viewer-source')).toHaveCount(0);
   await expect(previewFrame).toBeVisible();
   await expect(
@@ -984,16 +990,19 @@ test('[P0] @critical edited HTML file restores selected tab and preview after re
   const frame = artifactPreviewFrame(page);
   await expect(frame.getByRole('heading', { name: 'Original Hero' })).toBeVisible();
   await page.getByTestId('manual-edit-mode-toggle').click();
-  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY');
-  const fontSizeInput = inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Size' }).locator('input');
+  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'Parameters');
+  const fontSizeInput = inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Font size' }).locator('input');
   await expect(fontSizeInput).toBeVisible();
   await fontSizeInput.fill('52');
-  await inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Color' }).locator('input').fill('#2563eb');
+  await inspectorSection(page, 'Parameters').locator('.cc-row').filter({ hasText: 'Text color' }).locator('input').fill('#2563eb');
   await inspectSaveButton(page).click({ force: true });
   await expectFileSource(page, projectId, 'restore-edit.html', ['font-size: 52px', 'color:']);
 
   await page.getByTestId('manual-edit-mode-toggle').click();
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  await expect(page.getByRole('tablist', { name: 'View mode' }).getByRole('tab', { name: 'Preview' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(page.locator('.viewer-source')).toHaveCount(0);
   await expect(restoreTab).toHaveAttribute('aria-selected', 'true');
   await expect(secondaryTab).toHaveAttribute('aria-selected', 'false');
@@ -1004,7 +1013,10 @@ test('[P0] @critical edited HTML file restores selected tab and preview after re
   const restoredTab = tabBySuffix(page, 'restore-edit.html');
   await expect(restoredTab).toBeVisible();
   await expect(restoredTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  await expect(page.getByRole('tablist', { name: 'View mode' }).getByRole('tab', { name: 'Preview' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(page.locator('.viewer-source')).toHaveCount(0);
   await expect(artifactPreview(page)).toBeVisible();
   const restoredFrame = artifactPreviewFrame(page);
@@ -1312,32 +1324,24 @@ async function openDesignFile(page: Page, fileName: string) {
     await expect(preview).toBeVisible();
     return;
   }
-  const filePattern = new RegExp(fileName.replace(/\./g, '\\.'), 'i');
+  const filePattern = new RegExp(escapeRegExp(fileName), 'i');
   const fileTabButton = page.getByRole('tab', { name: filePattern }).first();
-  let tabFound = true;
-  try {
-    await fileTabButton.waitFor({ state: 'visible', timeout: 5_000 });
-  } catch {
-    tabFound = false;
-  }
-
-  if (tabFound) {
+  const fileTabVisible = await fileTabButton
+    .waitFor({ state: 'visible', timeout: T.short })
+    .then(() => true)
+    .catch(() => false);
+  if (fileTabVisible) {
     const isSelected = await fileTabButton.getAttribute('aria-selected');
     if (isSelected !== 'true') {
       await fileTabButton.click();
     }
   } else {
-    const fileButton = page.getByRole('button', { name: filePattern }).first();
-    await fileButton.click();
-    if (!(await preview.isVisible().catch(() => false))) {
-      const openButton = page.getByTestId('design-file-preview').getByRole('button', { name: 'Open' });
-      if (await openButton.isVisible().catch(() => false)) {
-        await openButton.click();
-      } else {
-        await fileButton.dblclick();
-      }
-    }
+    await openAllProjectFiles(page);
+    const fileRow = page.getByTestId(`design-file-row-${fileName}`);
+    await expect(fileRow).toBeVisible();
+    await fileRow.getByRole('button').first().click();
   }
+  await expect(fileTabButton).toHaveAttribute('aria-selected', 'true');
   await expect(preview).toBeVisible();
 }
 

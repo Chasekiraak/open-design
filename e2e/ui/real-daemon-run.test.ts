@@ -552,7 +552,7 @@ test('[P0] separate projects keep daemon artifacts isolated across recent-projec
   const alpha = await currentProjectContext(page);
   await expectProjectFilesToContain(page, alpha.projectId, [GENERATED_FILE]);
 
-  await page.getByRole('button', { name: /back to projects/i }).click();
+  await gotoEntryHome(page);
 
   await createProject(page, 'Real daemon isolation beta');
   await expectWorkspaceReady(page);
@@ -561,14 +561,14 @@ test('[P0] separate projects keep daemon artifacts isolated across recent-projec
   await expectProjectFilesToContain(page, beta.projectId, [FOLLOW_UP_FILE]);
   expect(beta.projectId).not.toBe(alpha.projectId);
 
-  await page.getByRole('button', { name: /back to projects/i }).click();
+  await gotoEntryHome(page);
   await openProjectFromProjectsView(page, alpha.projectId);
   await expectWorkspaceReady(page);
   await expect(page.getByTestId('file-workspace').getByText(GENERATED_FILE, { exact: true })).toBeVisible();
   await expect(page.getByText(FOLLOW_UP_FILE, { exact: true })).toHaveCount(0);
   expect((await listProjectFiles(page, alpha.projectId)).map((file) => file.name)).toEqual([GENERATED_FILE]);
 
-  await page.getByRole('button', { name: /back to projects/i }).click();
+  await gotoEntryHome(page);
   await openProjectFromProjectsView(page, beta.projectId);
   await expectWorkspaceReady(page);
   await expect(page.getByTestId('file-workspace').getByText(FOLLOW_UP_FILE, { exact: true })).toBeVisible();

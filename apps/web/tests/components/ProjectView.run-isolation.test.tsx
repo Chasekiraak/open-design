@@ -1350,13 +1350,13 @@ describe('ProjectView conversation run isolation', () => {
 
     fireEvent.click(screen.getByTestId('workspace-focus-mode'));
     await waitFor(() =>
-      expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(true),
+      expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.getAttribute('aria-hidden')).toBe('true'),
     );
     fireEvent.click(screen.getByTestId('workspace-open-comments'));
     fireEvent.click(screen.getByTestId('workspace-send-comment'));
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
-    expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(false);
+    expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('aria-hidden')).toBe(false);
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 'conv-b',
       projectId: 'project-1',

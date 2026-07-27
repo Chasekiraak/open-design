@@ -678,7 +678,7 @@ export async function openAvatarMenu(page: Page): Promise<Locator> {
 export async function openSettingsDetailsFromHeader(page: Page): Promise<Locator> {
   const dialog = page.locator('.modal-settings[role="dialog"]').first();
   const triggers = [
-    page.getByTestId('entry-settings-button').first(),
+    page.getByTestId('entry-nav-settings').first(),
     page.getByTestId('entry-settings-menu-trigger').first(),
     page.locator('.settings-icon-btn').first(),
   ];

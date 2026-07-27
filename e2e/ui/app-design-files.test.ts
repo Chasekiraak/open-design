@@ -336,16 +336,6 @@ async function selectComposerSessionMode(page: Page, modeTitle: 'Ask mode' | 'Pl
   await expect(trigger).toHaveAttribute('aria-label', `Mode: ${modeName}`);
 }
 
-async function clickDesignFilePreviewOpen(page: Page) {
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await expect(async () => {
-    const openButton = preview.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible({ timeout: 1_000 });
-    await openButton.click({ timeout: 1_000 });
-  }).toPass({ timeout: T.medium });
-}
-
 async function openDesignFile(page: Page, fileName: string) {
   const preview = page.getByTestId('artifact-preview-frame');
   if (await preview.isVisible()) return;
@@ -357,12 +347,10 @@ async function openDesignFile(page: Page, fileName: string) {
   }
 
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: fileName,
-  });
+  const fileRow = page.getByTestId(`design-file-row-${fileName}`);
   await expect(fileRow).toBeVisible();
   await fileRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
 }
 
 async function waitForLoadingToClear(page: Page) {
@@ -869,12 +857,10 @@ test('[P0] @critical file workspace restores HTML preview after switching throug
   })).toBeVisible();
 
   await openAllProjectFiles(page);
-  const sourceRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'logic.ts',
-  });
+  await page.getByTestId('design-files-tab-cat:code').click();
+  const sourceRow = page.getByTestId('design-file-row-logic.ts');
   await expect(sourceRow).toBeVisible();
   await sourceRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
   await expect(page.getByRole('tab', { name: /logic\.ts/i })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.code-viewer')).toContainText('riskScore');
 
@@ -931,12 +917,9 @@ async function runDesignFilesTabPersistenceFlow(page: Page) {
     // Depending on restoration timing, inactive files can either be restored as
     // tabs already or remain available from the Design Files list.
     await openAllProjectFiles(page);
-    const secondFileRow = page.locator('[data-testid^="design-file-row-"]', {
-      hasText: 'second-tab.png',
-    });
+    const secondFileRow = page.getByTestId('design-file-row-second-tab.png');
     await expect(secondFileRow).toBeVisible();
     await secondFileRow.getByRole('button').first().click();
-    await clickDesignFilePreviewOpen(page);
   }
 
   await expect(restoredSecondTab).toBeVisible();

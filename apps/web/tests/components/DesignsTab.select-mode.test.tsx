@@ -138,7 +138,7 @@ describe('DesignsTab select mode', () => {
         onOpenLiveArtifact={vi.fn()}
         onDelete={vi.fn()}
         onRename={vi.fn()}
-        isActive={false}
+        isActive
       />,
     );
 

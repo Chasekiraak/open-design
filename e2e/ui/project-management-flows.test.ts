@@ -468,7 +468,7 @@ test('[P2] project detail header keeps the title and execution controls aligned 
   await expect(title).toBeVisible();
   await expect(settingsButton).toBeVisible();
   await expect(handoffButton).toBeVisible();
-  await expect(page.getByTestId('chat-composer').getByTestId('project-ds-picker-trigger')).toBeVisible();
+  await expect(page.getByTestId('chat-composer').getByTestId('composer-design-system-trigger')).toBeVisible();
 
   const [titleBox, settingsBox, handoffBox] = await Promise.all([
     title.boundingBox(),
@@ -493,7 +493,7 @@ test('[P1] project detail header design system picker switches the active projec
   await createProject(page, 'Header design system switch');
   await expectWorkspaceReady(page);
 
-  const trigger = page.getByTestId('project-ds-picker-trigger');
+  const trigger = page.getByTestId('composer-design-system-trigger');
   await expect(trigger).toContainText(/design system/i);
 
   await trigger.click();
@@ -549,7 +549,7 @@ test('[P0] @critical project detail header design system switch carries into the
   await createProject(page, 'Header design system run context');
   await expectWorkspaceReady(page);
 
-  const trigger = page.getByTestId('project-ds-picker-trigger');
+  const trigger = page.getByTestId('composer-design-system-trigger');
   await trigger.click();
   await page.getByTestId('project-ds-picker-search').fill('editorial');
   const editorialOption = page.getByRole('option', { name: /^Editorial Noir$/ });
@@ -581,7 +581,7 @@ test('[P1] project detail design system picker stays inside the composer control
   await expectWorkspaceReady(page);
 
   const composer = page.getByTestId('chat-composer');
-  await expect(composer.getByTestId('project-ds-picker-trigger')).toBeVisible();
+  await expect(composer.getByTestId('composer-design-system-trigger')).toBeVisible();
 });
 
 test('[P1] project detail composer working directory picker opens without leaving chat', async ({ page }) => {
@@ -1541,7 +1541,7 @@ test('[P0] clearing the project design system removes designSystemId from the ne
   await createProject(page, 'Header design system clear run context');
   await expectWorkspaceReady(page);
 
-  const trigger = page.getByTestId('project-ds-picker-trigger');
+  const trigger = page.getByTestId('composer-design-system-trigger');
   await trigger.click();
   await page.getByTestId('project-ds-picker-search').fill('editorial');
   const editorialOption = page.getByRole('option', { name: /^Editorial Noir$/ });
@@ -1728,11 +1728,14 @@ test('[P1] project detail workspace keeps design file tabs and preview controls 
   const fileTab = tabBySuffix(page, uploadedName);
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('workspace-pages-menu-trigger')).toBeVisible();
+  await expect(page.getByRole('tablist', { name: 'Pages' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New tab' })).toBeVisible();
 
   await openUploadedHtmlArtifactPreview(page, uploadedName);
 
-  await expect(page.getByRole('tablist', { name: 'View mode' })).toHaveCount(0);
+  const viewMode = page.getByRole('tablist', { name: 'View mode' });
+  await expect(viewMode).toBeVisible();
+  await expect(viewMode.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
   await expect(artifactPreview(page)).toBeVisible();
   await expect(
     artifactPreviewFrame(page).getByRole('heading', { name: 'Workspace Preview Structure' }),
@@ -3348,9 +3351,8 @@ async function openUploadedHtmlArtifactPreview(page: Page, uploadedName: string)
   const fileRow = rowByFileName(page, uploadedName);
   await expect(fileRow).toBeVisible();
   await fileRow.getByRole('button').first().click();
-  const previewCard = page.getByTestId('design-file-preview');
-  await expect(previewCard).toBeVisible();
-  await previewCard.getByRole('button', { name: 'Open' }).click();
+  await expect(tabBySuffix(page, uploadedName)).toHaveAttribute('aria-selected', 'true');
+  await expect(artifactPreview(page)).toBeVisible();
 }
 
 function tabBySuffix(page: Page, name: string): Locator {
