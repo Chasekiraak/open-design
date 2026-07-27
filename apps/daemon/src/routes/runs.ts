@@ -633,17 +633,18 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
-    // Reject a client-supplied conversationId that is missing or not owned by
-    // projectId before plugin snapshot resolve (which links the snapshot to the
-    // conversation and would FK-fail / 500) and before omit-pin mint/seed
-    // (which would return 202 with an unpersisted assistantMessageId).
+    // Reject a client-supplied conversationId that is missing a projectId or
+    // not owned by that projectId before plugin snapshot resolve (which links
+    // the snapshot to the conversation and would FK-fail / 500) and before
+    // omit-pin mint/seed (which would return 202 with an unpersisted
+    // assistantMessageId, or write messages without owning-project context).
     if (typeof requestBody.conversationId === 'string' && requestBody.conversationId) {
       const requestConversation = getConversation(db, requestBody.conversationId);
       if (
         !requestConversation ||
-        (typeof requestBody.projectId === 'string' &&
-          requestBody.projectId &&
-          requestConversation.projectId !== requestBody.projectId)
+        typeof requestBody.projectId !== 'string' ||
+        !requestBody.projectId ||
+        requestConversation.projectId !== requestBody.projectId
       ) {
         return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
       }
@@ -804,14 +805,15 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     // Re-check after optional headless conversation bind: a run may only attach
     // to a conversation that exists and is owned by its project. Covers both
     // client-supplied ids (already validated above) and fallback-bound ids.
-    // Must run before omit-pin mint/seed so a missing conversation never yields
-    // a 202 with an assistantMessageId that was never persisted.
+    // Require a string projectId so omit-pin never seeds without owning-project
+    // context. Must run before omit-pin mint/seed so a missing conversation
+    // never yields a 202 with an assistantMessageId that was never persisted.
     if (typeof meta.conversationId === 'string' && meta.conversationId) {
       if (
         !conversationSession ||
-        (typeof meta.projectId === 'string' &&
-          meta.projectId &&
-          conversationSession.projectId !== meta.projectId)
+        typeof meta.projectId !== 'string' ||
+        !meta.projectId ||
+        conversationSession.projectId !== meta.projectId
       ) {
         return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
       }

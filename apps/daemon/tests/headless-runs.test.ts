@@ -523,6 +523,45 @@ describe('POST /api/runs headless fallbacks', () => {
     ).toBe(false);
   });
 
+  it('rejects conversationId without projectId before seeding omit-pin prompt', async () => {
+    started = await startTestServer();
+    const { projectId, conversationId } = await createProject(
+      started.url,
+      'Missing projectId ownership project',
+    );
+    const prompt = `omit-pin without projectId ${randomUUID()}`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        conversationId,
+        message: prompt,
+      }),
+    });
+    expect(runResponse.status).toBe(404);
+    await expect(runResponse.json()).resolves.toMatchObject({
+      error: {
+        code: 'CONVERSATION_NOT_FOUND',
+        message: 'conversation not found for project',
+      },
+    });
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(
+      messagesBody.messages.some(
+        (m) => m.role === 'user' && m.content.includes(prompt),
+      ),
+    ).toBe(false);
+  });
+
   it('rejects nonexistent conversationId before minting omit-pin assistantMessageId', async () => {
     started = await startTestServer();
     const { projectId } = await createProject(started.url, 'Stale conversation project');
