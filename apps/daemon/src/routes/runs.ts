@@ -559,6 +559,21 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
+    // Reject a client-supplied conversationId that is missing or not owned by
+    // projectId before plugin snapshot resolve (which links the snapshot to the
+    // conversation and would FK-fail / 500) and before omit-pin mint/seed
+    // (which would return 202 with an unpersisted assistantMessageId).
+    if (typeof requestBody.conversationId === 'string' && requestBody.conversationId) {
+      const requestConversation = getConversation(db, requestBody.conversationId);
+      if (
+        !requestConversation ||
+        (typeof requestBody.projectId === 'string' &&
+          requestBody.projectId &&
+          requestConversation.projectId !== requestBody.projectId)
+      ) {
+        return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+      }
+    }
     let resolvedSnapshot = null;
     if (typeof requestBody.projectId === 'string' && requestBody.projectId) {
       let registryView: Parameters<typeof resolvePluginSnapshot>[0]['registry'];
@@ -710,19 +725,20 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       typeof meta.conversationId === 'string' && meta.conversationId
         ? getConversation(db, meta.conversationId)
         : null;
-    // A run may only attach to a conversation owned by its own project. Without
-    // this guard a request pairing projectId=A with a conversationId owned by
-    // project B runs in A's cwd but pins its messages and native session under
-    // B — corrupting B's chat history and resume identity. Mirror the ownership
-    // check the sibling routes already enforce (handoff.ts, terminal.ts).
-    // Must run before omit-pin mint/seed so a 404 never leaves a prompt in B.
-    if (
-      conversationSession &&
-      typeof meta.projectId === 'string' &&
-      meta.projectId &&
-      conversationSession.projectId !== meta.projectId
-    ) {
-      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+    // Re-check after optional headless conversation bind: a run may only attach
+    // to a conversation that exists and is owned by its project. Covers both
+    // client-supplied ids (already validated above) and fallback-bound ids.
+    // Must run before omit-pin mint/seed so a missing conversation never yields
+    // a 202 with an assistantMessageId that was never persisted.
+    if (typeof meta.conversationId === 'string' && meta.conversationId) {
+      if (
+        !conversationSession ||
+        (typeof meta.projectId === 'string' &&
+          meta.projectId &&
+          conversationSession.projectId !== meta.projectId)
+      ) {
+        return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+      }
     }
     // Web always mints assistantMessageId client-side. API clients that already
     // know conversationId (eval runners, scripts, MCP after the bind above) may

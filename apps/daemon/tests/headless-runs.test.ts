@@ -227,6 +227,30 @@ describe('POST /api/runs headless fallbacks', () => {
     ).toBe(false);
   });
 
+  it('rejects nonexistent conversationId before minting omit-pin assistantMessageId', async () => {
+    started = await startTestServer();
+    const { projectId } = await createProject(started.url, 'Stale conversation project');
+    const missingConversationId = `missing-conv-${randomUUID()}`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId,
+        conversationId: missingConversationId,
+        message: 'stale conversation omit-pin prompt',
+      }),
+    });
+    expect(runResponse.status).toBe(404);
+    await expect(runResponse.json()).resolves.toMatchObject({
+      error: {
+        code: 'CONVERSATION_NOT_FOUND',
+        message: 'conversation not found for project',
+      },
+    });
+  });
+
   it('falls back past a stale saved agent to the first detected available runtime', async () => {
     started = await startTestServer();
     const binDir = await mkdtemp(path.join(os.tmpdir(), 'od-headless-run-bin-'));
