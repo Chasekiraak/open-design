@@ -234,10 +234,11 @@ describe('POST /api/runs headless fallbacks', () => {
     );
     const prompt = `omit-pin with attachments ${randomUUID()}`;
     const attachmentPath = 'assets/hero.png';
+    const bmpAttachmentPath = 'assets/scan.bmp';
     const commentAttachment = {
       id: `comment-${randomUUID()}`,
       order: 1,
-      filePath: 'index.html',
+      filePath: 'deck.html',
       elementId: 'hero-title',
       selector: '#hero-title',
       label: 'Hero title',
@@ -245,6 +246,8 @@ describe('POST /api/runs headless fallbacks', () => {
       currentText: 'Welcome',
       pagePosition: { x: 12, y: 24, width: 180, height: 40 },
       htmlHint: '<h1 id="hero-title">Welcome</h1>',
+      // Deck annotations need slideIndex after reload for queuedSlideNavTarget.
+      slideIndex: 2,
     };
 
     const runResponse = await fetch(`${started.url}/api/runs`, {
@@ -255,7 +258,7 @@ describe('POST /api/runs headless fallbacks', () => {
         projectId,
         conversationId,
         message: prompt,
-        attachments: [attachmentPath],
+        attachments: [attachmentPath, bmpAttachmentPath],
         commentAttachments: [commentAttachment],
       }),
     });
@@ -276,6 +279,7 @@ describe('POST /api/runs headless fallbacks', () => {
           elementId: string;
           comment: string;
           selector: string;
+          slideIndex?: number;
         }>;
       }>;
     };
@@ -290,6 +294,12 @@ describe('POST /api/runs headless fallbacks', () => {
         kind: 'image',
         order: 0,
       },
+      {
+        path: bmpAttachmentPath,
+        name: 'scan.bmp',
+        kind: 'image',
+        order: 1,
+      },
     ]);
     expect(user?.commentAttachments).toEqual(
       expect.arrayContaining([
@@ -299,6 +309,7 @@ describe('POST /api/runs headless fallbacks', () => {
           elementId: commentAttachment.elementId,
           comment: commentAttachment.comment,
           selector: commentAttachment.selector,
+          slideIndex: 2,
         }),
       ]),
     );

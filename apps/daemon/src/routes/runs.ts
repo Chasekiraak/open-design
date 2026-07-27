@@ -103,6 +103,9 @@ import {
 } from '../runtimes/run-lifecycle-analytics.js';
 import { normalizeCommentAttachments } from '../runtimes/chat-prompt-inputs.js';
 
+// Keep in sync with the web uploader's `looksLikeImage` (apps/web registry):
+// omit-pin seeds must classify the same extensions as `image` so reload chips
+// match the original staged attachment kind.
 const SEEDED_USER_IMAGE_EXTS = new Set([
   '.png',
   '.jpg',
@@ -111,6 +114,7 @@ const SEEDED_USER_IMAGE_EXTS = new Set([
   '.webp',
   '.avif',
   '.svg',
+  '.bmp',
 ]);
 
 type SqliteDb = Database.Database;
@@ -120,6 +124,41 @@ type ApiResponse = Response<unknown>;
 type ProjectMetadata = (Partial<ContractProjectMetadata> & JsonRecord) | null | undefined;
 type AgentCliEnv = Parameters<typeof agentCliEnvForAgent>[0];
 type RunDeliveryTarget = 'managed-project' | 'external-project' | 'none';
+type SeededCommentAttachment = ReturnType<typeof normalizeCommentAttachments>[number] & {
+  slideIndex?: number;
+};
+
+/**
+ * Deck annotations carry a zero-based `slideIndex` so reload/retry can flip the
+ * preview via `queuedSlideNavTarget`. The prompt normalizer intentionally omits
+ * it; re-attach from the raw request when seeding persisted messages.
+ */
+function seededSlideIndexFromRaw(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const slideIndex = (raw as { slideIndex?: unknown }).slideIndex;
+  if (typeof slideIndex !== 'number' || !Number.isFinite(slideIndex) || slideIndex < 0) {
+    return undefined;
+  }
+  return Math.floor(slideIndex);
+}
+
+function withSeededSlideIndex(
+  normalized: ReturnType<typeof normalizeCommentAttachments>,
+  rawCommentAttachments: unknown[],
+): SeededCommentAttachment[] {
+  return normalized.map((item, index) => {
+    const rawById = rawCommentAttachments.find(
+      (entry) =>
+        entry &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        typeof (entry as { id?: unknown }).id === 'string' &&
+        (entry as { id: string }).id === item.id,
+    );
+    const slideIndex = seededSlideIndexFromRaw(rawById ?? rawCommentAttachments[index]);
+    return slideIndex === undefined ? item : { ...item, slideIndex };
+  });
+}
 
 /**
  * Map ChatRunCreateRequest attachment fields onto the ChatMessage shape used by
@@ -129,7 +168,7 @@ type RunDeliveryTarget = 'managed-project' | 'external-project' | 'none';
  */
 function seededUserMessageAttachmentFields(meta: JsonRecord): {
   attachments?: Array<{ path: string; name: string; kind: 'image' | 'file'; order: number }>;
-  commentAttachments?: ReturnType<typeof normalizeCommentAttachments>;
+  commentAttachments?: SeededCommentAttachment[];
 } {
   const attachments = Array.isArray(meta.attachments)
     ? meta.attachments
@@ -145,10 +184,14 @@ function seededUserMessageAttachmentFields(meta: JsonRecord): {
           };
         })
     : [];
-  const commentAttachments = normalizeCommentAttachments(
-    Array.isArray(meta.commentAttachments)
-      ? (meta.commentAttachments as Parameters<typeof normalizeCommentAttachments>[0])
-      : null,
+  const rawCommentAttachments = Array.isArray(meta.commentAttachments)
+    ? meta.commentAttachments
+    : [];
+  const commentAttachments = withSeededSlideIndex(
+    normalizeCommentAttachments(
+      rawCommentAttachments as Parameters<typeof normalizeCommentAttachments>[0],
+    ),
+    rawCommentAttachments,
   );
   return {
     ...(attachments.length > 0 ? { attachments } : {}),
