@@ -282,17 +282,24 @@ function runtimeStyleRuleBody(doc: Document, id: string): string | null {
 
 function readRuntimeStyleOverride(doc: Document, id: string): ManualEditStyles {
   const styles = emptyManualEditStyles();
-  const body = runtimeStyleRuleBody(doc, id);
-  if (body == null) return styles;
+  for (const [name, value] of parseRuntimeStyleDeclarations(runtimeStyleRuleBody(doc, id))) {
+    const key = MANUAL_EDIT_STYLE_PROPS.find((prop) => camelToKebab(prop) === name);
+    if (key) styles[key] = value;
+  }
+  return styles;
+}
+
+function parseRuntimeStyleDeclarations(body: string | null): Map<string, string> {
+  const declarations = new Map<string, string>();
+  if (!body) return declarations;
   for (const declaration of body.split(';')) {
     const colon = declaration.indexOf(':');
     if (colon < 0) continue;
     const name = declaration.slice(0, colon).trim();
     const value = declaration.slice(colon + 1).replace(/!important\s*$/i, '').trim();
-    const key = MANUAL_EDIT_STYLE_PROPS.find((prop) => camelToKebab(prop) === name);
-    if (key && value) styles[key] = value;
+    if (name && value) declarations.set(name, value);
   }
-  return styles;
+  return declarations;
 }
 
 export function readManualEditAttributes(source: string, id: string): Record<string, string> {
@@ -759,17 +766,24 @@ function safeJsonForScript(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * Persist a `set-style` patch for a runtime-only target by MERGING it into the
+ * target's existing override rule. Toolbar autosaves send only the touched
+ * properties, so declarations an earlier save persisted must survive a later
+ * partial patch; an incoming empty value deletes that declaration only. The
+ * rule disappears once its last declaration is deleted.
+ */
 function setRuntimeStyleOverride(doc: Document, id: string, styles: Partial<ManualEditStyles>): void {
   const style = runtimeStyleElement(doc);
   const selector = `[data-od-id="${cssStringEscape(id)}"]`;
+  const merged = parseRuntimeStyleDeclarations(runtimeStyleRuleBody(doc, id));
+  for (const [name, value] of Object.entries(styles)) {
+    const cssName = camelToKebab(name);
+    if (typeof value !== 'string' || value.trim() === '') merged.delete(cssName);
+    else merged.set(cssName, value.trim());
+  }
   const cleaned = removeRuntimeStyleRule(style.textContent ?? '', selector);
-  const body = Object.entries(styles)
-    .map(([name, value]) => {
-      if (typeof value !== 'string' || value.trim() === '') return '';
-      return `  ${camelToKebab(name)}: ${value.trim()} !important;`;
-    })
-    .filter(Boolean)
-    .join('\n');
+  const body = Array.from(merged, ([name, value]) => `  ${name}: ${value} !important;`).join('\n');
   style.textContent = body ? `${cleaned}\n${selector} {\n${body}\n}\n`.trimStart() : cleaned.trim();
 }
 

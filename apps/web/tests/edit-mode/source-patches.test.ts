@@ -345,6 +345,46 @@ describe('manual edit source patches', () => {
     expect(hasManualEditRuntimeStyleOverride(brandKitSource, 'brand-name')).toBe(false);
   });
 
+  it('merges successive runtime style patches instead of replacing the whole rule', () => {
+    // Toolbar autosaves send only the touched property; a later partial patch
+    // must not discard declarations an earlier save already persisted.
+    const first = applyManualEditPatch(brandKitSource, {
+      kind: 'set-style',
+      id: 'brand-name',
+      styles: { fontSize: '48px' },
+    });
+    const second = applyManualEditPatch(first.source, {
+      kind: 'set-style',
+      id: 'brand-name',
+      styles: { color: '#ff5500' },
+    });
+
+    expect(second.ok).toBe(true);
+    const merged = readManualEditSavedStyles(second.source, 'brand-name');
+    expect(merged.fontSize).toBe('48px');
+    expect(merged.color).toBe('#ff5500');
+
+    // An explicitly empty incoming value deletes that declaration only.
+    const cleared = applyManualEditPatch(second.source, {
+      kind: 'set-style',
+      id: 'brand-name',
+      styles: { fontSize: '' },
+    });
+    expect(cleared.ok).toBe(true);
+    const remaining = readManualEditSavedStyles(cleared.source, 'brand-name');
+    expect(remaining.fontSize).toBe('');
+    expect(remaining.color).toBe('#ff5500');
+
+    // Deleting the last declaration removes the target's rule entirely.
+    const emptied = applyManualEditPatch(cleared.source, {
+      kind: 'set-style',
+      id: 'brand-name',
+      styles: { color: '' },
+    });
+    expect(emptied.ok).toBe(true);
+    expect(hasManualEditRuntimeStyleOverride(emptied.source, 'brand-name')).toBe(false);
+  });
+
   it('hides dynamic brand-kit targets instead of reporting target not found on delete', () => {
     const result = applyManualEditPatch(brandKitSource, { kind: 'remove-element', id: 'brand-system-section' });
 
