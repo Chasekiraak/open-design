@@ -914,10 +914,12 @@ describe('WorkspaceTabsBar identity-scope tab reset', () => {
     cleanup();
   });
 
-  it('does not disturb a restored session the first time identityScopeKey resolves (upgrade compatibility)', async () => {
+  it('keeps the current route tab when the first identityScopeKey resolves over an unowned legacy snapshot', async () => {
     // A session persisted by a build that predates this feature: tabs with no
-    // `scopeKey` field at all. The very first resolved identityScopeKey must
-    // be adopted silently, not treated as a change to reconcile against.
+    // `scopeKey` field at all. Such a snapshot has no owner stamp and is never
+    // adopted wholesale (see the discard tests below) — but the current URL
+    // stays route truth, so the deep-linked project keeps its tab and the
+    // first resolution must not navigate the user away.
     window.localStorage.setItem(
       'open-design:workspace-tabs:v1',
       JSON.stringify({
@@ -1358,5 +1360,219 @@ describe('WorkspaceTabsBar identity-scope tab reset', () => {
       ).toBe(true);
     });
     expect(navigate).not.toHaveBeenCalledWith(homeRoute);
+  });
+
+  // recvqziATl6LlJ / recvqxKdOz0S6g: a legacy snapshot written by a build
+  // that predates tab scoping carries NO owner stamp. The account that owned
+  // those tabs may have switched since (the old build never closed tabs on an
+  // account swap), so adopting the whole snapshot into whichever scope
+  // happens to resolve first attributes another account's project tabs to
+  // the current account's workspace — QA reproduced exactly this as "the new
+  // workspace's tab strip shows a project that does not exist in it". Tabs
+  // are bookmarks: when attribution is unknowable the snapshot is dropped
+  // and the scope starts from route truth instead.
+  it('discards an unowned legacy snapshot instead of adopting it into the first resolved scope', async () => {
+    window.localStorage.setItem(
+      'open-design:workspace-tabs:v1',
+      JSON.stringify({
+        tabs: [
+          { id: 'entry:home:a', kind: 'entry', view: 'home', createdAt: 1, lastActiveAt: 1 },
+          {
+            id: 'project:project-alpha:b',
+            kind: 'project',
+            projectId: 'project-alpha',
+            conversationId: null,
+            fileName: null,
+            createdAt: 2,
+            lastActiveAt: 2,
+          },
+        ],
+        activeTabId: 'project:project-alpha:b',
+      }),
+    );
+
+    // App boots on Home with the identity still unresolved, then the first
+    // resolved scope belongs to a DIFFERENT account's brand-new workspace
+    // (the account swap happened before this session, on a build that never
+    // stamped an owner into the snapshot).
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={homeRoute}
+        projects={[project]}
+        identityScopeKey={null}
+      />,
+    );
+    rerender(
+      <WorkspaceTabsBar
+        route={homeRoute}
+        projects={[project]}
+        identityScopeKey="user-2::ws-new-team"
+      />,
+    );
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels).toHaveLength(1);
+      expect(labels.some((label) => label.includes('Project Alpha'))).toBe(false);
+    });
+    // The mis-attribution must not be persisted either: the new scope's
+    // registry entry must not contain the unowned project tab.
+    await waitFor(() => {
+      const parsed = JSON.parse(
+        window.localStorage.getItem('open-design:workspace-tabs:v1') ?? '{}',
+      ) as { scopeKey?: string; scopes?: Record<string, unknown> };
+      expect(parsed.scopeKey).toBe('user-2::ws-new-team');
+      expect(JSON.stringify(parsed.scopes?.['user-2::ws-new-team'] ?? {})).not.toContain(
+        'project-alpha',
+      );
+    });
+  });
+
+  it('rebuilds the first resolved scope from route truth alone when upgrading an unowned legacy snapshot', async () => {
+    // Same-account upgrade path: the legacy snapshot holds MORE tabs than the
+    // current URL. Even for the snapshot's rightful owner the per-tab
+    // workspace cannot be inferred (legacy tabs predate workspaces), so only
+    // the route-derived tab survives; background legacy tabs are dropped
+    // rather than guessed into the active workspace.
+    window.localStorage.setItem(
+      'open-design:workspace-tabs:v1',
+      JSON.stringify({
+        tabs: [
+          { id: 'entry:home:a', kind: 'entry', view: 'home', createdAt: 1, lastActiveAt: 1 },
+          {
+            id: 'project:project-alpha:b',
+            kind: 'project',
+            projectId: 'project-alpha',
+            conversationId: null,
+            fileName: 'alpha.html',
+            createdAt: 2,
+            lastActiveAt: 2,
+          },
+          {
+            id: 'project:project-beta:c',
+            kind: 'project',
+            projectId: 'project-beta',
+            conversationId: null,
+            fileName: 'beta.html',
+            createdAt: 3,
+            lastActiveAt: 3,
+          },
+        ],
+        activeTabId: 'project:project-beta:c',
+      }),
+    );
+
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute, fileName: 'alpha.html' }}
+        projects={[project, projectBeta]}
+        identityScopeKey={null}
+      />,
+    );
+    rerender(
+      <WorkspaceTabsBar
+        route={{ ...projectRoute, fileName: 'alpha.html' }}
+        projects={[project, projectBeta]}
+        identityScopeKey="user-1::ws-personal-1"
+      />,
+    );
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels).toEqual([
+        expect.stringContaining('Home'),
+        expect.stringContaining('Project Alpha'),
+      ]);
+    });
+    await waitFor(() => {
+      const parsed = JSON.parse(
+        window.localStorage.getItem('open-design:workspace-tabs:v1') ?? '{}',
+      ) as { scopeKey?: string };
+      expect(parsed.scopeKey).toBe('user-1::ws-personal-1');
+    });
+  });
+
+  it("never re-homes another account's tabs into the incoming scope while onboarding is active", async () => {
+    // recvqziATl6LlJ leak family, second face: the onboarding branch of the
+    // scope effect re-homes the LIVE state into the incoming scope without
+    // resetting it, assuming only the pinned entry tab can exist mid-flow.
+    // But the live state can hold a snapshot restored at mount (localStorage
+    // outlives a daemon data-dir reset that replays onboarding), and the
+    // incoming scope can belong to a DIFFERENT account (direct account swap
+    // mid-onboarding, no sign-out hop). Re-homing is attribution: across
+    // accounts it must fail closed to a fresh Home state — while still never
+    // navigating away from the flow.
+    const onboardingRoute: Route = { kind: 'home', view: 'onboarding' };
+    const ownedSnapshot = {
+      tabs: [
+        { id: 'entry:home:a', kind: 'entry', view: 'home', createdAt: 1, lastActiveAt: 1 },
+        {
+          id: 'project:project-alpha:b',
+          kind: 'project',
+          projectId: 'project-alpha',
+          conversationId: null,
+          fileName: null,
+          createdAt: 2,
+          lastActiveAt: 2,
+        },
+      ],
+      activeTabId: 'project:project-alpha:b',
+    };
+    window.localStorage.setItem(
+      'open-design:workspace-tabs:v1',
+      JSON.stringify({
+        ...ownedSnapshot,
+        scopeKey: 'user-1::ws-a',
+        scopes: { 'user-1::ws-a': { state: ownedSnapshot, updatedAt: 1 } },
+      }),
+    );
+
+    const { rerender } = render(
+      <WorkspaceTabsBar
+        route={onboardingRoute}
+        projects={[project]}
+        onboardingCompleted={false}
+        identityScopeKey="user-1::ws-a"
+      />,
+    );
+    // Precondition: the owner's own scope restores its own tabs — allowed.
+    await waitFor(() => {
+      expect(screen.getAllByRole('tab')).toHaveLength(2);
+    });
+
+    // Direct account swap mid-onboarding.
+    rerender(
+      <WorkspaceTabsBar
+        route={onboardingRoute}
+        projects={[project]}
+        onboardingCompleted={false}
+        identityScopeKey="user-2::ws-b"
+      />,
+    );
+
+    await waitFor(() => {
+      const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
+      expect(labels.some((label) => label.includes('Project Alpha'))).toBe(false);
+    });
+    // Stays in the onboarding flow: no navigation fired, entry tab still on
+    // the onboarding view.
+    expect(navigate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(storedEntryTabView()).toBe('onboarding');
+    });
+    // Persisted registry: the incoming account's bucket must not have
+    // adopted the outgoing account's project tab, while the outgoing
+    // account's own bucket keeps it.
+    await waitFor(() => {
+      const parsed = JSON.parse(
+        window.localStorage.getItem('open-design:workspace-tabs:v1') ?? '{}',
+      ) as { scopes?: Record<string, unknown> };
+      expect(JSON.stringify(parsed.scopes?.['user-2::ws-b'] ?? {})).not.toContain(
+        'project-alpha',
+      );
+      expect(JSON.stringify(parsed.scopes?.['user-1::ws-a'] ?? {})).toContain(
+        'project-alpha',
+      );
+    });
   });
 });

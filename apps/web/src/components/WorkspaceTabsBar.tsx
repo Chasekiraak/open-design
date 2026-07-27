@@ -456,6 +456,14 @@ function initialTabsState(
     return syncStateToRoute(persisted.current ?? fallbackState, route);
   }
   if (identityScopeKey === null) {
+    // An unowned snapshot (no `scopeKey` stamp — written by a build that
+    // predates tab scoping) cannot be attributed to whichever identity is
+    // about to resolve, so it must not even be displayed provisionally
+    // (recvqziATl6LlJ / recvqxKdOz0S6g). Owned snapshots keep the warm-reload
+    // restore; the scope effect reconciles them once the identity resolves.
+    if (persisted.scopeKey === undefined) {
+      return syncStateToRoute(fallbackState, route);
+    }
     return persisted.current ?? syncStateToRoute(fallbackState, route);
   }
   const scoped = persisted.scopes[identityScopeKey]?.state;
@@ -463,7 +471,9 @@ function initialTabsState(
     return syncStateToRoute(scoped ?? persisted.current ?? fallbackState, route);
   }
   if (persisted.scopeKey === undefined) {
-    return syncStateToRoute(persisted.current ?? fallbackState, route);
+    // Same attribution rule with the scope already resolved at mount time:
+    // unowned storage never seeds a resolved scope. Route truth alone does.
+    return syncStateToRoute(fallbackState, route);
   }
   return scoped ?? freshHomeTabsState();
 }
@@ -858,9 +868,23 @@ export function WorkspaceTabsBar({
     if (previous === identityScopeKey) return;
 
     if (previous === undefined) {
-      // Upgrade compatibility: a legacy single snapshot has no owner. Adopt
-      // it into the first real scope and keep the current URL as route truth.
-      const adopted = syncStateToRoute(stateRef.current, route);
+      // Upgrade compatibility, held to the attribution rule (recvqziATl6LlJ /
+      // recvqxKdOz0S6g): a legacy single snapshot has no owner stamp, so it
+      // must never be adopted into whichever scope happens to resolve first —
+      // the account that opened those tabs may have switched since (pre-scoping
+      // builds never closed tabs on an account swap), and adopting would
+      // surface another account's project tabs inside the current account's
+      // workspace. Tabs are bookmarks: when attribution is unknowable, drop
+      // the snapshot and rebuild from route truth (fresh Home plus whatever
+      // tab the current URL already points at). A session with no unowned
+      // snapshot in storage (fresh install / already-scoped storage) keeps
+      // adopting its own live, session-created state unchanged.
+      const unownedSnapshotInStorage =
+        persistedTabsStore.scopeKey === undefined && persistedTabsStore.current !== null;
+      const adopted = syncStateToRoute(
+        unownedSnapshotInStorage ? freshHomeTabsState() : stateRef.current,
+        route,
+      );
       persistedTabsStore.scopes[identityScopeKey] = {
         state: adopted,
         updatedAt: Date.now(),
@@ -878,13 +902,29 @@ export function WorkspaceTabsBar({
     }
 
     if (onboardingActive) {
-      // Onboarding has exactly one pinned entry tab and must not be interrupted
-      // by sign-in resolving a workspace. Re-home that safe state to the new
-      // scope without navigating away from the flow.
+      // Onboarding must not be interrupted by sign-in resolving a workspace:
+      // never navigate away from the flow. But re-homing the live state to
+      // the new scope is attribution, and the live state is not always the
+      // single pinned entry tab the flow itself creates — a snapshot restored
+      // at mount can ride along (browser localStorage outlives a daemon
+      // data-dir reset that replays onboarding). Within one account that is
+      // the owner's own state; across accounts (a direct mid-onboarding
+      // account swap) it must fail closed to a fresh Home state instead
+      // (recvqziATl6LlJ leak family) — visually identical for the legitimate
+      // sign-in-mid-onboarding case (a single entry tab either way, synced to
+      // the onboarding route), and never a cross-account tab transfer.
+      const rehomed =
+        accountBucketForScope(previous) === accountBucketForScope(identityScopeKey)
+          ? stateRef.current
+          : syncStateToRoute(freshHomeTabsState(), route);
       persistedTabsStore.scopes[identityScopeKey] = {
-        state: stateRef.current,
+        state: rehomed,
         updatedAt: Date.now(),
       };
+      if (rehomed !== stateRef.current) {
+        pendingScopeStateRef.current = { scopeKey: identityScopeKey, state: rehomed };
+        setState(rehomed);
+      }
       return;
     }
 
