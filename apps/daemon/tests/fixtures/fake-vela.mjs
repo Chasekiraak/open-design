@@ -43,6 +43,10 @@
  *   FAKE_VELA_SET_MODEL_ERROR    – when set, session/set_model returns a JSON-RPC error
  *   FAKE_VELA_PROMPT_ERROR       – when set, session/prompt returns a JSON-RPC error
  *   FAKE_VELA_PROMPT_ERROR_ON_LOAD – when set, session/prompt errors only after session/load
+ *   FAKE_VELA_STALL_AFTER_PROMPT – when set to '1', session/prompt never completes
+ *                                   and emits non-substantive heartbeat updates
+ *   FAKE_VELA_PROMPT_RESULT_DELAY_MS – delay the terminal session/prompt result
+ *                                      after streaming substantive output
  *   FAKE_VELA_MODELS             – newline-separated `vela models` stdout
  *   FAKE_VELA_MODEL_PRESET_JSON  – JSON stdout for `model preset --format json`
  *   FAKE_VELA_MODEL_LIST_JSON    – JSON stdout for `model list --all --format json`
@@ -73,6 +77,11 @@ const SESSION_NEW_ERROR = env.FAKE_VELA_SESSION_NEW_ERROR || '';
 const SET_MODEL_ERROR = env.FAKE_VELA_SET_MODEL_ERROR || '';
 const PROMPT_ERROR = env.FAKE_VELA_PROMPT_ERROR || '';
 const PROMPT_ERROR_ON_LOAD = env.FAKE_VELA_PROMPT_ERROR_ON_LOAD || '';
+const STALL_AFTER_PROMPT = env.FAKE_VELA_STALL_AFTER_PROMPT === '1';
+const TEXT_BEFORE_STALL = env.FAKE_VELA_TEXT_BEFORE_STALL === '1';
+const PROMPT_RESULT_DELAY_MS = Number(env.FAKE_VELA_PROMPT_RESULT_DELAY_MS) || 0;
+const OMIT_PROMPT_USAGE = env.FAKE_VELA_OMIT_PROMPT_USAGE === '1';
+const STAY_ALIVE_AFTER_PROMPT_MS = Number(env.FAKE_VELA_STAY_ALIVE_AFTER_PROMPT_MS) || 0;
 const AVAILABLE_MODELS = [
   { modelId: 'openai/gpt-5.4-mini', name: 'gpt-5.4-mini' },
   { modelId: 'anthropic/claude-3.7-sonnet', name: 'claude-3.7-sonnet' },
@@ -293,11 +302,35 @@ function handleMessage(msg) {
         writeError(id, 'session/set_model must be called before session/prompt', -32602);
         return;
       }
+      if (STALL_AFTER_PROMPT) {
+        if (TEXT_BEFORE_STALL) emitSessionUpdates(sessionId);
+        // Keep both the ACP stage watchdog and the outer chat inactivity
+        // watchdog fed without producing text, thinking, tools, artifacts, or
+        // a terminal prompt result. This models a provider bridge that stays
+        // transport-alive forever while never returning a first model output.
+        setInterval(() => {
+          writeNotification('session/update', {
+            sessionId,
+            update: { sessionUpdate: 'heartbeat' },
+          });
+        }, 20);
+        return;
+      }
       emitSessionUpdates(sessionId);
-      writeResult(id, {
-        stopReason: 'end_turn',
-        usage: { inputTokens: 12, outputTokens: 7, totalTokens: 19 },
-      });
+      const finishPrompt = () => {
+        writeResult(id, {
+          stopReason: 'end_turn',
+          ...(OMIT_PROMPT_USAGE
+            ? {}
+            : { usage: { inputTokens: 12, outputTokens: 7, totalTokens: 19 } }),
+        });
+        if (STAY_ALIVE_AFTER_PROMPT_MS > 0) setTimeout(() => {}, STAY_ALIVE_AFTER_PROMPT_MS);
+      };
+      if (PROMPT_RESULT_DELAY_MS > 0) {
+        setTimeout(finishPrompt, PROMPT_RESULT_DELAY_MS);
+      } else {
+        finishPrompt();
+      }
       return;
     }
     case 'session/cancel':

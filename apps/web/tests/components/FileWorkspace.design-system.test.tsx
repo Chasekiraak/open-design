@@ -212,6 +212,7 @@ describe('FileWorkspace design-system project surface', () => {
         designSystemProject={designSystem()}
         designSystemBrandId="brand-acme"
         designSystemEditable={false}
+        designSystemExtractionInProgress
       />,
     );
 
@@ -231,6 +232,40 @@ describe('FileWorkspace design-system project surface', () => {
       await Promise.resolve();
     });
     expect(container.textContent).not.toContain('Edit DESIGN.md');
+  });
+
+  // recvqb6mfyqXLD: `designSystemEditable=false` now also covers "the caller
+  // may not manage this team-synced design system" (ProjectView's
+  // `canMutate` gate), not just "extraction still running". The status pill
+  // must key off the separate `designSystemExtractionInProgress` flag so a
+  // finished, published teammate's design system reads as complete — not as
+  // still extracting — while the Publish toggle and edit affordances stay
+  // locked.
+  it('reads as extraction-complete (not "still extracting") when locked only because the caller cannot manage a team-synced system', async () => {
+    registryMocks.fetchProjectFileText.mockResolvedValue(null);
+
+    const container = renderWorkspace(
+      <FileWorkspace
+        projectId="brand-acme"
+        projectKind="prototype"
+        files={[workspaceFile('DESIGN.md'), workspaceFile('brand.html')]}
+        liveArtifacts={[]}
+        onRefreshFiles={vi.fn()}
+        isDeck={false}
+        tabsState={{ tabs: [], active: null }}
+        onTabsStateChange={vi.fn()}
+        designSystemProject={designSystem({ teamSynced: true, canMutate: false })}
+        designSystemBrandId="brand-acme"
+        designSystemEditable={false}
+      />,
+    );
+
+    await flushKit();
+
+    expect(container.querySelector('[data-testid="design-system-project-tab"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('Extracting design system');
+    expect(container.textContent).toContain('Extraction complete');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="design-system-publish"]')?.disabled).toBe(true);
   });
 
   it('edits and resets palette colors through the color editor dialog', async () => {

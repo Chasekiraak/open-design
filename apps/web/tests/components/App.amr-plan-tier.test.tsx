@@ -204,13 +204,29 @@ describe('App AMR plan-tier gate', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.endsWith('/api/workspace/billing')) {
-        return jsonResponse({ summary: { membershipTier: 'team_plus', balanceUsd: '12.34' } });
+      if (url.includes('/api/workspace/billing?')) {
+        return jsonResponse({
+          summary: {
+            membershipTier: 'team_plus',
+            balanceUsd: '12.34',
+            workspaceBalance: {
+              workspaceId: 'ws-team',
+              balanceUsd: '12.34',
+            },
+          },
+        });
       }
       if (url.endsWith('/api/workspace/context')) {
         // A non-owner member: B omits planId here (the documented gap
         // resolvePlanTier's precedence chain exists to route around).
-        return jsonResponse({ context: { workspaceType: 'team', role: 'member' } });
+        return jsonResponse({
+          context: {
+            workspaceId: 'ws-team',
+            workspaceType: 'team',
+            workspaceMemberId: 'member-team',
+            role: 'member',
+          },
+        });
       }
       return jsonResponse({});
     });

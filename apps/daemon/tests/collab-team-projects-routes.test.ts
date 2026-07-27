@@ -90,6 +90,7 @@ describe('GET /api/workspace/projects/team', () => {
           calls.push('list');
           return PROJECTS;
         },
+        get: async () => null,
         upsert: async () => {},
         remove: async () => {},
       },
@@ -111,6 +112,7 @@ describe('GET /api/workspace/projects/team', () => {
         list: async () => {
           throw new Error('catalog should not be read off-team');
         },
+        get: async () => null,
         upsert: async () => {},
         remove: async () => {},
       },

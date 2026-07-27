@@ -13,7 +13,10 @@
 // users out of starting tasks. The signed-out answer comes from the local
 // config read, so it is reliable enough to hard-gate on.
 
-import type { AmrWalletSnapshot } from '@open-design/contracts';
+import type {
+  AmrWalletSnapshot,
+  WorkspaceBillingResponse,
+} from '@open-design/contracts';
 import { fetchAmrWalletSnapshot } from '../providers/daemon';
 
 /**
@@ -38,6 +41,11 @@ export type AmrBalanceGateResult =
   | { kind: 'hard'; reason: 'insufficient'; snapshot: AmrWalletSnapshot }
   | { kind: 'hard'; reason: 'signed_out'; snapshot: AmrWalletSnapshot }
   | { kind: 'soft'; snapshot: AmrWalletSnapshot };
+
+export interface AmrBalanceGateScope {
+  workspaceType: 'personal' | 'team';
+  workspaceId: string;
+}
 
 /** Parse a definitive balance from a snapshot; null when the answer is
  * indefinite (missing/unavailable/unparseable — those must fail open). */
@@ -91,8 +99,83 @@ export function setAmrLowBalanceWarnOptedOut(): void {
  * soft tier trusts the cache (its cost is one dismissible reminder, and the
  * daemon cache is at most a few seconds old).
  */
-export async function checkAmrBalanceGate(): Promise<AmrBalanceGateResult> {
+async function fetchTeamWorkspaceWalletSnapshot(
+  scope: AmrBalanceGateScope,
+  accountSnapshot: AmrWalletSnapshot | null,
+): Promise<AmrWalletSnapshot | null> {
+  const workspaceId = scope.workspaceId.trim();
+  if (!workspaceId) return null;
+  const response = await fetch(
+    `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}`,
+    { cache: 'no-store' },
+  );
+  if (!response.ok) return null;
+  const body = (await response.json()) as WorkspaceBillingResponse;
+  const workspaceBalance = body.workspaceBalance;
+  if (
+    !workspaceBalance ||
+    workspaceBalance.billingScopeVersion !== 2 ||
+    workspaceBalance.workspaceId !== workspaceId
+  ) {
+    return null;
+  }
+  return {
+    status: 'available',
+    profile: accountSnapshot?.profile ?? 'default',
+    user: accountSnapshot?.user ?? null,
+    balanceUsd: workspaceBalance.balanceUsd,
+    updatedAt: workspaceBalance.updatedAt,
+    fetchedAt: new Date().toISOString(),
+    stale: false,
+    source: 'vela_api',
+  };
+}
+
+async function checkTeamWorkspaceBalanceGate(
+  scope: AmrBalanceGateScope,
+): Promise<AmrBalanceGateResult> {
+  let accountSnapshot = await fetchAmrWalletSnapshot().catch(() => null);
+  if (accountSnapshot?.status === 'signed_out') {
+    const freshAccount = await fetchAmrWalletSnapshot({ refresh: true }).catch(() => null);
+    if (freshAccount?.status === 'signed_out') {
+      return {
+        kind: 'hard',
+        reason: 'signed_out',
+        snapshot: freshAccount,
+      };
+    }
+    accountSnapshot = freshAccount;
+  }
+
+  // The URL carries the selected workspace identity. The daemon authorizes
+  // that exact directory membership and returns a v2 identity-stamped wallet.
+  // No account number participates in this decision.
+  const workspaceSnapshot = await fetchTeamWorkspaceWalletSnapshot(
+    scope,
+    accountSnapshot,
+  ).catch(() => null);
+  const balance = amrWalletBalanceUsd(workspaceSnapshot);
+  if (balance == null) return { kind: 'allow' };
+  if (balance <= AMR_HARD_BLOCK_BALANCE_USD) {
+    return {
+      kind: 'hard',
+      reason: 'insufficient',
+      snapshot: workspaceSnapshot!,
+    };
+  }
+  if (balance <= AMR_LOW_BALANCE_WARN_USD && !isAmrLowBalanceWarnOptedOut()) {
+    return { kind: 'soft', snapshot: workspaceSnapshot! };
+  }
+  return { kind: 'allow' };
+}
+
+export async function checkAmrBalanceGate(
+  scope?: AmrBalanceGateScope,
+): Promise<AmrBalanceGateResult> {
   try {
+    if (scope?.workspaceType === 'team') {
+      return await checkTeamWorkspaceBalanceGate(scope);
+    }
     const cached = await fetchAmrWalletSnapshot().catch(() => null);
     const cachedBalance = amrWalletBalanceUsd(cached);
     const cachedHardCandidate =

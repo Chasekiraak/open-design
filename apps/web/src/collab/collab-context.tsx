@@ -22,6 +22,7 @@ const DISABLED: CollabContextValue = {
   isOwner: false,
   ownerDisplayName: null,
   ownerRole: null,
+  downloadPending: false,
   reportChange: () => {},
   requestPublish: () => {},
   refreshPresence: () => {},

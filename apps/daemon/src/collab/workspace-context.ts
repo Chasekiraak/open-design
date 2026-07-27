@@ -53,6 +53,15 @@ export interface WorkspaceContextProvider {
    * reads this instead of awaiting `.current()`.
    */
   lastKnown?(): WorkspaceCollabContext | null;
+  /**
+   * Same cached identity plus a monotonic generation that advances whenever
+   * an observed authorization identity changes, including A -> B -> A between
+   * two callers' snapshots.
+   */
+  lastKnownSnapshot?(): {
+    context: WorkspaceCollabContext | null;
+    generation: number;
+  };
 }
 
 /**
@@ -70,16 +79,47 @@ export interface WorkspaceContextProvider {
  * NOT scoped per-workspace-id: a caller must compare `lastKnown().workspaceId`
  * against the workspace it cares about and treat a mismatch as "no opinion",
  * exactly like a cache miss.
+ *
+ * Authorization generations have a narrower meaning than raw availability.
+ * Vela maps both a transient timeout and a real signed-out response to `null`,
+ * so treating every null as a new identity turns A -> transient null -> A into
+ * a false workspace switch. The raw context still becomes null (and therefore
+ * fails closed while unavailable), but generation advances only when a
+ * non-null authoritative identity differs. A later successful A read restores
+ * availability without fabricating drift. Dev/demo `set(null)` remains an
+ * explicit authoritative clear and does advance the generation.
  */
 export function withLastKnownWorkspaceContext(
   provider: WorkspaceContextProvider,
 ): WorkspaceContextProvider {
   let lastKnown: WorkspaceCollabContext | null = null;
+  let lastIdentityKey: string | null | undefined;
+  let generation = 0;
+  const observe = (
+    context: WorkspaceCollabContext | null,
+    nullIsAuthoritative: boolean,
+  ): void => {
+    lastKnown = context;
+    if (context === null && !nullIsAuthoritative) return;
+    const identityKey = context
+      ? JSON.stringify([
+          context.workspaceId,
+          context.teamId ?? context.workspaceId,
+          context.workspaceMemberId,
+          context.memberStatus,
+          context.lifecycleState,
+        ])
+      : null;
+    if (identityKey !== lastIdentityKey) {
+      generation += 1;
+      lastIdentityKey = identityKey;
+    }
+  };
   return {
     ...provider,
     async current(req: WorkspaceContextRequest): Promise<WorkspaceCollabContext | null> {
       const context = await provider.current(req);
-      lastKnown = context;
+      observe(context, false);
       return context;
     },
     // Dev/demo provider only (see `set?` above): a direct override is also a
@@ -88,12 +128,13 @@ export function withLastKnownWorkspaceContext(
     ...(provider.set
       ? {
           set: (context: WorkspaceCollabContext | null) => {
-            lastKnown = context;
+            observe(context, true);
             provider.set!(context);
           },
         }
       : {}),
     lastKnown: () => lastKnown,
+    lastKnownSnapshot: () => ({ context: lastKnown, generation }),
   };
 }
 
@@ -140,9 +181,9 @@ function nonNegativeInt(value: unknown, fallback: number): number {
 }
 
 /**
- * The URL of the team's settings/management console on the cloud web app. Team
- * management (members, billing, dashboard) lives there — the local client only
- * links out to it. Prefers an explicit value the upstream context carries;
+ * The URL of the workspace settings/management console on the cloud web app.
+ * Team actions (create, invite, members, billing) live there — the local client
+ * only links out to them. Prefers an explicit value the upstream context carries;
  * otherwise builds one from `OD_VELA_WEB_URL` when configured. Undefined when
  * neither is available (the client then hides the settings entry).
  */
@@ -235,10 +276,8 @@ export function parseWorkspaceCollabContext(input: unknown): WorkspaceCollabCont
     // a dev PUT that omits it must not silently disable the collab plane.
     context.teamId = workspaceId;
   }
-  if (workspaceType === 'team') {
-    const settingsUrl = resolveWorkspaceSettingsUrl(workspaceId, raw.workspaceSettingsUrl);
-    if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
-  }
+  const settingsUrl = resolveWorkspaceSettingsUrl(workspaceId, raw.workspaceSettingsUrl);
+  if (settingsUrl) context.workspaceSettingsUrl = settingsUrl;
   if (typeof raw.teamName === 'string' && raw.teamName.trim()) {
     context.teamName = raw.teamName.trim();
   }

@@ -24,6 +24,7 @@ import type {
   RunContextSelection,
   WorkspaceTeamProjectsResponse,
   WorkspaceCollabContext,
+  WorkspaceProjectSummary,
 } from '@open-design/contracts';
 import { DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID } from '@open-design/contracts';
 import { EntryView } from './components/EntryView';
@@ -41,6 +42,7 @@ import { ProjectView } from './components/ProjectView';
 import { AmrArtifactUpgradeGate } from './components/AmrArtifactUpgradeGate';
 import { AmrArtifactUpgradeHomeCard } from './components/AmrArtifactUpgradeHomeCard';
 import { TooltipLayer } from './components/TooltipLayer';
+import { UpdateDialog } from './components/UpdateDialog';
 import { openWorkspaceTab, WorkspaceTabsBar } from './components/WorkspaceTabsBar';
 import {
   DesignSystemCreationFlow,
@@ -82,6 +84,7 @@ import { AMR_LOGIN_STATUS_EVENT } from './components/amrLoginPolling';
 import { CollabDemoView } from './collab/CollabDemoView';
 import { useWorkspaceBilling, useWorkspaceContext } from './collab/useWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
+import { deriveTabIdentityScope, UNSET_ACCOUNT_BUCKET } from './collab/tab-scope';
 import { CommunityView } from './components/CommunityView';
 import { seedHomeComposerPrompt } from './components/HomeView';
 import { goBack, navigate, useRoute, type Route } from './router';
@@ -117,6 +120,7 @@ import {
   getProject,
   importClaudeDesignZip,
   importFolderProject,
+  listWorkspaceProjectSummaries,
   listProjects,
   listTemplates,
   deleteTemplate,
@@ -267,7 +271,21 @@ function clearStaleAmrModelChoiceOnProfileChange(
 type ProjectListRequest = {
   generation: number;
   mutationVersion: number;
+  scopeKey: string;
 };
+
+function projectListScopeKey(context: WorkspaceCollabContext | null): string {
+  return context
+    ? `${context.workspaceId}:${context.workspaceMemberId}`
+    : 'local';
+}
+
+export function projectViewAuthorizationLifetimeKey(
+  projectId: string,
+  context: WorkspaceCollabContext | null,
+): string {
+  return `${projectListScopeKey(context)}:${projectId}`;
+}
 
 export async function persistComposioConfigChange(
   current: AppConfig,
@@ -411,20 +429,180 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
-async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<boolean> {
+/**
+ * `isTeamShared` is the hub-backed truth: `/api/workspace/projects/team`
+ * reads the team's resource-hub catalog directly (see
+ * `apps/daemon/src/routes/collab-context.ts`), not this daemon's local
+ * sqlite. It stays true the instant the hub confirms the project is shared
+ * to the caller's team, well before the pull below has materialized a local
+ * row. Callers that need to distinguish "not on the hub catalog" (genuinely
+ * not shared / no access) from "on the catalog but the local mirror hasn't
+ * landed yet" must branch on `isTeamShared`, not on `pulled` — a pull can
+ * return `ok: true` with no bytes materialized yet (see collab-sync.ts's
+ * `/collab/pull` handler, which only registers the local project once
+ * `pullLatest` resolves a non-null version).
+ */
+type TeamSharedProjectPullOutcome = {
+  isTeamShared: boolean;
+  pulled: boolean;
+};
+
+async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<TeamSharedProjectPullOutcome> {
   try {
     const listResponse = await fetch('/api/workspace/projects/team');
-    if (!listResponse.ok) return false;
+    if (!listResponse.ok) return { isTeamShared: false, pulled: false };
     const body = (await listResponse.json()) as WorkspaceTeamProjectsResponse;
     const isTeamShared = (body.projects ?? []).some((project) => project.projectId === projectId);
-    if (!isTeamShared) return false;
+    if (!isTeamShared) return { isTeamShared: false, pulled: false };
     const pullResponse = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/pull`, {
       method: 'POST',
     });
-    return pullResponse.ok;
+    return { isTeamShared: true, pulled: pullResponse.ok };
   } catch {
-    return false;
+    return { isTeamShared: false, pulled: false };
   }
+}
+
+// A member's first-ever open of a just-shared project races the daemon's
+// local materialization (POST /collab/pull's registerPulledProject, or
+// ProjectView's own /collab/status poll firing ensureSharedProjectPlaceholder
+// — see collab-sync.ts) against the deep-link bootstrap effect below. Give
+// that materialization a bounded window instead of trusting a single
+// immediate miss.
+//
+// 21 attempts * 600ms = ~12s total. The original budget here was 4 * 600ms =
+// ~2.4s, sized well under the real /collab/pull latency observed against a
+// live vela-backed hub (up to ~10s for a fresh project's first pull) —
+// exhausting the window and falling through to "not found" while the pull
+// was still genuinely in flight is a false negative, not a correctness
+// backstop. ~12s matches the budget ProjectView's own
+// CONVERSATION_LOAD_RETRY_DELAYS_MS already established for the identical
+// "team-shared project not yet materialized locally" race on the
+// conversations-list read, so both retry loops now cover the same worst
+// case instead of one giving up 5x sooner than the other. This is still a
+// BOUNDED retry, not an unconditional hang: `everConfirmedTeamShared`
+// already keeps the caller from navigating home the moment the hub confirms
+// team membership even once (see `still-materializing` below), so widening
+// this window only helps the case where the hub itself is slow to reflect a
+// share, not a genuinely-missing/no-access project — that path still falls
+// through to the not-found/navigate-home handling unchanged.
+const DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS = 21;
+const DEEP_LINK_TEAM_SHARE_RETRY_DELAY_MS = 600;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type DeepLinkedProjectResolution =
+  | { kind: 'found'; project: Project }
+  // The hub confirmed team membership at least once during the retry window:
+  // the project exists and the caller has access. Local materialization is
+  // still catching up — the caller must NOT treat this as "not found".
+  | { kind: 'still-materializing' }
+  // Never confirmed as team-shared within the retry window (or genuinely not
+  // shared at all) — the caller's existing not-found handling applies.
+  | { kind: 'not-found' };
+
+/**
+ * Resolves a project a member has just deep-linked to but has no local
+ * record of yet. Bounded-retries `getProject` + `pullTeamSharedProjectIfAvailable`
+ * so a first-ever open of a freshly team-shared project survives the local
+ * materialization race instead of being misread as "doesn't exist" on the
+ * first miss. Pulled out of the App.tsx bootstrap effect as a plain async
+ * function (no React, no timers beyond the injected `delay`) so the retry
+ * decision — when does "not found yet" become "still materializing" versus
+ * "genuinely not found" — is unit-testable without mounting the component.
+ */
+export async function resolveDeepLinkedTeamSharedProject(
+  projectId: string,
+  deps: {
+    getProject: (id: string) => Promise<Project | null>;
+    pullTeamSharedProjectIfAvailable: (id: string) => Promise<TeamSharedProjectPullOutcome>;
+    delay: (ms: number) => Promise<void>;
+    retryAttempts?: number;
+    retryDelayMs?: number;
+    isCancelled?: () => boolean;
+  },
+): Promise<DeepLinkedProjectResolution> {
+  const attempts = deps.retryAttempts ?? DEEP_LINK_TEAM_SHARE_RETRY_ATTEMPTS;
+  const retryDelayMs = deps.retryDelayMs ?? DEEP_LINK_TEAM_SHARE_RETRY_DELAY_MS;
+  const isCancelled = () => deps.isCancelled?.() ?? false;
+  let everConfirmedTeamShared = false;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await deps.delay(retryDelayMs);
+      if (isCancelled()) return { kind: 'still-materializing' };
+    }
+    const project = await deps.getProject(projectId).catch(() => null);
+    if (isCancelled()) return { kind: 'still-materializing' };
+    if (project) return { kind: 'found', project };
+    const { isTeamShared, pulled } = await deps.pullTeamSharedProjectIfAvailable(projectId);
+    if (isCancelled()) return { kind: 'still-materializing' };
+    if (isTeamShared) everConfirmedTeamShared = true;
+    if (pulled) {
+      const pulledProject = await deps.getProject(projectId).catch(() => null);
+      if (isCancelled()) return { kind: 'still-materializing' };
+      if (pulledProject) return { kind: 'found', project: pulledProject };
+    }
+  }
+  return everConfirmedTeamShared ? { kind: 'still-materializing' } : { kind: 'not-found' };
+}
+
+export async function hydrateReadyTeamProject(
+  projectId: string,
+  workspaceId: string,
+  deps: {
+    getWorkspaceContext: () => WorkspaceCollabContext | null;
+    listWorkspaceProjects: (
+      context: WorkspaceCollabContext,
+    ) => Promise<WorkspaceProjectSummary[]>;
+    applyProject: (project: Project) => void;
+  },
+): Promise<Project | null> {
+  const initialContext = deps.getWorkspaceContext();
+  if (
+    !initialContext ||
+    initialContext.workspaceType !== 'team' ||
+    initialContext.workspaceId !== workspaceId ||
+    initialContext.memberStatus !== 'active' ||
+    initialContext.lifecycleState !== 'active'
+  ) {
+    return null;
+  }
+  const contextMatches = () => {
+    const context = deps.getWorkspaceContext();
+    return Boolean(
+      context &&
+      context.workspaceType === 'team' &&
+      context.workspaceId === initialContext.workspaceId &&
+      context.workspaceMemberId === initialContext.workspaceMemberId &&
+      context.memberStatus === 'active' &&
+      context.lifecycleState === 'active' &&
+      (context.teamId ?? context.workspaceId) ===
+        (initialContext.teamId ?? initialContext.workspaceId)
+    );
+  };
+  const summaries = await deps.listWorkspaceProjects(initialContext).catch(() => []);
+  if (!contextMatches()) return null;
+  const summary = summaries.find((candidate) =>
+    candidate.id === projectId &&
+    candidate.project.id === projectId
+  );
+  const hasMaterializedTeamBinding = Boolean(
+    summary &&
+    summary.workspaceId === workspaceId &&
+    summary.project.workspaceId === workspaceId &&
+    summary.visibility === 'team' &&
+    summary.resourceState === 'active' &&
+    summary.cloudTombstonedAt == null &&
+    summary.currentUserAccess.canOpen === true &&
+    typeof summary.resourceHubResourceId === 'string' &&
+    summary.resourceHubResourceId.trim() &&
+    summary.syncState === 'synced'
+  );
+  if (!summary || !hasMaterializedTeamBinding) return null;
+  deps.applyProject(summary.project);
+  return summary.project;
 }
 
 export function App() {
@@ -448,7 +626,7 @@ function AppInner() {
   const iframeKeepAlivePool = useIframeKeepAlivePool();
   const clientType = useMemo(() => detectClientType(), []);
   useModalWindowDragGuard();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const { context: workspaceContext, loading: workspaceContextLoading } = useWorkspaceContext();
   const workspaceBilling = useWorkspaceBilling();
   const workspaceContextRef = useRef<WorkspaceCollabContext | null>(null);
   workspaceContextRef.current = workspaceContext;
@@ -562,6 +740,12 @@ function AppInner() {
     recent: [],
   });
   const pendingLocalProjectIdsRef = useRef<Set<string>>(new Set());
+  const pendingLocalProjectScopeRef = useRef(projectListScopeKey(workspaceContext));
+  const currentProjectListScope = projectListScopeKey(workspaceContext);
+  if (pendingLocalProjectScopeRef.current !== currentProjectListScope) {
+    pendingLocalProjectScopeRef.current = currentProjectListScope;
+    pendingLocalProjectIdsRef.current.clear();
+  }
   const locallyDeletedProjectIdsRef = useRef<Map<string, number>>(new Map());
   const projectListMutationVersionRef = useRef(0);
   const projectListRequestGenerationRef = useRef(0);
@@ -662,6 +846,33 @@ function AppInner() {
     projectListMutationVersionRef.current += 1;
   }, []);
 
+  const handleTeamProjectContentReady = useCallback(async (
+    projectId: string,
+    workspaceId: string,
+    workspaceMemberId: string,
+  ): Promise<boolean> => {
+    if (workspaceContextRef.current?.workspaceMemberId !== workspaceMemberId) {
+      return false;
+    }
+    const project = await hydrateReadyTeamProject(projectId, workspaceId, {
+      getWorkspaceContext: () => workspaceContextRef.current,
+      listWorkspaceProjects: (context) =>
+        listWorkspaceProjectSummaries({
+          context,
+          workspaceView: 'team',
+          throwOnError: true,
+        }),
+      applyProject: (project) => {
+        rememberLocalProject(projectId);
+        setProjects((current) => [
+          project,
+          ...current.filter((candidate) => candidate.id !== projectId),
+        ]);
+      },
+    });
+    return project != null;
+  }, [rememberLocalProject]);
+
   const clearLocalProject = useCallback((projectId: string, options?: { deleted?: boolean }) => {
     pendingLocalProjectIdsRef.current.delete(projectId);
     projectListMutationVersionRef.current += 1;
@@ -678,10 +889,14 @@ function AppInner() {
     return {
       generation: projectListRequestGenerationRef.current,
       mutationVersion: projectListMutationVersionRef.current,
+      scopeKey: projectListScopeKey(workspaceContextRef.current),
     };
   }, []);
 
   const reconcileFetchedProjects = useCallback((list: Project[], request: ProjectListRequest) => {
+    if (request.scopeKey !== projectListScopeKey(workspaceContextRef.current)) {
+      return false;
+    }
     const pendingLocalProjectIds = pendingLocalProjectIdsRef.current;
     const locallyDeletedProjectIds = locallyDeletedProjectIdsRef.current;
     const fetchedIds = new Set(list.map((project) => project.id));
@@ -785,9 +1000,11 @@ function AppInner() {
     billing: workspaceBilling,
     context: workspaceContext,
     accountPlan:
-      amrLoginStatus?.account?.plan?.trim()
-      || amrLoginStatus?.user?.plan?.trim()
-      || null,
+      workspaceContextLoading || workspaceContext?.workspaceType === 'team'
+        ? null
+        : amrLoginStatus?.account?.plan?.trim()
+          || amrLoginStatus?.user?.plan?.trim()
+          || null,
   });
   // Child surfaces report status snapshots, not login events. Deduplicate the
   // signed-in transition here: restarting the model poll for every Settings
@@ -811,6 +1028,38 @@ function AppInner() {
       restartAmrPolling();
     }
   }, [restartAmrPolling]);
+
+  // Tab-scope identity key, fed to WorkspaceTabsBar so it can close every open
+  // tab down to a single fresh Home tab whenever the caller's identity
+  // changes — signing out, signing in as a different account, switching
+  // workspace, or simply never having signed into AMR at all are each their
+  // own scope, and a tab opened under one must not silently keep pointing at
+  // a project/section the next identity has no standing to see (see
+  // WorkspaceTabsBar's own doc, and deriveTabIdentityScope's, for the full
+  // design rationale — notably why the workspace half of the key LATCHES
+  // across a null `workspaceContext` instead of reacting to it directly, and
+  // why `workspaceContextLoading` must ride along: on every fresh boot
+  // (first load OR a plain refresh) `amrLoginStatus` and `workspaceContext`
+  // resolve on independent timers, and without the loading flag the
+  // in-between "logged in, workspace context not landed yet" tick reads as a
+  // confirmed no-workspace baseline — so the real workspace context landing a
+  // beat later looks exactly like a workspace switch and bounces a team
+  // member's own deep-linked/refreshed project back to Home).
+  const tabScopeWorkspaceIdRef = useRef<string>('none');
+  const tabScopeAccountIdRef = useRef<string>(UNSET_ACCOUNT_BUCKET);
+  const {
+    scopeKey: identityScopeKey,
+    nextWorkspaceBucket: nextTabScopeWorkspaceId,
+    nextAccountBucket: nextTabScopeAccountId,
+  } = deriveTabIdentityScope({
+    amrLoginStatus,
+    workspaceContext,
+    workspaceContextLoading,
+    previousWorkspaceBucket: tabScopeWorkspaceIdRef.current,
+    previousAccountBucket: tabScopeAccountIdRef.current,
+  });
+  tabScopeWorkspaceIdRef.current = nextTabScopeWorkspaceId;
+  tabScopeAccountIdRef.current = nextTabScopeAccountId;
 
   // v2 analytics requires every event to carry the configure-state
   // triplet (has_available_configure_cli / configure_type /
@@ -1371,6 +1620,11 @@ function AppInner() {
   const refreshDesignSystems = useCallback(async () => {
     const list = await fetchDesignSystems();
     setDesignSystems(list);
+    // Bootstrap and this workspace-scoped refresh can overlap on launch.
+    // Either response is a complete catalog for the active daemon identity,
+    // so do not leave a successful refresh hidden behind bootstrap's loader
+    // when that duplicate request is cancelled or stalls.
+    setDsLoading(false);
   }, []);
 
   // The design-system catalog is workspace-scoped on the daemon (#145), so it
@@ -1514,20 +1768,22 @@ function AppInner() {
   // and the daemon so the choice survives reloads.
   const handleThemeChange = useCallback(
     (theme: AppConfig['theme']) => {
-      const next = { ...config, theme };
+      const current = latestPersistedConfigRef.current;
+      const next = { ...current, theme };
+      latestPersistedConfigRef.current = next;
       // Apply to the DOM synchronously inside the click handler so the theme
       // flips instantly. Otherwise the visible switch waits on the (heavier)
       // React re-render of the whole tree before the layout effect re-applies
       // it — which reads as a perceptible lag after the click.
       applyAppearanceToDocument({
         theme: theme ?? 'system',
-        accentColor: config.accentColor,
+        accentColor: current.accentColor,
       });
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const handleAgentChange = useCallback(
@@ -1565,12 +1821,16 @@ function AppInner() {
   // user had previously configured for the target protocol.
   const handleApiProtocolChange = useCallback(
     (protocol: ApiProtocol) => {
-      const next = switchApiProtocolConfig(config, protocol);
+      const next = switchApiProtocolConfig(
+        latestPersistedConfigRef.current,
+        protocol,
+      );
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   // BYOK model picker — patches `model` (and the per-protocol shadow
@@ -1578,35 +1838,45 @@ function AppInner() {
   // mid-session without retyping their key.
   const handleApiModelChange = useCallback(
     (model: string) => {
-      const next = updateCurrentApiProtocolConfig(config, { model });
+      const next = updateCurrentApiProtocolConfig(
+        latestPersistedConfigRef.current,
+        { model },
+      );
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const handleChangeDefaultDesignSystem = useCallback(
     (designSystemId: string | null) => {
-      const next = { ...config, designSystemId };
+      const next = {
+        ...latestPersistedConfigRef.current,
+        designSystemId,
+      };
+      latestPersistedConfigRef.current = next;
       saveConfig(next);
       void syncConfigToDaemon(next);
       setConfig(next);
     },
-    [config],
+    [],
   );
 
   const refreshAgents = useCallback(
     async (options?: { throwOnError?: boolean; agentCliEnv?: AppConfig['agentCliEnv'] }) => {
       if (options && Object.prototype.hasOwnProperty.call(options, 'agentCliEnv')) {
-        const nextConfig = clearStaleAmrModelChoiceOnProfileChange(config, {
-          ...config,
+        const current = latestPersistedConfigRef.current;
+        const nextConfig = clearStaleAmrModelChoiceOnProfileChange(current, {
+          ...current,
           agentCliEnv: options.agentCliEnv ?? {},
         });
+        latestPersistedConfigRef.current = nextConfig;
         amrModelsRef.current = null;
         saveConfig(nextConfig);
-        await syncConfigToDaemon(nextConfig);
         setConfig(nextConfig);
+        await syncConfigToDaemon(nextConfig);
       }
       const agentRequestId = beginAgentStreamRequest();
       setAgentsLoading(true);
@@ -1637,7 +1907,7 @@ function AppInner() {
         return [];
       }
     },
-    [beginAgentStreamRequest, config, isCurrentAgentStreamRequest],
+    [beginAgentStreamRequest, isCurrentAgentStreamRequest],
   );
 
   useEffect(() => {
@@ -2140,7 +2410,7 @@ function AppInner() {
         navigate({ kind: 'project', projectId: id, fileName: routeFileName });
         return true;
       }
-      const pulled = await pullTeamSharedProjectIfAvailable(id);
+      const { pulled } = await pullTeamSharedProjectIfAvailable(id);
       if (pulled) {
         const pulledProject = await getProject(id);
         if (pulledProject) {
@@ -2354,54 +2624,66 @@ function AppInner() {
   const activeProject = loadedActiveProject ?? routeProjectPlaceholder;
 
   // Deep-linked route to a project we don't have yet (e.g. after a refresh
-  // that finishes after the project list comes back). Fetch it in the
+  // that finishes after the project list comes back, OR a member's first-ever
+  // open of a project their team just shared with them). Fetch it in the
   // background so the view can render rather than bouncing to home.
+  //
+  // A member's first open of a freshly-shared project is a genuine race: the
+  // hub already confirms the project belongs to their team, but the local
+  // sqlite mirror (materialized by POST /collab/pull's registerPulledProject,
+  // or by ProjectView's own /collab/status poll firing
+  // ensureSharedProjectPlaceholder — see collab-sync.ts) hasn't landed yet. A
+  // single immediate miss used to be indistinguishable from "this project
+  // doesn't exist / I have no access", and navigated the member straight back
+  // to Home mid-sync. `pullTeamSharedProjectIfAvailable`'s
+  // `isTeamShared` is the reliable signal here: it comes from the hub-backed
+  // `/api/workspace/projects/team` catalog, not from local sqlite state that
+  // can simply be running behind. Retry on that signal for a short bounded
+  // window, and once the hub has confirmed team membership even once, never
+  // fall through to the not-found/navigate-home path for this project — only
+  // a hub-confirmed absence does.
   useEffect(() => {
     if (route.kind !== 'project') return;
     if (loadedActiveProject) return;
     if (!projects.length && !daemonLive) return;
     if (projects.some((p) => p.id === route.projectId)) return;
     let cancelled = false;
+    const projectId = route.projectId;
     (async () => {
-      const project = await getProject(route.projectId).catch(() => null);
+      const resolution = await resolveDeepLinkedTeamSharedProject(projectId, {
+        getProject,
+        pullTeamSharedProjectIfAvailable,
+        delay,
+        isCancelled: () => cancelled,
+      });
       if (cancelled) return;
-      if (project) {
+      if (resolution.kind === 'found') {
+        const fetched = resolution.project;
         setProjects((curr) => {
-          const existingIndex = curr.findIndex((candidate) => candidate.id === project.id);
+          const existingIndex = curr.findIndex((candidate) => candidate.id === fetched.id);
           if (existingIndex < 0) {
-            return [...curr, project];
+            return [...curr, fetched];
           }
-          return curr.map((candidate) => (candidate.id === project.id ? project : candidate));
+          return curr.map((candidate) => (candidate.id === fetched.id ? fetched : candidate));
         });
         return;
       }
-      const pulled = await pullTeamSharedProjectIfAvailable(route.projectId);
-      if (cancelled) return;
-      if (pulled) {
-        const pulledProject = await getProject(route.projectId).catch(() => null);
-        if (cancelled) return;
-        if (pulledProject) {
-          setProjects((curr) => {
-            const existingIndex = curr.findIndex((candidate) => candidate.id === pulledProject.id);
-            if (existingIndex < 0) {
-              return [...curr, pulledProject];
-            }
-            return curr.map((candidate) => (candidate.id === pulledProject.id ? pulledProject : candidate));
-          });
-          return;
-        }
-      }
+      // The hub confirmed at least once during the retry window that this
+      // project belongs to the caller's team: it exists and they have access.
+      // Local materialization is just still catching up — leave the route
+      // alone instead of bouncing the member off a project they can see.
+      if (resolution.kind === 'still-materializing') return;
       const request = beginProjectListRequest();
       const list = await listCurrentWorkspaceProjects({ workspaceView: 'all' }).catch(() => []);
       if (cancelled) return;
       const applied = reconcileFetchedProjects(list, request);
       if (!applied) return;
-      const fetchedProject = locallyDeletedProjectIdsRef.current.has(route.projectId)
+      const fetchedProject = locallyDeletedProjectIdsRef.current.has(projectId)
         ? undefined
-        : list.find((p) => p.id === route.projectId);
+        : list.find((p) => p.id === projectId);
       const staleRequest = request.mutationVersion < projectListMutationVersionRef.current;
       const knownLocalProject =
-        staleRequest && pendingLocalProjectIdsRef.current.has(route.projectId);
+        staleRequest && pendingLocalProjectIdsRef.current.has(projectId);
       if (!fetchedProject && !knownLocalProject) {
         setProjectOpenError(t('project.missing'));
         navigate({ kind: 'home', view: 'home' }, { replace: true });
@@ -2615,6 +2897,17 @@ function AppInner() {
     }
   };
 
+  const handleResetOnboarding = useCallback((next: AppConfig) => {
+    latestPersistedConfigRef.current = next;
+    saveConfig(next);
+    void syncConfigToDaemon(next, { allowOnboardingReset: true });
+    setConfig(next);
+    setSettingsOpen(false);
+    settingsDraftConfigRef.current = null;
+    setSettingsHighlight(null);
+    navigate({ kind: 'home', view: 'onboarding' });
+  }, []);
+
   const renderSettingsSurface = (presentation: 'modal' | 'page') => (
     <SettingsDialog
       presentation={presentation}
@@ -2631,6 +2924,7 @@ function AppInner() {
       onDraftChange={handleSettingsDraftChange}
       onPersistComposioKey={handleConfigPersistComposioKey}
       onClose={handleCloseSettings}
+      onResetOnboarding={handleResetOnboarding}
       onRefreshAgents={refreshAgents}
       onAmrLoginStatusChange={handleAmrLoginStatusChange}
       daemonMediaProviders={daemonMediaProviders}
@@ -2741,7 +3035,7 @@ function AppInner() {
   } else if (activeProject) {
     appMain = (
       <ProjectView
-        key={activeProject.id}
+        key={projectViewAuthorizationLifetimeKey(activeProject.id, workspaceContext)}
         project={activeProject}
         routeFileName={route.kind === 'project' ? route.fileName : null}
         routeConversationId={route.kind === 'project' ? route.conversationId : null}
@@ -2822,6 +3116,7 @@ function AppInner() {
         onDuplicateProject={handleDuplicateProject}
         onRenameProject={handleRenameProject}
         onProjectsRefresh={refreshProjectsStrict}
+        onTeamProjectContentReady={handleTeamProjectContentReady}
         onChangeDefaultDesignSystem={handleChangeDefaultDesignSystem}
         onCreateDesignSystem={() => {
           setPendingDesignSystemCreateEntry('design_systems_page');
@@ -2878,6 +3173,7 @@ function AppInner() {
           route={route}
           projects={projects}
           onboardingCompleted={config.onboardingCompleted === true}
+          identityScopeKey={identityScopeKey}
         />
         <div className="workspace-shell__body">
           {appMain}
@@ -2892,6 +3188,7 @@ function AppInner() {
         />
       )}
       <TooltipLayer />
+      <UpdateDialog />
       <AmrArtifactUpgradeGate
         homeVisible={route.kind === 'home' && route.view === 'home'}
         activeProjectId={route.kind === 'project' ? route.projectId : null}

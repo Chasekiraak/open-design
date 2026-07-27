@@ -1,9 +1,13 @@
+import { spawn } from "node:child_process";
+
 import { describe, expect, it } from "vitest";
 
 import {
   collectProcessTreePids,
   processCommandExactlyRunsExecutable,
+  stopProcesses,
   type ProcessSnapshot,
+  waitForProcessExit,
 } from "../src/index.js";
 
 function snapshot(pid: number, ppid: number, command = `pid-${pid}`): ProcessSnapshot {
@@ -63,4 +67,40 @@ describe("processCommandExactlyRunsExecutable", () => {
     expect(processCommandExactlyRunsExecutable(`${executable} --inspect`, executable, "darwin")).toBe(false);
     expect(processCommandExactlyRunsExecutable(`${executable} Helper`, executable, "darwin")).toBe(false);
   });
+});
+
+describe("stopProcesses", () => {
+  it.skipIf(process.platform === "win32")(
+    "escalates to SIGKILL when a child ignores SIGTERM",
+    async () => {
+      const child = spawn(
+        process.execPath,
+        [
+          "-e",
+          "process.on('SIGTERM',()=>{});process.stdout.write('ready\\n');setInterval(()=>{},1000)",
+        ],
+        { stdio: ["ignore", "pipe", "ignore"] },
+      );
+      const pid = child.pid;
+      if (pid == null) throw new Error("test child did not start");
+      await new Promise<void>((resolve, reject) => {
+        child.once("error", reject);
+        child.stdout?.once("data", () => resolve());
+      });
+
+      try {
+        const result = await stopProcesses([pid], {
+          termGraceMs: 100,
+          killGraceMs: 1_000,
+        });
+        expect(result.forcedPids).toContain(pid);
+        expect(result.remainingPids).toEqual([]);
+        expect(result.stoppedPids).toContain(pid);
+      } finally {
+        child.kill("SIGKILL");
+        await waitForProcessExit(pid, 1_000);
+      }
+    },
+    5_000,
+  );
 });

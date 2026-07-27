@@ -226,6 +226,7 @@ const WORKSPACE_STRING_FLAGS = new Set([
   'daemon-url', 'workspace', 'view', 'visibility', 'owner', 'project',
   'member', 'role', 'email', 'app-user', 'lifecycle-state',
   'member-status', 'can-share-projects', 'can-write-synced-files',
+  'workspace-type',
 ]);
 const WORKSPACE_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 // `od templates …` mirrors NewProjectPanel / ExamplesTab. Same surface,
@@ -365,6 +366,7 @@ const SUBCOMMAND_MAP = {
   deploy: runDeploy,
   daemon: runDaemon,
   atoms: runAtoms,
+  skill: runSkills,
   skills: runSkills,
   'design-systems': runDesignSystems,
   resource: runResource,
@@ -977,6 +979,7 @@ async function runCollab(args) {
       const body = await request('GET', '/collab/status');
       return emit(body, () => {
         console.log(`publishedVersion\t${body?.publishedVersion ?? '-'}`);
+        console.log(`materializedVersion\t${body?.materializedVersion ?? '-'}`);
         console.log(`syncState\t${body?.syncState ?? '-'}`);
       });
     }
@@ -6550,7 +6553,7 @@ async function runWorkspace(args) {
   od workspace projects batch-delete --workspace <id> --project <id> [--project <id> ...] [--json]
   od workspace projects batch-move --workspace <id> --visibility personal|team --project <id> [--project <id> ...] [--json]
   od workspace members list [--json]
-  od workspace billing [--json]
+  od workspace billing [--workspace-type personal|team] [--workspace <id>] [--json]
 
 Common options:
   --daemon-url <url>   Open Design daemon HTTP base.
@@ -6609,25 +6612,53 @@ Common options:
     return;
   }
 
-  // Dual-track parity for the account menu's credits card: the same
-  // /api/workspace/billing the UI reads, scoped to the daemon's active
-  // workspace. Prints the workspace it describes so an embedding agent can
-  // tell WHOSE billing it just read rather than assuming the account's.
+  // Dual-track parity for the account menu's credits card. Billing scope is an
+  // explicit CLI argument, never daemon active-workspace state: account is the
+  // compatibility default; team requires both type + workspace id.
   if (area === 'billing') {
-    const data = await workspaceContextRequest('/api/workspace/billing');
+    const workspaceType =
+      typeof flags['workspace-type'] === 'string'
+        ? flags['workspace-type'].trim().toLowerCase()
+        : '';
+    const workspaceId =
+      typeof flags.workspace === 'string' ? flags.workspace.trim() : '';
+    if (
+      (workspaceType && workspaceType !== 'personal' && workspaceType !== 'team') ||
+      (workspaceType === 'team' && !workspaceId) ||
+      (workspaceType === 'personal' && workspaceId) ||
+      (!workspaceType && workspaceId)
+    ) {
+      console.error(
+        'Usage: od workspace billing [--workspace-type personal|team] [--workspace <id>] [--json]',
+      );
+      process.exit(2);
+    }
+    const billingPath =
+      workspaceType === 'team'
+        ? `/api/workspace/billing?scope=workspace&workspaceId=${encodeURIComponent(workspaceId)}`
+        : '/api/workspace/billing?scope=account';
+    const data = await workspaceContextRequest(billingPath);
     if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
     const summary = data?.summary ?? null;
-    if (!summary) {
+    const workspaceBalance = data?.workspaceBalance ?? null;
+    if (!summary && !workspaceBalance) {
       console.log('No billing summary (no vela session or CLI unavailable).');
       return;
     }
-    console.log(`Workspace:\t${summary.workspaceId ?? '-'}`);
-    console.log(`Plan:\t${summary.membershipTier || 'free'}`);
-    console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
-    console.log(`Credits:\t${summary.totalAvailableCredits}`);
-    console.log(`  Plan credits:\t${summary.subscriptionCredits}`);
-    console.log(`  Top-up credits:\t${summary.rechargeCredits}`);
-    console.log(`Balance (USD):\t${summary.balanceUsd}`);
+    if (workspaceBalance) {
+      console.log(`Workspace:\t${workspaceBalance.workspaceId}`);
+    }
+    if (summary) {
+      console.log(`Account plan:\t${summary.membershipTier || 'free'}`);
+      console.log(`Subscription:\t${summary.subscriptionStatus || 'none'}`);
+      console.log(`Account credits:\t${summary.totalAvailableCredits}`);
+      console.log(`  Account plan credits:\t${summary.subscriptionCredits}`);
+      console.log(`  Account top-up credits:\t${summary.rechargeCredits}`);
+    }
+    const balanceUsd = workspaceBalance?.balanceUsd ?? summary?.balanceUsd;
+    if (balanceUsd != null) {
+      console.log(`${workspaceBalance ? 'Workspace' : 'Account'} balance (USD):\t${balanceUsd}`);
+    }
     return;
   }
 
@@ -8541,8 +8572,61 @@ async function runLibraryList(name, args) {
 // "Capability exposure (UI/CLI dual-track)"). Bundled skills are refused by the
 // route, not here — the daemon owns that judgement.
 async function runSkills(args) {
+  if (!args[0] || args[0] === 'help' || args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  od skill install <https://github.com/owner/repo|github:owner/repo|https://…tar.gz|https://…tgz> [--json]
+  od skill list
+  od skill show <id>
+  od skill uninstall <id>
+
+\`od skills …\` remains an alias for compatibility.`);
+    process.exit(args[0] ? 0 : 2);
+  }
+  if (args[0] === 'install' || args[0] === 'add') return runSkillInstall(args.slice(1));
   if (args[0] === 'uninstall' || args[0] === 'remove') return runSkillUninstall(args.slice(1));
   return runLibraryList('skills', args);
+}
+
+async function runSkillInstall(rest) {
+  const flags = parseFlags(rest, {
+    string: LIBRARY_STRING_FLAGS,
+    boolean: LIBRARY_BOOLEAN_FLAGS,
+  });
+  const source = positionalArgs(rest, LIBRARY_STRING_FLAGS)[0];
+  if (!source) {
+    console.error(
+      'Usage: od skill install <https://github.com/owner/repo|github:owner/repo|https://…tar.gz|https://…tgz> [--json] [--daemon-url <url>]',
+    );
+    process.exit(2);
+  }
+  const base = (await libraryDaemonUrl(flags)).replace(/\/$/, '');
+  try {
+    const resp = await fetch(`${base}/api/skills/install`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const message = body?.error ?? `Skill install failed (${resp.status})`;
+      if (flags.json) {
+        console.log(JSON.stringify({
+          ok: false,
+          status: resp.status,
+          code: body?.code ?? null,
+          error: message,
+        }));
+      } else {
+        console.error(`POST /api/skills/install failed: ${resp.status} ${message}`);
+      }
+      process.exit(1);
+    }
+    if (flags.json) return process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    console.log(`[install] ${body?.skill?.id ?? body?.skill?.name ?? source}`);
+  } catch (err) {
+    surfaceFetchError(err, base);
+    process.exit(3);
+  }
 }
 
 async function runSkillUninstall(rest) {

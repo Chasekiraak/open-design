@@ -290,21 +290,20 @@ describe('HomeHero intent rail', () => {
     const presets = screen.getAllByTestId('home-hero-plugin-preset');
     expect(presets).toHaveLength(1);
     // The preset card is now a thumbnail + name only; the prompt blurb was
-    // dropped from the card face but is still passed through on Use below.
+    // dropped from the card face but is still passed through on click below.
     expect(presets[0]?.textContent).toContain('Investor deck');
 
-    // Clicking the card body opens the preview (detail modal), not the seed.
+    // The whole card is the single click-to-use affordance (2026-07 removed
+    // the hover-revealed Use/Remix overlay and the card-click-opens-details
+    // behavior, restoring the #5517 baseline) — clicking it directly seeds
+    // the composer with the preset's brief.
     fireEvent.click(presets[0]!);
-    expect(onOpenPluginDetails).toHaveBeenCalledWith(deckPlugin);
-    expect(onPickExamplePlugin).not.toHaveBeenCalled();
-
-    // The Use button is what seeds the composer with the preset's brief.
-    fireEvent.click(screen.getByTestId('home-hero-plugin-preset-use-example-deck-a'));
     expect(onPickExamplePlugin).toHaveBeenCalledWith(
       deckPlugin,
       'deck',
       'Create with a focused brief using Investor deck',
     );
+    expect(onOpenPluginDetails).not.toHaveBeenCalled();
   });
 
   it('maps powered WebGL presets to the WebGL chip without exposing a Worker chip', () => {

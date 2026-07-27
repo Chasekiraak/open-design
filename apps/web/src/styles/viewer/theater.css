@@ -895,6 +895,12 @@
   align-items: start;
   gap: 9px;
   width: 100%;
+  /* The frame's aspect-ratio is resolved after the auto grid row's intrinsic
+     contribution, so without an explicit row floor Chromium sizes the row
+     from the 11px page number and lets the 16:9 frame overlap the next item.
+     82px is the rounded 16:9 height of the 145px frame in the fixed 194px rail
+     (194 - 24px list padding - 16px number - 9px gap). */
+  min-height: 82px;
   padding: 0;
   border: 0;
   background: transparent;

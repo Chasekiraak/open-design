@@ -14,6 +14,9 @@ export type { CollabPresenceMember };
 export interface CollabSnapshot {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
+  materializedVersion: number | null;
+  /** Monotonic trigger incremented after every successful status response. */
+  statusPollGeneration: number;
   /**  project sync state; null until the first status poll lands. */
   syncState: ProjectSyncState | null;
   /** The member who shared this project (its single writer); null if unshared. */
@@ -30,7 +33,13 @@ export interface CollabSnapshot {
 
 export interface CollabClientOptions {
   projectId: string;
-  member: CollabPresenceMember;
+  /**
+   * The presence identity. Nullable because status polling (below) does not
+   * need one — a caller can start the client before the identity resolves and
+   * supply it later via {@link CollabClient.setMember}. Presence (heartbeat +
+   * leave) stays a no-op the whole time `member` is null.
+   */
+  member: CollabPresenceMember | null;
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
   /** Daemon API base; default '' (same origin). */
@@ -46,7 +55,9 @@ const DEFAULT_STATUS_POLL_MS = 5_000;
 
 export class CollabClient {
   private readonly projectId: string;
-  private readonly member: CollabPresenceMember;
+  // Mutable — see setMember(). Status polling below never reads this; only
+  // heartbeat/leave/leaveBeacon do, and all three no-op while it is null.
+  private member: CollabPresenceMember | null;
   private readonly fetchImpl: typeof fetch;
   private readonly baseUrl: string;
   private readonly heartbeatMs: number;
@@ -57,6 +68,8 @@ export class CollabClient {
   private snapshot: CollabSnapshot = {
     present: [],
     publishedVersion: null,
+    materializedVersion: null,
+    statusPollGeneration: 0,
     syncState: null,
     ownerMemberId: null,
     ownerDisplayName: null,
@@ -78,6 +91,20 @@ export class CollabClient {
 
   getSnapshot(): CollabSnapshot {
     return this.snapshot;
+  }
+
+  /**
+   * Supply (or clear) the presence identity after construction. Status
+   * polling is already running by the time an identity typically resolves —
+   * this lets the caller hand it in without tearing the client (and its
+   * in-flight status poll) down and rebuilding it. Fires an immediate
+   * heartbeat when a real member arrives while running, so presence
+   * announces itself right away instead of waiting out the next interval
+   * tick — the same immediacy `start()` gives a member known up front.
+   */
+  setMember(member: CollabPresenceMember | null): void {
+    this.member = member;
+    if (this.running && member) void this.heartbeat();
   }
 
   start(): void {
@@ -139,11 +166,15 @@ export class CollabClient {
    * The daemon materializes the new content and its file watcher then fires the
    * existing live-reload SSE, so the FileViewer refreshes on its own.
    */
-  async pull(): Promise<void> {
-    await this.post('/collab/pull');
+  async pull(): Promise<number | null> {
+    const body = await this.post('/collab/pull');
+    return typeof body?.version === 'number' ? body.version : null;
   }
 
   async heartbeat(): Promise<void> {
+    // No identity yet (status polling can be running well before `member`
+    // resolves — see setMember) — presence has nothing to announce.
+    if (!this.member) return;
     if (!this.isSharedProject()) {
       if (this.snapshot.present.length > 0) this.update({ present: [] });
       return;
@@ -161,11 +192,21 @@ export class CollabClient {
       const wasShared = this.isSharedProject();
       const body = await this.get('/collab/status');
       const version = typeof body?.publishedVersion === 'number' ? body.publishedVersion : null;
+      const materializedVersion =
+        typeof body?.materializedVersion === 'number' ? body.materializedVersion : null;
       const syncState = (body?.syncState as ProjectSyncState | undefined) ?? null;
       const ownerMemberId = typeof body?.ownerMemberId === 'string' ? body.ownerMemberId : null;
       const ownerDisplayName = typeof body?.ownerDisplayName === 'string' ? body.ownerDisplayName : null;
       const ownerRole = isCollabMemberRole(body?.ownerRole) ? body.ownerRole : null;
-      this.update({ publishedVersion: version, syncState, ownerMemberId, ownerDisplayName, ownerRole });
+      this.update({
+        publishedVersion: version,
+        materializedVersion,
+        statusPollGeneration: this.snapshot.statusPollGeneration + 1,
+        syncState,
+        ownerMemberId,
+        ownerDisplayName,
+        ownerRole,
+      });
       if (!wasShared && this.isSharedProject()) void this.heartbeat();
     } catch (error) {
       this.onError?.(error);
@@ -173,6 +214,7 @@ export class CollabClient {
   }
 
   private async leave(): Promise<void> {
+    if (!this.member) return;
     try {
       await this.post('/presence/leave', { memberId: this.member.memberId });
     } catch (error) {
@@ -188,6 +230,7 @@ export class CollabClient {
    * the page is gone, so the present set drops promptly.
    */
   leaveBeacon(): void {
+    if (!this.member) return;
     const url = this.url('/presence/leave');
     const body = JSON.stringify({ memberId: this.member.memberId });
     try {

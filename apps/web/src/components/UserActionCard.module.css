@@ -73,23 +73,27 @@
   margin-left: 33px;
 }
 
-/* `flex: 0 0 auto` (replacing a previous `min-width: 0`) is load-bearing:
-   the old rule let the flex algorithm squeeze this box to fit next to
-   `.detailsToggle` on one line even when a long CTA label (e.g. the AMR
-   recharge button) could not actually shrink — the button then overflowed
-   its box and visually overlapped the toggle text instead of dropping to
-   its own row. Keeping this box at its natural width means it only ever
-   shares the row when it truly fits; otherwise `flex-wrap` on `.footer`
-   moves it below, and `margin-left: auto` keeps it right-aligned either
-   way. */
+/* ChatPane can be resized independently of the viewport. Let the group shrink
+   to the card's available inline size and wrap its actions there; using its
+   max-content width as an inflexible basis lets long localized CTA labels
+   extend beyond a narrow card even though the footer itself wraps. */
 .footerActions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 7px;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
+}
+
+.footerActions > * {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .detailsToggle {
@@ -165,7 +169,7 @@
   }
 
   .footerActions {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 }
 

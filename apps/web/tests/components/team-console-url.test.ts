@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { teamConsoleUrl } from '../../src/components/EntryNavRail';
+import { teamConsoleUrl, workspaceUpgradeUrl } from '../../src/components/EntryNavRail';
+import type { WorkspaceBillingSummary, WorkspaceCollabContext } from '@open-design/contracts';
 
 // The context's settings URL carries B's ?workspaceId deep-link param; section
 // derivation must land on B's REAL console routes (members live at /team, the
@@ -18,29 +19,164 @@ describe('teamConsoleUrl', () => {
     expect(teamConsoleUrl(base, 'billing')).toBe('https://web.example/wallet?workspaceId=ws-1');
   });
 
-  // "Upgrade" must land ON the plan-change dialog, not on a billing page where
-  // the user has to hunt for it. B opens that dialog from `billing=checkout`
-  // (vela routes/workspace-settings.tsx and routes/team-dashboard.tsx).
-  it('deep-links upgrade straight into the plan-change dialog', () => {
+  // "Upgrade" must land ON a subscription dialog, not on a billing page where
+  // the user has to hunt for it. B gates the FIRST-checkout dialog and the
+  // change-PLAN dialog on mutually exclusive subscription states
+  // (team-dashboard.tsx: `canUpgradeTeam` needs billingState in
+  // free/inactive/locked, `ownerBillingActionsAvailable` needs 'active') — so
+  // the caller's `hasActivePlan` picks which one actually matches. Default
+  // (no options / `hasActivePlan: false`) keeps the never-subscribed-yet
+  // behavior so existing callers that have not been taught about the split
+  // keep landing on the FIRST-checkout dialog, same as before this test grew
+  // the `hasActivePlan` branch.
+  it('deep-links upgrade straight into the first-checkout dialog when the team has never subscribed', () => {
     expect(teamConsoleUrl(base, 'upgrade')).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
+    );
+    expect(teamConsoleUrl(base, 'upgrade', { hasActivePlan: false })).toBe(
       'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
     );
   });
 
-  // recvq725Kx0rM4: this used to assert a `workspace=create` deep-link param
-  // on the premise that B's dashboard honors it — checked against B's real
-  // route source and it does not; the dialog only opens from a sidebar button
-  // click (pure client state, no URL hook). The stale param made the entry
-  // look broken (dashboard loads, nothing opens) rather than just "you land
-  // on the dashboard, not the dialog". No dead param until B exposes a real
-  // deep-link to replace this with.
-  it('lands create-team on the plain dashboard, with no dead deep-link param', () => {
+  // recvpYEiH019cD / recvpSQKna0LwR: `billing=checkout` silently opens no
+  // dialog for a team that already has an active plan (confirmed live —
+  // an already-subscribed "Team Pro" workspace landed on the bare Overview
+  // page). `billing=plan` is B's change-plan deep link for that state.
+  it('deep-links upgrade into the change-plan dialog when the team already has an active plan', () => {
+    expect(teamConsoleUrl(base, 'upgrade', { hasActivePlan: true })).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=plan',
+    );
+  });
+
+  // recvq725Kx0rM4 / recvqfXzHtY5wg: B's create-workspace dialog opens from a
+  // `?workspace=create` deep link (vela `sidebar-actions.tsx`, PR #905 /
+  // commit 501c0069, live on the `feat/workspace-team` branch the
+  // feature-test deployment serves). A prior fix removed this param on the
+  // premise that B's route source had no handler for it — true of the repo
+  // checkout that fix read at the time, but stale once B shipped the handler.
+  it('deep-links create-team into the create-workspace dialog', () => {
     expect(teamConsoleUrl(base, 'create-team')).toBe(
-      'https://web.example/dashboard?workspaceId=ws-1',
+      'https://web.example/dashboard?workspaceId=ws-1&workspace=create',
+    );
+  });
+
+  // recvpYEiH019cD: the personal upgrade path is the wallet page with B's
+  // pricing modal auto-opened. (For a TEAM workspace B redirects this exact
+  // URL into `dashboard?billing=checkout` itself, so even a misrouted team
+  // session degrades to the first-checkout dialog rather than a dead page.)
+  it('deep-links plans into the wallet pricing modal', () => {
+    expect(teamConsoleUrl(base, 'plans')).toBe(
+      'https://web.example/wallet?workspaceId=ws-1&view=plans',
     );
   });
 
   it('falls back to the raw URL when it cannot be parsed', () => {
     expect(teamConsoleUrl('not-a-url', 'members')).toBe('not-a-url');
+  });
+});
+
+// recvpYEiH019cD (failed acceptance round): B returns `workspaceSettingsUrl`
+// for a PERSONAL workspace too, so "console URL present" must never be the
+// team/personal axis — `workspaceType` is. One helper decides for all five
+// upgrade entry points (EntryNavRail credits chip + invite dialog,
+// AmrBalanceDialog, RecentProjectsStrip invite dialog, SettingsDialog AMR
+// cards), so the three states cannot drift apart per entry point.
+describe('workspaceUpgradeUrl', () => {
+  const settingsUrl = 'https://web.example/settings?workspaceId=ws-1';
+  const baseContext: WorkspaceCollabContext = {
+    workspaceId: 'ws-1',
+    workspaceType: 'team',
+    workspaceMemberId: 'member-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'free',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: true },
+    permissions: {
+      canManageBilling: true,
+      canManageMembers: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    workspaceSettingsUrl: settingsUrl,
+  };
+  const billingSummary = (membershipTier: string): WorkspaceBillingSummary => ({
+    workspaceId: null,
+    membershipTier,
+    totalAvailableCredits: 0,
+    subscriptionCredits: 0,
+    rechargeCredits: 0,
+    balanceUsd: '0.00',
+    subscriptionStatus: membershipTier ? 'active' : 'none',
+    availableActions: [],
+    workspaceBalance: null,
+  });
+
+  it('sends a personal workspace to the wallet pricing modal, never a team billing deep link', () => {
+    const context: WorkspaceCollabContext = {
+      ...baseContext,
+      workspaceType: 'personal',
+    };
+    expect(workspaceUpgradeUrl(context, null)).toBe(
+      'https://web.example/wallet?workspaceId=ws-1&view=plans',
+    );
+  });
+
+  it('sends a never-subscribed team to the first-checkout dialog', () => {
+    expect(workspaceUpgradeUrl(baseContext, null)).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
+    );
+    expect(workspaceUpgradeUrl(baseContext, billingSummary(''))).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=checkout',
+    );
+  });
+
+  it('sends an already-subscribed team to the change-plan dialog', () => {
+    expect(
+      workspaceUpgradeUrl({ ...baseContext, planId: 'team_pro', billingState: 'active' }, null),
+    ).toBe('https://web.example/dashboard?workspaceId=ws-1&billing=plan');
+    expect(workspaceUpgradeUrl(baseContext, billingSummary('team_pro'))).toBe(
+      'https://web.example/dashboard?workspaceId=ws-1&billing=plan',
+    );
+  });
+
+  it.each(['admin', 'member'] as const)(
+    'fails closed for a %s without workspace billing permission',
+    (role) => {
+      const context: WorkspaceCollabContext = {
+        ...baseContext,
+        role,
+        permissions: {
+          ...baseContext.permissions,
+          canManageBilling: false,
+        },
+      };
+
+      expect(workspaceUpgradeUrl(context, billingSummary('team_pro'))).toBeNull();
+      expect(
+        workspaceUpgradeUrl(context, billingSummary('team_pro'), {
+          fallbackProfile: 'feature-test',
+        }),
+      ).toBeNull();
+    },
+  );
+
+  it('returns null without a console URL so entry points hide the affordance', () => {
+    const context: WorkspaceCollabContext = { ...baseContext };
+    delete context.workspaceSettingsUrl;
+    expect(workspaceUpgradeUrl(context, null)).toBeNull();
+    expect(workspaceUpgradeUrl(null, null)).toBeNull();
+  });
+
+  it('falls back to the profile plans deep link for CTA callers that must always link somewhere', () => {
+    expect(workspaceUpgradeUrl(null, null, { fallbackProfile: 'feature-test' })).toBe(
+      'https://amr-feature.powerformer.net/wallet?source=open_design&view=plans',
+    );
   });
 });

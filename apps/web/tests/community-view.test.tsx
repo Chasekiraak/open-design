@@ -276,6 +276,68 @@ describe('CommunityView remix', () => {
       prompt: 'A decision-grade seed round narrative.',
     });
   });
+
+  it('drops repeat Remix clicks that land before React re-renders (rapid click race)', async () => {
+    // Regression for a bug that survived an earlier "fix": a `useState`-only
+    // in-flight guard (`if (remixingId) return; setRemixingId(id);`) reads
+    // `remixingId` from the closure of whichever render is currently
+    // mounted. `setRemixingId` does not update that closure synchronously,
+    // so a burst of clicks that all fire before React commits the first
+    // state update all read the same stale (pre-click) `remixingId` and all
+    // sail past the guard. Real double-account browser verification with 5
+    // rapid clicks on this exact button produced 5 `POST /api/projects`.
+    //
+    // `fireEvent.click(...)` called 5x in a row does NOT reproduce this:
+    // Testing Library wraps every `fireEvent` call in its own `act()`, which
+    // flushes a full render between each call, so by click #2 the component
+    // already has the updated (post-click #1) closure and the guard works
+    // "by accident" in the test even though it is broken in the browser.
+    // Dispatching the raw native events directly, back to back with no
+    // await/act boundary between them, reproduces the same same-tick burst
+    // a real fast click produces: React's automatic batching only commits
+    // once the whole synchronous burst finishes, so every handler
+    // invocation still observes the pre-click state -- exactly the failure
+    // mode a synchronous ref does not have.
+    const onRemix = vi.fn();
+    await renderCommunity({ onRemixTemplate: onRemix });
+
+    const remixButton = screen.getAllByRole('button', { name: 'Remix' })[0]!;
+    for (let i = 0; i < 5; i += 1) {
+      remixButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    await waitFor(() => expect(onRemix).toHaveBeenCalled());
+    expect(onRemix).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops repeat clicks on the preview modal\'s mirrored Use button under the same race', async () => {
+    // The modal's "Use" button shares handleTemplateAction with the grid
+    // card and must be gated by the same synchronous lock, not a second,
+    // independently-racy copy of the guard.
+    const onRemix = vi.fn();
+    await renderCommunity({ onRemixTemplate: onRemix });
+
+    fireEvent.click(renderedCards()[0]!);
+    const modalButton = document.querySelector('.community-template-preview__foot button') as HTMLButtonElement;
+    expect(modalButton).not.toBeNull();
+
+    for (let i = 0; i < 5; i += 1) {
+      modalButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    await waitFor(() => expect(onRemix).toHaveBeenCalled());
+    expect(onRemix).toHaveBeenCalledTimes(1);
+  });
+
+  it('still fires on a single, ordinary click (the fix must not swallow real clicks)', async () => {
+    const onRemix = vi.fn();
+    await renderCommunity({ onRemixTemplate: onRemix });
+
+    const remixButton = screen.getAllByRole('button', { name: 'Remix' })[0]!;
+    fireEvent.click(remixButton);
+
+    expect(onRemix).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('CommunityView facet counts', () => {

@@ -60,6 +60,13 @@ export interface CollabPresenceLeaveResponse extends OkResponse {
  */
 export interface CollabSyncStatusResponse {
   publishedVersion: number | null;
+  /**
+   * The latest published version this daemon has durably materialized into the
+   * local project tree for the current workspace + project owner scope. Null
+   * means the local cursor is unavailable, so clients must fail closed and
+   * treat a non-null published head as potentially pending.
+   */
+  materializedVersion: number | null;
   syncState: ProjectSyncState;
   /**
    * The member who shared this project (its single writer), resolved
@@ -79,6 +86,12 @@ export interface CollabSyncStatusResponse {
   ownerDisplayName?: string;
   /** The owner's team role (owner/admin/member), from the same directory entry. */
   ownerRole?: CollabMemberRole;
+}
+
+/** POST /api/projects/:id/collab/pull response. */
+export interface CollabPullResponse extends OkResponse {
+  /** The actual hub version materialized by this pull, or null when unpublished. */
+  version: number | null;
 }
 
 /** POST /api/projects/:id/collab/sync-intent response. */
@@ -364,32 +377,83 @@ export function buildWorkspaceSeatSummary(input: {
   };
 }
 
+/** One backend-proven v2 workspace wallet balance. */
+export interface WorkspaceWalletBalance {
+  workspaceId: string;
+  workspaceMemberId: string;
+  balanceUsd: string;
+  billingScopeVersion: 2;
+  expiresAt: string | null;
+  updatedAt: string | null;
+}
+
 /**
- * A caller's Vela billing summary (A-lane data), surfaced through the vela CLI
- * 收口 (`vela billing summary --format json`) so the client can show real
- * credits + plan tier instead of a placeholder. `null` when the CLI or the
- * signed-in billing session is unavailable — the client falls back to the
- * plan-tier hint it already has from the workspace context.
+ * One authoritative, explicitly scoped workspace billing snapshot from Vela.
+ *
+ * Revisions are opaque equality tokens. Clients use events only as invalidation
+ * signals and always re-read this snapshot; they never derive money or plan
+ * state from an event payload.
+ */
+export interface WorkspaceBillingSnapshot {
+  schemaVersion: 1;
+  workspaceId: string;
+  workspaceMemberId: string;
+  billingScopeVersion: 2;
+  billing: {
+    billingState: WorkspaceBillingState | null;
+    planId: string | null;
+  };
+  wallet: {
+    balanceUsd: string;
+    expiresAt: string | null;
+    updatedAt: string | null;
+  };
+  revisions: {
+    billing: string;
+    wallet: string;
+  };
+}
+
+/**
+ * Daemon-owned freshness metadata for one exact workspace/member billing
+ * projection. Additive to the legacy response so older clients keep consuming
+ * `workspaceBalance` / `workspaceSnapshot` unchanged.
+ */
+export type WorkspaceBillingRuntimeStatus =
+  | 'loading'
+  | 'fresh'
+  | 'stale'
+  | 'refreshing'
+  | 'error'
+  | 'access-revoked';
+
+export interface WorkspaceBillingRuntimeState {
+  workspaceId: string;
+  workspaceMemberId: string;
+  status: WorkspaceBillingRuntimeStatus;
+  /** Daemon-local uint64 rendered as a decimal string. */
+  revision: string;
+  observedAt: string | null;
+  retryAt: string | null;
+  errorCode: string | null;
+  /** Why the most recent state transition or authoritative read occurred. */
+  reason: string;
+  /** True when an ordered upstream revision skipped at least one value. */
+  sourceGapDetected: boolean;
+}
+
+/**
+ * The caller's Vela account billing summary.
+ *
+ * `vela billing summary` remains account-scoped. The daemon must never turn it
+ * into workspace data by copying a requested id onto the response.
  */
 export interface WorkspaceBillingSummary {
   /**
-   * The workspace this summary was requested FOR, or null when the daemon had
-   * no workspace context to scope the read with.
-   *
-   * Provenance, not identity: it records which workspace the client asked
-   * about so a summary left over from the workspace the user just switched
-   * away from is detectable instead of being displayed as the new one's. The
-   * route used to take no request at all, which is how one account showed the
-   * same credits and the same tier in every workspace it opened.
-   *
-   * NOTE: B's wallet itself is still ACCOUNT-scoped — `/api/v1/billing/summary`
-   * reads `credit_recharges` by `app_user_id` with no workspace dimension, and
-   * `vela billing summary` has no `--workspace-id` (only `team-catalog` and
-   * `checkout` do). The stamp and the workspace-scoped request are the client
-   * side of the contract; a genuinely per-workspace balance needs B to grow a
-   * workspace-scoped summary first.
+   * Deprecated compatibility field. Account summaries are not workspace
+   * identities, so this is always null. Use `workspaceBalance.workspaceId`.
    */
-  workspaceId: string | null;
+  workspaceId: null;
   /** Membership tier, e.g. `team` / `free`. */
   membershipTier: string;
   /** Total available credits (subscription + recharge), as a number. */
@@ -414,10 +478,33 @@ export interface WorkspaceBillingSummary {
   subscriptionStatus: string;
   /** Actions the caller may take, e.g. `subscription_checkout` / `billing_portal`. */
   availableActions: string[];
+  /**
+   * Deprecated compatibility field. Workspace money now lives on
+   * `WorkspaceBillingResponse.workspaceBalance` so an account-summary outage
+   * cannot erase an independently proven workspace balance.
+   */
+  workspaceBalance: WorkspaceWalletBalance | null;
 }
 
 export interface WorkspaceBillingResponse {
+  /** Account-scoped metadata; independently nullable from workspace money. */
   summary: WorkspaceBillingSummary | null;
+  /**
+   * One backend-proven explicit workspace wallet, or null for an account read /
+   * failed workspace-wallet read. Never inferred from `summary`.
+   */
+  workspaceBalance: WorkspaceWalletBalance | null;
+  /**
+   * Additive v1 workspace snapshot. Absent/null means the installed Vela CLI
+   * or backend does not expose the capability, so callers keep using the
+   * legacy summary + workspaceBalance fields.
+   */
+  workspaceSnapshot?: WorkspaceBillingSnapshot | null;
+  /**
+   * Additive daemon-owned freshness metadata. Missing means the connected
+   * daemon predates the runtime coordinator; values above remain authoritative.
+   */
+  workspaceRuntime?: WorkspaceBillingRuntimeState;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

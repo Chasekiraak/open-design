@@ -198,7 +198,7 @@ describe('createVelaCliResourceAdapter', () => {
     const { run, workspaces } = recordingRun({
       push: JSON.stringify({ version: 7 }),
       head: JSON.stringify({ version: 7 }),
-      pull: '{}',
+      pull: JSON.stringify({ version: 7, versionId: 'v7' }),
       remove: '{}',
     });
     const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
@@ -244,10 +244,17 @@ describe('createVelaCliResourceAdapter', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('pulls into the pull dir', async () => {
-    const { run, calls } = recordingRun({ pull: '{}' });
+  it('returns the exact version materialized by `pull --json`', async () => {
+    const { run, calls } = recordingRun({
+      pull: JSON.stringify({
+        version: 1,
+        versionId: 'v1',
+        manifestDigest: 'd1',
+      }),
+    });
     const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
-    await adapter.pull!({ projectId: 'p1' });
+    const result = await adapter.pull!({ projectId: 'p1' });
+    expect(result).toEqual({ version: 1, versionId: 'v1' });
     expect(calls[0]).toEqual(['pull', 'design_system', 'project-p1', '/copies/p1', '--ref', 'published', '--json']);
   });
 
@@ -260,7 +267,7 @@ describe('createVelaCliResourceAdapter', () => {
       },
       {
         match: ['pull', 'design_system', 'project-p1', '/copies/p1', '--ref', 'published', '--json'],
-        output: '{}',
+        output: JSON.stringify({ version: 9, versionId: 'v9' }),
       },
     ]);
     const adapter = createVelaCliResourceAdapter({
@@ -271,6 +278,21 @@ describe('createVelaCliResourceAdapter', () => {
     });
     await adapter.pull!({ projectId: 'p1', principal });
     expect(calls).toHaveLength(2);
+  });
+
+  it('fails closed when a successful pull response omits the materialized version', async () => {
+    const { run } = recordingRun({
+      pull: JSON.stringify({
+        resourceId: 'project-p1',
+        ref: 'published',
+        dir: '/copies/p1',
+      }),
+    });
+    const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
+
+    await expect(adapter.pull!({ projectId: 'p1' })).rejects.toThrow(
+      'missing the materialized version',
+    );
   });
 
   it('does not hide authentication failures behind a legacy pull fallback', async () => {
@@ -310,6 +332,47 @@ describe('createVelaCliResourceAdapter', () => {
     await adapter.unpublish!({ projectId: 'p1' });
     expect(calls.length).toBe(0);
   });
+
+  it('stops spawning `vela resource push` on the very next attempt once the live context reports the member removed', async () => {
+    // Reproduces the collab-publish-watcher gap: an already-attached file
+    // watcher never re-checks `shouldPublish`, so the ONLY thing standing
+    // between a removed owner's local edits and `vela resource push` is this
+    // adapter re-deriving `hasTeamIdentity` fresh on every publish attempt.
+    const { run, calls } = recordingRun({ push: JSON.stringify({ version: 1 }) });
+    let memberStatus: 'active' | 'removed' = 'active';
+    const adapter = createVelaCliResourceAdapter({
+      ...OPTS,
+      hasTeamIdentity: () =>
+        contextHasTeamIdentity({
+          workspaceType: 'team',
+          workspaceId: 't1',
+          workspaceMemberId: 'm1',
+          memberStatus,
+        } as never),
+      run,
+    });
+
+    // While still an active member, an edit publishes normally.
+    expect(await adapter.publish({ projectId: 'p1', reason: 'edit' })).toEqual({ version: 1 });
+    expect(calls).toHaveLength(1);
+
+    // The team removes this member out-of-band (B-side); the daemon keeps
+    // running with the file watcher still attached.
+    memberStatus = 'removed';
+
+    // The next debounced publish for the SAME already-watched project must not
+    // reach the vela CLI at all.
+    expect(await adapter.publish({ projectId: 'p1', reason: 'edit' })).toBeNull();
+    expect(calls).toHaveLength(1);
+
+    // Read/unpublish operations on the same live session are refused too —
+    // a removed member's daemon should not keep talking to the team hub at
+    // all through this session.
+    expect(await adapter.syncLatest!({ projectId: 'p1' })).toBeNull();
+    await adapter.pull!({ projectId: 'p1' });
+    await adapter.unpublish!({ projectId: 'p1' });
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe('transport selection', () => {
@@ -332,13 +395,29 @@ describe('transport selection', () => {
         workspaceType: 'team',
         workspaceId: 't1',
         workspaceMemberId: 'm1',
+        memberStatus: 'active',
       } as never),
     ).toBe(true);
     expect(contextHasTeamIdentity({
       workspaceType: 'personal',
       workspaceId: 'personal-1',
       workspaceMemberId: 'm1',
+      memberStatus: 'active',
     } as never)).toBe(false);
     expect(contextHasTeamIdentity(null)).toBe(false);
+  });
+
+  it('refuses a member the team has removed, even though their identity fields still resolve', () => {
+    // A removed member's workspaceType/workspaceId/workspaceMemberId keep
+    // resolving — only memberStatus flips — so the identity fields alone are
+    // not enough to prove this session may still address the resource hub.
+    expect(
+      contextHasTeamIdentity({
+        workspaceType: 'team',
+        workspaceId: 't1',
+        workspaceMemberId: 'm1',
+        memberStatus: 'removed',
+      } as never),
+    ).toBe(false);
   });
 });

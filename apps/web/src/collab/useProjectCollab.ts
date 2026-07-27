@@ -146,6 +146,14 @@ export interface ProjectCollab {
   ownerDisplayName: string | null;
   /** The owner's team role (owner/admin/member); null when unresolved. */
   ownerRole: CollabMemberRole | null;
+  /**
+   * True only once status has confirmed that a non-owner member's local
+   * mirror trails the published head, or while the corresponding pull is
+   * active. Status latency by itself is not evidence that local files are
+   * stale: reopening an already-materialized project must keep its local
+   * files visible while the first status request is in flight.
+   */
+  downloadPending: boolean;
   reportChange: () => void;
   requestPublish: () => void;
   /** Refresh the presence roster now (hub push-channel consumer). */
@@ -178,6 +186,19 @@ export function useProjectCollab(
     projectId: projectId ?? null,
     member,
     enabled: decision.enabled,
+    // Let the status poll (`/collab/status`) start in parallel with
+    // `/api/workspace/context` instead of waiting for it — the poll doesn't
+    // need `member`/`context` (the daemon resolves the caller's own identity
+    // server-side; see useCollab's `statusEnabled` doc). While the context
+    // read is still in flight we don't yet know whether collab applies at
+    // all, so poll optimistically, same as the surrounding fail-closed UI
+    // already assumes "maybe yes" during this exact window (see
+    // `relationshipUnknown` below). Once the read resolves, fall back to the
+    // real decision: a CONFIRMED permission-denied reason (no-workspace-
+    // context / member-removed / lifecycle-xxx — see collab-session.ts) is an
+    // identity/permission gate, not a "haven't read the response yet"
+    // problem, so it must stop the poll same as before this change.
+    statusEnabled: Boolean(projectId) && (workspaceContextLoading || decision.enabled),
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
     ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
@@ -284,48 +305,109 @@ export function useProjectCollab(
   // owner auto-pull over their own working tree, so this gate keys off explicit
   // project ownership instead of the broader `viewerOnly` flag.
   //
-  // The cursor starts at 0 (not the first observed `publishedVersion`), so
-  // entering a shared project pulls once to guarantee the member lands on the
-  // latest head rather than trusting a possibly-stale local copy.
-  const pulledVersionRef = useRef(0);
+  // The cursor seeds from the daemon's durable materializedVersion. A missing
+  // cursor fails closed to 0 and pulls; an exact match proves this daemon
+  // already has the published head, including across tab remounts/restarts.
+  const pullCursorRef = useRef<{ projectId: string | null; version: number }>({
+    projectId: null,
+    version: 0,
+  });
   const pullInFlightRef = useRef(false);
   // Bumped after each successful pull to re-evaluate immediately — this catches
   // a head that advanced while a pull was in flight (the plain publishedVersion
   // dep would otherwise not re-fire once it settles on the newer number).
   const [pullTick, setPullTick] = useState(0);
-  // Reset the cursor when the project changes so switching to another shared
-  // project pulls its latest head instead of inheriting the previous cursor.
+  const projectKey = projectId ?? null;
+  if (pullCursorRef.current.projectId !== projectKey) {
+    pullCursorRef.current = {
+      projectId: projectKey,
+      version: collab.materializedVersion ?? 0,
+    };
+  } else if (
+    collab.materializedVersion != null
+    && collab.materializedVersion > pullCursorRef.current.version
+  ) {
+    // The daemon's durable, owner-scoped cursor is the cold-start truth. Keep
+    // the optimistic response cursor below only when it is newer than the
+    // latest status response (a pull can finish just before its refresh lands).
+    pullCursorRef.current.version = collab.materializedVersion;
+  }
+  // A pull from the prior project can resolve after navigation. Epoch-gate all
+  // async writes so that late completion cannot overwrite the new project's
+  // cursor or release its in-flight lock.
+  const projectEpochRef = useRef(0);
   useEffect(() => {
-    pulledVersionRef.current = 0;
+    const epoch = projectEpochRef.current + 1;
+    projectEpochRef.current = epoch;
     pullInFlightRef.current = false;
+    return () => {
+      if (projectEpochRef.current === epoch) {
+        projectEpochRef.current += 1;
+        pullInFlightRef.current = false;
+      }
+    };
   }, [projectId]);
   const { publishedVersion } = collab;
   const pull = collab.pull;
+  const checkStatusNow = collab.checkStatusNow;
   const shouldAutoPull = decision.enabled && shared && !isOwner;
   useEffect(() => {
     if (!shouldAutoPull) return;
     if (publishedVersion == null) return;
-    if (publishedVersion <= pulledVersionRef.current) return;
+    if (publishedVersion <= pullCursorRef.current.version) return;
     if (pullInFlightRef.current) return;
-    const target = publishedVersion;
+    const epoch = projectEpochRef.current;
     pullInFlightRef.current = true;
     void (async () => {
       let advanced = false;
       try {
-        await pull();
-        // Advance only on success so a failed pull is retried, not skipped.
-        pulledVersionRef.current = target;
-        advanced = true;
+        const pulledVersion = await pull();
+        if (projectEpochRef.current !== epoch) return;
+        // Advance from the daemon's ACTUAL pull response, never from the
+        // requested target. A null response cannot prove bytes landed and must
+        // remain retryable on the next successful status poll.
+        if (pulledVersion != null) {
+          pullCursorRef.current.version = Math.max(
+            pullCursorRef.current.version,
+            pulledVersion,
+          );
+          advanced = true;
+        }
       } catch {
-        // Swallow: the ~5s status poll keeps publishedVersion fresh and the next
-        // tick retries while the cursor is still behind. Deferring the retry to
-        // the poll (rather than looping) avoids hammering a failing daemon.
+        // Swallow: statusPollGeneration changes on every successful ~5s status
+        // response, even when publishedVersion is numerically unchanged, so the
+        // next poll retries while the durable/local cursor remains behind.
       } finally {
-        pullInFlightRef.current = false;
+        if (projectEpochRef.current === epoch) {
+          pullInFlightRef.current = false;
+        }
       }
-      if (advanced) setPullTick((n) => n + 1);
+      if (advanced && projectEpochRef.current === epoch) {
+        setPullTick((n) => n + 1);
+        // Re-read the daemon's durable materialization cursor immediately;
+        // polling remains the bounded fallback if this refresh fails.
+        checkStatusNow();
+      }
     })();
-  }, [shouldAutoPull, publishedVersion, pull, pullTick]);
+  }, [
+    shouldAutoPull,
+    publishedVersion,
+    pull,
+    pullTick,
+    collab.statusPollGeneration,
+    checkStatusNow,
+  ]);
+
+  // Status latency alone is not a download. Only replace local file rows with
+  // skeletons after status has confirmed this member should pull and the
+  // durable/local cursor is actually behind (or that pull is still active).
+  // `pullTick` is not read directly, but its state bump forces this render to
+  // observe the ref cursor written by a successful pull.
+  const downloadPending = shouldAutoPull
+    && (
+      (publishedVersion != null && publishedVersion > pullCursorRef.current.version)
+      || pullInFlightRef.current
+    );
 
   return {
     enabled: collabEnabled,
@@ -337,6 +419,7 @@ export function useProjectCollab(
     isOwner,
     ownerDisplayName: collab.ownerDisplayName,
     ownerRole: collab.ownerRole,
+    downloadPending,
     reportChange: collab.reportChange,
     requestPublish: collab.requestPublish,
     refreshPresence: collab.refreshPresence,

@@ -122,6 +122,9 @@ describe('useProjectCollab', () => {
 
     expect(result.current.enabled).toBe(false);
     expect(result.current.viewerOnly).toBe(true);
+    // Permission controls still fail closed, but an unresolved context is not
+    // proof that the daemon's local mirror is behind. Keep local files visible.
+    expect(result.current.downloadPending).toBe(false);
   });
 
   it('fails closed: a non-owner admin is read-only on a shared project even before the owner id arrives', async () => {
@@ -167,6 +170,9 @@ describe('useProjectCollab', () => {
     expect(result.current.enabled).toBe(true);
     expect(result.current.syncState).toBeNull();
     expect(result.current.viewerOnly).toBe(true);
+    // Status remains permission-fail-closed through viewerOnly, but it is not
+    // a download until a response proves the published head is ahead.
+    expect(result.current.downloadPending).toBe(false);
   });
 
   it('lets the confirmed owner edit their own shared project', async () => {

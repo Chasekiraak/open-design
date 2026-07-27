@@ -97,6 +97,7 @@ import {
 import {
   writePromptAndEndStdin,
   applyClaudeStreamJsonRunBookkeeping,
+  assertValidRuntimeDefFirstOutputTimeoutMs,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
   classifyChatRunCloseStatus,
@@ -104,6 +105,7 @@ import {
   resolveAcpStageTimeoutMs,
   resolveActiveInactivityTimeoutMs,
   resolveChatRunArtifactQuietPeriodMs,
+  resolveChatRunFirstOutputTimeoutMs,
   resolveChatRunInactivityTimeoutMs,
   resolveChatRunShutdownGraceMs,
 } from './runtimes/chat-run-lifecycle.js';
@@ -150,6 +152,7 @@ export {
 } from './runtimes/chat-prompt-inputs.js';
 export {
   applyClaudeStreamJsonRunBookkeeping,
+  assertValidRuntimeDefFirstOutputTimeoutMs,
   assertValidRuntimeDefInactivityTimeoutMs,
   bufferedAntigravityGeminiFirstTokenAt,
   classifyChatRunCloseStatus,
@@ -157,6 +160,7 @@ export {
   resolveAcpStageTimeoutMs,
   resolveActiveInactivityTimeoutMs,
   resolveChatRunArtifactQuietPeriodMs,
+  resolveChatRunFirstOutputTimeoutMs,
   resolveChatRunInactivityTimeoutMs,
 } from './runtimes/chat-run-lifecycle.js';
 export {
@@ -216,6 +220,14 @@ import {
   resolveAmrProfile,
 } from './integrations/vela.js';
 import { projectResourceIdFor } from './integrations/vela-team-projects.js';
+import {
+  getTeamProjectMaterialization,
+  latestTeamProjectMaterializationVersion,
+  materializePulledTeamMirror,
+  teamProjectMaterializationMatches,
+  teamProjectMaterializationSupersedes,
+} from './collab/team-mirror-materializer.js';
+import { recoverAuthorizedTeamProjectPromotions } from './collab/team-mirror-promotion.js';
 import {
   amrAccountFailureDetails,
   classifyAmrAccountFailureSignal,
@@ -564,6 +576,7 @@ import {
   listUnboundProjects,
   listTeamWorkspaceProjectShares,
   listWorkspaceProjects,
+  listWorkspaceResources,
   listRoutines,
   listRoutineRuns,
   listTabs,
@@ -652,12 +665,18 @@ import { registerOpenDesignPublicMetadataRoutes } from './routes/open-design-pub
 import { registerWhatsNewRoutes } from './routes/whats-new.js';
 import { registerMemoryRoutes } from './routes/memory.js';
 import { registerCollabPresenceRoutes } from './routes/collab-presence.js';
-import { registerCollabSyncRoutes } from './routes/collab-sync.js';
+import {
+  registerCollabSyncRoutes,
+  type TeamMirrorPullScope,
+} from './routes/collab-sync.js';
 import { registerCollabContextRoutes } from './routes/collab-context.js';
 import { registerTeamResourceRoutes } from './routes/team-resources.js';
 import { registerTeamResourceShareRoutes } from './routes/team-resource-share.js';
 import { createCollabRuntime } from './collab/runtime.js';
-import { createActiveWorkspaceSelectionStore } from './collab/active-workspace-selection.js';
+import {
+  createActiveWorkspaceSelectionStore,
+  resolveAuthorizedActiveTeamWorkspaceSnapshot,
+} from './collab/active-workspace-selection.js';
 import {
   headerValue,
   isWorkspaceResourceLocked,
@@ -670,11 +689,26 @@ import {
   impossibleTeamShareRows,
   projectCollabScope,
 } from './collab/team-share-scope.js';
+import { resolveWorkspaceScope } from './collab/workspace-scope.js';
 import {
   createWorkspaceContextProviderFromEnv,
-  listVelaWorkspaceDirectory,
+  fetchVelaWorkspaceDirectory,
 } from './collab/vela-workspace-context.js';
+import {
+  createWorkspaceBillingRuntimeCoordinator,
+  shouldEmitWorkspaceBillingRuntimeNudge,
+  WorkspaceBillingAccessRevokedError,
+} from './collab/workspace-billing-runtime.js';
 import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
+import {
+  activeTeamWorkspaceIdentity,
+  createProactiveContentPull,
+  type ProactiveContentPullTarget,
+} from './collab/proactive-content-pull.js';
+import {
+  emitSharedProjectPullTiming,
+  sharedProjectPullProfileEnabled,
+} from './collab/pull-profile.js';
 import { createSyncDigestReader } from './collab/sync-digest.js';
 import {
   createCollabSyncSnapshotStore,
@@ -684,7 +718,10 @@ import {
 import { createPersistentSyncCache } from './collab/persistent-sync-cache.js';
 import { createSwrCache } from './collab/swr-cache.js';
 import { readVelaControlApiContext } from './integrations/vela.js';
+import { fetchVelaWorkspaceBillingProjection } from './integrations/vela-billing.js';
 import { createCollabPublishWatcher } from './collab/collab-publish-watcher.js';
+import { createShouldPublish } from './collab/should-publish.js';
+import { recoverPersistedTeamShareOwnership } from './collab/persisted-team-share.js';
 import { resolveProjectShareDir } from './collab/project-share-dir.js';
 import { createTeamProjectsLister } from './collab/team-projects.js';
 import {
@@ -701,6 +738,16 @@ import {
 import { createCollabCloudClientFromEnv } from './integrations/collab-cloud.js';
 import { createCollabCloudService } from './collab/collab-cloud-service.js';
 import { createWorkspaceInvalidationPoller } from './collab/workspace-invalidation-poller.js';
+import {
+  handleHubTeamProjectsChanged,
+  handlePolledWorkspaceInvalidation,
+  reconcileWorkspaceProjectsWithRemote,
+  type LocalTeamProjectBinding,
+} from './collab/workspace-projects-reconciler.js';
+import {
+  reconcileWorkspaceResourcesWithRemote,
+  type LocalTeamResourceBinding,
+} from './collab/workspace-resources-reconciler.js';
 import { createVelaCliCollabClientFromEnv } from './collab/vela-cli-collab-client.js';
 import {
   createVelaCliTeamProjectCatalogClientFromEnv,
@@ -1186,6 +1233,29 @@ function emitWorkspaceEvent(payload: { type: string; at?: number }): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Hub → daemon handling for the `workspace-context-changed` event (see
+ * `startHubEventsSubscriber`'s `onEvent` below). Vela sends this same event
+ * both for an ordinary workspace switch AND for "your membership just
+ * changed" (e.g. removed from the team) — so besides forwarding the thin
+ * signal to the web, this must ALSO kick one immediate workspace-invalidation
+ * poll cycle, the same catch-up `onReconnect` already runs. Without it, the
+ * mutation gate's last-known-membership cache (`getLastKnownMembership` in
+ * `collab/workspace-resource-mutation.ts`) only refreshes on the poller's
+ * normal ~15s cadence, so a removed member keeps passing the gate for up to
+ * that long even though the hub already told this daemon something changed.
+ *
+ * Extracted as its own named, exported step (rather than inlined in the
+ * switch) so this invariant is directly unit-testable without standing up a
+ * real hub connection.
+ */
+export function handleHubWorkspaceContextChanged(
+  pollWorkspaceInvalidation: () => Promise<void>,
+): void {
+  emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+  void pollWorkspaceInvalidation().catch(() => undefined);
 }
 
 // Windows ENAMETOOLONG mitigation constants
@@ -2632,6 +2702,33 @@ export async function startServer({
     };
   };
   const activeWorkspace = createActiveWorkspaceSelectionStore(RUNTIME_DATA_DIR);
+  const teamMirrorPromotionJournalDir = path.join(
+    RUNTIME_DATA_DIR,
+    'team-mirror-promotions',
+  );
+  await recoverAuthorizedTeamProjectPromotions({
+    journalDir: teamMirrorPromotionJournalDir,
+    allowedProjectsRoot: PROJECTS_DIR,
+    isCommitted: (entry) => {
+      const stored = getTeamProjectMaterialization(
+        db,
+        entry.receipt.workspaceId,
+        entry.receipt.projectId,
+      );
+      return teamProjectMaterializationMatches(stored, entry.receipt);
+    },
+    isSuperseded: (entry) => {
+      const stored = getTeamProjectMaterialization(
+        db,
+        entry.receipt.workspaceId,
+        entry.receipt.projectId,
+      );
+      return teamProjectMaterializationSupersedes(stored, entry.receipt);
+    },
+    onError: (error) => {
+      console.warn('[od] failed to recover authorized team mirror promotion:', error);
+    },
+  });
   // What this daemon has learned about each workspace's type, memoized off reads
   // it already performs (the workspace directory the web fetches on every load,
   // the workspace context the invalidation poller reads every 15s). It is the
@@ -2639,12 +2736,27 @@ export async function startServer({
   // recorded in — and a project-scoped collab call may only be pinned to — a
   // workspace that can actually host a team plane. See collab/team-share-scope.ts.
   const workspaceTypes = createWorkspaceTypeRegistry();
+  const fetchWorkspaceDirectory = async () => {
+    const result = await fetchVelaWorkspaceDirectory();
+    if (result.ok) workspaceTypes.learn(result.items);
+    return result;
+  };
   const listWorkspaceDirectory = async () => {
-    const items = await listVelaWorkspaceDirectory();
-    workspaceTypes.learn(items);
-    return items;
+    const result = await fetchWorkspaceDirectory();
+    return result.items;
   };
   const teamResourceVersions = createTeamResourceVersionStore(RUNTIME_DATA_DIR);
+  const teamProjectContentResourceId = (
+    projectId: string,
+    scope: { resourceTeamId: string; ownerMemberId: string },
+  ) =>
+    projectResourceIdFor(projectId, {
+      teamId: scope.resourceTeamId,
+      memberId: scope.ownerMemberId,
+      role: 'member',
+      lifecycleState: 'active',
+      workspaceType: 'team',
+    });
   const getActiveWorkspaceId = () => activeWorkspace.get();
 
   /**
@@ -2886,16 +2998,11 @@ export async function startServer({
     },
   });
   for (const share of listTeamWorkspaceProjectShares(db)) {
-    const ownerMemberId = share.createdByWorkspaceMemberId ?? share.updatedByWorkspaceMemberId;
-    if (!share.projectId || !share.workspaceId || !ownerMemberId) continue;
+    const restored = recoverPersistedTeamShareOwnership(share);
+    if (!restored) continue;
     collab.rememberTeamShare(
-      share.projectId,
-      {
-        memberId: ownerMemberId,
-        teamId: share.workspaceId,
-        role: 'member',
-        lifecycleState: 'active',
-      },
+      restored.projectId,
+      restored.principal,
       share.syncState === 'synced' || share.syncState === 'sync_failed' || share.syncState === 'pending_upload'
         ? share.syncState
         : 'pending_upload',
@@ -3021,8 +3128,9 @@ export async function startServer({
   // load; this one survives process restarts, so a freshly started daemon whose
   // team catalog is unchanged serves the first paint from disk after a digest
   // GET instead of a full catalog round-trip. Only the DISPLAY path is wrapped —
-  // `teamProjectsLister` itself stays raw so the pull gate and comment/presence
-  // relays keep observing an unshare immediately.
+  // `teamProjectsLister` itself stays raw for display refreshes; the pull gate
+  // below uses the exact uncached catalog lookup so it observes an unshare
+  // immediately without downloading the whole workspace catalog.
   const teamProjectsCatalogSnapshot = createPersistentSyncCache({
     face: 'catalog',
     fetch: teamProjectsLister,
@@ -3037,8 +3145,8 @@ export async function startServer({
   // can never serve another workspace's list and a workspace switch is an
   // automatic miss. Deliberately NOT used by resolveSharedProject below: the
   // pull gate and comment/presence relays must observe an unshare immediately,
-  // so those stay on the uncached lister. A just-shared/unshared project shows
-  // up in this list within the TTL.
+  // so those use the uncached exact lookup. A just-shared/unshared project
+  // shows up in this list within the TTL.
   const teamProjectsDisplayCache = (() => {
     // Stale-while-revalidate: after the first load every call returns the last
     // known list immediately and only kicks a background refresh once the value
@@ -3046,8 +3154,8 @@ export async function startServer({
     // remote round-trip and freshness catches up one request later. Keyed on the
     // active workspace id (a switch is an automatic miss); concurrent callers
     // coalesce on the in-flight fetch. Stays off the revocation path —
-    // resolveSharedProject below is uncached so the pull gate and comment/
-    // presence relays observe an unshare immediately.
+    // resolveSharedProject below uses an uncached exact lookup so the pull gate
+    // and comment/presence relays observe an unshare immediately.
     const freshMs = 3000;
     let entry:
       | {
@@ -3148,9 +3256,73 @@ export async function startServer({
   };
   const teamProjectsForDisplay = async (): Promise<TeamProject[]> =>
     withoutLocallyUnsharedProjects(await teamProjectsDisplayCache());
-  const resolveSharedProject = async (projectId: string) => {
-    const list = await withoutLocallyUnsharedProjects(await teamProjectsLister());
-    return list.find((entry) => entry.projectId === projectId) ?? null;
+  // Collab realtime reconciliation: react to a `team-projects-changed` signal
+  // (hub push OR the 15s poller's own diff, wired below) by actually
+  // re-checking this daemon's `workspace_projects` rows against the remote
+  // catalog, not just refreshing the display cache. See
+  // `collab/workspace-projects-reconciler.ts` for the full design and its
+  // relationship to `reconcileUnboundProjectBeforeMove` /
+  // `reconcileLocalRowWithRemoteTeamAccess` (routes/project/index.ts), which
+  // this does NOT replace.
+  const reconcileWorkspaceProjectsFromRemote = () =>
+    reconcileWorkspaceProjectsWithRemote({
+      getWorkspaceIdentity: async () => {
+        const context = await collab.workspaceContext.current({});
+        if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
+        return { workspaceId: context.workspaceId, workspaceMemberId: context.workspaceMemberId };
+      },
+      listRemoteTeamProjects: async () =>
+        (await teamProjectsForDisplay()).map((project) => ({
+          projectId: project.projectId,
+          ownerMemberId: project.ownerMemberId,
+        })),
+      // Materialization gate for the bind direction — see the dep's doc
+      // comment in workspace-projects-reconciler.ts. `getProject` is the same
+      // `projects`-table read `workspace_projects`' FOREIGN KEY points at.
+      hasLocalProject: (projectId) => getProject(db, projectId) != null,
+      listLocalTeamRows: (workspaceId): LocalTeamProjectBinding[] =>
+        listWorkspaceProjects(db, workspaceId)
+          .filter((row: any) => row.workspaceVisibility === 'team')
+          .map((row: any) => ({
+            projectId: row.id,
+            workspaceId: row.workspaceId,
+            visibility: row.workspaceVisibility,
+            createdByWorkspaceMemberId: row.createdByWorkspaceMemberId ?? null,
+            resourceHubResourceId: row.resourceHubResourceId ?? null,
+          })),
+      getLocalBinding: (projectId): LocalTeamProjectBinding | null => {
+        const row = getWorkspaceProjectByProjectId(db, projectId) as any;
+        if (!row) return null;
+        return {
+          projectId,
+          workspaceId: row.workspaceId,
+          visibility: row.visibility,
+          createdByWorkspaceMemberId: row.createdByWorkspaceMemberId ?? null,
+          resourceHubResourceId: row.resourceHubResourceId ?? null,
+        };
+      },
+      applyBind: (projectId, patch) => {
+        // `rebindWorkspaceProject` only corrects an EXISTING row (it never
+        // inserts — see its own doc comment in db.ts); a project this daemon
+        // has never locally bound at all needs `ensureWorkspaceProject`
+        // instead, seeded with the same patch so the fresh row is correct on
+        // arrival.
+        if (rebindWorkspaceProject(db, projectId, patch)) return;
+        ensureWorkspaceProject(db, { projectId, ...patch });
+      },
+      applyDemote: (workspaceId, projectId, patch) => updateWorkspaceProject(db, workspaceId, projectId, patch),
+      onError: (error) => console.warn('[od] workspace-projects reconciliation error:', error),
+    });
+  const resolveSharedProject = async (
+    projectId: string,
+    scope?: TeamMirrorPullScope | null,
+  ) => {
+    const project = velaCliTeamProjectCatalog
+      ? await velaCliTeamProjectCatalog.get(projectId, scope?.workspaceId)
+      : (await teamProjectsLister(scope?.workspaceId))
+          .find((entry) => entry.projectId === projectId) ?? null;
+    if (!project) return null;
+    return (await withoutLocallyUnsharedProjects([project]))[0] ?? null;
   };
   // Owner lookup is a display concern (the "shared project" banner, comment
   // author names, the publish trigger) and the owner changes only when a project
@@ -3210,15 +3382,11 @@ export async function startServer({
   const collabPublishWatcher = createCollabPublishWatcher({
     notifyChanged: (projectId) => collab.scheduler.notifyChanged(projectId, 'file-change'),
     listProjectIds: () => listProjects(db).map((project: { id: string }) => project.id),
-    shouldPublish: async (projectId) => {
-      const owner = await resolveSharedProjectOwner(projectId);
-      if (!owner) return false;
-      const ctx = await collab.workspaceContext.current({});
-      const principal = contextToResourceHubPrincipal(ctx);
-      if (!principal || owner !== principal.memberId) return false;
-      collab.rememberTeamShare(projectId, principal);
-      return true;
-    },
+    shouldPublish: createShouldPublish({
+      resolveSharedProjectOwner,
+      workspaceContext: collab.workspaceContext,
+      rememberTeamShare: collab.rememberTeamShare,
+    }),
     subscribeFiles: (projectId, onChange) => {
       const watchProject = getProject(db, projectId);
       const sub = subscribeFileEvents(PROJECTS_DIR, projectId, (evt) => {
@@ -3229,7 +3397,17 @@ export async function startServer({
     onError: (error) => console.warn('[od] collab publish watcher error:', error),
   });
   collabPublishWatcher.start();
-  registerCollabSyncRoutes(app, {
+  const sharedProjectPullProfiling =
+    sharedProjectPullProfileEnabled(process.env);
+  const authorizedActiveWorkspaceSnapshot = () =>
+    resolveAuthorizedActiveTeamWorkspaceSnapshot(
+      activeWorkspace.snapshot(),
+      collab.workspaceContext.lastKnownSnapshot?.() ?? {
+        context: null,
+        generation: 0,
+      },
+    );
+  const collabSyncRoutes = registerCollabSyncRoutes(app, {
     collab,
     // Register-on-pull: after a member pulls a shared project, insert a local
     // project record so it appears in /api/projects and opens read-only (the
@@ -3257,6 +3435,9 @@ export async function startServer({
           updatedAt: input.updatedAt,
         });
       },
+      materializeTeamMirror: (input, scope) => materializePulledTeamMirror(db, input, scope),
+      materializeAuthorizedTeamMirror: (input, scope, receipt) =>
+        materializePulledTeamMirror(db, input, scope, receipt),
     },
     resolveProjectDir: async (projectId) => {
       const project = getProject(db, projectId);
@@ -3264,6 +3445,34 @@ export async function startServer({
       return resolveProjectShareDir(PROJECTS_DIR, projectId, project, resolveProjectDir);
     },
     resolvePullDir: (projectId) => resolveProjectDir(PROJECTS_DIR, projectId),
+    readMaterializedVersion: (projectId, scope) => {
+      const authorized = getTeamProjectMaterialization(
+        db,
+        scope.workspaceId,
+        projectId,
+      );
+      return latestTeamProjectMaterializationVersion(
+        authorized,
+        teamResourceVersions.get(
+          scope.workspaceId,
+          'project-content',
+          teamProjectContentResourceId(projectId, scope),
+        ),
+        projectId,
+        scope,
+      );
+    },
+    authorizedTeamProjectPull: {
+      journalDir: teamMirrorPromotionJournalDir,
+      getActiveWorkspaceSnapshot: authorizedActiveWorkspaceSnapshot,
+    },
+    writeMaterializedVersion: (projectId, scope, version) =>
+      teamResourceVersions.set(
+        scope.workspaceId,
+        'project-content',
+        teamProjectContentResourceId(projectId, scope),
+        String(version),
+      ),
     resolveSharedProject,
     resolveSharedProjectOwner,
     // Non-destructive revocation flag for a pulled team mirror: the pull gate
@@ -3291,6 +3500,22 @@ export async function startServer({
     // instead of depending on the watcher having survived the swap.
     notifyFilesChanged: (projectId: string) =>
       emitProjectEvent(projectId, { type: 'file-changed', path: '', kind: 'change' }),
+    // A pull that replaces the "共享项目" placeholder record with the real
+    // project name (registerPulledProject) changed metadata the web renders
+    // from its `projects` state; push the existing `project-metadata-changed`
+    // thin signal so the open view re-fetches the record instead of keeping
+    // the placeholder title until a page reload (recvqhwv6RPU1j).
+    notifyProjectMetadataChanged: (projectId: string) =>
+      emitProjectEvent(projectId, {
+        type: 'project-metadata-changed',
+        projectId,
+        at: Date.now(),
+      }),
+    ...(sharedProjectPullProfiling
+      ? {
+          onPullTiming: emitSharedProjectPullTiming,
+        }
+      : {}),
     // Resolve the owner's display name + role from the collab-cloud directory so
     // /collab/status can hand the client a named "shared project" banner.
     ...(collabCloud
@@ -3301,6 +3526,180 @@ export async function startServer({
           },
         }
       : {}),
+  });
+  // Hub push-channel consumer for 'project-content-changed' (recvqmKQRiIlYf):
+  // when a teammate publishes new content for a shared project, pull it NOW —
+  // daemon-side, no open tab required — through the SAME flow the member
+  // web's POST /collab/pull runs (collabSyncRoutes.pullSharedProject, which
+  // also coalesces the two when they race). Every guard is fail-closed and
+  // every failure degrades silently to the web's ~5s status polling, which
+  // stays running untouched as the fallback; see
+  // collab/proactive-content-pull.ts for the guard boundary (never pull a
+  // project this member owns; an unbound first share requires an exact
+  // event-workspace/active-workspace match; dedupe by hub version).
+  const proactiveTeamProjectMaterializedVersion = (
+    target: ProactiveContentPullTarget,
+  ) => {
+    const authorized = getTeamProjectMaterialization(
+      db,
+      target.workspaceId,
+      target.projectId,
+    );
+    const version = latestTeamProjectMaterializationVersion(
+      authorized,
+      teamResourceVersions.get(
+        target.workspaceId,
+        'project-content',
+        teamProjectContentResourceId(target.projectId, target),
+      ),
+      target.projectId,
+      target,
+    );
+    return version == null ? null : String(version);
+  };
+  const proactiveContentPull = createProactiveContentPull({
+    getLocalBinding: (projectId) => {
+      const row = getWorkspaceProjectByProjectId(db, projectId) as
+        | { workspaceId: string; visibility: 'personal' | 'team' }
+        | null;
+      if (!row) return null;
+      return { workspaceId: row.workspaceId, visibility: row.visibility };
+    },
+    // Same active-team-membership shape the workspace-projects reconciler
+    // keys on: only an ACTIVE team member has a principal that may pull.
+    getWorkspaceIdentity: async () => {
+      const context = await collab.workspaceContext.current({});
+      return activeTeamWorkspaceIdentity(context);
+    },
+    // A witness may skip the route's pre-transport catalog gate, so only this
+    // uncached authoritative lookup is allowed to mint one. The display SWR
+    // owner cache remains wired everywhere else.
+    resolveSharedProjectOwner: async (projectId) =>
+      (await resolveSharedProject(projectId))?.ownerMemberId ?? null,
+    // Catch-up reads the rich catalog exactly once per verified connection
+    // (or missing-project floor). Re-check the active scope after the CLI
+    // await so a concurrent workspace switch cannot feed another team's rows
+    // into this daemon's pull loop.
+    listSharedProjects: async (workspaceId) => {
+      if (!velaCliWorkspaceTeamProjectCatalog) return [];
+      const beforeContext =
+        await collab.workspaceContext.current({}).catch(() => null);
+      if (!beforeContext) return [];
+      const before = authorizedActiveWorkspaceSnapshot();
+      if (before.workspaceId !== workspaceId) return [];
+      const projects = await velaCliWorkspaceTeamProjectCatalog.list();
+      const afterContext =
+        await collab.workspaceContext.current({}).catch(() => null);
+      if (!afterContext) return [];
+      const after = authorizedActiveWorkspaceSnapshot();
+      if (
+        after.workspaceId !== workspaceId ||
+        after.generation !== before.generation
+      ) {
+        return [];
+      }
+      return projects
+        .filter((project) => project.workspaceId === workspaceId && project.access.canView)
+        .map((project) => ({
+          projectId: project.projectId,
+          ownerMemberId: project.ownerMemberId,
+        }));
+    },
+    hasMaterializedProject: async (projectId, target) => {
+      const project = getProject(db, projectId);
+      if (!project) return false;
+      // Authorized Vela mirrors contain the shared project files, not the
+      // local-only `.open-design/project.json`. Their exact-scope receipt is
+      // the durable version proof; the live directory proves the promoted
+      // namespace still exists. Both are required so a deleted tree heals,
+      // while another workspace/owner's receipt can never satisfy this pull.
+      if (proactiveTeamProjectMaterializedVersion(target) == null) {
+        return false;
+      }
+      const projectDir = resolveProjectShareDir(
+        PROJECTS_DIR,
+        projectId,
+        project,
+        resolveProjectDir,
+      );
+      const entry = await fs.promises.lstat(projectDir).catch(() => null);
+      return Boolean(
+        entry &&
+        entry.isDirectory() &&
+        !entry.isSymbolicLink(),
+      );
+    },
+    materializedVersion: proactiveTeamProjectMaterializedVersion,
+    // The resource is owner-scoped; the same captured team/owner principal is
+    // used by the shared pull below. The member session remains the transport
+    // credential, while Vela validates the active workspace server-side.
+    publishedHead: (target) =>
+      collab.publishedHead(target.projectId, {
+        teamId: target.resourceTeamId,
+        memberId: target.ownerMemberId,
+        role: 'member',
+        lifecycleState: 'active',
+        workspaceType: 'team',
+      }),
+    pullSharedProject: (target, expectedVersion) =>
+      collabSyncRoutes.pullSharedProject(target.projectId, {
+        workspaceId: target.workspaceId,
+        resourceTeamId: target.resourceTeamId,
+        viewerMemberId: target.viewerMemberId,
+        ownerMemberId: target.ownerMemberId,
+      }, target.authorizationWitness, expectedVersion, target.authorizedStageInvocation),
+    // All Projects is a list-level surface and does not subscribe to every
+    // project-scoped SSE. Once an inbound pull has actually materialized the
+    // tree, nudge that surface so its failed pre-pull cover scan runs again
+    // immediately instead of waiting for the 15s refresh floor.
+    onPulled: async (target, version) => {
+      emitWorkspaceEvent({
+        type: 'team-project-content-ready',
+        projectId: target.projectId,
+        workspaceId: target.workspaceId,
+        at: Date.now(),
+      });
+    },
+    ...(sharedProjectPullProfiling
+      ? {
+          onTiming: emitSharedProjectPullTiming,
+        }
+      : {}),
+    onError: (error) =>
+      console.warn('[od] proactive shared-project pull failed (web polling remains the fallback):', String(error)),
+    onCatchUp: (event) => {
+      if (
+        event.phase === 'retry-scheduled' ||
+        event.phase === 'retry-exhausted'
+      ) {
+        console.info(
+          `[od] shared-project content catch-up ${event.phase} mode=${event.mode} lane=${event.lane} ` +
+            `workspaceId=${event.workspaceId ?? 'unknown'} ` +
+            `projectId=${event.projectId ?? 'all'} attempt=${event.attempt ?? event.failures ?? 0} ` +
+            `delayMs=${event.delayMs ?? 0}`,
+        );
+        return;
+      }
+      if (event.phase === 'skipped') {
+        console.info(
+          `[od] shared-project content catch-up skipped mode=${event.mode} lane=${event.lane} reason=${event.reason ?? 'unknown'}`,
+        );
+        return;
+      }
+      if (event.phase === 'started') {
+        console.info(
+          `[od] shared-project content catch-up started mode=${event.mode} lane=${event.lane} workspaceId=${event.workspaceId ?? 'unknown'}`,
+        );
+        return;
+      }
+      console.info(
+        `[od] shared-project content catch-up completed mode=${event.mode} lane=${event.lane} ` +
+          `workspaceId=${event.workspaceId ?? 'unknown'} scanned=${event.scanned ?? 0} ` +
+          `candidates=${event.candidates ?? 0} headChecks=${event.headChecks ?? 0} ` +
+          `heads=${event.heads ?? 0} ` +
+          `suppressed=${event.suppressed ?? 0} complete=${event.complete === true}`,
+      );
+    },
   });
   // Stale-while-revalidate the member directory keyed on the active workspace.
   // The web shell re-reads members on every navigation (and several mounted
@@ -3330,12 +3729,46 @@ export async function startServer({
         3000,
       )
     : null;
+  const workspaceBillingRuntime = createWorkspaceBillingRuntimeCoordinator({
+    fetchProjection: async ({ workspaceId, workspaceMemberId }) => {
+      const directory = await fetchWorkspaceDirectory();
+      if (!directory.ok) {
+        throw Object.assign(new Error('workspace directory unavailable'), {
+          code: 'workspace_directory_unavailable',
+        });
+      }
+      const membership = directory.items.find(
+        (item) =>
+          item.workspaceId === workspaceId &&
+          item.workspaceMemberId === workspaceMemberId &&
+          item.workspaceType === 'team' &&
+          item.memberStatus === 'active' &&
+          item.lifecycleState === 'active',
+      );
+      if (!membership) throw new WorkspaceBillingAccessRevokedError();
+      return fetchVelaWorkspaceBillingProjection(workspaceId);
+    },
+    onStateChange: (state) => {
+      // The request that created a runtime already receives this state in its
+      // response. Background catch-up/retry/poll completion needs a thin nudge
+      // so old and new web clients re-read the same explicit route.
+      if (!shouldEmitWorkspaceBillingRuntimeNudge(state)) return;
+      emitWorkspaceEvent({
+        type: 'billing-changed',
+        workspaceId: state.workspaceId,
+        revision: `runtime:${state.revision}`,
+        at: Date.now(),
+      });
+    },
+  });
   registerCollabContextRoutes(app, {
     workspaceContext: collab.workspaceContext,
     activeWorkspace,
+    billingRuntime: workspaceBillingRuntime,
     // Same directory read the route would have made on its own, wrapped so every
     // workspace type it carries is memoized for the team-share invariant.
     listWorkspaceDirectory,
+    fetchWorkspaceDirectory,
     // Reuse the shared team-projects lister (which holds the shared vela-cli
     // catalog adapter). Without this the endpoint built a fresh adapter per
     // request and re-ran the one-off `vela team-projects --help` capability
@@ -3352,8 +3785,12 @@ export async function startServer({
   });
   // Collab realtime hop-2: daemon-side change source for the workspace SSE.
   // Diffs the same reads the web polls (context / team projects / members) and
-  // emits a thin signal only on an actual change. Runs IN ADDITION to the web
-  // polls (poll-as-floor), so a client whose SSE never connects is unaffected.
+  // emits a thin signal only on an actual change. The same 15s timer also asks
+  // the proactive pull coordinator to advance one bounded full-head batch at
+  // most every 30s, so missed content events and locally missing projects both
+  // converge without an additional recovery timer.
+  // Runs IN ADDITION to the web polls, so a client whose SSE never connects is
+  // unaffected.
   const workspaceInvalidationPoller = createWorkspaceInvalidationPoller({
     getWorkspaceContext: async () => {
       const context = await collab.workspaceContext.current({});
@@ -3362,7 +3799,21 @@ export async function startServer({
     },
     listTeamProjects: teamProjectsForDisplay,
     listMembers: teamMembersCache ? () => teamMembersCache() : async () => [],
-    emit: (payload) => emitWorkspaceEvent(payload),
+    // `handlePolledWorkspaceInvalidation` forwards every signal to
+    // `emitWorkspaceEvent` unchanged, then ALSO runs a real
+    // `workspace_projects` reconciliation pass for `team-projects-changed`.
+    emit: (payload) => {
+      handlePolledWorkspaceInvalidation(payload, emitWorkspaceEvent, reconcileWorkspaceProjectsFromRemote);
+    },
+    // Unlike `emit`, this observation hook also runs for a stable catalog. The
+    // poller throttles it to a 30s floor and never awaits the broad recovery,
+    // keeping context/catalog/member polling responsive even when pulls are
+    // slow. Scope comes from the successful context read, never activeWorkspace.
+    // The observed projects came from the display cache; full recovery treats
+    // them only as a nudge and independently re-checks authoritative active-team
+    // identity + catalog state before any head read or pull.
+    onTeamProjectsObserved: ({ workspaceId }) =>
+      proactiveContentPull.advanceRecoveryFloor(workspaceId),
     onError: (error) => console.warn('[od] workspace invalidation poll error:', error),
   });
   workspaceInvalidationPoller.start();
@@ -3397,23 +3848,66 @@ export async function startServer({
       const session = readVelaControlApiContext(process.env);
       if (!session?.controlKey || !session.apiUrl) return null;
       const workspaceId = activeWorkspace.get()?.trim();
+      if (!workspaceId) return null;
       return {
         url: new URL('/api/v1/collab/events', session.apiUrl).toString(),
+        workspaceId,
         headers: {
           authorization: `Bearer ${session.controlKey}`,
-          ...(workspaceId ? { 'x-vela-workspace-id': workspaceId } : {}),
+          'x-vela-workspace-id': workspaceId,
         },
       };
     },
+    onStateChange: (state) => {
+      console.info(`[od] hub events channel ${state}`);
+    },
+    onConnect: ({ reconnect, workspaceId }) => {
+      console.info(
+        `[od] hub events workspace verified workspaceId=${workspaceId ?? 'unknown'} reconnect=${reconnect}`,
+      );
+      if (workspaceId) {
+        void proactiveContentPull.catchUpPublishedHeads(workspaceId);
+      }
+    },
+    onDrop: ({ reason, eventName, expectedWorkspaceId, actualWorkspaceId }) => {
+      console.warn(
+        `[od] hub event dropped reason=${reason} event=${eventName} ` +
+          `expectedWorkspaceId=${expectedWorkspaceId ?? 'unknown'} ` +
+          `actualWorkspaceId=${actualWorkspaceId ?? 'unknown'}`,
+      );
+    },
     onEvent: (event) => {
+      console.info(
+        `[od] hub workspace event received type=${event.type} ` +
+          `workspaceId=${event.workspaceId ?? 'unknown'} ` +
+          `projectId=${event.projectId ?? 'unknown'} version=${event.version ?? 'unknown'}`,
+      );
       switch (event.type) {
-        case 'team-projects-changed':
+        case 'team-projects-changed': {
+          // Catalog changed (share/unshare). Refresh the display cache and
+          // signal the web, AND run a real `workspace_projects`
+          // reconciliation pass — see `collab/workspace-projects-reconciler.ts`.
+          handleHubTeamProjectsChanged(emitTeamProjectsChangedDeduped, reconcileWorkspaceProjectsFromRemote);
+          // Hub catalog writes carry the affected project id on current Vela
+          // deployments, so keep the latency-sensitive recovery targeted. An
+          // older/unscoped event still refreshes and reconciles the catalog;
+          // the poller's throttled 30s bounded full recovery remains its
+          // safety floor.
+          if (event.workspaceId && event.projectId) {
+            void proactiveContentPull.materializeMissingProjects(
+              event.workspaceId,
+              event.projectId,
+            );
+          }
+          break;
+        }
         case 'project-metadata-changed': {
-          // Catalog changed (share/unshare/rename). Refresh the display cache
-          // then signal the web; the metadata variant additionally pings the
-          // open project view so its title can follow a rename.
+          // A rename only — refresh the display cache/signal the web (same
+          // as team-projects-changed) and additionally ping the open project
+          // view so its title can follow the rename. No reconciliation pass:
+          // a rename never changes WHICH projects are team-shared.
           emitTeamProjectsChangedDeduped();
-          if (event.type === 'project-metadata-changed' && event.projectId) {
+          if (event.projectId) {
             emitProjectEvent(event.projectId, {
               type: 'project-metadata-changed',
               projectId: event.projectId,
@@ -3448,8 +3942,32 @@ export async function startServer({
           break;
         }
         case 'project-content-changed': {
-          // A teammate published a new version. The member web's status loop
-          // picks it up; forward a thin nudge so an open project checks NOW.
+          // A teammate published a new version. Pull it daemon-side NOW so
+          // the local mirror stays fresh even with no tab open; after the
+          // pull lands, the existing post-pull signals (`file-changed` +
+          // `project-metadata-changed`) reach any open view over the same
+          // SSE path a web-triggered pull uses. All ownership/binding guards
+          // live in collab/proactive-content-pull.ts — an owner daemon
+          // receiving its own publish echo never pulls over its working
+          // tree, and failures degrade silently to the web's status polling.
+          if (sharedProjectPullProfiling) {
+            const profileReceivedAtMs = Date.now();
+            emitSharedProjectPullTiming({
+              phase: 'event-received',
+              projectId: event.projectId ?? 'unknown',
+              ...(event.version != null ? { version: event.version } : {}),
+              receivedAtMs: profileReceivedAtMs,
+              atMs: profileReceivedAtMs,
+            });
+            void proactiveContentPull.handleContentChanged({
+              ...event,
+              profileReceivedAtMs,
+            });
+          } else {
+            void proactiveContentPull.handleContentChanged(event);
+          }
+          // Keep the thin nudge for an OPEN project view so its status/banner
+          // refreshes immediately rather than on the next ~5s poll tick.
           if (event.projectId && activeProjectEventSinks.has(event.projectId)) {
             emitProjectEvent(event.projectId, {
               type: 'project-metadata-changed',
@@ -3460,18 +3978,84 @@ export async function startServer({
           break;
         }
         case 'workspace-context-changed':
-          emitWorkspaceEvent({ type: 'workspace-context-changed', at: Date.now() });
+          handleHubWorkspaceContextChanged(() => workspaceInvalidationPoller.pollOnce());
+          // Revalidate exact membership before the next billing projection.
+          // A removed/rebound member must clear money and entitlement state,
+          // even when no billing-specific event accompanies the roster change.
+          workspaceBillingRuntime.refreshAll('workspace-context-changed');
           break;
         case 'billing-changed':
-          emitWorkspaceEvent({ type: 'billing-changed', at: Date.now() });
+          workspaceBillingRuntime.invalidate({
+            domain: 'legacy',
+            ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-billing-changed',
+          });
+          emitWorkspaceEvent({
+            type: 'billing-changed',
+            ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
           break;
+        case 'billing-subscription-changed':
+          if (!event.workspaceId) break;
+          workspaceBillingRuntime.invalidate({
+            domain: 'subscription',
+            workspaceId: event.workspaceId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-billing-subscription-changed',
+          });
+          emitWorkspaceEvent({
+            type: 'billing-subscription-changed',
+            workspaceId: event.workspaceId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
+          break;
+        case 'wallet-balance-changed':
+          if (!event.workspaceId || !event.workspaceMemberId) break;
+          workspaceBillingRuntime.invalidate({
+            domain: 'wallet',
+            workspaceId: event.workspaceId,
+            workspaceMemberId: event.workspaceMemberId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            reason: 'vela-wallet-balance-changed',
+          });
+          emitWorkspaceEvent({
+            type: 'wallet-balance-changed',
+            workspaceId: event.workspaceId,
+            workspaceMemberId: event.workspaceMemberId,
+            ...(event.revision ? { revision: event.revision } : {}),
+            at: Date.now(),
+          });
+          break;
+        case 'team-resources-changed': {
+          // A design-system/plugin/skill resource was shared (moved the
+          // 'published' ref) or retracted (removed) on the resource hub.
+          // `resourceKind` routes to just that kind's reconciler instead of
+          // re-checking all of them on every event — see
+          // `reconcileTeamResourcesFromRemote` below (declared later in this
+          // function; referencing it here is safe because this callback only
+          // ever RUNS once an actual SSE event arrives, well after the rest
+          // of `startServer`'s synchronous setup — including that
+          // declaration — has completed).
+          void reconcileTeamResourcesFromRemote(event.resourceKind).catch(() => undefined);
+          break;
+        }
       }
     },
     onReconnect: () => {
       // Close the disconnect gap: one catch-up cycle over the same reads the
       // pollers watch, plus a comment pull for open projects.
       void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
+      workspaceBillingRuntime.reconnect();
       void collabCloud?.pollOnce().catch(() => undefined);
+      // Same catch-up principle for the design-system/skill resource
+      // reconciler: a missed 'team-resources-changed' push during the
+      // disconnect window is closed by one full re-check across every kind
+      // this daemon drives it for (no resourceKind => reconcile all).
+      void reconcileTeamResourcesFromRemote().catch(() => undefined);
     },
     onError: (error) => {
       console.warn('[od] hub events channel error (will reconnect):', String(error));
@@ -3875,6 +4459,87 @@ export async function startServer({
     share: skillsTeamShare,
     listTeam: cachedTeamResourceList(skillsTeamShare, syncSharedTeamSkill),
   });
+
+  // Collab realtime for design-system/skill "team resource" sharing: react
+  // to a `team-resources-changed` signal (hub push, wired above, OR the
+  // dedicated poll fallback below) by reconciling this workspace's
+  // `workspace_resources` rows against each kind's live shared listing. See
+  // `collab/workspace-resources-reconciler.ts` for the full design —
+  // in particular why retraction marks `resourceState: 'deleted'` and leaves
+  // `visibility: 'team'` alone, instead of demoting to `visibility:
+  // 'personal'` the way `workspace-projects-reconciler.ts` does for
+  // `workspace_projects` (that would misattribute a teammate's pulled copy
+  // as caller-authored — the exact bug `SkillSummary.teamSynced` exists to
+  // prevent).
+  //
+  // 'plugin' is a deliberate, documented gap, not an oversight: plugin's
+  // personal/team split runs entirely through `installed_plugins.source`'s
+  // `team:plugin:` prefix and has never been bound into `workspace_resources`
+  // at all (unlike design_system/skill, whose `syncSharedTeamDesignSystem` /
+  // `syncSharedTeamSkill` already double-write into that table today).
+  // Driving this reconciler for 'plugin' before that binding exists would
+  // just read zero local rows and silently do nothing on every call — a
+  // reconciler that looks wired but never has anything to reconcile is worse
+  // than the honest gap. Follow-up: teach plugin install/share to also write
+  // a `workspace_resources('plugin', ...)` row (mirroring the other two
+  // kinds), then add it to `RECONCILED_TEAM_RESOURCE_KINDS` below.
+  const RECONCILED_TEAM_RESOURCE_KINDS = ['design_system', 'skill'] as const;
+  type ReconciledTeamResourceKind = (typeof RECONCILED_TEAM_RESOURCE_KINDS)[number];
+  const teamResourceShareByKind: Record<ReconciledTeamResourceKind, TeamResourceShareService> = {
+    design_system: designSystemsTeamShare,
+    skill: skillsTeamShare,
+  };
+  const reconcileTeamResourceKind = (resourceType: ReconciledTeamResourceKind) =>
+    reconcileWorkspaceResourcesWithRemote({
+      getWorkspaceIdentity: async () => {
+        const context = await collab.workspaceContext.current({});
+        if (!context || context.workspaceType !== 'team' || context.memberStatus !== 'active') return null;
+        return { workspaceId: context.workspaceId };
+      },
+      listRemoteTeamResources: async () =>
+        (await teamResourceShareByKind[resourceType].sharedResources()).map((resource) => ({
+          resourceId: resource.id,
+        })),
+      listLocalActiveTeamRows: (workspaceId): LocalTeamResourceBinding[] =>
+        listWorkspaceResources(db, resourceType, workspaceId)
+          .filter((row: any) => row.visibility === 'team' && row.resourceState !== 'deleted')
+          .map((row: any) => ({
+            resourceId: row.resourceId,
+            workspaceId: row.workspaceId,
+            visibility: row.visibility,
+            resourceState: row.resourceState ?? null,
+          })),
+      applyRetire: (workspaceId, resourceId) => {
+        updateWorkspaceResource(db, resourceType, workspaceId, resourceId, { resourceState: 'deleted' });
+      },
+      onError: (error) => console.warn(`[od] workspace-resources (${resourceType}) reconciliation error:`, error),
+    });
+  // `resourceKind` scopes the pass to just the kind the event was about;
+  // omitted (hub reconnect catch-up, the poll fallback) reconciles every
+  // kind this daemon drives it for.
+  const reconcileTeamResourcesFromRemote = async (resourceKind?: string): Promise<void> => {
+    const kinds = resourceKind
+      ? RECONCILED_TEAM_RESOURCE_KINDS.filter((kind) => kind === resourceKind)
+      : RECONCILED_TEAM_RESOURCE_KINDS;
+    await Promise.all(kinds.map((kind) => reconcileTeamResourceKind(kind)));
+  };
+  // Dedicated ~15s poll fallback — the "poll-as-floor" half of the same
+  // architecture principle `workspaceInvalidationPoller` follows for
+  // project/member/context signals (push accelerates delivery; the poll
+  // never stops running). Kept as its own timer rather than folded into that
+  // poller's deps: `workspaceInvalidationPoller` decides whether to emit by
+  // diffing a cheap SIGNATURE against the previous one (see its
+  // `emitIfChanged`), and there is no equivalent cheap "did the team-shared
+  // resource set change" digest to diff against (vela's own
+  // `/api/v1/collab/sync-digest` carries no resources token) — so this
+  // always just re-reads and re-diffs unconditionally on its own cadence
+  // instead of piggybacking on that poller's change-detection.
+  const teamResourcesPollTimer = setInterval(() => {
+    void reconcileTeamResourcesFromRemote().catch((error) =>
+      console.warn('[od] workspace-resources poll error:', error),
+    );
+  }, 15_000);
+  teamResourcesPollTimer.unref?.();
 
   registerMemoryRoutes(app, {
     http: { createSseResponse, requireLocalDaemonRequest },
@@ -4523,6 +5188,43 @@ export async function startServer({
     validation: validationDeps,
   });
 
+  // Whether the caller may mutate (edit / publish-toggle / delete) a design
+  // system. A system pulled from a teammate's team share (`teamSynced` in its
+  // metadata.json — see `isTeamSyncedUserDesignSystem`) is only mutable by
+  // whoever `canManageSharedResource` says may manage the share — the same
+  // principal check `unshare` already enforces. Anything not teamSynced is
+  // the caller's own, so it stays unrestricted.
+  //
+  // Spec 9.2: on top of that existing rule, a workspace the caller's own
+  // request marks as locked/deleted (billing lapse, deletion in progress)
+  // blocks mutation unconditionally — the one real gap design system had
+  // that project/plugin already closed via `enforceWorkspaceResourceMutation`.
+  // Reuses that module's own `workspaceResourceContextFromRequest`/
+  // `isWorkspaceResourceLocked` rather than re-deriving the header contract
+  // here.
+  //
+  // Hoisted out of `registerDesignSystemRoutes`'s deps (recvqb6mfyqXLD) so
+  // `registerStaticResourceRoutes`'s design-system LIST route can decorate
+  // every teamSynced entry with the same verdict — any detail surface a
+  // design system's summary reaches (not just the single-item GET) can then
+  // gate its own edit/publish/delete affordances on the authority the
+  // backend actually enforces, instead of re-deriving (or forgetting to
+  // derive) an equivalent check per surface.
+  const canMutateUserDesignSystem = async (
+    root: string,
+    id: string,
+    req: any,
+  ): Promise<boolean> => {
+    const requestCtx = workspaceResourceContextFromRequest(req);
+    if (requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx)) {
+      return false;
+    }
+    const synced = await isTeamSyncedUserDesignSystem(root, id);
+    if (!synced) return true;
+    const resources = await designSystemsTeamShare.sharedResources();
+    return resources.find((resource) => resource.id === id)?.canUnshare === true;
+  };
+
   // Resource catalog
   registerStaticResourceRoutes(app, {
     db,
@@ -4535,6 +5237,7 @@ export async function startServer({
       listAllSkillLikeEntries,
       listAllDesignSystems,
       resolveWorkspaceScope: resolveDesignSystemWorkspaceScope,
+      canMutateUserDesignSystem,
       mimeFor,
     },
     tokenContractRebuild: {
@@ -4560,29 +5263,9 @@ export async function startServer({
     projectFiles: projectFileDeps,
     designSystems: {
       buildUserDesignSystemArchive,
-      // recvqb6mfyqXLD: a system pulled from a teammate's team share
-      // (`teamSynced` in its metadata.json — see `isTeamSyncedUserDesignSystem`)
-      // is only mutable by whoever `canManageSharedResource` says may manage
-      // the share — the same principal check `unshare` already enforces.
-      // Anything not teamSynced is the caller's own, so it stays unrestricted.
-      //
-      // Spec 9.2: on top of that existing rule, a workspace the caller's own
-      // request marks as locked/deleted (billing lapse, deletion in
-      // progress) blocks mutation unconditionally — the one real gap design
-      // system had that project/plugin already closed via
-      // `enforceWorkspaceResourceMutation`. Reuses that module's own
-      // `workspaceResourceContextFromRequest`/`isWorkspaceResourceLocked`
-      // rather than re-deriving the header contract here.
-      canMutateUserDesignSystem: async (root, id, req) => {
-        const requestCtx = workspaceResourceContextFromRequest(req);
-        if (requestCtx && requestCtx !== 'missing' && isWorkspaceResourceLocked(requestCtx)) {
-          return false;
-        }
-        const synced = await isTeamSyncedUserDesignSystem(root, id);
-        if (!synced) return true;
-        const resources = await designSystemsTeamShare.sharedResources();
-        return resources.find((resource) => resource.id === id)?.canUnshare === true;
-      },
+      // Hoisted above (before `registerStaticResourceRoutes`) so the
+      // design-system LIST route can reuse the exact same verdict.
+      canMutateUserDesignSystem,
       createUserDesignSystem: createWorkspaceOwnedDesignSystem,
       deleteUserDesignSystem,
       // spec 04 §11: unshare `id` from the team hub before DELETE proceeds
@@ -5855,7 +6538,7 @@ export async function startServer({
         BYOK_OPENCODE_PROVIDER_REQUIRED_MESSAGE,
       );
     }
-    // Validate the checked-in `inactivityTimeoutMs` hint immediately
+    // Validate the checked-in runtime timeout hints immediately
     // after the runtime def is selected and before any side-effectful
     // setup (auto-memory extract, `.mcp.json` write/unlink,
     // composeSystemPrompt, prompt persistence). A bad def value would
@@ -5864,7 +6547,7 @@ export async function startServer({
     // residue behind (issue #2467 review on PR #2579).
     //
     // Catch is intentionally narrowed to `RangeError`, the only kind
-    // `assertValidRuntimeDefInactivityTimeoutMs` is allowed to throw
+    // the runtime timeout validators are allowed to throw
     // for invalid checked-in values. Anything else (a regression that
     // makes the helper throw on a valid value, an unrelated bug
     // introduced while touching this path) should bubble up to the
@@ -5873,6 +6556,7 @@ export async function startServer({
     // "the runtime def is bad" and burying the real failure.
     try {
       assertValidRuntimeDefInactivityTimeoutMs(def.inactivityTimeoutMs);
+      assertValidRuntimeDefFirstOutputTimeoutMs(def.firstOutputTimeoutMs);
     } catch (err) {
       if (err instanceof RangeError) {
         return design.runs.fail(run, 'AGENT_RUNTIME_DEF_INVALID', err.message);
@@ -7665,6 +8349,8 @@ export async function startServer({
     // earlier, so we keep only the new `runStartTimeMs` declaration.
     const runStartTimeMs = Date.now();
     const inactivityTimeoutMs = resolveChatRunInactivityTimeoutMs(def.inactivityTimeoutMs);
+    const firstOutputTimeoutMs =
+      resolveChatRunFirstOutputTimeoutMs(def.firstOutputTimeoutMs);
     const artifactQuietPeriodMs = resolveChatRunArtifactQuietPeriodMs();
     // Grace before the inactivity watchdog escalates a stalled child from
     // SIGTERM to SIGKILL. Env-tunable like its OD_CHAT_RUN_* cancel-grace
@@ -7674,6 +8360,8 @@ export async function startServer({
       return Number.isFinite(raw) && raw > 0 ? raw : 3_000;
     })();
     let inactivityTimer = null;
+    let firstOutputTimer = null;
+    let firstOutputSeen = false;
     let childStdoutSeen = false;
     let lastAgentEventPhase = 'spawn pending';
     let lastToolResultChars = 0;
@@ -7730,6 +8418,12 @@ export async function startServer({
         inactivityTimer = null;
       }
     };
+    const clearFirstOutputWatchdog = () => {
+      if (firstOutputTimer) {
+        clearTimeout(firstOutputTimer);
+        firstOutputTimer = null;
+      }
+    };
     let forcedChildShutdownTimers = [];
     const clearForcedChildShutdown = () => {
       for (const timer of forcedChildShutdownTimers) clearTimeout(timer);
@@ -7755,9 +8449,10 @@ export async function startServer({
         }, inactivityKillGraceMs * 2),
       ];
     };
-    const failForInactivity = () => {
+    const failForInactivity = (reason: 'inactivity' | 'first_output' = 'inactivity') => {
       if (run.cancelRequested || design.runs.isTerminal(run.status)) return;
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       if (artifactRegistered) {
         // The deliverable already exists. The agent process is either
         // genuinely idle (claude-code's stream-json child sitting on an
@@ -7801,8 +8496,14 @@ export async function startServer({
         }
       }
       if (!stallPayload) {
+        const timeoutMs =
+          reason === 'first_output' ? firstOutputTimeoutMs : inactivityTimeoutMs;
+        const timeoutDescription =
+          reason === 'first_output'
+            ? 'without emitting a first output'
+            : 'without emitting any new output';
         const message =
-          `Agent stalled without emitting any new output for ${Math.round(inactivityTimeoutMs / 1000)}s. ` +
+          `Agent stalled ${timeoutDescription} for ${Math.round(timeoutMs / 1000)}s. ` +
           'The model or CLI likely hung while generating. ' +
           `Phase details: spawned agent ${userFacingAgentLabel(agentId, resolvedBin)}; stdout arrived: ${childStdoutSeen ? 'yes' : 'no'}; ` +
           `last agent event: ${lastAgentEventPhase}; largest tool result observed: ${lastToolResultChars} chars. ` +
@@ -7827,6 +8528,33 @@ export async function startServer({
       if (child && !child.killed) design.runs.signalChild(run, 'SIGTERM');
       scheduleForcedChildShutdown();
     };
+    const armFirstOutputWatchdog = () => {
+      if (firstOutputSeen || firstOutputTimer || firstOutputTimeoutMs <= 0) return;
+      firstOutputTimer = setTimeout(
+        () => failForInactivity('first_output'),
+        firstOutputTimeoutMs,
+      );
+      firstOutputTimer.unref?.();
+    };
+    const noteFirstOutputEvent = (payload) => {
+      const type = payload?.type ? String(payload.type) : '';
+      const statusLabel =
+        type === 'status' && payload?.label ? String(payload.label) : '';
+      const isAcpToolActivity =
+        statusLabel === 'tool_call' || statusLabel === 'tool_call_update';
+      if (
+        type !== 'text_delta' &&
+        type !== 'thinking_delta' &&
+        type !== 'tool_use' &&
+        type !== 'tool_result' &&
+        type !== 'artifact' &&
+        !isAcpToolActivity
+      ) {
+        return;
+      }
+      firstOutputSeen = true;
+      clearFirstOutputWatchdog();
+    };
     const activeInactivityTimeoutMs = () =>
       resolveActiveInactivityTimeoutMs({
         inactivityTimeoutMs,
@@ -7846,6 +8574,8 @@ export async function startServer({
     const noteArtifactRegistered = () => {
       if (artifactRegistered) return;
       artifactRegistered = true;
+      firstOutputSeen = true;
+      clearFirstOutputWatchdog();
       // Switch the watchdog to the shorter quiet-period window
       // immediately so we don't have to wait for the next agent event
       // before the new ceiling takes effect. Call unconditionally:
@@ -7870,6 +8600,7 @@ export async function startServer({
       activeChatAgentEventSinks.set(toolTokenGrant.runId, (payload) => {
         lastAgentEventPhase = summarizeAgentEventForInactivity(payload);
         noteAgentActivity();
+        noteFirstOutputEvent(payload);
         send('agent', payload);
       });
       activeChatRunHandles.set(toolTokenGrant.runId, { noteArtifactRegistered });
@@ -7987,6 +8718,20 @@ export async function startServer({
           runId: run.id,
           conversationId: run.conversationId,
           runAttempt: run.retryAttemptCount ?? 0,
+          // Vela's workspace-credit isolation reads this env purely to
+          // decide which workspace's wallet an AMR spend attributes to — the
+          // project's own pinned TEAM workspace, never the account's ambient
+          // "current selection" (a workspace switched elsewhere must not
+          // re-aim a run that is already in flight for a different project).
+          // No team pin (personal project) means no header at all, so vela's
+          // NULL-sponsor fallback attributes the spend to the caller's own
+          // personal wallet.
+          workspaceId: resolveWorkspaceScope({
+            projectWorkspaceId:
+              typeof projectId === 'string' && projectId
+                ? findTeamWorkspaceIdForProject(db, projectId)
+                : null,
+          }).workspaceId,
         }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the
@@ -8490,6 +9235,7 @@ export async function startServer({
     function emitGuardedTextDelta(delta: string) {
       const safe = guardTextDelta(delta);
       if (safe.length > 0) {
+        noteFirstOutputEvent({ type: 'text_delta' });
         send('agent', { type: 'text_delta', delta: safe });
       }
       if (runGuard.contaminated && !runWarned) {
@@ -8633,6 +9379,7 @@ export async function startServer({
       // stream BEFORE the send, so run.lastTodoSnapshot / run.truncatedMidTurn are
       // set by the time finish() derives run.endedWithUnfinishedWork (#1247/#1060).
       captureRunWorkCompletenessSignals(run, ev);
+      noteFirstOutputEvent(ev);
       send('agent', ev);
       observeToolEventForLoop(ev);
     }
@@ -8946,14 +9693,27 @@ export async function startServer({
           : {}),
         onCliReady: () => noteCliReadyAt(),
         onSessionInit: () => noteSessionInitDoneAt(),
+        onPromptComplete: () => clearFirstOutputWatchdog(),
         send: (event, data) => {
           if (event === 'error') {
+            clearFirstOutputWatchdog();
             if (run.cancelRequested) return;
             acpFatalErrorObservedBeforeCancellation = true;
             run.runtimeFailureObservedBeforeCancellation = true;
           }
           if (event === 'agent') {
             lastAgentEventPhase = summarizeAgentEventForInactivity(data);
+            if (
+              data?.type === 'status' &&
+              data.label === 'waiting_for_first_output'
+            ) {
+              armFirstOutputWatchdog();
+            } else if (data?.type !== 'text_delta') {
+              // Raw ACP text may be entirely consumed by title-marker or role
+              // filtering. Only the guarded non-empty emission below counts
+              // as substantive first output.
+              noteFirstOutputEvent(data);
+            }
           }
           noteAgentActivity();
           if (event === 'error') flushVisibleAgentStderr();
@@ -9091,6 +9851,7 @@ export async function startServer({
 
     child.on('error', (err) => {
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       cleanupPromptFile();
       flushVisibleAgentStderr();
       revokeToolToken('child_exit');
@@ -9102,6 +9863,7 @@ export async function startServer({
     child.on('close', async (code, signal) => {
       try {
       clearInactivityWatchdog();
+      clearFirstOutputWatchdog();
       clearForcedChildShutdown();
       flushVisibleAgentStderr();
       if (watchdogRetryRestarted) {
@@ -10351,6 +11113,8 @@ export async function startServer({
       routineService?.stop();
       workspaceInvalidationPoller.stop();
       hubEventsSubscriber.stop();
+      workspaceBillingRuntime.dispose();
+      proactiveContentPull.dispose();
     };
     const shutdownDaemonRuns = async () => {
       if (daemonShutdownStarted) return;

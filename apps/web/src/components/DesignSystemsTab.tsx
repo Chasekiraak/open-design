@@ -412,12 +412,19 @@ export function DesignSystemsTab({
     };
   }, [refreshTeamShared]);
 
-  // Promote a personal design system into the team scope. The daemon packs and
-  // pushes it to the resource hub; on success it appears in the team collection.
+  // Promote a personal design system into the team scope, OR — when it is
+  // already team-shared — push the current local directory as an update that
+  // overwrites the hub's stale version. Same daemon route either way: `share()`
+  // (team-resource-share.ts) has no "already shared" guard, so a repeat call
+  // is just the latest bytes replacing the previous ones. Only the copy
+  // rendering distinguishes the two cases (see the `syncToTeam` label above).
   async function handleShareToTeam(system: DesignSystemSummary) {
     if (sharingId) return;
+    const wasAlreadyShared = teamSharedIds.has(system.id);
+    const loadingLabel = wasAlreadyShared ? t('dsManager.syncToTeam') : t('dsManager.shareToTeam');
+    const failedLabel = wasAlreadyShared ? t('dsManager.syncToTeamFailed') : t('dsManager.shareToTeamFailed');
     setSharingId(system.id);
-    notifyActionLoading(t('dsManager.shareToTeam'));
+    notifyActionLoading(loadingLabel);
     try {
       const res = await fetch(`/api/workspace/design-systems/${encodeURIComponent(system.id)}/share`, {
         method: 'POST',
@@ -428,12 +435,12 @@ export function DesignSystemsTab({
         notifyAction('success', t('ds.actionDone'));
       } else if (res.ok) {
         // Reached the daemon but there is no team identity to share under.
-        notifyAction('error', t('dsManager.shareToTeamFailed'));
+        notifyAction('error', failedLabel);
       } else {
-        notifyAction('error', t('dsManager.shareToTeamFailed'));
+        notifyAction('error', failedLabel);
       }
     } catch {
-      notifyAction('error', t('dsManager.shareToTeamFailed'));
+      notifyAction('error', failedLabel);
     } finally {
       setSharingId(null);
     }
@@ -1330,10 +1337,20 @@ function DesignSystemDetail({
   // publish toggle — and tuck the secondary actions (download / make-default /
   // delete) into a single ⋯ overflow so the toolbar reads clean (issue #5).
   const overflowActions: HeaderMenuAction[] = [
-    ...(isUser && onShareToTeam && !isTeamShared
+    // A design system that is ALREADY team-shared keeps this action visible
+    // (issue: owner edits a logo/name/content and teammates never see the
+    // update because the entry point vanished the moment `isTeamShared`
+    // flipped true). `share()` itself is a plain "push the latest directory"
+    // call — republishing an already-shared resource just overwrites the
+    // hub's version with the current local one, so relabeling to "sync" is
+    // the only UI change needed. Gated on `canManageTeamSynced` (same signal
+    // as unshare/edit/delete below) rather than `isUser` alone: a plain
+    // member merely viewing a teammate's pulled copy must not be able to
+    // push THEIR local copy over the real owner's shared entry.
+    ...(isUser && onShareToTeam && canManageTeamSynced
       ? [{
           id: 'share-to-team',
-          label: t('dsManager.shareToTeam'),
+          label: isTeamShared ? t('dsManager.syncToTeam') : t('dsManager.shareToTeam'),
           icon: 'share' as const,
           onClick: () => onShareToTeam(system),
           disabled: busy || sharing,

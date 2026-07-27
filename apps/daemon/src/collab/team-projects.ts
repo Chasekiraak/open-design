@@ -21,15 +21,15 @@ export interface CreateTeamProjectsListerOptions {
 
 export function createTeamProjectsLister(
   options: CreateTeamProjectsListerOptions,
-): () => Promise<TeamProject[]> {
+): (workspaceId?: string) => Promise<TeamProject[]> {
   const env = options.env ?? process.env;
-  return async () => {
+  return async (workspaceId?: string) => {
     const principal = contextToResourceHubPrincipal(
       await options.workspaceContext.current({}),
     );
     if (!principal) return [];
-    if (options.teamProjectCatalog) return options.teamProjectCatalog.list();
+    if (options.teamProjectCatalog) return options.teamProjectCatalog.list(workspaceId);
     if (!shouldUseVelaCliTeamProjectCatalog(env)) return [];
-    return createVelaCliTeamProjectCatalog().list();
+    return createVelaCliTeamProjectCatalog().list(workspaceId);
   };
 }

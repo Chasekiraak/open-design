@@ -1,0 +1,337 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  planWorkspaceProjectReconciliation,
+  reconcileWorkspaceProjectsWithRemote,
+  type LocalTeamProjectBinding,
+} from '../../src/collab/workspace-projects-reconciler.js';
+
+const WORKSPACE_ID = 'team-1';
+const OWNER_MEMBER_ID = 'member-owner';
+const READER_MEMBER_ID = 'member-reader';
+
+describe('planWorkspaceProjectReconciliation (pure)', () => {
+  it('binds a remote project this daemon has never locally bound, as a reader when someone else owns it', () => {
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: READER_MEMBER_ID,
+      remoteProjects: [{ projectId: 'p1', ownerMemberId: OWNER_MEMBER_ID }],
+      localBindings: new Map(),
+    });
+    expect(actions).toEqual([
+      {
+        kind: 'bind',
+        projectId: 'p1',
+        patch: {
+          workspaceId: WORKSPACE_ID,
+          visibility: 'team',
+          resourceState: 'active',
+          createdByWorkspaceMemberId: null,
+          updatedByWorkspaceMemberId: READER_MEMBER_ID,
+          resourceHubResourceId: null,
+          cloudTombstonedAt: null,
+          syncState: 'synced',
+        },
+      },
+    ]);
+  });
+
+  it('binds a remote project as editable when the current member is its owner', () => {
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: OWNER_MEMBER_ID,
+      remoteProjects: [{ projectId: 'p1', ownerMemberId: OWNER_MEMBER_ID }],
+      localBindings: new Map(),
+    });
+    expect(actions).toEqual([
+      expect.objectContaining({
+        kind: 'bind',
+        projectId: 'p1',
+        patch: expect.objectContaining({ createdByWorkspaceMemberId: OWNER_MEMBER_ID }),
+      }),
+    ]);
+  });
+
+  it('preserves an already-known resourceHubResourceId when correcting a row', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: WORKSPACE_ID,
+      visibility: 'personal', // stale: remote says team
+      createdByWorkspaceMemberId: null,
+      resourceHubResourceId: 'resource-abc',
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: OWNER_MEMBER_ID,
+      remoteProjects: [{ projectId: 'p1', ownerMemberId: OWNER_MEMBER_ID }],
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([
+      expect.objectContaining({
+        kind: 'bind',
+        patch: expect.objectContaining({ resourceHubResourceId: 'resource-abc' }),
+      }),
+    ]);
+  });
+
+  it('is a no-op when the local row already matches remote exactly', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: WORKSPACE_ID,
+      visibility: 'team',
+      createdByWorkspaceMemberId: OWNER_MEMBER_ID,
+      resourceHubResourceId: 'resource-abc',
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: OWNER_MEMBER_ID,
+      remoteProjects: [{ projectId: 'p1', ownerMemberId: OWNER_MEMBER_ID }],
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it('corrects ownership when the local row wrongly claims edit rights on a project someone else now owns', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: WORKSPACE_ID,
+      visibility: 'team',
+      createdByWorkspaceMemberId: READER_MEMBER_ID, // stale: I am no longer the owner
+      resourceHubResourceId: 'resource-abc',
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: READER_MEMBER_ID,
+      remoteProjects: [{ projectId: 'p1', ownerMemberId: OWNER_MEMBER_ID }],
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([
+      expect.objectContaining({
+        kind: 'bind',
+        patch: expect.objectContaining({ createdByWorkspaceMemberId: null }),
+      }),
+    ]);
+  });
+
+  // The concrete, repeatedly-reported scenario: an owner unshares (or deletes)
+  // a project; a member's local "team" binding must collapse back to
+  // personal instead of showing an already-unshared project forever.
+  it('demotes a local team row the remote catalog no longer lists (member row after owner unshares)', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: WORKSPACE_ID,
+      visibility: 'team',
+      createdByWorkspaceMemberId: null, // this member was a reader, not the owner
+      resourceHubResourceId: 'resource-abc',
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: READER_MEMBER_ID,
+      remoteProjects: [], // owner unshared: the hub no longer reports this project at all
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([
+      {
+        kind: 'demote',
+        projectId: 'p1',
+        workspaceId: WORKSPACE_ID,
+        patch: {
+          visibility: 'personal',
+          createdByWorkspaceMemberId: READER_MEMBER_ID,
+          resourceHubResourceId: null,
+          cloudTombstonedAt: null,
+          syncState: 'local_only',
+        },
+      },
+    ]);
+  });
+
+  it('does not touch a local row bound to a DIFFERENT workspace even if it is visibility team', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: 'some-other-workspace',
+      visibility: 'team',
+      createdByWorkspaceMemberId: null,
+      resourceHubResourceId: 'resource-abc',
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: READER_MEMBER_ID,
+      remoteProjects: [],
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it('does not touch a local row that is already personal-visibility (nothing to demote)', () => {
+    const local: LocalTeamProjectBinding = {
+      projectId: 'p1',
+      workspaceId: WORKSPACE_ID,
+      visibility: 'personal',
+      createdByWorkspaceMemberId: READER_MEMBER_ID,
+      resourceHubResourceId: null,
+    };
+    const actions = planWorkspaceProjectReconciliation({
+      workspaceId: WORKSPACE_ID,
+      workspaceMemberId: READER_MEMBER_ID,
+      remoteProjects: [],
+      localBindings: new Map([['p1', local]]),
+    });
+    expect(actions).toEqual([]);
+  });
+});
+
+describe('reconcileWorkspaceProjectsWithRemote (orchestrator, fake deps)', () => {
+  function baseDeps(overrides: Partial<Parameters<typeof reconcileWorkspaceProjectsWithRemote>[0]> = {}) {
+    return {
+      getWorkspaceIdentity: async () => ({ workspaceId: WORKSPACE_ID, workspaceMemberId: READER_MEMBER_ID }),
+      listRemoteTeamProjects: async () => [],
+      // Materialized by default: these tests exercise binding/demoting logic,
+      // not the materialization gate (covered by its own tests below).
+      hasLocalProject: () => true,
+      listLocalTeamRows: () => [] as LocalTeamProjectBinding[],
+      getLocalBinding: () => null,
+      applyBind: vi.fn(),
+      applyDemote: vi.fn(),
+      onError: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('is a total no-op off-team (null identity) — never reads or writes anything', async () => {
+    const listRemoteTeamProjects = vi.fn(async () => []);
+    const applyBind = vi.fn();
+    const applyDemote = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({ getWorkspaceIdentity: async () => null, listRemoteTeamProjects, applyBind, applyDemote }),
+    );
+    expect(result).toEqual({ bound: 0, demoted: 0 });
+    expect(listRemoteTeamProjects).not.toHaveBeenCalled();
+    expect(applyBind).not.toHaveBeenCalled();
+    expect(applyDemote).not.toHaveBeenCalled();
+  });
+
+  it('never demotes on a failed remote read (best-effort: missing data is not empty data)', async () => {
+    const applyDemote = vi.fn();
+    const onError = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'p1', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: 'r1' },
+        ],
+        listRemoteTeamProjects: async () => {
+          throw new Error('vela unreachable');
+        },
+        applyDemote,
+        onError,
+      }),
+    );
+    expect(result).toEqual({ bound: 0, demoted: 0 });
+    expect(applyDemote).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('looks up getLocalBinding only for remote projects not already covered by listLocalTeamRows', async () => {
+    const getLocalBinding = vi.fn(() => null);
+    await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'p1', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: READER_MEMBER_ID, resourceHubResourceId: 'r1' },
+        ],
+        listRemoteTeamProjects: async () => [
+          { projectId: 'p1', ownerMemberId: READER_MEMBER_ID },
+          { projectId: 'p2', ownerMemberId: OWNER_MEMBER_ID },
+        ],
+        getLocalBinding,
+      }),
+    );
+    expect(getLocalBinding).toHaveBeenCalledTimes(1);
+    expect(getLocalBinding).toHaveBeenCalledWith('p2');
+  });
+
+  it('applies bind and demote actions through the injected writers and reports counts', async () => {
+    const applyBind = vi.fn();
+    const applyDemote = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'gone', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: 'r-gone' },
+        ],
+        listRemoteTeamProjects: async () => [{ projectId: 'new', ownerMemberId: READER_MEMBER_ID }],
+        applyBind,
+        applyDemote,
+      }),
+    );
+    expect(result).toEqual({ bound: 1, demoted: 1 });
+    expect(applyBind).toHaveBeenCalledWith('new', expect.objectContaining({ visibility: 'team' }));
+    expect(applyDemote).toHaveBeenCalledWith(WORKSPACE_ID, 'gone', expect.objectContaining({ visibility: 'personal' }));
+  });
+
+  // recvqmnuxxKHaI: `workspace_projects.project_id` is a FOREIGN KEY into
+  // `projects(id)`, so a bind for a project this daemon never materialized
+  // (no `projects` row — e.g. a teammate's share the member never opened)
+  // can never be written. The reconciler must skip it silently — the pull
+  // path owns materialization — not throw SQLITE_CONSTRAINT_FOREIGNKEY on
+  // every pass forever.
+  it('skips the bind for a remote project with no local binding and no local projects row', async () => {
+    const applyBind = vi.fn();
+    const onError = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listRemoteTeamProjects: async () => [
+          { projectId: 'never-materialized', ownerMemberId: OWNER_MEMBER_ID },
+          { projectId: 'materialized', ownerMemberId: OWNER_MEMBER_ID },
+        ],
+        hasLocalProject: (projectId) => projectId === 'materialized',
+        applyBind,
+        onError,
+      }),
+    );
+    expect(result).toEqual({ bound: 1, demoted: 0 });
+    expect(applyBind).toHaveBeenCalledTimes(1);
+    expect(applyBind).toHaveBeenCalledWith('materialized', expect.objectContaining({ visibility: 'team' }));
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('still corrects (and can demote) a project whose binding exists even when hasLocalProject is consulted for others only', async () => {
+    // A bound row always implies a projects row (the FK guarantees it), so
+    // the materialization gate must never suppress the demote direction: a
+    // team row remote no longer lists still collapses back to personal.
+    const hasLocalProject = vi.fn(() => false);
+    const applyDemote = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'gone-remote', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: 'r1' },
+        ],
+        listRemoteTeamProjects: async () => [],
+        hasLocalProject,
+        applyDemote,
+      }),
+    );
+    expect(result).toEqual({ bound: 0, demoted: 1 });
+    expect(applyDemote).toHaveBeenCalledWith(WORKSPACE_ID, 'gone-remote', expect.objectContaining({ visibility: 'personal' }));
+  });
+
+  it('reports one writer failure through onError without aborting the rest of the pass', async () => {
+    const onError = vi.fn();
+    const applyDemote = vi.fn();
+    const result = await reconcileWorkspaceProjectsWithRemote(
+      baseDeps({
+        listLocalTeamRows: () => [
+          { projectId: 'a', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: null },
+          { projectId: 'b', workspaceId: WORKSPACE_ID, visibility: 'team', createdByWorkspaceMemberId: null, resourceHubResourceId: null },
+        ],
+        listRemoteTeamProjects: async () => [],
+        applyDemote: vi.fn((workspaceId: string, projectId: string) => {
+          if (projectId === 'a') throw new Error('sqlite busy');
+          applyDemote(projectId);
+        }),
+        onError,
+      }),
+    );
+    expect(result).toEqual({ bound: 0, demoted: 2 });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(applyDemote).toHaveBeenCalledWith('b');
+  });
+});

@@ -10,7 +10,7 @@
 // no-name create path (`handleCreateProjectFromDesignSystem`, the New Project
 // panel's blank pick), which already tag `nameSource: 'generated'`.
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   buildWorkspacePermissions,
   buildWorkspaceSeatSummary,
@@ -21,7 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntryShell } from '../../src/components/EntryShell';
 import { I18nProvider } from '../../src/i18n';
 import type { AgentInfo, AppConfig } from '../../src/types';
-import { resetTeamProjectsCache, resetWorkspaceContextCache } from '../../src/collab/useWorkspaceContext';
+import {
+  notifyWorkspaceContextRefresh,
+  resetTeamProjectsCache,
+  resetWorkspaceContextCache,
+} from '../../src/collab/useWorkspaceContext';
 
 const originalFetch = globalThis.fetch;
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -30,6 +34,35 @@ class ResizeObserverMock {
   observe() {}
   disconnect() {}
   unobserve() {}
+}
+
+type EventSourceListener = (event: unknown) => void;
+class MockWorkspaceEventSource {
+  static instances: MockWorkspaceEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<EventSourceListener>>();
+
+  constructor(readonly url: string) {
+    MockWorkspaceEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventSourceListener): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+
+  removeEventListener(name: string, listener: EventSourceListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string, data: unknown): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close(): void {}
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -45,7 +78,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 // inside a team workspace ("OD Feature Team" in the live acceptance check) —
 // so the empty-state CTA renders deterministically instead of racing a
 // same-tick redirect.
-function teamContext(): WorkspaceCollabContext {
+function teamContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
   const role = 'member' as const;
   const lifecycleState = 'active' as const;
   return {
@@ -61,6 +96,7 @@ function teamContext(): WorkspaceCollabContext {
     seatSummary: buildWorkspaceSeatSummary({ seatLimit: 5, usedSeats: 1 }),
     permissions: buildWorkspacePermissions({ role, lifecycleState }),
     displayName: 'Ma Shu',
+    ...overrides,
   };
 }
 
@@ -154,6 +190,7 @@ beforeEach(() => {
   globalThis.ResizeObserver = ResizeObserverMock as typeof ResizeObserver;
   resetWorkspaceContextCache();
   resetTeamProjectsCache();
+  MockWorkspaceEventSource.instances = [];
   installFetchMock();
 });
 
@@ -163,6 +200,258 @@ afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
   resetWorkspaceContextCache();
   resetTeamProjectsCache();
+  vi.unstubAllGlobals();
+});
+
+describe('EntryShell team project content readiness', () => {
+  it('hydrates only a catalog-confirmed ready project and opens it without a second pull', async () => {
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    const requests: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const pathname = new URL(url, 'http://d.local').pathname;
+      requests.push({ url, method: init?.method ?? 'GET' });
+      if (pathname.endsWith('/workspace/context')) {
+        return jsonResponse({ context: teamContext() });
+      }
+      if (pathname.endsWith('/workspace/projects/team')) {
+        return jsonResponse({
+          projects: [{
+            projectId: 'shared-ready',
+            ownerMemberId: 'wm-owner',
+            sharedAt: '2026-07-25T00:00:00.000Z',
+            name: 'Ready shared project',
+          }],
+        });
+      }
+      if (pathname.endsWith('/files')) return jsonResponse({ files: [] });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const onOpenProject = vi.fn(async () => true);
+    const onProjectsRefresh = vi.fn();
+    let finishHydration!: (hydrated: boolean) => void;
+    const hydration = new Promise<boolean>((resolve) => {
+      finishHydration = resolve;
+    });
+    const onTeamProjectContentReady = vi.fn(async () => hydration);
+    renderAt('/all-projects', {
+      onOpenProject,
+      onProjectsRefresh,
+      onTeamProjectContentReady,
+    });
+
+    expect(await screen.findByText('Ready shared project')).toBeTruthy();
+    expect(MockWorkspaceEventSource.instances).toHaveLength(1);
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'shared-ready',
+        workspaceId: 'ws-1',
+      });
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'shared-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+    await waitFor(() => {
+      expect(onTeamProjectContentReady).toHaveBeenCalledWith('shared-ready', 'ws-1', 'wm-1');
+    });
+    expect(onTeamProjectContentReady).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTitle('Ready shared project'));
+    expect(onOpenProject).not.toHaveBeenCalled();
+    expect(
+      requests.some(({ url, method }) =>
+        method === 'POST' && url.includes('/api/projects/shared-ready/collab/pull')),
+    ).toBe(false);
+    await act(async () => {
+      finishHydration(true);
+      await hydration;
+    });
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    expect(onProjectsRefresh).not.toHaveBeenCalled();
+    expect(
+      requests.some(({ url, method }) =>
+        method === 'POST' && url.includes('/api/projects/shared-ready/collab/pull')),
+    ).toBe(false);
+  });
+
+  it('falls back to POST pull when ready hydration does not succeed', async () => {
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    const requests: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const pathname = new URL(url, 'http://d.local').pathname;
+      requests.push({ url, method: init?.method ?? 'GET' });
+      if (pathname.endsWith('/workspace/context')) {
+        return jsonResponse({ context: teamContext() });
+      }
+      if (pathname.endsWith('/workspace/projects/team')) {
+        return jsonResponse({
+          projects: [{
+            projectId: 'shared-ready',
+            ownerMemberId: 'wm-owner',
+            sharedAt: '2026-07-25T00:00:00.000Z',
+            name: 'Ready shared project',
+          }],
+        });
+      }
+      if (pathname.endsWith('/files')) return jsonResponse({ files: [] });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const onOpenProject = vi.fn(async () => true);
+    const onProjectsRefresh = vi.fn();
+    let finishHydration!: (hydrated: boolean) => void;
+    const hydration = new Promise<boolean>((resolve) => {
+      finishHydration = resolve;
+    });
+    const onTeamProjectContentReady = vi.fn(async () => hydration);
+    renderAt('/all-projects', {
+      onOpenProject,
+      onProjectsRefresh,
+      onTeamProjectContentReady,
+    });
+
+    expect(await screen.findByText('Ready shared project')).toBeTruthy();
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'shared-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+    await waitFor(() => expect(onTeamProjectContentReady).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTitle('Ready shared project'));
+    expect(
+      requests.some(({ url, method }) =>
+        method === 'POST' && url.includes('/api/projects/shared-ready/collab/pull')),
+    ).toBe(false);
+    await act(async () => {
+      finishHydration(false);
+      await hydration;
+    });
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    expect(onProjectsRefresh).toHaveBeenCalledTimes(1);
+    expect(
+      requests.some(({ url, method }) =>
+        method === 'POST' && url.includes('/api/projects/shared-ready/collab/pull')),
+    ).toBe(true);
+  });
+
+  it('clears content-ready latches when the member changes inside the same workspace', async () => {
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    let workspaceMemberId = 'wm-1';
+    const requests: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const pathname = new URL(url, 'http://d.local').pathname;
+      requests.push({ url, method: init?.method ?? 'GET' });
+      if (pathname.endsWith('/workspace/context')) {
+        return jsonResponse({
+          context: teamContext({
+            workspaceMemberId,
+            displayName: workspaceMemberId === 'wm-1' ? 'Member A' : 'Member B',
+          }),
+        });
+      }
+      if (pathname.endsWith('/workspace/projects/team')) {
+        return jsonResponse({
+          projects: [{
+            projectId: 'shared-ready',
+            ownerMemberId: 'wm-owner',
+            sharedAt: '2026-07-25T00:00:00.000Z',
+            name: 'Ready shared project',
+          }],
+        });
+      }
+      if (pathname.endsWith('/files')) return jsonResponse({ files: [] });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const onOpenProject = vi.fn(async () => true);
+    const onProjectsRefresh = vi.fn();
+    const onTeamProjectContentReady = vi.fn(async () => true);
+    renderAt('/all-projects', {
+      onOpenProject,
+      onProjectsRefresh,
+      onTeamProjectContentReady,
+    });
+
+    expect(await screen.findByText('Ready shared project')).toBeTruthy();
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'shared-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+    await waitFor(() => {
+      expect(onTeamProjectContentReady).toHaveBeenCalledWith(
+        'shared-ready',
+        'ws-1',
+        'wm-1',
+      );
+    });
+
+    workspaceMemberId = 'wm-2';
+    act(() => {
+      notifyWorkspaceContextRefresh();
+    });
+    expect(await screen.findByText('Member B')).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle('Ready shared project'));
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    expect(onProjectsRefresh).toHaveBeenCalledTimes(1);
+    expect(
+      requests.some(({ url, method }) =>
+        method === 'POST' && url.includes('/api/projects/shared-ready/collab/pull')),
+    ).toBe(true);
+    expect(onTeamProjectContentReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a ready hydration after its catalog row arrives', async () => {
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    let releaseCatalog!: (response: Response) => void;
+    const catalogResponse = new Promise<Response>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      if (pathname.endsWith('/workspace/context')) {
+        return jsonResponse({ context: teamContext() });
+      }
+      if (pathname.endsWith('/workspace/projects/team')) return catalogResponse;
+      if (pathname.endsWith('/files')) return jsonResponse({ files: [] });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const onTeamProjectContentReady = vi.fn(async () => true);
+    renderAt('/all-projects', { onTeamProjectContentReady });
+
+    await waitFor(() => expect(MockWorkspaceEventSource.instances).toHaveLength(1));
+    await screen.findByText('Ma Shu');
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'shared-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+    expect(onTeamProjectContentReady).not.toHaveBeenCalled();
+
+    releaseCatalog(jsonResponse({
+      projects: [{
+        projectId: 'shared-ready',
+        ownerMemberId: 'wm-owner',
+        sharedAt: '2026-07-25T00:00:00.000Z',
+        name: 'Ready shared project',
+      }],
+    }));
+    expect(await screen.findByText('Ready shared project')).toBeTruthy();
+    await waitFor(() => {
+      expect(onTeamProjectContentReady).toHaveBeenCalledWith('shared-ready', 'ws-1', 'wm-1');
+    });
+  });
 });
 
 describe('EntryShell blank-project creation tags nameSource', () => {

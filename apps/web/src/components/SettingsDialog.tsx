@@ -54,10 +54,7 @@ import {
   formatVelaBalanceUsd,
   type VelaLoginStatus,
 } from '../providers/daemon';
-import {
-  amrPlansUrlForProfile,
-  amrProfileBadgeLabel,
-} from '../runtime/amr-guidance';
+import { amrProfileBadgeLabel } from '../runtime/amr-guidance';
 import { isVisibleLocalCliAgent } from '../utils/visibleAgents';
 import { ExportDiagnosticsRow } from './ExportDiagnosticsButton';
 import { Icon } from './Icon';
@@ -77,7 +74,6 @@ import {
   KNOWN_PROVIDERS,
   hasAnyConfiguredProvider,
   mergeDaemonMediaProviders,
-  saveConfig,
   syncComposioConfigToDaemon,
   syncConfigToDaemon,
   syncMediaProvidersToDaemon,
@@ -158,9 +154,14 @@ import { PrivacySection } from './PrivacySection';
 import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
 import { SettingsWorkspaceSection } from './SettingsWorkspaceSection';
-import { useWorkspaceBilling, useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingBalanceUsd,
+} from '../collab/useWorkspaceContext';
 import { resolvePlanTier } from '../collab/team-plan';
 import { planBadgeTierForLabel } from './PlanWordmark';
+import { workspaceUpgradeUrl } from './EntryNavRail';
 import { canShowWorkspaceSettings } from '../collab/settings-access';
 import { ConnectorsBrowser } from './ConnectorsBrowser';
 import { MemoryModelInline } from './MemoryModelInline';
@@ -472,6 +473,8 @@ interface Props {
    */
   composioConfigLoading?: boolean;
   onClose: () => void;
+  /** Hand the explicit onboarding reset back to App, the config state owner. */
+  onResetOnboarding?: (next: AppConfig) => void;
   onRefreshAgents: (
     options?: AgentRefreshOptions,
   ) => AgentInfo[] | Promise<AgentInfo[] | void> | void;
@@ -1484,6 +1487,7 @@ export function SettingsDialog({
   onPersistComposioKey,
   composioConfigLoading = false,
   onClose,
+  onResetOnboarding,
   onRefreshAgents,
   onAmrLoginStatusChange,
   daemonMediaProviders,
@@ -1614,7 +1618,10 @@ export function SettingsDialog({
   // gate now guards the deep-link (`initialSection='workspace'`) path — it must
   // stay, otherwise a deep link would hand workspace settings to a viewer the
   // permission bits exclude.
-  const { context: workspaceContext } = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
   // recvpZPzGJL7o7: the local-CLI card's balance came ONLY from vela's
   // account-scoped sources (`amrCardStatus.account.balanceUsd`, then the
   // `/api/integrations/vela/wallet` snapshot) — the same account-scoped
@@ -1622,10 +1629,23 @@ export function SettingsDialog({
   // right next to it, via the SAME card's `amrCardResolvedPlan` below. A team
   // member reads their PERSONAL wallet there even while the card's own badge
   // correctly names the team's paid plan, because nothing fed the workspace's
-  // real balance into the number. `useWorkspaceBilling` is the workspace-scoped
-  // source of truth (same one EntryNavRail's credits chip reads).
-  const workspaceBilling = useWorkspaceBilling();
+  // real balance into the number. `useWorkspaceBillingResponse` carries the
+  // explicit v2 workspace-wallet source independently from account metadata.
+  const workspaceBillingResponse = useWorkspaceBillingResponse();
+  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
+  // The 「升级」 buttons on the AMR model card route through
+  // `workspaceUpgradeUrl` — the one decision point every upgrade affordance
+  // shares (see its docblock in `EntryNavRail.tsx`): personal workspace →
+  // B's wallet pricing modal (`view=plans`, recvpYEiH019cD); team → the
+  // checkout vs change-plan dashboard dialog by subscription state
+  // (recvpSQKna0LwR). The profile fallback keeps the buttons alive after a
+  // signed-out/no-context read; while that read is still loading, hide them so
+  // an owner-only action cannot flash briefly for an admin/member.
+  const amrUpgradeUrl = (profile: string | null | undefined): string | null =>
+    workspaceContextLoading
+      ? null
+      : workspaceUpgradeUrl(workspaceContext, workspaceBilling, { fallbackProfile: profile });
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(true);
   // Scroll the right-hand content pane back to the top whenever the user
@@ -1663,18 +1683,6 @@ export function SettingsDialog({
   useEffect(() => {
     onAmrLoginStatusChange?.(amrCardStatus);
   }, [amrCardStatus, onAmrLoginStatusChange]);
-
-  const formatAmrWalletBalance = useCallback((balanceUsd: string | null | undefined) => {
-    if (!balanceUsd) return null;
-    const amount = Number(balanceUsd);
-    if (!Number.isFinite(amount)) return `$${balanceUsd}`;
-    return new Intl.NumberFormat(locale, {
-      currency: 'USD',
-      maximumFractionDigits: 2,
-      minimumFractionDigits: 2,
-      style: 'currency',
-    }).format(amount);
-  }, [locale]);
 
   const refreshAmrWalletSnapshot = useCallback(async (options: { refresh?: boolean } = {}) => {
     setAmrWalletReady(false);
@@ -1968,19 +1976,6 @@ export function SettingsDialog({
   const handleOpenReleaseNotes = useCallback(() => {
     void openExternalUrl(OPEN_DESIGN_RELEASES_URL);
   }, []);
-
-  // Precise inverse of App.handleCompleteOnboarding: flip
-  // onboardingCompleted back to false, mirror it to localStorage and the
-  // daemon through the same config-persist path, then route the user into
-  // the first-run flow so they can replay setup (including brand extraction).
-  const handleResetOnboarding = useCallback(() => {
-    const next: AppConfig = { ...cfg, onboardingCompleted: false };
-    setCfg(next);
-    saveConfig(next);
-    void syncConfigToDaemon(next);
-    onClose();
-    navigateRoute({ kind: 'home', view: 'onboarding' });
-  }, [cfg, onClose]);
 
   // Imperative handle for the External MCP section. The dialog footer Save
   // routes through this when the MCP tab is active so the user can press the
@@ -3096,6 +3091,7 @@ export function SettingsDialog({
   const autosaveSavedTimerRef = useRef<number | null>(null);
   const autosaveRetryTimerRef = useRef<number | null>(null);
   const autosavePendingFlushRef = useRef(false);
+  const explicitOnboardingResetRef = useRef(false);
   const byokPreflightTrackingRef = useRef<string | null>(null);
   const committedClearedByokProviderKeyRef = useRef<string | null>(null);
   const autosaveLatestRef = useRef<AppConfig>(cfg);
@@ -3111,6 +3107,27 @@ export function SettingsDialog({
   const [autosaveCommitTick, setAutosaveCommitTick] = useState(0);
   const [autosaveRetryTick, setAutosaveRetryTick] = useState(0);
   autosaveLatestRef.current = cfg;
+
+  // App owns the config transition and persistence. Settings only supplies
+  // its latest draft with the explicit reset intent. Cancel a queued autosave
+  // before handing off: the dialog unmounts immediately, and its normal
+  // pending-draft flush must not replay the pre-reset `true` snapshot.
+  const handleResetOnboarding = useCallback(() => {
+    if (!onResetOnboarding) return;
+    explicitOnboardingResetRef.current = true;
+    autosavePendingFlushRef.current = false;
+    if (autosaveTimerRef.current != null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    if (autosaveRetryTimerRef.current != null) {
+      window.clearTimeout(autosaveRetryTimerRef.current);
+      autosaveRetryTimerRef.current = null;
+    }
+    setAutosaveStatus('idle');
+    onResetOnboarding({ ...cfg, onboardingCompleted: false });
+  }, [cfg, onResetOnboarding]);
+
   useEffect(() => {
     if (autosaveSkipFirstRef.current) {
       autosaveSkipFirstRef.current = false;
@@ -3259,7 +3276,10 @@ export function SettingsDialog({
   // timer to avoid setState after unmount.
   useEffect(() => {
     return () => {
-      if (autosavePendingFlushRef.current) {
+      if (
+        autosavePendingFlushRef.current
+        && !explicitOnboardingResetRef.current
+      ) {
         const mediaProvidersVersion = mediaProvidersChangeVersionRef.current;
         // Best-effort flush; if it rejects, localStorage already has
         // the latest copy from the synchronous saveConfig call inside
@@ -3967,14 +3987,17 @@ export function SettingsDialog({
                       : undefined
                   }
                   onDisabledOptionUpgrade={
-                    selected.id === 'amr'
-                      ? () =>
+                    selected.id === 'amr' &&
+                    !workspaceContextLoading &&
+                    (!workspaceContext ||
+                      workspaceContext.permissions?.canManageBilling === true)
+                      ? () => {
+                          const upgradeUrl = amrUpgradeUrl(amrCardStatus?.profile);
+                          if (!upgradeUrl) return;
                           void openExternalUrl(
-                            attributedAmrSettingsUrl(
-                              amrPlansUrlForProfile(amrCardStatus?.profile),
-                              'settings_amr_upgrade',
-                            ),
-                          )
+                            attributedAmrSettingsUrl(upgradeUrl, 'settings_amr_upgrade'),
+                          );
+                        }
                       : undefined
                   }
                 />
@@ -4513,23 +4536,37 @@ export function SettingsDialog({
                               : null;
                           const amrWalletBalance =
                             amrWalletVisible && amrWalletSnapshot?.status === 'available'
-                              ? formatAmrWalletBalance(amrWalletSnapshot.balanceUsd)
+                              ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
                               : null;
                           // recvpZPzGJL7o7: `amrStatusBalance` and `amrWalletBalance`
-                          // are both vela ACCOUNT-scoped reads — the same
-                          // scope `resolvePlanTier` exists to override for the
-                          // plan badge right next to this number. Workspace
-                          // billing (when it has loaded) is the workspace-scoped
-                          // source of truth and wins here for the same reason;
-                          // the account-scoped pair stays as the fallback for
-                          // local/BYOK use with no workspace billing at all.
+                          // are both vela ACCOUNT-scoped reads. A team balance
+                          // may only come from the nested v2 workspace wallet
+                          // response whose workspace identity Vela returned;
+                          // never display the account summary's balance as a
+                          // team fallback. Personal/local use keeps the account
+                          // summary and login-status fallbacks.
+                          //
+                          // recvqakgSc1Pwd: this must read `balanceUsd` — the
+                          // dollar figure vela already computed — not
+                          // `totalAvailableCredits`, a raw credits COUNT on a
+                          // completely different scale (vela reports
+                          // thousands of credits per dollar). Formatting the
+                          // credits count as a dollar amount is what put
+                          // "Balance $388307.00" on a workspace whose real
+                          // balance was under $39.
+                          const workspaceBalanceUsd = workspaceBillingBalanceUsd(
+                            workspaceBillingResponse,
+                            workspaceContext,
+                          );
                           const amrWorkspaceBalance =
-                            amrWalletVisible && workspaceBilling
-                              ? formatVelaBalanceUsd(String(workspaceBilling.totalAvailableCredits))
+                            amrWalletVisible && workspaceBalanceUsd
+                              ? formatVelaBalanceUsd(workspaceBalanceUsd)
                               : null;
                           const amrCardBalanceLabel =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? amrWorkspaceBalance ?? amrStatusBalance ?? amrWalletBalance
+                              ? workspaceContext?.workspaceType === 'team'
+                                ? amrWorkspaceBalance
+                                : amrWorkspaceBalance ?? amrStatusBalance ?? amrWalletBalance
                               : null;
                           // vela's `account.plan` is ACCOUNT-scoped, so a member
                           // whose plan is held by the team workspace reads
@@ -4549,9 +4586,17 @@ export function SettingsDialog({
                           const amrCardPlanLabel = amrCardResolvedPlan
                             ? planBadgeTierForLabel(amrCardResolvedPlan) ?? amrCardResolvedPlan
                             : null;
+                          // recvqfYKutwWlQ: a team member without billing
+                          // permission (owner-only) can't act on an upgrade
+                          // even when the plan tier itself is upgradeable, so
+                          // the entry point must not render for them. Personal
+                          // workspaces always resolve `canManageBilling` true
+                          // (the user is their own owner), so this does not
+                          // affect the personal-workspace upgrade path.
                           const amrCardCanUpgrade =
                             isAmrAgent && active && amrCardStatus?.loggedIn
-                              ? canUpgradeVelaPlan(amrCardStatus.account?.plan)
+                              ? canUpgradeVelaPlan(amrCardStatus.account?.plan) &&
+                                Boolean(workspaceContext?.permissions?.canManageBilling)
                               : false;
                           const amrRevealPendingCancelAction =
                             isAmrAgent &&
@@ -4745,16 +4790,18 @@ export function SettingsDialog({
                                           type="button"
                                           className="agent-card-amr-upgrade"
                                           data-testid="settings-agent-card-amr-upgrade"
-                                          onClick={() =>
+                                          onClick={() => {
+                                            const upgradeUrl = amrUpgradeUrl(
+                                              amrCardStatus?.profile,
+                                            );
+                                            if (!upgradeUrl) return;
                                             void openExternalUrl(
                                               attributedAmrSettingsUrl(
-                                                amrPlansUrlForProfile(
-                                                  amrCardStatus?.profile,
-                                                ),
+                                                upgradeUrl,
                                                 'settings_amr_upgrade',
                                               ),
-                                            )
-                                          }
+                                            );
+                                          }}
                                         >
                                           {t('settings.amrUpgrade')}
                                         </button>

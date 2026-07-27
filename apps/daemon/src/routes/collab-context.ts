@@ -6,9 +6,11 @@ import type {
   WorkspaceBillingCatalog,
   WorkspaceBillingCatalogResponse,
   WorkspaceBillingCheckoutResponse,
+  WorkspaceBillingSnapshot,
   WorkspaceTeamBillingPlanId,
   WorkspaceBillingResponse,
   WorkspaceBillingSummary,
+  WorkspaceWalletBalance,
   WorkspaceDirectoryItem,
   WorkspaceDirectoryResponse,
   WorkspaceContextResponse,
@@ -35,9 +37,20 @@ import {
 import {
   fetchBillingCheckoutUrl,
   fetchVelaBillingCatalog,
+  fetchVelaWorkspaceBillingProjection,
   fetchVelaBillingSummary,
+  type VelaWorkspaceBillingProjection,
 } from '../integrations/vela-billing.js';
-import { listVelaWorkspaceDirectory } from '../collab/vela-workspace-context.js';
+import {
+  listVelaWorkspaceDirectory,
+  type WorkspaceDirectoryFetchResult,
+} from '../collab/vela-workspace-context.js';
+import {
+  createWorkspaceBillingRuntimeCoordinator,
+  WorkspaceBillingInterestError,
+  type WorkspaceBillingRuntimeCoordinator,
+  type WorkspaceBillingRuntimeResult,
+} from '../collab/workspace-billing-runtime.js';
 
 export interface RegisterCollabContextRoutesDeps {
   workspaceContext: WorkspaceContextProvider;
@@ -46,7 +59,15 @@ export interface RegisterCollabContextRoutesDeps {
   /** Injectable for tests; defaults to creating invites on B with the vela session. */
   createInvite?: (input: CreateWorkspaceInviteInput) => Promise<CreateInviteOutcome>;
   /** Injectable for tests; defaults to the vela billing CLI 收口. */
-  fetchBilling?: (workspaceId: string) => Promise<WorkspaceBillingSummary | null>;
+  fetchBilling?: () => Promise<WorkspaceBillingSummary | null>;
+  /** Injectable for tests; returns one backend-proven v2 workspace wallet. */
+  fetchWorkspaceBalance?: (workspaceId: string) => Promise<WorkspaceWalletBalance | null>;
+  /** Injectable for tests; returns the additive atomic plan+wallet projection. */
+  fetchWorkspaceBillingProjection?: (
+    workspaceId: string,
+  ) => Promise<VelaWorkspaceBillingProjection>;
+  /** Daemon-owned exact-scope billing state. Shared with upstream SSE hooks. */
+  billingRuntime?: WorkspaceBillingRuntimeCoordinator;
   /** Injectable for tests; defaults to the vela billing catalog CLI 收口. */
   fetchBillingCatalog?: (workspaceId: string) => Promise<WorkspaceBillingCatalog | null>;
   /** Injectable for tests; defaults to the vela billing checkout CLI 收口. */
@@ -77,6 +98,11 @@ export interface RegisterCollabContextRoutesDeps {
   };
   /** Injectable for tests; defaults to the Vela workspace directory API. */
   listWorkspaceDirectory?: () => Promise<WorkspaceDirectoryItem[]>;
+  /**
+   * Directory read with an authoritative-success bit. An unavailable backend
+   * must never be collapsed into a confirmed empty membership list.
+   */
+  fetchWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   /**
    * Collab realtime hop-2 — the workspace-scoped invalidation SSE seams. When
    * both are provided the daemon registers `GET /api/workspace/events`; the route
@@ -135,8 +161,21 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const consumeInvite = deps.consumeInvite ?? ((nonce: string) => consumeInviteContinuation(nonce));
   const createInvite =
     deps.createInvite ?? ((input: CreateWorkspaceInviteInput) => createWorkspaceInvite(input));
-  const fetchBilling =
-    deps.fetchBilling ?? ((workspaceId: string) => fetchVelaBillingSummary(workspaceId));
+  const fetchBilling = deps.fetchBilling ?? (() => fetchVelaBillingSummary());
+  const fetchWorkspaceBillingProjection =
+    deps.fetchWorkspaceBillingProjection ??
+    (deps.fetchWorkspaceBalance
+      ? async (workspaceId: string): Promise<VelaWorkspaceBillingProjection> => ({
+          snapshot: null,
+          workspaceBalance: await deps.fetchWorkspaceBalance!(workspaceId),
+        })
+      : (workspaceId: string) => fetchVelaWorkspaceBillingProjection(workspaceId));
+  const billingRuntime =
+    deps.billingRuntime ??
+    createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: ({ workspaceId }) =>
+        fetchWorkspaceBillingProjection(workspaceId),
+    });
   const fetchBillingCatalog =
     deps.fetchBillingCatalog ?? ((workspaceId: string) => fetchVelaBillingCatalog(workspaceId));
   const startCheckout =
@@ -148,6 +187,12 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   const listMembers = deps.listMembers ?? (async () => []);
   const listWorkspaceDirectory =
     deps.listWorkspaceDirectory ?? (() => listVelaWorkspaceDirectory());
+  const fetchWorkspaceDirectory =
+    deps.fetchWorkspaceDirectory ??
+    (async (): Promise<WorkspaceDirectoryFetchResult> => ({
+      ok: true,
+      items: await listWorkspaceDirectory(),
+    }));
 
   // Desktop invite hand-off ("桌面唤起和本地恢复"): the desktop app parses the
   // opendesign:// invite deeplink and POSTs the nonce here. The daemon consumes
@@ -327,26 +372,140 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     res.json(body);
   });
 
-  // A-lane billing 收口: the client's credits chip fetches the caller's real
-  // plan tier + credit balance here. The daemon shells out to `vela billing
-  // summary` (same vela session as resources); a null summary means the CLI /
-  // session is unavailable and the client keeps its context-derived tier hint.
-  // This route is also the sync-back path after a user upgrades in Vela Web.
+  // Billing reads are explicit at the HTTP boundary:
+  // - scope=account is the personal/account summary;
+  // - scope=workspace requires a workspaceId that resolves to an active team
+  //   membership in the directory, then reads Vela's independently scoped v2
+  //   wallet response.
   //
-  // Scoped to the ACTIVE workspace, exactly like the catalog route below it.
-  // The handler used to take no request at all, which made the summary an
-  // account question: switching workspaces re-read the same wallet and the
-  // same tier, so one account displayed identical credits everywhere (#134).
-  // Unlike the catalog, an absent workspace is NOT an empty answer here —
-  // B's wallet is readable without one — so the read still happens and the
-  // summary simply carries a null workspace stamp.
+  // The URL is the selection source. Authorization is an independent
+  // membership lookup — never daemon-global active/current state — so two
+  // clients can address different workspaces without switching each other.
+  // Account metadata and workspace money remain independently nullable.
   app.get('/api/workspace/billing', async (req, res) => {
-    const authorization = req.header('authorization') ?? undefined;
-    const context = await workspaceContext.current({ authorization });
-    const workspaceId = context?.workspaceId?.trim() ?? '';
-    const summary = await fetchBilling(workspaceId);
-    const body: WorkspaceBillingResponse = { summary };
-    res.json(body);
+    const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
+    const requestedWorkspaceId =
+      typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    if (
+      (scope !== 'account' && scope !== 'workspace') ||
+      (scope === 'account' && requestedWorkspaceId) ||
+      (scope === 'workspace' && !requestedWorkspaceId)
+    ) {
+      return res.status(400).json({ error: 'invalid_billing_scope' });
+    }
+    if (scope === 'account') {
+      const summary = await fetchBilling();
+      const body: WorkspaceBillingResponse = { summary, workspaceBalance: null };
+      return res.json(body);
+    }
+
+    const clientId = req.header('x-od-workspace-runtime-client-id') ?? undefined;
+    const clientGeneration =
+      req.header('x-od-workspace-runtime-generation') ?? undefined;
+    const directoryResult = await fetchWorkspaceDirectory().catch(
+      (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+    );
+    if (!directoryResult.ok) {
+      billingRuntime.markWorkspaceUnavailable(
+        requestedWorkspaceId,
+        'workspace_directory_unavailable',
+      );
+      const unavailable = clientId
+        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
+        : null;
+      if (unavailable?.state.status === 'error') {
+        const body: WorkspaceBillingResponse = {
+          summary: null,
+          workspaceBalance: null,
+          workspaceSnapshot: null,
+          workspaceRuntime: unavailable.state,
+        };
+        return res.json(body);
+      }
+      return res.status(503).json({ error: 'workspace_directory_unavailable' });
+    }
+    const directory = directoryResult.items;
+    const membership = directory.find(
+      (item) =>
+        item.workspaceId === requestedWorkspaceId &&
+        item.workspaceType === 'team' &&
+        item.memberStatus === 'active' &&
+        item.lifecycleState === 'active',
+    );
+    if (!membership) {
+      billingRuntime.revokeWorkspace(requestedWorkspaceId);
+      const revoked = clientId
+        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
+        : null;
+      if (revoked?.state.status === 'access-revoked') {
+        const body: WorkspaceBillingResponse = {
+          summary: null,
+          workspaceBalance: null,
+          workspaceSnapshot: null,
+          workspaceRuntime: revoked.state,
+        };
+        return res.json(body);
+      }
+      return res.status(409).json({ error: 'workspace_not_authorized' });
+    }
+    billingRuntime.retainWorkspaceMember(
+      requestedWorkspaceId,
+      membership.workspaceMemberId,
+    );
+    billingRuntime.authorizeWorkspaceMember({
+      workspaceId: requestedWorkspaceId,
+      workspaceMemberId: membership.workspaceMemberId,
+    });
+    let accountSummary: WorkspaceBillingSummary | null;
+    let runtimeResult: WorkspaceBillingRuntimeResult;
+    try {
+      [accountSummary, runtimeResult] = await Promise.all([
+        fetchBilling(),
+        billingRuntime.read(
+          {
+            workspaceId: requestedWorkspaceId,
+            workspaceMemberId: membership.workspaceMemberId,
+          },
+          {
+            reason: 'explicit-billing-read',
+            ...(clientId ? { clientId } : {}),
+            ...(clientGeneration ? { clientGeneration } : {}),
+          },
+        ),
+      ]);
+    } catch (error) {
+      if (error instanceof WorkspaceBillingInterestError) {
+        return res.status(409).json({
+          error: error.code,
+          ...(error.acceptedGeneration
+            ? { acceptedGeneration: error.acceptedGeneration }
+            : {}),
+        });
+      }
+      throw error;
+    }
+    const projection = runtimeResult.projection;
+    const workspaceBalance = projection.workspaceBalance;
+    const authorizedWorkspaceBalance =
+      workspaceBalance?.workspaceId === requestedWorkspaceId &&
+      workspaceBalance.workspaceMemberId === membership.workspaceMemberId
+        ? workspaceBalance
+        : null;
+    const snapshot = projection.snapshot;
+    const authorizedWorkspaceSnapshot: WorkspaceBillingSnapshot | null =
+      snapshot?.workspaceId === requestedWorkspaceId &&
+      snapshot.workspaceMemberId === membership.workspaceMemberId
+        ? snapshot
+        : null;
+    const body: WorkspaceBillingResponse = {
+      summary: accountSummary,
+      workspaceBalance: authorizedWorkspaceBalance,
+      ...(authorizedWorkspaceSnapshot
+        ? { workspaceSnapshot: authorizedWorkspaceSnapshot }
+        : {}),
+      workspaceRuntime: runtimeResult.state,
+    };
+    return res.json(body);
   });
 
   app.get('/api/workspace/billing/catalog', async (req, res) => {

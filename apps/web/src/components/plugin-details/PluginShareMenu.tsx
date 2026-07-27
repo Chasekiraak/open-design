@@ -60,7 +60,7 @@ interface ShareLinkItem {
   href: string;
 }
 
-function buildInstallCommand(record: InstalledPluginRecord): string {
+export function buildPluginInstallCommand(record: InstalledPluginRecord): string {
   // The daemon's install resolver accepts the raw `record.source`
   // shape for every kind (github:owner/repo[@ref][/sub], https URL,
   // local path, marketplace id), so we mirror it verbatim. For
@@ -154,7 +154,7 @@ export function PluginShareMenu({ record, variant = 'default' }: Props) {
       label: t('plugins.actions.copyInstallCommand'),
       icon: 'copy',
       copies: true,
-      onSelect: () => copyPluginShareText(buildInstallCommand(record), 'install'),
+      onSelect: () => copyPluginShareText(buildPluginInstallCommand(record), 'install'),
     },
     {
       key: 'id',

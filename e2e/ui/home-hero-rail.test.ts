@@ -1464,7 +1464,7 @@ test('[P1] home hero example presets update the composer input for prototype and
   await expect(input).toHaveText('Create a live Notion dashboard artifact.');
 });
 
-test('[P1] home hero example preset Use button applies the template without relying on card click', async ({ page }) => {
+test('[P1] home hero example preset card has no hover overlay and applies the template directly', async ({ page }) => {
   await gotoEntryHome(page);
 
   const input = page.getByTestId('home-hero-input');
@@ -1472,185 +1472,25 @@ test('[P1] home hero example preset Use button applies the template without rely
 
   await pickHomeTemplate(page, 'prototype');
   await expect(page.getByTestId('home-hero-plugin-presets')).toBeVisible();
-  await useExamplePreset(page, 'example-web-prototype');
+
+  const card = page.locator(
+    '[data-testid="home-hero-plugin-preset"][data-plugin-id="example-web-prototype"]',
+  );
+  await card.hover();
+  // 2026-07 product decision: drop the hover-revealed Use/Remix overlay
+  // (#4861) and restore the #5517 baseline where the whole card is the
+  // single click-to-use affordance — no separate button, no preview modal.
+  await expect(
+    page.getByTestId('home-hero-plugin-preset-use-example-web-prototype'),
+  ).toHaveCount(0);
+  await expect(page.locator('.home-hero__plugin-preset-actions')).toHaveCount(0);
+
+  await card.click();
 
   await expect(page.getByTestId('home-hero-active-plugin')).toBeVisible();
   await expect(input).toHaveText(
     'Build a high-fidelity web prototype for product evaluators using the active project design system from the bundled web prototype seed.',
   );
-});
-
-test('[P1] home hero example preset Copy creates a project from the template preview', async ({ page }) => {
-  const projectId = 'home-preset-copy-project';
-  const conversationId = 'conv-home-preset-copy';
-  const duplicateRequests: Array<{ name?: string }> = [];
-  const copyPlugin = homePresetCopyPlugin('example-web-prototype', 'Web Prototype');
-
-  await page.unroute('**/api/plugins');
-  await page.route('**/api/plugins', async (route) => {
-    await route.fulfill({ json: { plugins: [copyPlugin] } });
-  });
-  await page.route('**/api/plugins/example-web-prototype/preview', async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'text/html' },
-      body: '<!doctype html><html><body><main><h1>Home Preset Copy Preview</h1></main></body></html>',
-    });
-  });
-  await page.route('**/api/plugins/example-web-prototype/duplicate-project', async (route) => {
-    duplicateRequests.push(route.request().postDataJSON() as { name?: string });
-    await route.fulfill({
-      json: {
-        ok: true,
-        sourcePluginId: 'example-web-prototype',
-        projectId,
-        conversationId,
-        relPath: 'example.html',
-        warnings: [],
-      },
-    });
-  });
-  await routeMinimalProjectWorkspace(page, projectId, conversationId, {
-    name: 'Web Prototype',
-    metadata: {
-      kind: 'prototype',
-      templateId: 'plugin:example-web-prototype',
-      duplicatedFromPluginId: 'example-web-prototype',
-    },
-  });
-  await page.route(`**/api/projects/${projectId}/files/example.html`, async (route) => {
-    await route.fulfill({
-      json: {
-        file: {
-          name: 'example.html',
-          path: 'example.html',
-          kind: 'html',
-          size: 96,
-          updatedAt: Date.now(),
-          content: '<!doctype html><html><body><h1>Copied preset</h1></body></html>',
-        },
-      },
-    });
-  });
-
-  await gotoEntryHome(page);
-  await pickHomeTemplate(page, 'prototype');
-  await expect(page.locator('[data-testid="home-hero-plugin-preset"][data-plugin-id="example-web-prototype"]')).toBeVisible();
-  const preset = page.locator('[data-testid="home-hero-plugin-preset"][data-plugin-id="example-web-prototype"]');
-  await preset.hover();
-  const duplicateButton = page.getByTestId('home-hero-plugin-preset-duplicate-example-web-prototype');
-  await expect(duplicateButton).toBeVisible();
-  await duplicateButton.click();
-
-  await expect
-    .poll(() => duplicateRequests.at(-1)?.name)
-    .toBe('Web Prototype');
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}`));
-});
-
-test('[P1] home hero example preset Copy failure keeps Home retryable', async ({ page }) => {
-  const duplicateRequests: Array<{ name?: string }> = [];
-  const copyPlugin = homePresetCopyPlugin('example-web-prototype', 'Web Prototype');
-
-  await page.unroute('**/api/plugins');
-  await page.route('**/api/plugins', async (route) => {
-    await route.fulfill({ json: { plugins: [copyPlugin] } });
-  });
-  await page.route('**/api/plugins/example-web-prototype/preview', async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: { 'content-type': 'text/html' },
-      body: '<!doctype html><html><body><main><h1>Copy Failure Preview</h1></main></body></html>',
-    });
-  });
-  await page.route('**/api/plugins/example-web-prototype/duplicate-project', async (route) => {
-    duplicateRequests.push(route.request().postDataJSON() as { name?: string });
-    await route.fulfill({
-      status: 500,
-      json: { error: { code: 'duplicate-failed', message: 'fixture duplicate failure' } },
-    });
-  });
-
-  await gotoEntryHome(page);
-  await pickHomeTemplate(page, 'prototype');
-  const duplicateButton = page.getByTestId('home-hero-plugin-preset-duplicate-example-web-prototype');
-  await page.locator('[data-testid="home-hero-plugin-preset"][data-plugin-id="example-web-prototype"]').hover();
-  await expect(duplicateButton).toBeVisible();
-  await duplicateButton.click();
-
-  await expect
-    .poll(() => duplicateRequests.at(-1)?.name)
-    .toBe('Web Prototype');
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator('.home-hero__error')).toContainText('Could not remix this template.');
-  await expect(duplicateButton).not.toHaveAttribute('aria-busy', 'true');
-  await expect(duplicateButton).toBeEnabled();
-});
-
-test('[P1] home hero preset inline Use and Duplicate actions work from the template card', async ({ page }) => {
-  const duplicateRequests: Array<{ name?: string }> = [];
-  await page.route('**/api/plugins/example-web-prototype/duplicate-project', async (route) => {
-    duplicateRequests.push(route.request().postDataJSON() as { name?: string });
-    await route.fulfill({
-      json: {
-        ok: true,
-        sourcePluginId: 'example-web-prototype',
-        projectId: 'web-prototype-template-project',
-        conversationId: 'web-prototype-template-conversation',
-        relPath: 'index.html',
-      },
-    });
-  });
-  await page.route('**/api/projects/web-prototype-template-project', async (route) => {
-    await route.fulfill({
-      json: {
-        project: {
-          id: 'web-prototype-template-project',
-          name: 'Web Prototype',
-          path: '/tmp/open-design/web-prototype-template-project',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          metadata: { kind: 'prototype', duplicatedFromPluginId: 'example-web-prototype' },
-        },
-      },
-    });
-  });
-  await page.route('**/api/projects/web-prototype-template-project/conversations', async (route) => {
-    await route.fulfill({
-      json: {
-        conversations: [
-          {
-            id: 'web-prototype-template-conversation',
-            title: 'Web Prototype',
-            projectId: 'web-prototype-template-project',
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            sessionMode: 'design',
-          },
-        ],
-      },
-    });
-  });
-  await page.route('**/api/projects/web-prototype-template-project/conversations/*/messages**', async (route) => {
-    await route.fulfill({ json: { messages: [] } });
-  });
-
-  await gotoEntryHome(page);
-  await pickHomeTemplate(page, 'prototype');
-  const card = page.locator('[data-testid="home-hero-plugin-preset"][data-plugin-id="example-web-prototype"]');
-  await card.hover();
-
-  await useExamplePreset(page, 'example-web-prototype');
-  await expect(page.getByTestId('home-hero-input')).toHaveText(
-    'Build a high-fidelity web prototype for product evaluators using the active project design system from the bundled web prototype seed.',
-  );
-
-  await card.hover();
-  await page.getByTestId('home-hero-plugin-preset-duplicate-example-web-prototype').click();
-  await expect
-    .poll(() => duplicateRequests.at(-1)?.name)
-    .toBe('Web Prototype');
-  await expect(page).toHaveURL(/\/projects\/web-prototype-template-project/);
 });
 
 test('[P1] home hero deck example preset updates the composer input', async ({ page }) => {
@@ -1746,32 +1586,32 @@ test('[P1] selecting another example updates the composer input', async ({ page 
 });
 
 /**
- * Apply an example preset to the composer. Clicking the preset CARD opens the
- * plugin details modal (`onPreview` → `onOpenPluginDetails`); the card's
- * hover-revealed "Use" action is what seeds the prompt, so drive that.
+ * Apply an example preset to the composer. The preset card itself is the
+ * single click-to-use affordance (2026-07 removed the separate
+ * hover-revealed "Use"/"Remix" overlay buttons and restored the #5517
+ * baseline), so this is just a plain click on the card.
  */
 async function usePreset(page: Page, pluginId: string) {
   const card = page.locator(
     `[data-testid="home-hero-plugin-preset"][data-plugin-id="${pluginId}"]`,
   );
   await expect(card).toBeVisible();
-  await card.hover();
-  const use = page.getByTestId(`home-hero-plugin-preset-use-${pluginId}`);
-  await expect(use).toBeVisible();
-  await use.click();
+  await card.click();
 }
 
 // Template selection / clearing now lives in `@/playwright/home-hero`
 // (`pickHomeTemplate` / `clearHomeTemplate`): both used to be local helpers
 // built on the deleted `home-hero-rail-*` cards and `home-hero-active-type-chip`.
+//
+// Historical alias from when picking a preset was a two-step hover + Use
+// button flow (`usePreset` hovered/asserted, `useExamplePreset` clicked);
+// kept so existing call-site pairs still resolve without churning every
+// caller now that both steps collapse into one click.
 async function useExamplePreset(page: Page, pluginId: string) {
   const card = page.locator(
     `[data-testid="home-hero-plugin-preset"][data-plugin-id="${pluginId}"]`,
   );
-  await card.hover();
-  const useButton = page.getByTestId(`home-hero-plugin-preset-use-${pluginId}`);
-  await expect(useButton).toBeVisible();
-  await useButton.click();
+  await card.click();
 }
 
 function activeHeroChip(page: Page) {
@@ -1858,42 +1698,6 @@ async function routeMinimalProjectWorkspace(
   await page.route('**/api/live-artifacts**', async (route) => {
     await route.fulfill({ json: { liveArtifacts: [] } });
   });
-}
-
-function homePresetCopyPlugin(id: string, title: string) {
-  return {
-    id,
-    title,
-    version: '1.0.0',
-    trust: 'trusted',
-    sourceKind: 'bundled',
-    source: `/tmp/${id}`,
-    fsPath: `/tmp/${id}`,
-    capabilitiesGranted: ['prompt:inject'],
-    installedAt: 0,
-    updatedAt: 0,
-    manifest: {
-      name: id,
-      title,
-      version: '1.0.0',
-      description: `${title} fixture.`,
-      tags: ['prototype', 'template'],
-      od: {
-        kind: 'scenario',
-        taskKind: 'new-generation',
-        mode: 'prototype',
-        preview: {
-          type: 'html',
-          entry: './example.html',
-        },
-        useCase: {
-          query: {
-            en: 'Build a copied template.',
-          },
-        },
-      },
-    },
-  };
 }
 
 async function routeRunsAccepted(page: Page) {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createVelaWorkspaceContextProvider,
   mapVelaWorkspaceContext,
@@ -37,6 +37,10 @@ const SESSION = { profile: 'prod', apiUrl: 'https://vela.example', controlKey: '
 function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('mapVelaWorkspaceContext', () => {
   it('maps a team context, deriving teamId from workspaceId and preserving BYOK', () => {
@@ -185,6 +189,7 @@ describe('createVelaWorkspaceContextProvider explicit local scope', () => {
   }
 
   it('picks a LOCAL default (personal first) with no server write when B has no current', async () => {
+    vi.stubEnv('OD_VELA_WEB_URL', 'https://web.example.com/console');
     const { fetchImpl, calls } = scriptedFetch({
       current: () => jsonResponse(403, { error: 'missing_principal' }),
       directory: () => jsonResponse(200, DIRECTORY),
@@ -200,9 +205,38 @@ describe('createVelaWorkspaceContextProvider explicit local scope', () => {
     expect(context?.workspaceId).toBe('ws-personal-1');
     expect(context?.workspaceType).toBe('personal');
     expect(context?.workspaceMemberId).toBe('wm-p1');
+    expect(context?.workspaceSettingsUrl).toBe(
+      'https://web.example.com/console/settings?workspaceId=ws-personal-1',
+    );
     // Resource semantics from the handoff: a plain read NEVER writes the
     // account-level Active Workspace.
     expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+  });
+
+  it('keeps Personal workspace actions stable from a synthesized context to a rich refresh', async () => {
+    vi.stubEnv('OD_VELA_WEB_URL', 'https://web.example.com/console');
+    let currentRead = 0;
+    const { fetchImpl } = scriptedFetch({
+      // First read disagrees with OD's Personal pin and forces directory
+      // synthesis. The next read models the rich response after switching away
+      // and back, when B's account-level current finally matches the local pin.
+      current: () => jsonResponse(200, currentRead++ === 0 ? B_TEAM_CONTEXT : B_PERSONAL_CONTEXT),
+      directory: () => jsonResponse(200, DIRECTORY),
+    });
+    const provider = createVelaWorkspaceContextProvider({
+      fetch: fetchImpl,
+      readSession: () => SESSION,
+      getActiveWorkspaceId: () => 'ws-personal-1',
+    });
+
+    const initial = await provider.current({});
+    const refreshed = await provider.current({});
+
+    expect(initial?.workspaceType).toBe('personal');
+    expect(initial?.workspaceSettingsUrl).toBe(
+      'https://web.example.com/console/settings?workspaceId=ws-personal-1',
+    );
+    expect(refreshed?.workspaceSettingsUrl).toBe(initial?.workspaceSettingsUrl);
   });
 
   it('serves the local selection and ignores a mismatched server current', async () => {

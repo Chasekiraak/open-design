@@ -125,6 +125,7 @@ import { designSystemGithubEvidenceState, repoConnectCopy } from './design-syste
 import { APP_CHROME_FILE_ACTIONS_ID } from './AppChromeHeader';
 import { FileViewer, LiveArtifactViewer } from './FileViewer';
 import { Icon, type IconName } from './Icon';
+import { FileSyncBadge, type FileSyncBadgeState } from '../collab/FileSyncBadge';
 import { Toast } from './Toast';
 import { TabLauncherMenu } from './workspace/TabLauncherMenu';
 import { buildLauncherActions, type LauncherContext } from './workspace/tab-launcher';
@@ -245,8 +246,21 @@ interface Props {
   onFocusModeChange?: (next: boolean) => void;
   designSystemProject?: DesignSystemSummary | null;
   designSystemBrandId?: string | null;
-  /** False while a brand-extraction design system is still running. */
+  /**
+   * False while a brand-extraction design system is still running, OR
+   * (recvqb6mfyqXLD) the caller may not manage a team-synced design system
+   * (`designSystemProject.canMutate === false`) — gates the Publish toggle,
+   * DESIGN.md save, delete, and asset edit affordances below.
+   */
   designSystemEditable?: boolean;
+  /**
+   * True only while a brand extraction is genuinely still generating —
+   * distinct from `designSystemEditable` above, which also folds in
+   * ownership. Drives the "Extracting design system…" status pill, which
+   * must not read as "still extracting" over a finished, published design
+   * system just because the viewer cannot manage it.
+   */
+  designSystemExtractionInProgress?: boolean;
   defaultDesignSystemId?: string | null;
   onSetDefaultDesignSystem?: (id: string | null) => Promise<void> | void;
   onDesignSystemsRefresh?: () => Promise<void> | void;
@@ -324,6 +338,14 @@ interface Props {
   viewerOnly?: boolean;
   /** Optional override for the read-only notice text. */
   readonlyNotice?: string;
+  /**
+   * Team-share file-sync state for the project. It is rendered on the Design
+   * Files root tab and open design-file tabs (never terminal / side-chat /
+   * browser tabs). `downloading` — a non-owner member's local copy has not
+   * caught up to the published head. `uploading` — the owner's local edits
+   * have not yet been published. Null once caught up / not a shared project.
+   */
+  fileSyncBadge?: FileSyncBadgeState | null;
 }
 
 interface SketchState {
@@ -1262,6 +1284,7 @@ export function FileWorkspace({
   designSystemProject = null,
   designSystemBrandId = null,
   designSystemEditable = true,
+  designSystemExtractionInProgress = false,
   defaultDesignSystemId = null,
   onSetDefaultDesignSystem,
   onDesignSystemsRefresh,
@@ -1303,6 +1326,7 @@ export function FileWorkspace({
   headerActions,
   viewerOnly = false,
   readonlyNotice,
+  fileSyncBadge = null,
 }: Props) {
   const { locale, t } = useI18n();
   const { context: workspaceContext } = useWorkspaceContext();
@@ -1334,6 +1358,15 @@ export function FileWorkspace({
   const [activeTab, setActiveTab] = useState<string>(
     tabsState.active ?? defaultRootTab,
   );
+  const fileSyncBadgeLabel = fileSyncBadge
+    ? fileSyncBadge === 'downloading'
+      ? t('workspace.fileSyncDownloading')
+      : t('workspace.fileSyncUploading')
+    : null;
+  const designFilesTabLabel = t('workspace.designFiles');
+  const designFilesTabTitle = fileSyncBadgeLabel
+    ? `${designFilesTabLabel} · ${fileSyncBadgeLabel}`
+    : designFilesTabLabel;
 
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -3396,15 +3429,20 @@ export function FileWorkspace({
             className={`ws-tab design-files-tab ${activeTab === DESIGN_FILES_TAB ? 'active' : ''}`}
             role="tab"
             aria-selected={activeTab === DESIGN_FILES_TAB}
+            aria-label={designFilesTabTitle}
             tabIndex={0}
             data-testid="design-files-tab"
             onClick={() => setPersistedActive(DESIGN_FILES_TAB)}
-            title={t('workspace.designFiles')}
+            title={designFilesTabTitle}
           >
             <span className="tab-icon" aria-hidden>
-              <Icon name="grid" size={14} />
+              {fileSyncBadge ? (
+                <FileSyncBadge state={fileSyncBadge} size={14} />
+              ) : (
+                <Icon name="grid" size={14} />
+              )}
             </span>
-            <span className="ws-tab-label">{t('workspace.designFiles')}</span>
+            <span className="ws-tab-label">{designFilesTabLabel}</span>
           </button>
           {visibleOrderedWorkspaceTabs.map((entry) => {
             if (entry.kind === 'browser') {
@@ -3459,11 +3497,20 @@ export function FileWorkspace({
                 ? 'comment'
                 : undefined;
             const handlers = tabHandlersFor(name);
+            // The sync badge only makes sense on a real design-file tab: a
+            // terminal / side-chat tab has no on-disk content to sync, and a
+            // live artifact is baked output, not the source file being pulled
+            // or published.
+            const tabSyncBadge =
+              fileSyncBadge && !isTerminal && !isSideChat && !liveArtifact
+                ? fileSyncBadge
+                : null;
             return (
               <Tab
                 key={name}
                 label={label}
                 iconNameOverride={iconNameOverride}
+                syncBadge={tabSyncBadge}
                 active={activeTab === name}
                 onActivate={handlers.onActivate}
                 onClose={handlers.onClose}
@@ -3641,6 +3688,7 @@ export function FileWorkspace({
             system={designSystemProject}
             brandId={designSystemBrandId}
             editable={designSystemEditable}
+            extractionInProgress={designSystemExtractionInProgress}
             files={visibleFiles}
             streaming={Boolean(streaming)}
             activityEvents={designSystemActivityEvents}
@@ -3664,6 +3712,7 @@ export function FileWorkspace({
             key={projectId}
             projectId={projectId}
             viewerOnly={viewerOnly}
+            downloadPending={fileSyncBadge === 'downloading'}
             rootDirName={rootDirName}
             reloading={reloading}
             running={Boolean(streaming)}
@@ -3970,6 +4019,7 @@ function DesignSystemProjectPanel({
   system,
   brandId,
   editable,
+  extractionInProgress,
   files,
   streaming,
   activityEvents,
@@ -3992,6 +4042,7 @@ function DesignSystemProjectPanel({
   system: DesignSystemSummary;
   brandId?: string | null;
   editable: boolean;
+  extractionInProgress?: boolean;
   files: ProjectFile[];
   streaming: boolean;
   activityEvents: AgentEvent[];
@@ -4208,7 +4259,7 @@ function DesignSystemProjectPanel({
   // navigates home — so the panel unmounts on success and there's no busy reset
   // to do in the happy path.
   async function deleteDesignSystemProject() {
-    if (kitActionBusy || !onDeleteDesignSystemProject) return;
+    if (kitActionBusy || !onDeleteDesignSystemProject || !editable) return;
     const ok = window.confirm(
       t('ds.deleteProjectConfirm', { title: system.title }),
     );
@@ -4694,7 +4745,11 @@ function DesignSystemProjectPanel({
   // header's "More" dropdown so the sticky row reads as one clear action.
   const repoCopy = repoConnectCopy(t, githubConnected);
   const publishActionLabel = published ? t('ds.unpublishDesignSystem') : t('ds.publishDesignSystem');
-  const extractionRunning = !editable || streaming;
+  // recvqb6mfyqXLD: keyed off `extractionInProgress` (brand-extraction-only),
+  // NOT `!editable` — `editable` also folds in ownership now, and a
+  // non-owning member of a finished, published team-synced design system
+  // must not see this pill read "still extracting".
+  const extractionRunning = extractionInProgress || streaming;
   const actionsSlot = (
     <span
       className="ds-project-publish-trigger"
@@ -4756,6 +4811,10 @@ function DesignSystemProjectPanel({
           } satisfies HeaderMenuAction,
         ]
       : []),
+    // recvqb6mfyqXLD: deleting a design system the caller does not own must
+    // be unavailable here the same way it already is for refresh/download/
+    // default above — `editable` folds in `canMutate` (ProjectView.tsx), the
+    // daemon's own team-share ownership verdict.
     ...(onDeleteDesignSystemProject
       ? [
           {
@@ -4763,7 +4822,7 @@ function DesignSystemProjectPanel({
             label: t('ds.deleteProjectAction', { title: system.title }),
             icon: 'trash' as IconName,
             onClick: () => void deleteDesignSystemProject(),
-            disabled: Boolean(kitActionBusy) || statusBusy || defaultBusy,
+            disabled: !editable || Boolean(kitActionBusy) || statusBusy || defaultBusy,
             loading: kitActionBusy === 'delete',
           } satisfies HeaderMenuAction,
         ]
@@ -7562,6 +7621,7 @@ const Tab = memo(function Tab({
   closable = true,
   kind,
   iconNameOverride,
+  syncBadge,
   liveArtifact,
   draggable = false,
   dragging = false,
@@ -7582,6 +7642,9 @@ const Tab = memo(function Tab({
   kind?: ProjectFile['kind'] | 'live-artifact' | 'browser';
   /** Force a specific icon (e.g. non-file tabs like terminal:<id> / chat:<id>). */
   iconNameOverride?: IconName;
+  /** Team-share sync state for this tab's file. Replaces the file-type icon
+   *  with an animated downloading/uploading badge while set. */
+  syncBadge?: FileSyncBadgeState | null;
   liveArtifact?: LiveArtifactWorkspaceEntry;
   draggable?: boolean;
   dragging?: boolean;
@@ -7594,7 +7657,13 @@ const Tab = memo(function Tab({
 }) {
   const t = useT();
   const iconName = iconNameOverride ?? kindIconName(kind);
+  const syncBadgeLabel = syncBadge
+    ? syncBadge === 'downloading'
+      ? t('workspace.fileSyncDownloading')
+      : t('workspace.fileSyncUploading')
+    : null;
   const tabTitle = title ?? (meta ? `${label} ${meta}` : label);
+  const tabTooltip = syncBadgeLabel ? `${tabTitle} · ${syncBadgeLabel}` : tabTitle;
   return (
     <div
       className={[
@@ -7618,8 +7687,8 @@ const Tab = memo(function Tab({
       role="tab"
       aria-selected={active}
       tabIndex={0}
-      title={tabTitle}
-      data-tooltip={tabTitle}
+      title={tabTooltip}
+      data-tooltip={tabTooltip}
       data-tooltip-placement="bottom"
       draggable={draggable}
       onDragStart={draggable ? onDragStart : undefined}
@@ -7628,7 +7697,11 @@ const Tab = memo(function Tab({
       onDrop={draggable ? onDrop : undefined}
       onDragEnd={draggable ? onDragEnd : undefined}
     >
-      {iconName ? (
+      {syncBadge ? (
+        <span className="tab-icon">
+          <FileSyncBadge state={syncBadge} size={13} />
+        </span>
+      ) : iconName ? (
         <span className="tab-icon" aria-hidden>
           <Icon name={iconName} size={13} />
         </span>

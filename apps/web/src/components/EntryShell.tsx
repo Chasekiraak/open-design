@@ -96,7 +96,7 @@ import { DesignSystemsTab } from './DesignSystemsTab';
 import { BrandsTab } from './BrandsTab';
 import { EntryNavRail, type EntryView as EntryViewKind } from './EntryNavRail';
 import { ProjectSearchModal } from './ProjectSearchModal';
-import { CloudSignInTip } from './CloudSignInTip';
+import { CloudSignInTip, RailAccountSyncTip } from './CloudSignInTip';
 import { LibrarySection } from './LibrarySection';
 import { UpdaterPopup } from './UpdaterPopup';
 import { WhatsNewPopup } from './WhatsNewPopup';
@@ -126,17 +126,21 @@ import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSele
 import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
-import { useWorkspaceContext, useWorkspaceBilling, useTeamProjects } from '../collab/useWorkspaceContext';
+import {
+  notifyTeamProjectsChanged,
+  notifyWorkspaceBillingRefresh,
+  notifyWorkspaceContextRefresh,
+  useTeamProjects,
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingBalanceUsd,
+} from '../collab/useWorkspaceContext';
+import { useWorkspaceInvalidation } from '../collab/workspace-events';
 import {
   buildAllProjectsList,
   buildDraftsList,
   createSharedProjectPredicate,
 } from '../collab/all-projects-list';
-import {
-  notifyTeamProjectsChanged,
-  notifyWorkspaceBillingRefresh,
-  notifyWorkspaceContextRefresh,
-} from '../collab/useWorkspaceContext';
 import {
   getModelCapabilityTag,
   getModelCostTier,
@@ -425,6 +429,11 @@ interface Props {
   onDuplicateProject?: (id: string) => Promise<void> | void;
   onRenameProject: (id: string, name: string) => void;
   onProjectsRefresh?: () => Promise<void> | void;
+  onTeamProjectContentReady?: (
+    projectId: string,
+    workspaceId: string,
+    workspaceMemberId: string,
+  ) => Promise<boolean> | boolean;
   onChangeDefaultDesignSystem: (id: string) => void;
   onCreateDesignSystem?: () => void;
   // NOTE: first-run onboarding intentionally no longer hosts guided
@@ -532,6 +541,7 @@ export function EntryShell({
   onDuplicateProject,
   onRenameProject,
   onProjectsRefresh,
+  onTeamProjectContentReady,
   onChangeDefaultDesignSystem,
   onCreateDesignSystem,
   onOpenDesignSystem,
@@ -552,7 +562,12 @@ export function EntryShell({
   // (personal or team); workspace surfaces gate on B's permission bits, not on
   // workspaceType.
   const { context: workspaceContext, loading: workspaceLoading } = useWorkspaceContext();
-  const workspaceBilling = useWorkspaceBilling();
+  const workspaceBillingResponse = useWorkspaceBillingResponse();
+  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
+  const workspaceBalanceUsd = workspaceBillingBalanceUsd(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
   // Team-wide shared-project discovery for the "全部项目" view. The member's own
   // `projects` prop is only their LOCAL list; team-shared projects come from the
   // resource hub through the daemon. Empty off-team / when the hub is unconfigured.
@@ -620,32 +635,163 @@ export function EntryShell({
   const teamProjectOwnerMemberIds = new Map(
     teamProjects.projects.map((teamProject) => [teamProject.projectId, teamProject.ownerMemberId]),
   );
+  const contentReadyProjectIdsRef = useRef(new Set<string>());
+  const pendingContentReadyProjectIdsRef = useRef(
+    new Map<string, { workspaceId: string; workspaceMemberId: string }>(),
+  );
+  const contentReadyHydrationRef = useRef(new Map<string, Promise<boolean>>());
+  const teamProjectIdsRef = useRef(new Set<string>());
+  teamProjectIdsRef.current = new Set(
+    teamProjects.projects.map((project) => project.projectId),
+  );
+  const readyWorkspaceId = workspaceContext?.workspaceId ?? null;
+  const readyWorkspaceMemberId = workspaceContext?.workspaceMemberId ?? null;
+  const readyScopeKey = readyWorkspaceId && readyWorkspaceMemberId
+    ? `${readyWorkspaceId}:${readyWorkspaceMemberId}`
+    : null;
+  const contentReadyScopeKeyRef = useRef<string | null>(null);
+  if (contentReadyScopeKeyRef.current !== readyScopeKey) {
+    contentReadyScopeKeyRef.current = readyScopeKey;
+    contentReadyProjectIdsRef.current.clear();
+    pendingContentReadyProjectIdsRef.current.clear();
+    contentReadyHydrationRef.current.clear();
+  }
+  const acceptContentReadyProject = useCallback((
+    projectId: string,
+    eventWorkspaceId: string,
+    eventWorkspaceMemberId: string,
+  ): Promise<boolean> => {
+    const workspaceId = workspaceContext?.workspaceId;
+    const workspaceMemberId = workspaceContext?.workspaceMemberId;
+    if (
+      !workspaceId ||
+      !workspaceMemberId ||
+      workspaceContext?.workspaceType !== 'team' ||
+      workspaceId !== eventWorkspaceId ||
+      workspaceMemberId !== eventWorkspaceMemberId ||
+      !teamProjectIdsRef.current.has(projectId)
+    ) {
+      return Promise.resolve(false);
+    }
+    if (contentReadyProjectIdsRef.current.has(projectId)) {
+      return Promise.resolve(true);
+    }
+    const scopeKey = `${workspaceId}:${workspaceMemberId}`;
+    const key = `${scopeKey}:${projectId}`;
+    const existing = contentReadyHydrationRef.current.get(key);
+    if (existing) return existing;
+    if (!onTeamProjectContentReady) return Promise.resolve(false);
+    const hydration = Promise.resolve(
+      onTeamProjectContentReady(projectId, workspaceId, workspaceMemberId),
+    )
+      .then((hydrated) => {
+        if (
+          hydrated !== true ||
+          contentReadyScopeKeyRef.current !== scopeKey ||
+          !teamProjectIdsRef.current.has(projectId)
+        ) {
+          return false;
+        }
+        pendingContentReadyProjectIdsRef.current.delete(projectId);
+        contentReadyProjectIdsRef.current.add(projectId);
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        if (contentReadyHydrationRef.current.get(key) === hydration) {
+          contentReadyHydrationRef.current.delete(key);
+        }
+      });
+    contentReadyHydrationRef.current.set(key, hydration);
+    return hydration;
+  }, [
+    onTeamProjectContentReady,
+    workspaceContext?.workspaceMemberId,
+    workspaceContext?.workspaceId,
+    workspaceContext?.workspaceType,
+  ]);
+  useWorkspaceInvalidation({
+    'team-project-content-ready': ({ projectId, workspaceId }) => {
+      const currentWorkspaceId = workspaceContext?.workspaceId;
+      const currentWorkspaceMemberId = workspaceContext?.workspaceMemberId;
+      if (
+        !currentWorkspaceId ||
+        !currentWorkspaceMemberId ||
+        currentWorkspaceId !== workspaceId
+      ) {
+        return;
+      }
+      pendingContentReadyProjectIdsRef.current.set(projectId, {
+        workspaceId,
+        workspaceMemberId: currentWorkspaceMemberId,
+      });
+      void acceptContentReadyProject(
+        projectId,
+        workspaceId,
+        currentWorkspaceMemberId,
+      );
+    },
+  });
+  useEffect(() => {
+    if (!readyScopeKey) return;
+    for (const [projectId, eventScope] of pendingContentReadyProjectIdsRef.current) {
+      if (
+        eventScope.workspaceId === readyWorkspaceId &&
+        eventScope.workspaceMemberId === readyWorkspaceMemberId
+      ) {
+        void acceptContentReadyProject(
+          projectId,
+          eventScope.workspaceId,
+          eventScope.workspaceMemberId,
+        );
+      }
+    }
+  }, [
+    acceptContentReadyProject,
+    readyScopeKey,
+    readyWorkspaceId,
+    readyWorkspaceMemberId,
+    teamProjects.projects,
+  ]);
   // Open handler for the "全部项目" grid. A project already in the member's local
   // list opens directly; a team-shared project the member has not pulled yet is
   // first pulled + registered on the daemon (materialize content + insert a local
   // project record) so it can open read-only — the member is not the owner, so
   // the useProjectCollab single-writer path keeps it read-only.
   const [pullingProjectId, setPullingProjectId] = useState<string | null>(null);
-  async function handleOpenAllProjects(id: string): Promise<void> {
-    if (localProjectIds.has(id)) {
+  async function handleOpenAllProjects(id: string): Promise<boolean> {
+    if (localProjectIds.has(id) || contentReadyProjectIdsRef.current.has(id)) {
       await Promise.resolve(onOpenProject(id));
-      return;
+      return true;
+    }
+    const scopeKey = contentReadyScopeKeyRef.current;
+    const hydration = scopeKey
+      ? contentReadyHydrationRef.current.get(`${scopeKey}:${id}`)
+      : null;
+    if (hydration) {
+      const hydrated = await hydration;
+      if (hydrated) {
+        await Promise.resolve(onOpenProject(id));
+        return true;
+      }
+      if (contentReadyScopeKeyRef.current !== scopeKey) return false;
     }
     // The pull materializes the whole project before it can open; surface it
     // on the card (spinner overlay) and swallow re-clicks meanwhile —
     // otherwise the first click reads as dead for the entire download.
-    if (pullingProjectId) return;
+    if (pullingProjectId) return false;
     setPullingProjectId(id);
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(id)}/collab/pull`, { method: 'POST' });
-      if (!response.ok) return;
+      if (!response.ok) return false;
       await Promise.resolve(onProjectsRefresh?.());
     } catch {
-      return;
+      return false;
     } finally {
       setPullingProjectId(null);
     }
     await Promise.resolve(onOpenProject(id));
+    return true;
   }
   // Resolve the effective light/dark theme so the rail's account-menu theme toggle
   // flips to the opposite of what's actually shown (system → resolved).
@@ -903,7 +1049,14 @@ export function EntryShell({
     // in ProjectView.handleSend.
     let amrGatePrechecked = false;
     if (config.mode === 'daemon' && config.agentId === 'amr') {
-      let gate = await checkAmrBalanceGate();
+      let gate = await checkAmrBalanceGate(
+        workspaceContext
+          ? {
+              workspaceType: workspaceContext.workspaceType,
+              workspaceId: workspaceContext.workspaceId,
+            }
+          : undefined,
+      );
       // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
       // its blocking condition clears (sign-in completed, recharge landed)
       // and the gate re-runs, so the task auto-continues through the normal
@@ -920,7 +1073,14 @@ export function EntryShell({
         });
         setAmrBalanceGateBlock(null);
         if (decision === 'dismiss') return 'blocked' as const;
-        gate = await checkAmrBalanceGate();
+        gate = await checkAmrBalanceGate(
+          workspaceContext
+            ? {
+                workspaceType: workspaceContext.workspaceType,
+                workspaceId: workspaceContext.workspaceId,
+              }
+            : undefined,
+        );
       }
       if (gate.kind === 'soft') {
         // Hold THIS submit while the reminder waits for a decision; 'proceed'
@@ -1184,11 +1344,24 @@ export function EntryShell({
           onClose={() => setRailOpen(false)}
           context={workspaceContext}
           billing={workspaceBilling}
+          balanceUsd={workspaceBalanceUsd}
           onOpenSettings={onOpenSettings}
           onInvite={() => changeView('members')}
           onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}
           footerExtra={railFooterActions}
-          footerNotice={!workspaceContext && !workspaceLoading ? <CloudSignInTip /> : null}
+          // recvqgpXSYFNTq: `workspaceLoading` is only ever true while
+          // `workspaceContext` is null (see `useWorkspaceContext`'s
+          // `markLoading`, which promotes "no context" to "loading" and never
+          // touches an already-resolved context) — so this is the exact
+          // window between a just-finished sign-in and the re-read landing.
+          // Swap the callout for a same-slot loading state there instead of
+          // rendering nothing, which used to read as the rail silently
+          // forgetting the user just signed in.
+          footerNotice={
+            !workspaceContext ? (
+              workspaceLoading ? <RailAccountSyncTip /> : <CloudSignInTip />
+            ) : null
+          }
         />
         {projectSearchOpen ? (
           <ProjectSearchModal
@@ -1457,7 +1630,7 @@ export function EntryShell({
                     onProjectUnshared={markProjectUnshared}
                     projectOwnerMemberIds={teamProjectOwnerMemberIds}
                     openingProjectId={pullingProjectId}
-                    onOpen={(id) => void handleOpenAllProjects(id)}
+                    onOpen={handleOpenAllProjects}
                     onViewAll={() => {}}
                     onDelete={onDeleteProject}
                     onRename={onRenameProject}

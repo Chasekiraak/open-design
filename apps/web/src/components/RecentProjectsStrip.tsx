@@ -7,7 +7,7 @@
 // surfaces (e.g. an in-project quick-switcher pane).
 
 import type { CSSProperties } from 'react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogDescription, DialogFooter, DialogTitle } from '@open-design/components';
 
 const MOVE_CONFIRM_SKIP_KEY = 'od.projects.moveConfirmSkip';
@@ -20,10 +20,19 @@ import { STATUS_LABEL_KEYS } from './DesignsTab';
 import { isDesignSystemProject, isPublishedDesignSystemProject } from './design-system-project';
 import type { SharedProjectPredicate } from '../collab/all-projects-list';
 import { useTeamMembers } from '../collab/useTeamMembers';
-import { notifyTeamProjectsChanged, useWorkspaceContext } from '../collab/useWorkspaceContext';
-import { teamConsoleUrl } from './EntryNavRail';
+import {
+  notifyTeamProjectsChanged,
+  useWorkspaceBilling,
+  useWorkspaceContext,
+} from '../collab/useWorkspaceContext';
+import {
+  canAccessWorkspaceInviteFlow,
+  resolveWorkspaceInviteTarget,
+  workspaceUpgradeUrl,
+} from './EntryNavRail';
 import { moveWorkspaceProject } from '../state/projects';
 import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
+import { useWorkspaceInvalidation } from '../collab/workspace-events';
 
 /** Which project space this strip renders. Drives the per-card 共享 badge
  *  (hidden in the all-shared team space) and the "{creator}创建" line: 'recent'
@@ -31,7 +40,6 @@ import { workspaceContextHasTeamIdentity } from '@open-design/contracts';
  *  'team' = the全部项目 grid where every card is a team-shared project. */
 export type SpaceKind = 'recent' | 'drafts' | 'team';
 import {
-  HtmlProjectCoverFrame,
   coverFromProjectFile,
   projectCoverUrl,
   selectProjectFileCover,
@@ -50,7 +58,9 @@ interface Props {
    *  omits this and keeps the compact "最近项目 / 查看全部" header. */
   heading?: string;
   description?: string;
-  onOpen: (id: string) => void;
+  /** Return false when opening failed and the grid stayed mounted, so aborted
+   * background cover work can resume after the foreground attempt finishes. */
+  onOpen: (id: string) => boolean | void | Promise<boolean | void>;
   onViewAll?: () => void;
   onDelete?: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicate?: (id: string) => Promise<void> | void;
@@ -84,6 +94,10 @@ interface Props {
   collaborationEnabled?: boolean;
   canAssignInviteRoles?: boolean;
   canManageProjectCollection?: boolean;
+  /** Whether this mounted strip is visible. EntryShell keeps Home mounted while
+   * other views are active, so hidden strips must not occupy browser connection
+   * slots with background cover probes. */
+  isActive?: boolean;
 }
 
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
@@ -125,6 +139,7 @@ const KIND_FILTER_OPTIONS: KindFilterOption[] = [
   { id: 'prototype', labelKey: 'designs.tagPrototype' },
   { id: 'slide', labelKey: 'designs.tagSlide' },
   { id: 'live-artifact', labelKey: 'designs.tagLiveArtifact' },
+  { id: 'web-clone', labelKey: 'designs.tagWebClone' },
   { id: 'media', labelKey: 'designs.tagMedia' },
   { id: 'design-system', label: DESIGN_SYSTEM_TAG_LABEL },
 ];
@@ -149,8 +164,122 @@ const deckCoverCache = new Map<string, string>();
 const deckCoverInflight = new Map<string, Promise<string>>();
 const DEFAULT_RECENT_PROJECT_LIMIT = 6;
 const WIDE_RECENT_PROJECT_LIMIT = 7;
+// Card covers are background decoration. Browsers commonly allow only six
+// concurrent connections per origin, so an unbounded All Projects scan can
+// occupy every slot and queue the project file list/preview the user just
+// opened. Two cover probes keep the grid moving while reserving capacity for
+// foreground reads.
+const MAX_BACKGROUND_COVER_REQUESTS = 2;
 // 7 * 180px cards + 6 * 12px gaps, matching recent-projects.css.
 const WIDE_RECENT_PROJECT_MIN_ROW_WIDTH = 1332;
+
+type BackgroundTask<T> = {
+  controller: AbortController;
+  run: () => Promise<T>;
+  resolve: (value: T | undefined) => void;
+  reject: (reason: unknown) => void;
+  started: boolean;
+  released: boolean;
+  settled: boolean;
+};
+
+class BackgroundTaskQueue {
+  private active = 0;
+  private readonly pending: BackgroundTask<unknown>[] = [];
+  private pauseDepth = 0;
+
+  constructor(private readonly concurrency: number) {}
+
+  schedule<T>(
+    controller: AbortController,
+    run: () => Promise<T>,
+    priority = false,
+  ): Promise<T | undefined> {
+    return new Promise<T | undefined>((resolve, reject) => {
+      const task: BackgroundTask<T> = {
+        controller,
+        run,
+        resolve,
+        reject,
+        started: false,
+        released: false,
+        settled: false,
+      };
+      const abort = () => {
+        if (task.settled) return;
+        task.settled = true;
+        task.resolve(undefined);
+        this.release(task);
+        this.drain();
+      };
+      controller.signal.addEventListener('abort', abort, { once: true });
+      // Store listener cleanup on the promise path without expanding the
+      // queue's public contract. A settled task's one-shot abort listener is
+      // harmless, but removing it avoids retaining component closures.
+      task.run = async () => {
+        try {
+          return await run();
+        } finally {
+          controller.signal.removeEventListener('abort', abort);
+        }
+      };
+      if (priority) {
+        this.pending.unshift(task as BackgroundTask<unknown>);
+      } else {
+        this.pending.push(task as BackgroundTask<unknown>);
+      }
+      this.drain();
+    });
+  }
+
+  withoutDraining(run: () => void): void {
+    this.pauseDepth += 1;
+    try {
+      run();
+    } finally {
+      this.pauseDepth -= 1;
+      this.drain();
+    }
+  }
+
+  private release<T>(task: BackgroundTask<T>): void {
+    if (task.started && !task.released) {
+      task.released = true;
+      this.active -= 1;
+      return;
+    }
+    if (!task.started) {
+      const index = this.pending.indexOf(task as BackgroundTask<unknown>);
+      if (index >= 0) this.pending.splice(index, 1);
+    }
+  }
+
+  private drain(): void {
+    if (this.pauseDepth > 0) return;
+    while (this.active < this.concurrency && this.pending.length > 0) {
+      const task = this.pending.shift()!;
+      if (task.settled || task.controller.signal.aborted) continue;
+      task.started = true;
+      this.active += 1;
+      void task.run().then(
+        (value) => {
+          if (task.settled) return;
+          task.settled = true;
+          task.resolve(value);
+          this.release(task);
+          this.drain();
+        },
+        (error) => {
+          if (task.settled) return;
+          task.settled = true;
+          task.reject(error);
+          this.release(task);
+          this.drain();
+        },
+      );
+    }
+  }
+}
 
 export function RecentProjectsStrip({
   projects,
@@ -172,6 +301,7 @@ export function RecentProjectsStrip({
   collaborationEnabled,
   canAssignInviteRoles,
   canManageProjectCollection,
+  isActive = true,
 }: Props) {
   const t = useT();
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -182,6 +312,7 @@ export function RecentProjectsStrip({
   // empty/null off-team, so every card safely falls back to "我创建".
   const { resolve: resolveMember } = useTeamMembers();
   const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceBilling = useWorkspaceBilling();
   const selfMemberId = workspaceContext?.workspaceMemberId ?? null;
   // `canShareProjects` alone is a ROLE permission ("could this member share IF
   // a team existed"), not a "does a team exist" signal — a purely personal
@@ -196,8 +327,13 @@ export function RecentProjectsStrip({
     collaborationEnabled ??
     (workspaceContextHasTeamIdentity(workspaceContext) &&
       workspaceContext?.permissions.canShareProjects === true);
-  const canInvite =
-    canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true;
+  const canAccessInviteFlow = canAccessWorkspaceInviteFlow(workspaceContext);
+  // The invite dialog's seat-gate upgrade CTA: personal workspace → B's wallet
+  // pricing modal, team → checkout vs change-plan by subscription state. One
+  // shared decision point — see `workspaceUpgradeUrl` in EntryNavRail.tsx
+  // (recvpYEiH019cD).
+  const inviteUpgradeUrl = workspaceUpgradeUrl(workspaceContext, workspaceBilling);
+  const inviteTarget = resolveWorkspaceInviteTarget(workspaceContext);
   const canManageCollection =
     canManageProjectCollection ??
     (workspaceContext?.permissions.canManageSharedResources === true ||
@@ -412,47 +548,203 @@ export function RecentProjectsStrip({
   // shell), and depending on it re-ran this effect — and re-fetched every
   // project's files — on every render (observed ~23× per project in a trace).
   const coverFetchKey = visibleProjects.map(({ project }) => project.id).join('|');
+  const visibleProjectsRef = useRef(new Map<string, Project>());
+  visibleProjectsRef.current = new Map(
+    visibleProjects.map(({ project }) => [project.id, project]),
+  );
+  const coverGenerationRef = useRef(new Map<string, number>());
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
+  const coverQueueRef = useRef<BackgroundTaskQueue | null>(null);
+  if (!coverQueueRef.current) {
+    coverQueueRef.current = new BackgroundTaskQueue(MAX_BACKGROUND_COVER_REQUESTS);
+  }
+  const coverQueue = coverQueueRef.current;
+  const coverInFlightRef = useRef(
+    new Map<string, {
+      controller: AbortController;
+      generation: number;
+      promise: Promise<void>;
+    }>(),
+  );
+  const loadProjectCover = useCallback(async (
+    project: Project,
+    signal: AbortSignal,
+  ): Promise<ProjectCoverOverride | null> => {
+    const designSystemProject = isDesignSystemProject(project);
+    if (project.metadata?.entryFile && !designSystemProject) return null;
+    let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
+    try {
+      files = await fetchProjectFiles(project.id, { signal });
+    } catch {
+      return null;
+    }
+    if (signal.aborted) return null;
+    if (designSystemProject) {
+      return (await findDesignSystemCover(project.id, files, signal)) ?? null;
+    }
+    const cover = selectProjectFileCover(files);
+    if (cover?.kind !== 'html') return cover;
+
+    const src = projectCoverUrl(project.id, cover.name, cover.mtime);
+    const diagnostic = `${project.id}:${cover.name}`;
+    if (project.metadata?.kind === 'deck') {
+      try {
+        await loadDeckCover(src, signal);
+        return signal.aborted ? null : cover;
+      } catch (err) {
+        if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+        console.warn('[project-cover] failed to load HTML cover:', diagnostic, err);
+        return null;
+      }
+    }
+
+    try {
+      const response = await fetch(src, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal,
+      });
+      if (signal.aborted) return null;
+      if (response.ok || response.status === 304) return cover;
+      console.warn(
+        `[project-cover] HTML cover unavailable (${response.status} ${response.statusText}):`,
+        diagnostic,
+      );
+    } catch (err) {
+      if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return null;
+      console.warn('[project-cover] failed to verify HTML cover:', diagnostic, err);
+    }
+    return null;
+  }, []);
+
+  const requestProjectCover = useCallback((
+    project: Project,
+    options: { force?: boolean } = {},
+  ): Promise<void> => {
+    if (!activeRef.current) return Promise.resolve();
+    const existing = coverInFlightRef.current.get(project.id);
+    if (existing && !options.force) return existing.promise;
+    const generation = (coverGenerationRef.current.get(project.id) ?? 0) + 1;
+    coverGenerationRef.current.set(project.id, generation);
+    const controller = new AbortController();
+    const promise = coverQueue.schedule(
+      controller,
+      () => loadProjectCover(project, controller.signal),
+      options.force,
+    )
+      .then((cover) => {
+        if (controller.signal.aborted) return;
+        if (cover === undefined) return;
+        if (coverGenerationRef.current.get(project.id) !== generation) return;
+        if (!visibleProjectsRef.current.has(project.id)) return;
+        setCoverByProject((current) => ({ ...current, [project.id]: cover }));
+      })
+      .finally(() => {
+        // Generation values can be reused after a StrictMode synthetic cleanup
+        // clears the maps. Only the exact request that installed this entry may
+        // remove it; otherwise late settlement from replay A can erase replay
+        // B, leaving the real unmount with no controller to abort.
+        if (coverInFlightRef.current.get(project.id)?.controller === controller) {
+          coverInFlightRef.current.delete(project.id);
+        }
+      });
+    coverInFlightRef.current.set(project.id, { controller, generation, promise });
+    // Install the replacement first so a force-refresh enters the front of the
+    // queue before aborting its stale predecessor releases a slot.
+    existing?.controller.abort();
+    return promise;
+  }, [coverQueue, loadProjectCover]);
+
+  const abortBackgroundCoverRequests = useCallback(() => {
+    coverQueue.withoutDraining(() => {
+      for (const request of coverInFlightRef.current.values()) {
+        request.controller.abort();
+      }
+    });
+    coverInFlightRef.current.clear();
+  }, [coverQueue]);
+
+  const resumeBackgroundCoverRequests = useCallback(() => {
+    if (!activeRef.current) return;
+    for (const project of visibleProjectsRef.current.values()) {
+      void requestProjectCover(project);
+    }
+  }, [requestProjectCover]);
+
   useEffect(() => {
-    let cancelled = false;
+    return () => {
+      // Cover probes are background-only. Do not let them survive navigation
+      // away from Home and occupy the connections needed by the reopened
+      // project's file list and preview source.
+      abortBackgroundCoverRequests();
+      coverGenerationRef.current.clear();
+    };
+  }, [abortBackgroundCoverRequests]);
+
+  const refreshProjectCover = useCallback((projectId: string) => {
+    const project = visibleProjectsRef.current.get(projectId);
+    if (!project) return;
+    // A content-ready event is authoritative and supersedes an older initial
+    // scan that may still be resolving against the pre-pull filesystem.
+    void requestProjectCover(project, { force: true });
+  }, [requestProjectCover]);
+
+  useWorkspaceInvalidation(
+    {
+      'team-project-content-ready': ({ projectId, workspaceId }) => {
+        if (!activeRef.current) return;
+        if (workspaceContext?.workspaceId !== workspaceId) return;
+        void refreshProjectCover(projectId);
+      },
+    },
+    {
+      // Thin SSE events are not replayed. On reconnect/focus, retry only cards
+      // whose initial scan found no local cover, closing a missed-ready gap
+      // without re-fetching every already-resolved card in the grid.
+      onActive: () => {
+        if (!activeRef.current) return;
+        for (const { project } of visibleProjects) {
+          if (coverByProject[project.id] == null) {
+            void requestProjectCover(project);
+          }
+        }
+      },
+    },
+  );
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleProjects.map(({ project }) => project.id));
+    if (!isActive) {
+      abortBackgroundCoverRequests();
+      return;
+    }
+    const staleRequests = [...coverInFlightRef.current.entries()]
+      .filter(([projectId]) => !visibleIds.has(projectId));
+    coverQueue.withoutDraining(() => {
+      for (const [projectId, request] of staleRequests) {
+        request.controller.abort();
+        coverInFlightRef.current.delete(projectId);
+        coverGenerationRef.current.delete(projectId);
+      }
+    });
     if (visibleProjects.length === 0) {
       setCoverByProject({});
       return;
     }
-
-    void Promise.all(
-      visibleProjects.map(async ({ project }) => {
-        const designSystemProject = isDesignSystemProject(project);
-        if (project.metadata?.entryFile && !designSystemProject) return [project.id, null] as const;
-        let files: Awaited<ReturnType<typeof fetchProjectFiles>>;
-        try {
-          files = await fetchProjectFiles(project.id);
-        } catch {
-          return [project.id, null] as const;
-        }
-        if (designSystemProject) {
-          const cover = await findDesignSystemCover(project.id, files);
-          if (cover) {
-            return [
-              project.id,
-              cover,
-            ] as const;
-          }
-          return [project.id, null] as const;
-        }
-        return [project.id, selectProjectFileCover(files)] as const;
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setCoverByProject(Object.fromEntries(entries));
+    setCoverByProject((current) => {
+      const entries = Object.entries(current).filter(([projectId]) => visibleIds.has(projectId));
+      return entries.length === Object.keys(current).length
+        ? current
+        : Object.fromEntries(entries);
     });
-
-    return () => {
-      cancelled = true;
-    };
+    for (const { project } of visibleProjects) {
+      void requestProjectCover(project);
+    }
     // Intentionally keyed on the id set (coverFetchKey), not visibleProjects,
     // so re-renders that don't change which projects are shown don't re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverFetchKey]);
+  }, [abortBackgroundCoverRequests, coverFetchKey, coverQueue, isActive, requestProjectCover]);
 
   // First-run home shouldn't reserve space for an empty "Recent
   // projects" rail — the dashed empty box just adds visual noise
@@ -680,11 +972,19 @@ export function RecentProjectsStrip({
             ) : null}
           </div>
           <div className="recent-projects__controls">
-            {collaborationAvailable && space === 'team' && canInvite ? (
+            {space === 'team' &&
+            canAccessInviteFlow &&
+            inviteTarget.kind !== 'unavailable' ? (
               <button
                 type="button"
                 className="recent-projects__invite"
-                onClick={() => setInviteOpen(true)}
+                onClick={() => {
+                  if (inviteTarget.kind === 'vela') {
+                    window.open(inviteTarget.url, '_blank', 'noopener,noreferrer');
+                  } else if (inviteTarget.kind === 'local') {
+                    setInviteOpen(true);
+                  }
+                }}
               >
                 <Icon name="share" size={15} /> {t('recentProjects.inviteTeammates')}
               </button>
@@ -963,7 +1263,26 @@ export function RecentProjectsStrip({
                     return;
                   }
                   if (opening) return;
-                  onOpen(project.id);
+                  // Release every background cover slot before the project view
+                  // starts its foreground files/content reads. Waiting for the
+                  // entry shell to unmount is too late: navigation itself needs
+                  // those same browser connections.
+                  abortBackgroundCoverRequests();
+                  try {
+                    const result = onOpen(project.id);
+                    if (result && typeof result === 'object' && 'then' in result) {
+                      void Promise.resolve(result).then(
+                        (opened) => {
+                          if (opened === false) resumeBackgroundCoverRequests();
+                        },
+                        () => resumeBackgroundCoverRequests(),
+                      );
+                    } else if (result === false) {
+                      resumeBackgroundCoverRequests();
+                    }
+                  } catch {
+                    resumeBackgroundCoverRequests();
+                  }
                 }}
                 aria-busy={opening ? true : undefined}
                 title={project.name}
@@ -1367,16 +1686,14 @@ export function RecentProjectsStrip({
       <InviteDialog
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
-        canAssignRoles={canInvite}
+        canAssignRoles={
+          canAssignInviteRoles ?? workspaceContext?.permissions.canInviteMembers === true
+        }
         availableSeats={workspaceContext?.seatSummary?.availableSeats}
         onUpgrade={
-          workspaceContext?.workspaceSettingsUrl
+          inviteUpgradeUrl
             ? () => {
-                window.open(
-                  teamConsoleUrl(workspaceContext.workspaceSettingsUrl!, 'upgrade'),
-                  '_blank',
-                  'noopener,noreferrer',
-                );
+                window.open(inviteUpgradeUrl, '_blank', 'noopener,noreferrer');
               }
             : undefined
         }
@@ -1402,22 +1719,51 @@ function RecentProjectHtmlThumb({
   deckCoverOnly: boolean;
 }) {
   // Plain HTML goes through the shared cover frame (#5762): it HEAD-probes the
-  // cover URL first and falls back to the initial glyph — plus a
-  // `[project-cover]` warning — when the entry file has gone missing, instead
-  // of leaving a blank iframe on the card. `DesignsTab` renders the same way.
+  // cover URL in the parent cover queue first and falls back to the initial
+  // glyph when the entry file has gone missing. Keeping verification in that
+  // queue is what prevents an All Projects grid from launching one HEAD per
+  // card at once.
   if (!deckCoverOnly) {
     return (
-      <HtmlProjectCoverFrame
+      <VerifiedHtmlCoverFrame
         src={src}
         initial={initial}
-        iframeClassName="recent-projects__thumb-iframe"
-        glyphClassName="recent-projects__card-glyph"
         diagnostic={diagnostic}
       />
     );
   }
 
   return <DeckCoverThumb src={src} />;
+}
+
+function VerifiedHtmlCoverFrame({
+  src,
+  initial,
+  diagnostic,
+}: {
+  src: string;
+  initial: string;
+  diagnostic: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) {
+    return <span className="recent-projects__card-glyph">{initial}</span>;
+  }
+  return (
+    <iframe
+      className="recent-projects__thumb-iframe"
+      src={src}
+      title=""
+      loading="lazy"
+      sandbox="allow-scripts"
+      tabIndex={-1}
+      onError={() => {
+        console.warn('[project-cover] failed to load HTML cover:', diagnostic);
+        setFailed(true);
+      }}
+    />
+  );
 }
 
 function DeckCoverThumb({ src }: { src: string }) {
@@ -1487,9 +1833,16 @@ function DeckCoverThumb({ src }: { src: string }) {
   );
 }
 
-async function loadDeckCover(src: string): Promise<string> {
+async function loadDeckCover(src: string, signal?: AbortSignal): Promise<string> {
   const cached = deckCoverCache.get(src);
   if (cached) return cached;
+  if (signal) {
+    const response = await fetch(src, { signal });
+    if (!response.ok) throw new Error(`Failed to load project cover: ${response.status}`);
+    const parsed = deckPreviewSrcDoc(await response.text());
+    if (!signal.aborted) deckCoverCache.set(src, parsed);
+    return parsed;
+  }
   const existing = deckCoverInflight.get(src);
   if (existing) return existing;
   const run = fetch(src)
@@ -1640,7 +1993,13 @@ export function projectCover(
   return { kind: 'fallback', style, initial };
 }
 
-export type ProjectCategory = 'prototype' | 'live-artifact' | 'slide' | 'media' | 'brand';
+export type ProjectCategory =
+  | 'prototype'
+  | 'live-artifact'
+  | 'web-clone'
+  | 'slide'
+  | 'media'
+  | 'brand';
 
 /** Every chip a project card can wear, `ProjectCategory` plus the
  *  design-system tag the card substitutes for it. */
@@ -1663,6 +2022,12 @@ export function projectCategory(project: Project): ProjectCategory {
   if (meta?.intent === 'live-artifact' || project.skillId === 'live-artifact') {
     return 'live-artifact';
   }
+  // Website clone projects still store `kind: 'prototype'` (see
+  // home-hero/chips.ts's 'web-clone' chip) so preview behavior stays
+  // identical to a blank prototype; only `intent: 'web-clone'` marks the
+  // scenario. Without this branch every clone fell through to the default
+  // 'prototype' bucket and had no way to be filtered separately (recvpZbvupSr1o).
+  if (meta?.intent === 'web-clone') return 'web-clone';
   if (meta?.kind === 'deck') return 'slide';
   if (meta?.kind === 'brand') return 'brand';
   if (meta?.kind === 'image' || meta?.kind === 'video' || meta?.kind === 'audio') {
@@ -1676,13 +2041,15 @@ export function ProjectTag({ category }: { category: ProjectCategory }) {
   const label =
     category === 'live-artifact'
       ? t('designs.tagLiveArtifact')
-      : category === 'slide'
-        ? t('designs.tagSlide')
-        : category === 'brand'
-          ? 'Brand'
-        : category === 'media'
-          ? t('designs.tagMedia')
-          : t('designs.tagPrototype');
+      : category === 'web-clone'
+        ? t('designs.tagWebClone')
+        : category === 'slide'
+          ? t('designs.tagSlide')
+          : category === 'brand'
+            ? 'Brand'
+          : category === 'media'
+            ? t('designs.tagMedia')
+            : t('designs.tagPrototype');
   return <span className={`design-card-tag tag-${category}`}>{label}</span>;
 }
 
@@ -1707,9 +2074,11 @@ function findDesignSystemLogoFile(files: ProjectFile[]): ProjectFile | null {
 async function findDesignSystemCover(
   projectId: string,
   files: ProjectFile[],
+  signal?: AbortSignal,
 ): Promise<ProjectCoverOverride | null> {
   const knownFiles = new Map(files.map((file) => [file.path ?? file.name, file]));
-  const brandCover = await designSystemCoverFromBrandJson(projectId, knownFiles);
+  const brandCover = await designSystemCoverFromBrandJson(projectId, knownFiles, signal);
+  if (signal?.aborted) return null;
   if (brandCover) return brandCover;
 
   const logo = findDesignSystemLogoFile(files);
@@ -1720,8 +2089,13 @@ async function findDesignSystemCover(
 async function designSystemCoverFromBrandJson(
   projectId: string,
   knownFiles: ReadonlyMap<string, ProjectFile>,
+  signal?: AbortSignal,
 ): Promise<ProjectCoverOverride | null> {
-  const raw = await fetchProjectFileText(projectId, 'brand.json', { cache: 'no-store' });
+  const raw = await fetchProjectFileText(projectId, 'brand.json', {
+    cache: 'no-store',
+    signal,
+  });
+  if (signal?.aborted) return null;
   if (!raw) return null;
   let brand: unknown;
   try {

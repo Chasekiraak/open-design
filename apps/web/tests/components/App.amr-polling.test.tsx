@@ -26,20 +26,24 @@ const homeRouteMock = { kind: 'home' as const, view: 'home' as const };
 const routeListeners = new Set<() => void>();
 const useRouteMock = vi.fn(() => homeRouteMock);
 
-vi.mock('../../src/router', () => ({
-  navigate: vi.fn((route: unknown) => {
-    useRouteMock.mockReturnValue(route as never);
-    routeListeners.forEach((notify) => notify());
-  }),
-  useRoute: () =>
-    useSyncExternalStore(
-      (onChange) => {
-        routeListeners.add(onChange);
-        return () => routeListeners.delete(onChange);
-      },
-      useRouteMock,
-    ),
-}));
+vi.mock('../../src/router', async () => {
+  const actual = await vi.importActual<typeof import('../../src/router')>('../../src/router');
+  return {
+    ...actual,
+    navigate: vi.fn((route: unknown) => {
+      useRouteMock.mockReturnValue(route as never);
+      routeListeners.forEach((notify) => notify());
+    }),
+    useRoute: () =>
+      useSyncExternalStore(
+        (onChange) => {
+          routeListeners.add(onChange);
+          return () => routeListeners.delete(onChange);
+        },
+        useRouteMock,
+      ),
+  };
+});
 
 vi.mock('../../src/components/EntryView', () => ({
   EntryView: ({
@@ -229,6 +233,7 @@ function deferred<T>() {
 
 describe('App AMR polling', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     useRouteMock.mockReturnValue(homeRouteMock);
     mockedDaemonIsLive.mockResolvedValue(true);
     mockedFetchAgentsStream.mockResolvedValue([

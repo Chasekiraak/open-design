@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RecentProjectsStrip } from '../../src/components/RecentProjectsStrip';
+import { fetchProjectFiles, fetchProjectFileText } from '../../src/providers/registry';
 import type { Project } from '../../src/types';
 
 vi.mock('../../src/providers/registry', () => ({
@@ -27,21 +29,21 @@ vi.mock('../../src/providers/registry', () => ({
   fetchProjectFiles: vi.fn(async (projectId: string) => {
     if (projectId === 'project-ds') {
       return [
-        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4 },
-        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3 },
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3, size: 0, mime: 'image/png' },
       ];
     }
     if (projectId === 'project-ds-fallback') {
       return [
-        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4 },
-        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3 },
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3, size: 0, mime: 'image/svg+xml' },
       ];
     }
     if (projectId === 'project-html') {
-      return [{ name: 'index.html', kind: 'html', mtime: 200 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 200, size: 0, mime: 'text/html' }];
     }
     if (projectId === 'project-deck') {
-      return [{ name: 'index.html', kind: 'html', mtime: 400 }];
+      return [{ name: 'index.html', kind: 'html', mtime: 400, size: 0, mime: 'text/html' }];
     }
     return [];
   }),
@@ -53,6 +55,27 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.mocked(fetchProjectFiles).mockReset().mockImplementation(async (projectId: string) => {
+    if (projectId === 'project-ds') {
+      return [
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'cover-0.png', path: 'imagery/cover-0.png', kind: 'image', mtime: 3, size: 0, mime: 'image/png' },
+      ];
+    }
+    if (projectId === 'project-ds-fallback') {
+      return [
+        { name: 'favicon-1.png', path: 'logos/favicon-1.png', kind: 'image', mtime: 4, size: 0, mime: 'image/png' },
+        { name: 'wordmark.svg', path: 'logos/wordmark.svg', kind: 'image', mtime: 3, size: 0, mime: 'image/svg+xml' },
+      ];
+    }
+    if (projectId === 'project-html') {
+      return [{ name: 'index.html', kind: 'html', mtime: 200, size: 0, mime: 'text/html' }];
+    }
+    if (projectId === 'project-deck') {
+      return [{ name: 'index.html', kind: 'html', mtime: 400, size: 0, mime: 'text/html' }];
+    }
+    return [];
+  });
 });
 
 function project(overrides: Partial<Project>): Project {
@@ -79,19 +102,536 @@ function projects(count: number): Project[] {
 }
 
 function stubCoverProbe(status = 200, statusText = 'OK', body = '<html><body>slide</body></html>') {
-  const fetchMock = vi.fn(async () => ({
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes('/api/workspace/context')) {
+      return new Response(JSON.stringify({
+        context: {
+          workspaceId: 'ws-1',
+          workspaceType: 'team',
+          workspaceMemberId: 'wm-1',
+          role: 'member',
+          memberStatus: 'active',
+          lifecycleState: 'active',
+          billingState: 'active',
+          planId: null,
+          providerMode: 'platform_credits',
+          seatSummary: { seatLimit: 5, usedSeats: 2, availableSeats: 3 },
+          permissions: {},
+          teamId: 'team-1',
+        },
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return {
     ok: status >= 200 && status < 300,
     status,
     statusText,
     // Deck cards read the cover document (GET) to build their first-slide
     // srcDoc; plain HTML cards only HEAD-probe it.
     text: async () => body,
-  }) as Response);
+    } as Response;
+  });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
+type EventSourceListener = (event: unknown) => void;
+class MockWorkspaceEventSource {
+  static instances: MockWorkspaceEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<EventSourceListener>>();
+
+  constructor(readonly url: string) {
+    MockWorkspaceEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventSourceListener): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+
+  removeEventListener(name: string, listener: EventSourceListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string, data: unknown): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close(): void {}
+}
+
 describe('RecentProjectsStrip', () => {
+  it('refreshes only the card named by team-project-content-ready', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    vi.mocked(fetchProjectFiles).mockImplementation(async (projectId: string) => {
+      if (
+        projectId === 'project-ready' &&
+        vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === projectId).length > 1
+      ) {
+        return [{
+          name: 'index.html',
+          path: 'index.html',
+          kind: 'html',
+          mtime: 700,
+          size: 0,
+          mime: 'text/html',
+        }];
+      }
+      return [];
+    });
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[
+          project({ id: 'project-ready', name: 'Ready project' }),
+          project({ id: 'project-other', name: 'Other project' }),
+        ]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+    expect(container.querySelector('.recent-projects__card-thumb-html')).toBeNull();
+    expect(MockWorkspaceEventSource.instances).toHaveLength(1);
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-ready',
+        workspaceId: 'ws-1',
+      });
+    });
+
+    await waitFor(() => expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull());
+    expect(vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === 'project-ready')).toHaveLength(2);
+    expect(vi.mocked(fetchProjectFiles).mock.calls.filter(([id]) => id === 'project-other')).toHaveLength(1);
+  });
+
+  it('rechecks unresolved visible covers when the workspace stream reconnects', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    vi.mocked(fetchProjectFiles)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        name: 'index.html',
+        path: 'index.html',
+        kind: 'html',
+        mtime: 701,
+        size: 0,
+        mime: 'text/html',
+      }]);
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-catch-up', name: 'Catch-up project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.recent-projects__card-thumb-html')).toBeNull();
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.onopen?.();
+    });
+
+    await waitFor(() => {
+      expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+      expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+    });
+  });
+
+  it('does not let a stale initial cover scan overwrite a newer content-ready result', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    let resolveInitial!: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+    const initial = new Promise<Awaited<ReturnType<typeof fetchProjectFiles>>>((resolve) => {
+      resolveInitial = resolve;
+    });
+    vi.mocked(fetchProjectFiles)
+      .mockReturnValueOnce(initial)
+      .mockResolvedValueOnce([{
+        name: 'index.html',
+        path: 'index.html',
+        kind: 'html',
+        mtime: 702,
+        size: 0,
+        mime: 'text/html',
+      }]);
+
+    const { container } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-race', name: 'Race project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+    const staleSignal = vi.mocked(fetchProjectFiles).mock.calls[0]?.[1]?.signal;
+    expect(staleSignal).toBeDefined();
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-race',
+        workspaceId: 'ws-1',
+      });
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+    });
+    expect(staleSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      resolveInitial([]);
+      await initial;
+    });
+    expect(container.querySelector('.recent-projects__card-thumb-html')).not.toBeNull();
+  });
+
+  it('coalesces repeated active catch-up while an unresolved cover scan is already in flight', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    const pending = new Promise<Awaited<ReturnType<typeof fetchProjectFiles>>>(() => {});
+    vi.mocked(fetchProjectFiles).mockReturnValue(pending);
+
+    render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-inflight', name: 'In-flight project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.onopen?.();
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts an unresolved background cover read when Home unmounts for a reopen', async () => {
+    let coverSignal: AbortSignal | undefined;
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      coverSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve([]), { once: true });
+      });
+    });
+
+    const { unmount } = render(
+      <RecentProjectsStrip
+        projects={[project({ id: 'project-reopen', name: 'Reopen project' })]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    expect(coverSignal).toBeDefined();
+    expect(coverSignal?.aborted).toBe(true);
+  });
+
+  it('bounds a large cover scan and aborts it before opening a foreground project', async () => {
+    const activeSignals = new Set<AbortSignal>();
+    const startedSignals: AbortSignal[] = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      startedSignals.push(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            activeSignals.delete(signal);
+            resolve([]);
+          },
+          { once: true },
+        );
+      });
+    });
+    const onOpen = vi.fn(() => {
+      expect(activeSignals.size).toBe(0);
+      expect(startedSignals.every((signal) => signal.aborted)).toBe(true);
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalled());
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+
+    expect(onOpen).toHaveBeenCalledWith('project-1');
+    expect(activeSignals.size).toBe(0);
+    await act(async () => {});
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes the bounded cover scan when a shared-project foreground open fails', async () => {
+    const activeSignals = new Set<AbortSignal>();
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            activeSignals.delete(signal);
+            resolve([]);
+          },
+          { once: true },
+        );
+      });
+    });
+    let finishOpen!: (opened: boolean) => void;
+    const onOpen = vi.fn(() => new Promise<boolean>((resolve) => {
+      finishOpen = resolve;
+    }));
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+    expect(activeSignals.size).toBe(0);
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    act(() => finishOpen(false));
+
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(4));
+    expect(activeSignals.size).toBe(2);
+  });
+
+  it('keeps HTML cover probes inside the same bounded queue and aborts them before open', async () => {
+    vi.mocked(fetchProjectFiles).mockImplementation(async (projectId) => [{
+      name: 'index.html',
+      path: 'index.html',
+      kind: 'html',
+      mtime: Number(projectId.replace('project-', '')),
+      size: 1,
+      mime: 'text/html',
+    }]);
+    const activeCoverSignals = new Set<AbortSignal>();
+    const coverFetch = vi.fn<typeof fetch>((input, init) => {
+      if (String(input).includes('/api/workspace/context')) {
+        return Promise.resolve(new Response(JSON.stringify({ context: null }), {
+          headers: { 'content-type': 'application/json' },
+        }));
+      }
+      const signal = init?.signal;
+      if (!signal) throw new Error('HTML cover probe must be cancellable');
+      activeCoverSignals.add(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          activeCoverSignals.delete(signal);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', coverFetch);
+    const onOpen = vi.fn(() => {
+      expect(activeCoverSignals.size).toBe(0);
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(20)}
+        limit={1000}
+        onOpen={onOpen}
+        heading="All projects"
+      />,
+    );
+
+    await waitFor(() => expect(activeCoverSignals.size).toBeGreaterThan(0));
+    expect(coverFetch.mock.calls.filter(([input]) => String(input).includes('/api/projects/')))
+      .toHaveLength(2);
+
+    fireEvent.click(screen.getByTitle('Project 1'));
+
+    expect(onOpen).toHaveBeenCalledWith('project-1');
+    expect(activeCoverSignals.size).toBe(0);
+    await act(async () => {});
+    expect(coverFetch.mock.calls.filter(([input]) => String(input).includes('/api/projects/')))
+      .toHaveLength(2);
+  });
+
+  it('does not start queued work while cancelling a saturated priority replacement', async () => {
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
+    const activeSignals = new Set<AbortSignal>();
+    const pending: Array<{
+      projectId: string;
+      finish: (files?: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+    }> = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((projectId, options) => {
+      const signal = options?.signal;
+      if (!signal) throw new Error('cover request must be cancellable');
+      activeSignals.add(signal);
+      return new Promise((resolve) => {
+        const finish = (files: Awaited<ReturnType<typeof fetchProjectFiles>> = []) => {
+          activeSignals.delete(signal);
+          resolve(files);
+        };
+        pending.push({ projectId, finish });
+        signal.addEventListener('abort', () => finish(), { once: true });
+      });
+    });
+
+    render(
+      <RecentProjectsStrip
+        projects={projects(5)}
+        limit={1000}
+        onOpen={() => {
+          expect(activeSignals.size).toBe(0);
+        }}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-5',
+        workspaceId: 'ws-1',
+      });
+    });
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(2);
+
+    act(() => pending.find(({ projectId }) => projectId === 'project-1')!.finish());
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(fetchProjectFiles).mock.calls[2]?.[0]).toBe('project-5');
+
+    fireEvent.click(screen.getByTitle('Project 2'));
+
+    expect(activeSignals.size).toBe(0);
+    await act(async () => {});
+    expect(fetchProjectFiles).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the StrictMode replay request abortable after the first request settles late', async () => {
+    const requests: Array<{
+      resolve: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
+      signal: AbortSignal;
+    }> = [];
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) =>
+      new Promise((resolve) => {
+        if (!options?.signal) throw new Error('cover request must be cancellable');
+        requests.push({ resolve, signal: options.signal });
+      }),
+    );
+
+    const { unmount } = render(
+      <StrictMode>
+        <RecentProjectsStrip
+          projects={[project({ id: 'project-replay', name: 'Replay project' })]}
+          onOpen={() => {}}
+          heading="All projects"
+        />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]?.signal.aborted).toBe(true);
+    expect(requests[1]?.signal.aborted).toBe(false);
+
+    await act(async () => {
+      requests[0]?.resolve([]);
+      await Promise.resolve();
+    });
+    expect(requests[1]?.signal.aborted).toBe(false);
+
+    unmount();
+
+    expect(requests[1]?.signal.aborted).toBe(true);
+    await act(async () => {
+      requests[1]?.resolve([]);
+      await Promise.resolve();
+    });
+  });
+
+  it('aborts hidden Home scans and does not continue a design-system read into brand.json', async () => {
+    vi.mocked(fetchProjectFileText).mockClear();
+    let coverSignal: AbortSignal | undefined;
+    vi.mocked(fetchProjectFiles).mockImplementation((_projectId, options) => {
+      coverSignal = options?.signal;
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => resolve([
+            {
+              name: 'logo.svg',
+              path: 'assets/logo.svg',
+              kind: 'image',
+              mtime: 1,
+              size: 1,
+              mime: 'image/svg+xml',
+            },
+          ]),
+          { once: true },
+        );
+      });
+    });
+
+    const projectToReopen = project({
+      id: 'project-ds-reopen',
+      name: 'Design System',
+      metadata: { kind: 'other', importedFrom: 'design-system' },
+    });
+    const { rerender } = render(
+      <RecentProjectsStrip
+        isActive
+        projects={[projectToReopen]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+    await waitFor(() => expect(fetchProjectFiles).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <RecentProjectsStrip
+        isActive={false}
+        projects={[projectToReopen]}
+        onOpen={() => {}}
+        heading="All projects"
+      />,
+    );
+
+    expect(coverSignal?.aborted).toBe(true);
+    await act(async () => {});
+    expect(fetchProjectFileText).not.toHaveBeenCalled();
+  });
+
   it('shows seven projects when the row has room for a seventh card', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getRect(this: HTMLElement) {
       return {
@@ -297,7 +837,10 @@ describe('RecentProjectsStrip', () => {
       expect(deckCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
       expect(htmlCard?.querySelector('.recent-projects__card-glyph')).toBeNull();
     });
-    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-deck/files/index.html?v=400');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-deck/files/index.html?v=400',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/project-html/files/index.html?v=200',
       expect.objectContaining({ cache: 'no-store', method: 'HEAD' }),
@@ -323,7 +866,7 @@ describe('RecentProjectsStrip', () => {
     );
 
     await waitFor(() => {
-      const htmlThumb = container.querySelector('.recent-projects__card-thumb-html');
+      const htmlThumb = container.querySelector('.recent-projects__card-thumb');
       expect(htmlThumb?.querySelector('iframe')).toBeNull();
       expect(htmlThumb?.querySelector('.recent-projects__card-glyph')?.textContent).toBe('W');
       expect(warn).toHaveBeenCalledWith(

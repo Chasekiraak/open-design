@@ -1,4 +1,7 @@
-import type { WorkspaceInviteRole } from '@open-design/contracts';
+import {
+  normalizeWorkspaceInviteCreateErrorCode,
+  type WorkspaceInviteRole,
+} from '@open-design/contracts';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 
 // Daemon half of the invite CREATE flow (the inviter/host side of the B-C invite
@@ -9,8 +12,9 @@ import { readVelaControlApiContext } from '../integrations/vela.js';
 // uses (never a client-supplied one) and POSTs to B's create-invite endpoint.
 // Any failure degrades to a typed outcome the route maps onto HTTP — it never
 // throws into the caller. In particular, B's create endpoint may not exist on a
-// local backend yet, so a 404 (or any non-2xx) is reported as `create_<status>`,
-// not a crash.
+// local backend yet. Safe, explicitly allowlisted business errors retain their
+// typed code; every other non-2xx becomes `create_<status>` instead of leaking
+// an arbitrary upstream body or crashing.
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 
@@ -42,9 +46,9 @@ export interface CreateWorkspaceInviteOptions {
  *
  * Errors are typed, not thrown: `no_session` (401) when the client is not signed
  * in, `no_workspace` (409) when there is no workspace to scope the invite to,
- * `create_<n>` for B's non-2xx (e.g. `create_404` when the endpoint is absent
- * locally, `create_403` when forbidden), and `create_unreachable` (502) on a
- * transport failure.
+ * safe allowlisted business codes for known B failures, `create_<n>` for every
+ * other B non-2xx (e.g. `create_404` when the endpoint is absent locally), and
+ * `create_unreachable` (502) on a transport failure.
  */
 export async function createWorkspaceInvite(
   input: CreateWorkspaceInviteInput,
@@ -76,7 +80,17 @@ export async function createWorkspaceInvite(
       signal: controller.signal,
     });
     if (!response.ok) {
-      return { ok: false, status: response.status, error: `create_${response.status}` };
+      const body = (await response.json().catch(() => null)) as
+        | { code?: unknown; error?: unknown }
+        | null;
+      const typedError =
+        normalizeWorkspaceInviteCreateErrorCode(body?.code) ??
+        normalizeWorkspaceInviteCreateErrorCode(body?.error);
+      return {
+        ok: false,
+        status: response.status,
+        error: typedError ?? `create_${response.status}`,
+      };
     }
     const body = (await response.json().catch(() => null)) as
       | { inviteId?: unknown; id?: unknown }

@@ -22,6 +22,7 @@ import {
 import {
   fetchSkills,
   importSkill,
+  installSkill,
   uninstallSkill,
   type SkillImportInput,
   type SkillImportError,
@@ -63,7 +64,7 @@ import {
 import { Icon } from './Icon';
 import { Toast } from './Toast';
 import { PluginDetailsModal } from './PluginDetailsModal';
-import { SkillDetailsModal } from './SkillDetailsModal';
+import { SkillDetailView } from './SkillDetailView';
 import { PluginsHomeSection } from './PluginsHomeSection';
 import { humanizeCategory } from './SkillsSection';
 import { buildCategoryCatalog, extractCategories } from './plugins-home/facets';
@@ -136,6 +137,18 @@ export function sharedResourceIsMine(
 function isPersonalPluginRecord(plugin: InstalledPluginRecord): boolean {
   if (!USER_SOURCE_KINDS.has(plugin.sourceKind)) return false;
   return !plugin.source.startsWith('team:plugin:');
+}
+
+// Mirrors `isPersonalPluginRecord` for skills: a skill materialized from a
+// TEAMMATE's team share carries `teamSynced: true` (the puller-side marker
+// `syncSharedTeamSkill`'s `markTeamSynced` stamps into `workspace_resources`,
+// surfaced onto `SkillSummary` by `listSkills`'s workspace-scoped pass — never
+// set on the sharer's own skill). Without this exclusion, unsharing a skill
+// team-side made the puller's now-stale copy silently reappear in "Personal"
+// — `source` reads `'user'` either way, so it was indistinguishable from a
+// skill the caller authored themselves.
+function isPersonalSkillRecord(skill: SkillSummary): boolean {
+  return skill.source === 'user' && !skill.teamSynced;
 }
 
 const PLUGINS_TABS: ReadonlyArray<{
@@ -852,7 +865,14 @@ interface MarketCard {
   action: MarketCardAction;
   // what the card body opens when clicked; null when nothing local backs it
   detail: MarketCardDetail | null;
-  // present only for a personal resource that is not yet shared to the team
+  // Present for a personal resource that is either not yet shared, or already
+  // shared AND managed by the current caller (`canUnshare` true — the
+  // original sharer or a workspace owner/admin). The button/menu label
+  // switches between "share" and "sync" (see `card.isShared`) but both cases
+  // call the same POST .../share route: it has no "already shared" guard, so
+  // a repeat call just pushes the current local directory over the hub's
+  // stale copy. Absent entirely for a teammate's pulled copy the caller may
+  // not manage, so a plain member can never overwrite someone else's share.
   share: { kind: MarketMode; id: string } | null;
   // present for a resource currently in the team index
   unshare: { kind: MarketMode; id: string } | null;
@@ -953,6 +973,10 @@ export function ExtensionsMarketplace({
     if (!detail) return;
     setMenuId(null);
     setConfirmUninstallId(null);
+    if (detail.kind === 'plugin') {
+      navigate({ kind: 'marketplace-detail', pluginId: detail.record.id });
+      return;
+    }
     setCardDetail(detail);
   }
 
@@ -962,7 +986,7 @@ export function ExtensionsMarketplace({
   //   Plugin · 从链接导入   → installPluginSource(url)
   //   Plugin · 上传本地文件夹 → uploadPluginFolder(files)
   //   Skill  · 上传本地文件夹 → importSkill(<SKILL.md body>)  (reads the folder)
-  //   Skill  · 从链接导入   → NO backend yet → 待接后端 (see handleCreateImportUrl)
+  //   Skill  · 从链接导入   → installSkill(source)
   const [createOpen, setCreateOpen] = useState(false);
   const [createKind, setCreateKind] = useState<'plugin' | 'skill'>('plugin');
   const [createUrl, setCreateUrl] = useState('');
@@ -1008,14 +1032,26 @@ export function ExtensionsMarketplace({
   async function handleCreateImportUrl() {
     const url = createUrl.trim();
     if (!url || createBusy) return;
-    // Skills have no import-from-URL endpoint yet. Keep the UI shell but do not
-    // fabricate a flow — surface the gap plainly. TODO(backend): skill import
-    // from a public URL.
     if (createKind === 'skill') {
-      setToast({
-        message: t('pluginsView.skillUrlUnsupported'),
-        tone: 'error',
-      });
+      setCreateBusy('import');
+      try {
+        const result = await installSkill({ source: url }, workspaceContext);
+        if ('error' in result) {
+          setToast({ message: result.error || t('pluginsView.importFailed'), tone: 'error' });
+          return;
+        }
+        await refresh();
+        setCreateOpen(false);
+        revealImported('skill');
+        setToast({
+          message: t('pluginsView.importSkillSuccess', {
+            name: localizeSkillName(locale, result.skill),
+          }),
+          tone: 'success',
+        });
+      } finally {
+        setCreateBusy(null);
+      }
       return;
     }
     setCreateBusy('import');
@@ -1176,7 +1212,7 @@ export function ExtensionsMarketplace({
     () => buildAvailablePlugins(marketplaces, allInstalledPlugins),
     [marketplaces, allInstalledPlugins],
   );
-  const userSkills = useMemo(() => skills.filter((skill) => skill.source === 'user'), [skills]);
+  const userSkills = useMemo(() => skills.filter(isPersonalSkillRecord), [skills]);
   const officialSkills = useMemo(
     () => skills.filter((skill) => skill.source !== 'user'),
     [skills],
@@ -1184,6 +1220,12 @@ export function ExtensionsMarketplace({
 
   async function shareResource(kind: MarketMode, id: string, title: string) {
     if (sharingId || unsharingId) return;
+    // Same POST route promotes a not-yet-shared resource AND pushes an update
+    // for one that is already shared (`share()` has no "already shared"
+    // guard — see team-resource-share.ts). Only the toast copy distinguishes
+    // the two so an owner who just edited and re-shared sees "synced", not a
+    // confusing "shared" repeated on every subsequent push.
+    const wasAlreadyShared = (kind === 'plugins' ? sharedPluginIds : sharedSkillIds).has(id);
     setSharingId(id);
     setMenuId(null);
     const basePath = kind === 'plugins' ? 'plugins' : 'skills';
@@ -1194,12 +1236,21 @@ export function ExtensionsMarketplace({
       const body = (await res.json().catch(() => ({}))) as { shared?: boolean };
       if (res.ok && body.shared) {
         await refreshSharedResources();
-        setToast({ message: t('pluginsView.shareSuccess', { title }), tone: 'success' });
+        setToast({
+          message: t(wasAlreadyShared ? 'pluginsView.syncSuccess' : 'pluginsView.shareSuccess', { title }),
+          tone: 'success',
+        });
       } else {
-        setToast({ message: t('pluginsView.shareUnavailable', { title }), tone: 'error' });
+        setToast({
+          message: t(wasAlreadyShared ? 'pluginsView.syncUnavailable' : 'pluginsView.shareUnavailable', { title }),
+          tone: 'error',
+        });
       }
     } catch {
-      setToast({ message: t('pluginsView.shareFailed', { title }), tone: 'error' });
+      setToast({
+        message: t(wasAlreadyShared ? 'pluginsView.syncFailed' : 'pluginsView.shareFailed', { title }),
+        tone: 'error',
+      });
     } finally {
       setSharingId(null);
     }
@@ -1292,7 +1343,13 @@ export function ExtensionsMarketplace({
         accent: marketAccent(record.id),
         action: { kind: 'try', record },
         detail: { kind: 'plugin', record },
-        share: personal && !shared ? { kind: 'plugins', id: record.id } : null,
+        // Keep the share affordance live after the first share (relabeled to
+        // "sync" by `card.isShared`) so an owner can push a local edit to the
+        // team without unsharing and resharing. Restricted to `canUnshare`
+        // once shared — the same "who may manage this" gate `unshare` already
+        // uses — so a plain member who merely has the plugin installed can't
+        // overwrite the real owner's shared copy.
+        share: personal && (!shared || canUnshare) ? { kind: 'plugins', id: record.id } : null,
         unshare: shared && canUnshare ? { kind: 'plugins', id: record.id } : null,
         uninstall:
           record.sourceKind === 'bundled' ? null : { kind: 'plugins', id: record.id },
@@ -1315,7 +1372,10 @@ export function ExtensionsMarketplace({
         // the skill at all (issue #131).
         action: { kind: 'use-skill', skill },
         detail: { kind: 'skill', skill },
-        share: personal && !shared ? { kind: 'skills', id: skill.id } : null,
+        // See the plugin card builder above: keep sharing live post-share
+        // (relabeled "sync") for whoever may manage it, so a skill owner can
+        // push local edits without unshare-then-reshare.
+        share: personal && (!shared || canUnshare) ? { kind: 'skills', id: skill.id } : null,
         unshare: shared && canUnshare ? { kind: 'skills', id: skill.id } : null,
         uninstall: skill.source === 'user' ? { kind: 'skills', id: skill.id } : null,
         stats: null,
@@ -1473,6 +1533,40 @@ export function ExtensionsMarketplace({
       return `${card.title} ${card.description}`.toLowerCase().includes(q);
     });
   }, [cards, category, query]);
+
+  if (cardDetail?.kind === 'skill') {
+    const selectedSkill = cardDetail.skill;
+    const closeSkillDetail = () => {
+      setCardDetail(null);
+      queueMicrotask(() => {
+        const trigger = [...document.querySelectorAll<HTMLElement>(
+          '.plugin-marketplace__item--skill[data-testid]',
+        )].find((card) => card.dataset.testid === `plugins-card-${selectedSkill.id}`);
+        trigger?.focus();
+      });
+    };
+    return (
+      <SkillDetailView
+        skill={selectedSkill}
+        author={
+          scope === 'official'
+            ? 'Open Design'
+            : scope === 'team'
+              ? 'Nexu Team'
+              : t('chat.you')
+        }
+        onBack={closeSkillDetail}
+        {...(onUseSkill
+          ? {
+            onUse: () => {
+              setCardDetail(null);
+              onUseSkill(selectedSkill);
+            },
+          }
+          : {})}
+      />
+    );
+  }
 
   return (
     <section className="plugin-marketplace" aria-labelledby="plugin-marketplace-title">
@@ -1712,7 +1806,11 @@ export function ExtensionsMarketplace({
                           void shareResource(share.kind, share.id, card.title);
                         }}
                       >
-                        {busy ? t('pluginsView.sharing') : t('pluginsView.shareToTeam')}
+                        {busy
+                          ? t('pluginsView.sharing')
+                          : card.isShared
+                            ? t('pluginsView.syncToTeam')
+                            : t('pluginsView.shareToTeam')}
                       </button>
                     ) : card.unshare ? (
                       <button
@@ -1765,7 +1863,7 @@ export function ExtensionsMarketplace({
                                 }}
                               >
                                 <Icon name="users" size={14} />
-                                {t('pluginsView.shareToTeam')}
+                                {card.isShared ? t('pluginsView.syncToTeam') : t('pluginsView.shareToTeam')}
                               </button>
                             ) : null}
                             {menuActions.includes('unshare') ? (
@@ -1850,22 +1948,6 @@ export function ExtensionsMarketplace({
           />
         ) : null}
       </AnimatePresence>
-      {cardDetail?.kind === 'skill' ? (
-        <SkillDetailsModal
-          skillId={cardDetail.skill.id}
-          summary={cardDetail.skill}
-          onClose={() => setCardDetail(null)}
-          {...(onUseSkill
-            ? {
-              onUse: () => {
-                const skill = cardDetail.skill;
-                setCardDetail(null);
-                onUseSkill(skill);
-              },
-            }
-            : {})}
-        />
-      ) : null}
       {createOpen ? (
         <div
           className="plugin-marketplace__modal-backdrop"
@@ -1946,7 +2028,11 @@ export function ExtensionsMarketplace({
                       value={createUrl}
                       onChange={(event) => setCreateUrl(event.target.value)}
                       disabled={createBusy !== null}
-                      placeholder={createKind === 'plugin' ? 'https://example.com/open-design-suite' : 'https://example.com/skill'}
+                      placeholder={
+                        createKind === 'plugin'
+                          ? 'https://github.com/owner/plugin-repo'
+                          : 'https://github.com/owner/skill-repo'
+                      }
                     />
                     <button
                       type="button"

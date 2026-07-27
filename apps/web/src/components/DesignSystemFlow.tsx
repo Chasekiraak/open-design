@@ -938,6 +938,7 @@ export function DesignSystemCreationFlow({
         description: [state.company.trim(), state.notes.trim()].filter(Boolean).join('\n\n'),
         designMd: designMdForExtraction,
         throwOnError: true,
+        workspaceContext,
       });
       if (!result) {
         setVisibleError(t('dsCreate.extractionAlreadyStarting'));
@@ -1924,7 +1925,17 @@ export function DesignSystemDetailView({
 
   const sections = useMemo(() => parseDesignSystemSections(body, t), [body, t]);
   const published = system?.status === 'published';
-  const editable = system?.isEditable !== false;
+  // recvqb6mfyqXLD: `isEditable` only distinguishes a user-authored system
+  // from a built-in preset — it stays `true` even on a teammate's team-synced
+  // copy the caller does not own, which used to leave the Publish toggle and
+  // the DESIGN.md Save button live for a plain member here (this view also
+  // renders for the direct `/design-systems/:id` route, e.g. from the
+  // Library's "Open design system" link — not just DesignSystemsTab's own
+  // team tab, which already gates its own copy of these controls). `canMutate`
+  // is the daemon's own PATCH/DELETE verdict (`canMutateUserDesignSystem`)
+  // mirrored onto the GET response, so this stays in lockstep with whatever
+  // the backend actually allows.
+  const editable = system?.isEditable !== false && system?.canMutate !== false;
   const activeJob = revisionJob ?? generationJob;
   const pendingRevision = revisions.find((revision) => revision.status === 'pending') ?? null;
   const recentRevisions = revisions.slice(0, 5);
@@ -2543,7 +2554,7 @@ export function DesignSystemDetailView({
     revision: DesignSystemRevision,
     status: 'accepted' | 'rejected',
   ) {
-    if (!system) return;
+    if (!system || !editable) return;
     setSaving(true);
     setStatusLine(null);
     try {
@@ -2702,7 +2713,7 @@ export function DesignSystemDetailView({
                       : t('dsFlow.publishCardWorking')
                   : t('dsFlow.publishCardReady')}
               </p>
-              <label>
+              <label title={system.canMutate === false ? t('dsManager.teamSyncedReadOnly') : undefined}>
                 <input
                   type="checkbox"
                   checked={published}
@@ -2761,6 +2772,7 @@ export function DesignSystemDetailView({
               <RevisionDiffCard
                 revision={pendingRevision}
                 saving={saving}
+                editable={editable}
                 onAccept={() => void resolveRevision(pendingRevision, 'accepted')}
                 onReject={() => void resolveRevision(pendingRevision, 'rejected')}
               />
@@ -2821,7 +2833,10 @@ export function DesignSystemDetailView({
                 );
               })}
             </div>
-            <label className="ds-body-editor">
+            <label
+              className="ds-body-editor"
+              title={system.canMutate === false ? t('dsManager.teamSyncedReadOnly') : undefined}
+            >
               DESIGN.md
               <Textarea
                 value={body}
@@ -2830,7 +2845,12 @@ export function DesignSystemDetailView({
                 disabled={!editable}
               />
             </label>
-            <Button variant="primary" disabled={!editable || saving} onClick={() => void saveBody()}>
+            <Button
+              variant="primary"
+              disabled={!editable || saving}
+              onClick={() => void saveBody()}
+              title={system.canMutate === false ? t('dsManager.teamSyncedReadOnly') : undefined}
+            >
               {t('ds.saveDesignMd')}
             </Button>
             {recentRevisions.length > 0 ? <RevisionHistoryList revisions={recentRevisions} /> : null}
@@ -3494,16 +3514,24 @@ function GenerationStatusCard({ job }: { job: DesignSystemGenerationJob }) {
 function RevisionDiffCard({
   revision,
   saving,
+  editable,
   onAccept,
   onReject,
 }: {
   revision: DesignSystemRevision;
   saving: boolean;
+  /** recvqb6mfyqXLD: accepting/rejecting commits (or discards) the revision
+   *  onto the canonical design system, so it needs the same ownership gate as
+   *  the Publish toggle / DESIGN.md Save button above — otherwise a plain
+   *  member viewing a teammate's team-synced system could act on a pending
+   *  revision that was never theirs to decide on. */
+  editable: boolean;
   onAccept: () => void;
   onReject: () => void;
 }) {
   const { t } = useI18n();
   const diff = revisionAddedText(revision);
+  const readOnlyTitle = editable ? undefined : t('dsManager.teamSyncedReadOnly');
   return (
     <section className="ds-revision-card">
       <div className="ds-revision-card__head">
@@ -3515,11 +3543,23 @@ function RevisionDiffCard({
           </small>
         </span>
         <div>
-          <button type="button" className="ghost danger" disabled={saving} onClick={onReject}>
+          <button
+            type="button"
+            className="ghost danger"
+            disabled={saving || !editable}
+            title={readOnlyTitle}
+            onClick={onReject}
+          >
             <Icon name="close" />
             {t('dsFlow.revisionReject')}
           </button>
-          <button type="button" className="ghost success" disabled={saving} onClick={onAccept}>
+          <button
+            type="button"
+            className="ghost success"
+            disabled={saving || !editable}
+            title={readOnlyTitle}
+            onClick={onAccept}
+          >
             <Icon name="check" />
             {t('dsFlow.revisionAccept')}
           </button>

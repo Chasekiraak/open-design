@@ -59,19 +59,8 @@
   border-radius: var(--radius);
   padding: 6px 10px;
 }
-/* recvqatCJzuCAD: dogfood flagged the popover's alignment under the design
-   system detail modal's "更多" trigger as "看着有些奇怪". Measured via real
-   getBoundingClientRect() on the live modal — the popover's right edge is
-   pixel-identical to the trigger's right edge (position: absolute; right: 0
-   inside the relative `.plugin-share-menu` wrap is correct), so this was
-   never a positioning offset bug. The real cause: `button.ghost` zeroes out
-   background/border, so this trigger renders as bare icon+text and gives no
-   visual acknowledgement of being open (aria-expanded='true' looked
-   identical to idle) — right next to the "分享" dropdown, which already
-   solves the exact same problem for its own `.ghost` trigger (see
-   `.template-share-trigger.ghost` in tools.css). Mirroring that established,
-   already-shipped treatment here (not a new fabricated style) gives the
-   220px-wide popover an anchor the eye can actually trace back to.  */
+/* Match the adjacent template share trigger so the inline variant keeps a
+   visible anchor while its popover is open. */
 .plugin-share-trigger.ghost:not(:disabled) {
   background: var(--bg-panel);
   border-color: var(--border);
@@ -125,6 +114,7 @@
   appearance: none;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   border: 0;

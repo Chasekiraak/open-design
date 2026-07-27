@@ -1,6 +1,11 @@
 import { execFile } from 'node:child_process';
 
-import { createCommandInvocation } from '@open-design/platform';
+import {
+  collectProcessTreePids,
+  createCommandInvocation,
+  listProcessSnapshots,
+  stopProcesses,
+} from '@open-design/platform';
 
 import {
   agentCliEnvForAgent,
@@ -17,6 +22,77 @@ export interface VelaCommandOptions {
   env?: NodeJS.ProcessEnv;
   configuredEnv?: Record<string, string>;
   maxBuffer?: number;
+  /**
+   * Terminate the child process tree when it exceeds this wall-clock budget.
+   * Rejection happens only after termination is confirmed, so callers cannot
+   * release a materialization lock while the old process may still be writing.
+   */
+  timeoutMs?: number;
+  /** Optional caller cancellation with the same confirmed-termination rule. */
+  signal?: AbortSignal;
+  /** Grace for each of SIGTERM and SIGKILL confirmation. Defaults to 500ms. */
+  terminationGraceMs?: number;
+  /**
+   * Observe buffered stderr after the child exits. The stdout return contract
+   * stays unchanged; observer failures never affect command completion.
+   */
+  onStderr?: (stderr: string) => void;
+}
+
+type VelaTerminationReason = 'abort' | 'timeout';
+
+const DEFAULT_TERMINATION_GRACE_MS = 500;
+
+function positiveInteger(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function commandTerminationError(
+  reason: VelaTerminationReason,
+  timeoutMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Error {
+  if (reason === 'abort') {
+    const error = new Error('vela command aborted', {
+      cause: signal?.reason,
+    });
+    error.name = 'AbortError';
+    Object.assign(error, { code: 'ABORT_ERR' });
+    return error;
+  }
+  const error = new Error(`vela command timed out after ${timeoutMs}ms`);
+  error.name = 'TimeoutError';
+  Object.assign(error, { code: 'ETIMEDOUT' });
+  return error;
+}
+
+function logCommandTermination(
+  phase: 'completed' | 'failed' | 'scheduled' | 'unconfirmed',
+  detail: {
+    reason: VelaTerminationReason;
+    timeoutMs?: number | undefined;
+    childPid?: number | undefined;
+    forcedPids?: number[] | undefined;
+    remainingPids?: number[] | undefined;
+    error?: unknown;
+  },
+): void {
+  const fields = [
+    `phase=${phase}`,
+    `reason=${detail.reason}`,
+    `timeoutMs=${detail.timeoutMs ?? 'none'}`,
+    `childPid=${detail.childPid ?? 'unknown'}`,
+    `forced=${detail.forcedPids?.length ?? 0}`,
+    `remaining=${detail.remainingPids?.length ?? 0}`,
+  ];
+  if (detail.error != null) {
+    fields.push(
+      `error=${detail.error instanceof Error ? detail.error.name : 'unknown'}`,
+    );
+  }
+  console.warn(`[od] vela_command_termination ${fields.join(' ')}`);
 }
 
 export function velaWorkspaceCommandOptions(
@@ -85,8 +161,102 @@ export function runVelaCommand(
     launch,
   );
   const invocation = createCommandInvocation({ command: bin, args, env: childEnv });
+  const timeoutMs = positiveInteger(options.timeoutMs);
+  const terminationGraceMs =
+    positiveInteger(options.terminationGraceMs) ?? DEFAULT_TERMINATION_GRACE_MS;
+  if (options.signal?.aborted) {
+    return Promise.reject(
+      commandTerminationError('abort', timeoutMs, options.signal),
+    );
+  }
   return new Promise<string>((resolve, reject) => {
-    execFile(
+    let childPid: number | undefined;
+    let settled = false;
+    let terminating = false;
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+
+    const clearTriggers = (): void => {
+      if (deadlineTimer) {
+        clearTimeout(deadlineTimer);
+        deadlineTimer = undefined;
+      }
+      if (abortListener && options.signal) {
+        options.signal.removeEventListener('abort', abortListener);
+        abortListener = undefined;
+      }
+    };
+
+    const settle = (
+      outcome: { stdout: string } | { error: unknown },
+    ): void => {
+      if (settled) return;
+      settled = true;
+      clearTriggers();
+      if ('error' in outcome) reject(outcome.error);
+      else resolve(outcome.stdout);
+    };
+
+    const terminate = (reason: VelaTerminationReason): void => {
+      if (settled || terminating) return;
+      terminating = true;
+      clearTriggers();
+      logCommandTermination('scheduled', {
+        reason,
+        timeoutMs,
+        childPid,
+      });
+      if (childPid == null) {
+        // Releasing the caller's lock without a PID would allow another pull
+        // to write concurrently with a process whose termination is unknown.
+        logCommandTermination('unconfirmed', {
+          reason,
+          timeoutMs,
+        });
+        return;
+      }
+      void (async () => {
+        const processTree = collectProcessTreePids(
+          await listProcessSnapshots(),
+          [childPid],
+        );
+        const result = await stopProcesses(processTree, {
+          termGraceMs: terminationGraceMs,
+          killGraceMs: terminationGraceMs,
+        });
+        if (result.remainingPids.length > 0) {
+          logCommandTermination('unconfirmed', {
+            reason,
+            timeoutMs,
+            childPid,
+            forcedPids: result.forcedPids,
+            remainingPids: result.remainingPids,
+          });
+          return;
+        }
+        logCommandTermination('completed', {
+          reason,
+          timeoutMs,
+          childPid,
+          forcedPids: result.forcedPids,
+          remainingPids: result.remainingPids,
+        });
+        settle({
+          error: commandTerminationError(reason, timeoutMs, options.signal),
+        });
+      })().catch((error: unknown) => {
+        // Do not settle: without confirmed termination the caller must retain
+        // its per-project lock rather than permit overlapping disk writes.
+        logCommandTermination('failed', {
+          reason,
+          timeoutMs,
+          childPid,
+          error,
+        });
+      });
+    };
+
+    const child = execFile(
       invocation.command,
       invocation.args,
       {
@@ -95,10 +265,33 @@ export function runVelaCommand(
         maxBuffer: options.maxBuffer ?? 16 * 1024 * 1024,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       },
-      (error, stdout) => {
-        if (error) reject(error);
-        else resolve(stdout);
+      (error, stdout, stderr) => {
+        if (terminating) return;
+        if (stderr && options.onStderr) {
+          try {
+            options.onStderr(stderr);
+          } catch {
+            // Diagnostics are observational and must never change transport.
+          }
+        }
+        if (error) settle({ error });
+        else settle({ stdout });
       },
     );
+    childPid = child.pid;
+    if (settled) return;
+
+    if (options.signal) {
+      abortListener = () => terminate('abort');
+      options.signal.addEventListener('abort', abortListener, { once: true });
+      if (options.signal.aborted) {
+        terminate('abort');
+        return;
+      }
+    }
+    if (timeoutMs !== undefined) {
+      deadlineTimer = setTimeout(() => terminate('timeout'), timeoutMs);
+      deadlineTimer.unref();
+    }
   });
 }

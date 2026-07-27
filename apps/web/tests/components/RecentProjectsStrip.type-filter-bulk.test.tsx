@@ -61,6 +61,15 @@ const LIVE = project({
   updatedAt: 3,
   metadata: { kind: 'prototype', intent: 'live-artifact' },
 });
+// recvpZbvupSr1o: a web-clone project still stores `kind: 'prototype'`
+// (home-hero/chips.ts's 'web-clone' chip keeps preview behavior identical to
+// a blank prototype) — only `intent: 'web-clone'` marks the scenario.
+const WEB_CLONE = project({
+  id: 'p-web-clone',
+  name: 'Web clone project',
+  updatedAt: 2.5,
+  metadata: { kind: 'prototype', intent: 'web-clone' },
+});
 const MEDIA = project({
   id: 'p-media',
   name: 'Media project',
@@ -74,7 +83,7 @@ const DESIGN_SYSTEM = project({
   metadata: { kind: 'other', importedFrom: 'design-system' },
 });
 
-const ALL_PROJECTS = [PROTOTYPE, DECK, LIVE, MEDIA, DESIGN_SYSTEM];
+const ALL_PROJECTS = [PROTOTYPE, DECK, LIVE, WEB_CLONE, MEDIA, DESIGN_SYSTEM];
 
 function renderGrid(props: Partial<React.ComponentProps<typeof RecentProjectsStrip>> = {}) {
   return render(
@@ -107,8 +116,23 @@ describe('projectCardCategory', () => {
     expect(projectCardCategory(PROTOTYPE)).toBe('prototype');
     expect(projectCardCategory(DECK)).toBe('slide');
     expect(projectCardCategory(LIVE)).toBe('live-artifact');
+    expect(projectCardCategory(WEB_CLONE)).toBe('web-clone');
     expect(projectCardCategory(MEDIA)).toBe('media');
     expect(projectCardCategory(DESIGN_SYSTEM)).toBe('design-system');
+  });
+
+  it('recvpZbvupSr1o: resolves a web-clone-intent project to its own chip, not the blank prototype bucket', () => {
+    // Both projects store `kind: 'prototype'`; only `intent` distinguishes a
+    // website clone from a real blank prototype. Before this fix every clone
+    // fell through the missing branch straight to the 'prototype' default.
+    expect(
+      projectCardCategory(project({ id: 'p-blank', metadata: { kind: 'prototype' } })),
+    ).toBe('prototype');
+    expect(
+      projectCardCategory(
+        project({ id: 'p-clone', metadata: { kind: 'prototype', intent: 'web-clone' } }),
+      ),
+    ).toBe('web-clone');
   });
 
   it('resolves brand-kind projects to the design-system chip the card shows', () => {
@@ -152,6 +176,7 @@ describe('RecentProjectsStrip type filter (#77)', () => {
       'Prototype',
       'Slide',
       'Live Artifact',
+      'Website clone',
       'Media',
       'Design System',
     ]);
@@ -167,6 +192,11 @@ describe('RecentProjectsStrip type filter (#77)', () => {
 
     fireEvent.click(within(openKindMenu(container)).getByText('Live Artifact'));
     expect(cardNames(container)).toEqual(['Live project']);
+
+    // recvpZbvupSr1o: Website clone must be its own filter bucket, separate
+    // from both Live Artifact and the blank Prototype bucket it used to hide in.
+    fireEvent.click(within(openKindMenu(container)).getByText('Website clone'));
+    expect(cardNames(container)).toEqual(['Web clone project']);
 
     fireEvent.click(within(openKindMenu(container)).getByText('Design System'));
     expect(cardNames(container)).toEqual(['Design system project']);

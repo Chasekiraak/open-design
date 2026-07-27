@@ -51,9 +51,22 @@ interface TeamProjectCatalogSink {
   remove?(projectId: string, principal?: ResourceHubPrincipal | null): Promise<unknown>;
 }
 
+/**
+ * The subset of {@link CollabPublishScheduler} the rest of the daemon is
+ * allowed to drive directly (the HTTP routes and the project file watcher —
+ * see `server.ts`'s `notifyFilesChanged` wiring). Narrowed to an interface,
+ * rather than exposing the class, so `createCollabRuntime` can hand out a
+ * facade that also updates `syncState` on every author-side change without
+ * either side needing to know about the other.
+ */
+export interface CollabRuntimeScheduler {
+  notifyChanged(projectId: string, reason?: string): void;
+  runBoundary(projectId: string): void;
+}
+
 export interface CollabRuntime {
   presence: CollabPresenceTracker;
-  scheduler: CollabPublishScheduler;
+  scheduler: CollabRuntimeScheduler;
   /** Workspace-context provider — the B-integration seam (identity/visibility). */
   workspaceContext: WorkspaceContextProvider;
   /** Team-resource state provider — the E-resource-hub seam (share/freeze state). */
@@ -235,6 +248,30 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
           ? 'synced'
           : 'local_only';
     syncStates.set(projectId, aggregateState);
+  }
+
+  /**
+   * A local edit landed on a project that is already shared to the team: its
+   * published head is about to go stale until the scheduler's debounced
+   * publish confirms. Without this, `syncState` only ever left `'synced'` on
+   * the FIRST share (`requestTeamShare`) and stayed `'synced'` through every
+   * later edit-then-republish cycle, so `/collab/status` had no way to tell
+   * the owner's own client "your last edit hasn't reached teammates yet" —
+   * the "uploading" tab badge has nothing to key off without this. Only
+   * touches projects that already have a share principal; an unshared
+   * project's `syncState` stays `'local_only'` regardless of local edits.
+   */
+  function markLocalChangePending(projectId: string) {
+    const principals = principalsForProject(projectId);
+    if (principals.length === 0) return;
+    for (const principal of principals) {
+      const key = scopedProjectKey(projectId, principal);
+      const state = syncStates.get(key);
+      if (state === 'synced' || state === 'sync_failed') {
+        syncStates.set(key, 'pending_upload');
+      }
+    }
+    refreshProjectAggregate(projectId);
   }
 
   async function markTeamProject(
@@ -522,6 +559,21 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
   };
 
   const scheduler = new CollabPublishScheduler(schedulerOptions);
+  // Every external caller of `.scheduler` only ever needs to REPORT a change;
+  // route that through `markLocalChangePending` first so `syncState` reflects
+  // "uploading" for the window between the edit and the debounced publish
+  // confirming it (see the function's doc comment). The real scheduler still
+  // owns debouncing/coalescing/flush — this only adds the state update.
+  const schedulerFacade: CollabRuntimeScheduler = {
+    notifyChanged(projectId, reason) {
+      markLocalChangePending(projectId);
+      scheduler.notifyChanged(projectId, reason);
+    },
+    runBoundary(projectId) {
+      markLocalChangePending(projectId);
+      scheduler.runBoundary(projectId);
+    },
+  };
   const presenceOptions: CollabPresenceTrackerOptions = {};
   if (options.onPresenceChange) presenceOptions.onChange = options.onPresenceChange;
   const presence = new CollabPresenceTracker(presenceOptions);
@@ -529,7 +581,7 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
 
   return {
     presence,
-    scheduler,
+    scheduler: schedulerFacade,
     workspaceContext,
     teamResources,
     publishedVersion: (projectId, principal) => {
@@ -619,7 +671,13 @@ export function createCollabRuntime(options: CreateCollabRuntimeOptions = {}): C
       }
     },
     async pullLatest(projectId, principal) {
-      if (baseAdapter.pull) await baseAdapter.pull({ projectId, ...(principal ? { principal } : {}) });
+      if (baseAdapter.pull) {
+        const materialized = await baseAdapter.pull({
+          projectId,
+          ...(principal ? { principal } : {}),
+        });
+        return { version: materialized?.version ?? null };
+      }
       const head = baseAdapter.syncLatest
         ? await baseAdapter.syncLatest({ projectId, ...(principal ? { principal } : {}) })
         : { version: principal ? published.get(scopedProjectKey(projectId, principal)) ?? null : published.get(projectId) ?? null };

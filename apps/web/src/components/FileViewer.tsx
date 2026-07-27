@@ -211,7 +211,6 @@ async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean>
 import { HandoffButton } from './HandoffButton';
 import { SocialShareGrid } from './SocialShareGrid';
 import { Toast } from './Toast';
-import { teamConsoleUrl } from './EntryNavRail';
 import {
   PreviewDrawOverlay,
   ANNOTATION_EVENT,
@@ -263,6 +262,12 @@ import {
 } from '../edit-mode/source-patches';
 import { MANUAL_EDIT_STYLE_PROPS, type ManualEditBridgeMessage, type ManualEditHistoryEntry, type ManualEditPatch, type ManualEditStyles, type ManualEditTarget } from '../edit-mode/types';
 import { isRenderableSketchJson, SketchPreview } from './SketchPreview';
+import {
+  getHtmlSourceSnapshot,
+  htmlSourceSnapshotRefreshKey,
+  invalidateHtmlSourceSnapshotFile,
+  setHtmlSourceSnapshot,
+} from './html-source-snapshot-cache';
 
 function resolveChromeActionsHost(): HTMLElement | null {
   return document.querySelector<HTMLElement>(APP_CHROME_FILE_ACTIONS_SELECTOR)
@@ -6364,41 +6369,6 @@ function ReactComponentViewer({
                           )}
                         </div>
                         ) : null}
-                        {/* Team-only, same as HtmlViewer's copy of this card below — see
-                            the comment there (recvqae3pK5hyx). This must NOT also require
-                            `!canPublishPublic`: a signed-in personal workspace gets the
-                            public-publish card above but never a team, so gating this on
-                            BOTH being absent left it silently blank right under a working
-                            card — the dogfood report's "missing option, blank area" shot.
-                            Swap in the narrower title when the publish card already
-                            answered "is there anything to share" so the two cards don't
-                            contradict each other. */}
-                        {!workspaceContextHasTeamIdentity(workspaceContext) ? (
-                          <div className="chrome-share-card chrome-share-card--empty">
-                            <div className="chrome-share-card__header">
-                              <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
-                              <span className="share-menu-text">
-                                <span>
-                                  {canPublishPublic
-                                    ? t('fileViewer.shareTeamMissingTitle')
-                                    : t('fileViewer.shareEmptyStateTitle')}
-                                </span>
-                                <small>{t('fileViewer.shareEmptyStateDescription')}</small>
-                              </span>
-                            </div>
-                            {workspaceContext?.workspaceSettingsUrl ? (
-                              <a
-                                className="chrome-publish-primary"
-                                href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                              >
-                                <RemixIcon name="add-line" size={15} />
-                                {t('fileViewer.shareEmptyStateCreateTeam')}
-                              </a>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
                     {unifiedActionTab === 'export' ? (
@@ -6664,7 +6634,15 @@ function HtmlViewer({
   installationId?: string | null;
 }) {
   const { locale, t } = useI18n();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const {
+    context: workspaceContext,
+    loading: workspaceContextLoading,
+  } = useWorkspaceContext();
+  const sourceAuthorizationScopeKey = workspaceContextLoading
+    ? null
+    : workspaceContext
+      ? `workspace:${workspaceContext.workspaceId}:member:${workspaceContext.workspaceMemberId}`
+      : 'local';
   const analytics = useAnalytics();
   // Team collaboration: resolve comment anchors through the drift ladder when
   // the viewer is a team member of a shared project. Off (exact-match, single
@@ -6929,8 +6907,22 @@ function HtmlViewer({
     });
   };
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
-  const [source, setSource] = useState<string | null>(liveHtml ?? null);
-  const [routingSource, setRoutingSource] = useState<string | null>(liveHtml ?? null);
+  const sourceSnapshotRefreshKey = htmlSourceSnapshotRefreshKey(file, filesRefreshKey);
+  const sourceSnapshotIdentity =
+    `${sourceAuthorizationScopeKey ?? 'pending'}\0${projectId}\0${file.name}\0${sourceSnapshotRefreshKey}`;
+  const [initialSourceSnapshot] = useState(() => (
+    liveHtml === undefined && sourceAuthorizationScopeKey
+      ? getHtmlSourceSnapshot(
+          sourceAuthorizationScopeKey,
+          projectId,
+          file.name,
+          sourceSnapshotRefreshKey,
+        )
+      : null
+  ));
+  const initialSource = liveHtml ?? initialSourceSnapshot?.source ?? null;
+  const [source, setSource] = useState<string | null>(initialSource);
+  const [routingSource, setRoutingSource] = useState<string | null>(initialSource);
   const [serverPoweredPreviewRequired, setServerPoweredPreviewRequired] = useState(false);
   const [previewAssetWarning, setPreviewAssetWarning] = useState<PreviewAssetWarning | null>(null);
   const [inlinedSource, setInlinedSource] = useState<string | null>(null);
@@ -7220,11 +7212,13 @@ function HtmlViewer({
   // Set to true permanently once `source` has been populated for the first
   // time. After the first load, we never show the "loading" skeleton again —
   // even if a reload temporarily clears `source` to null (issue #4650).
-  const sourceEverLoadedRef = useRef(false);
+  const sourceEverLoadedRef = useRef(source !== null);
   // Files whose source has been shown at least once (projectId + name). A
   // revisit skips the loading skeleton entirely — the fetch still runs, but
   // the pane doesn't flash a skeleton for content the user has already seen.
-  const sourceLoadedKeysRef = useRef<Set<string>>(new Set());
+  const sourceLoadedKeysRef = useRef<Set<string>>(
+    new Set(source !== null ? [`${projectId}\u0000${file.name}`] : []),
+  );
   const [boardMode, setBoardMode] = useState(false);
   const [commentPanelOpen, setCommentPanelOpen] = useState(false);
   const [commentCreateMode, setCommentCreateMode] = useState(false);
@@ -7512,7 +7506,12 @@ function HtmlViewer({
   // to URL-load (Codex P2, issue #4650).  Cleared on file/project switch so
   // a new file never inherits the previous file's routing predicates.
   const lastGoodSourceForRoutingRef = useRef<string | null>(null);
-  const sourceFileKeyRef = useRef<string | null>(null);
+  const sourceFileKeyRef = useRef<string | null>(
+    source !== null
+      ? `${sourceAuthorizationScopeKey ?? 'pending'}\0${projectId}\0${file.name}\0${liveHtml === undefined ? 'raw' : 'live'}`
+      : null,
+  );
+  const revalidatedSourceSnapshotRef = useRef<string | null>(null);
   const templateNameId = useId();
   const templateDescriptionId = useId();
   const imageExportTitleId = useId();
@@ -7873,7 +7872,8 @@ function HtmlViewer({
     !isDeck;
 
   useEffect(() => {
-    const sourceFileKey = `${projectId}\0${file.name}\0${liveHtml === undefined ? 'raw' : 'live'}`;
+    const sourceFileKey =
+      `${sourceAuthorizationScopeKey ?? 'pending'}\0${projectId}\0${file.name}\0${liveHtml === undefined ? 'raw' : 'live'}`;
     if (liveHtml !== undefined) {
       sourceFileKeyRef.current = sourceFileKey;
       sourceEverLoadedRef.current = true;
@@ -7886,11 +7886,28 @@ function HtmlViewer({
     }
     const fileChanged = sourceFileKeyRef.current !== sourceFileKey;
     sourceFileKeyRef.current = sourceFileKey;
+    const cachedSnapshot = sourceAuthorizationScopeKey
+      ? getHtmlSourceSnapshot(
+          sourceAuthorizationScopeKey,
+          projectId,
+          file.name,
+          sourceSnapshotRefreshKey,
+        )
+      : null;
+    const shouldRevalidateCachedSnapshot =
+      cachedSnapshot !== null &&
+      revalidatedSourceSnapshotRef.current !== sourceSnapshotIdentity;
     if (fileChanged) {
-      setSource(null);
-      setRoutingSource(null);
+      const cachedSource = cachedSnapshot?.source ?? null;
+      setSource(cachedSource);
+      setRoutingSource(cachedSource);
       setServerPoweredPreviewRequired(false);
-      sourceRef.current = null;
+      sourceRef.current = cachedSource;
+      if (cachedSource !== null) {
+        sourceEverLoadedRef.current = true;
+        sourceLoadedKeysRef.current.add(`${projectId}\u0000${file.name}`);
+        lastGoodSourceForRoutingRef.current = cachedSource;
+      }
       // Note: prevSourceBeforeReloadRef is cleared by the [projectId,
       // file.name] reset effect that runs on file/project switch.  The
       // identity check in the null-restore branch below is defense-in-depth
@@ -7900,6 +7917,7 @@ function HtmlViewer({
     let cancelled = false;
     if (
       shouldDeferPassivePreviewSource &&
+      !shouldRevalidateCachedSnapshot &&
       sourceRef.current !== null &&
       !previewTextNeedsFullSourceForSafeInline(sourceRef.current)
     ) {
@@ -7918,14 +7936,23 @@ function HtmlViewer({
     // check, and the preview only refreshes when Comment closes and the
     // url-load iframe takes over with its own ?v=mtime cache-bust.
     const cacheBustKey = `${file.mtime}-${reloadKey}-${filesRefreshKey}`;
-    const loadText = shouldDeferPassivePreviewSource
+    // A snapshot hit is only a first-paint seed. Revisit mounts always perform
+    // one full no-store read even for passive large-HTML mode, so an owner-side
+    // remote update replaces the cached document when SSE or metadata did not
+    // change locally. Subsequent mode-only effect reruns may use the bounded
+    // routing preview again.
+    revalidatedSourceSnapshotRef.current = sourceSnapshotIdentity;
+    const loadText = shouldDeferPassivePreviewSource && !shouldRevalidateCachedSnapshot
       ? fetchProjectFileTextPreview(projectId, file.name, {
           limit: HTML_ROUTING_TEXT_PREVIEW_LIMIT,
           cacheBustKey,
         }).then(async (preview) => {
           const previewText = preview?.text ?? null;
           if (previewTextNeedsFullSourceForSafeInline(previewText)) {
-            const fullText = await fetchProjectFileText(projectId, file.name, { cacheBustKey });
+            const fullText = await fetchProjectFileText(projectId, file.name, {
+              cache: 'no-store',
+              cacheBustKey,
+            });
             if (fullText !== null) {
               return {
                 text: fullText,
@@ -7940,7 +7967,10 @@ function HtmlViewer({
             sourceLoadMode: 'routing-preview' as HtmlSourceLoadMode,
           };
         })
-      : fetchProjectFileText(projectId, file.name, { cacheBustKey }).then((text) => ({
+      : fetchProjectFileText(projectId, file.name, {
+          cache: 'no-store',
+          cacheBustKey,
+        }).then((text) => ({
         text,
         poweredPreviewRequired: false,
         sourceLoadMode: 'full' as HtmlSourceLoadMode,
@@ -7997,6 +8027,15 @@ function HtmlViewer({
       if (sourceLoadMode === 'routing-preview') {
         sourceRef.current = null;
       } else {
+        if (sourceAuthorizationScopeKey) {
+          setHtmlSourceSnapshot({
+            authorizationScopeKey: sourceAuthorizationScopeKey,
+            projectId,
+            fileName: file.name,
+            refreshKey: sourceSnapshotRefreshKey,
+            source: text,
+          });
+        }
         setSource(text);
         sourceRef.current = text;
       }
@@ -8011,6 +8050,9 @@ function HtmlViewer({
     liveHtml,
     reloadKey,
     filesRefreshKey,
+    sourceSnapshotRefreshKey,
+    sourceSnapshotIdentity,
+    sourceAuthorizationScopeKey,
     shouldDeferPassivePreviewSource,
   ]);
 
@@ -10921,6 +10963,13 @@ function HtmlViewer({
 
   function reloadHtmlPreview() {
     fireArtifactToolbarClick('reload');
+    if (sourceAuthorizationScopeKey) {
+      invalidateHtmlSourceSnapshotFile(
+        sourceAuthorizationScopeKey,
+        projectId,
+        file.name,
+      );
+    }
     capturePreviewScrollPosition();
     imageExportSnapshotDataUrlRef.current = null;
     setInlinedSource(null);
@@ -13127,51 +13176,6 @@ function HtmlViewer({
                           </button>
                         )}
                       </div>
-                      ) : null}
-                      {/* recvqae3pK5hyx: the team-share card above is gated on
-                          workspaceContextHasTeamIdentity alone — a personal/free
-                          account (or signed-out session) never gets it. This used
-                          to ALSO require `!canPublishPublic`, on the premise that
-                          the tab was only worth explaining when neither card could
-                          render. But a signed-in personal workspace DOES get the
-                          public-publish card above (canPublishPublic only needs a
-                          workspace, not a team), so that guard left this section
-                          silently blank right under a working "Publish file" card
-                          — exactly the dogfood report's screenshot: one option
-                          visible, an unexplained empty area where team sharing
-                          should be. Show the hint whenever there is no team,
-                          regardless of whether publish is available, and swap in
-                          the narrower title when the publish card already answered
-                          "is there anything to share" so the two don't contradict
-                          each other. Point at the same B console create-team flow
-                          the entry rail's workspace switcher uses; render plain
-                          text instead of a dead link when B has not given us a
-                          console URL to send them to. */}
-                      {!workspaceContextHasTeamIdentity(workspaceContext) ? (
-                        <div className="chrome-share-card chrome-share-card--empty">
-                          <div className="chrome-share-card__header">
-                            <span className="share-menu-icon"><RemixIcon name="team-line" size={16} /></span>
-                            <span className="share-menu-text">
-                              <span>
-                                {canPublishPublic
-                                  ? t('fileViewer.shareTeamMissingTitle')
-                                  : t('fileViewer.shareEmptyStateTitle')}
-                              </span>
-                              <small>{t('fileViewer.shareEmptyStateDescription')}</small>
-                            </span>
-                          </div>
-                          {workspaceContext?.workspaceSettingsUrl ? (
-                            <a
-                              className="chrome-publish-primary"
-                              href={teamConsoleUrl(workspaceContext.workspaceSettingsUrl, 'create-team')}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                            >
-                              <RemixIcon name="add-line" size={15} />
-                              {t('fileViewer.shareEmptyStateCreateTeam')}
-                            </a>
-                          ) : null}
-                        </div>
                       ) : null}
                       </div>
                     ) : null}

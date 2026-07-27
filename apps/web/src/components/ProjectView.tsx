@@ -160,6 +160,7 @@ import {
   deleteConversation as deleteConversationApi,
   duplicatePluginAsProject,
   fetchAppliedPluginSnapshot,
+  getProject,
   installGeneratedPluginFolder,
   listConversations,
   listMessages,
@@ -234,6 +235,7 @@ import {
   useCritiqueTheaterEnabled,
 } from './Theater';
 import { useIframeKeepAlivePool } from './IframeKeepAlivePool';
+import { invalidateHtmlSourceSnapshotProject } from './html-source-snapshot-cache';
 import {
   decideAutoOpenAfterWrite,
   selectAutoOpenProducedArtifact,
@@ -1468,6 +1470,17 @@ export function ProjectView({
   // mount-local guard would let the funnel events re-fire on a later
   // conversation/run of the same project.
   const iframeKeepAlivePool = useIframeKeepAlivePool();
+  // ProjectView is the authorization lifetime for project-owned file content.
+  // FileViewer may unmount while switching to a root tab such as Design Files,
+  // but ProjectView remains mounted in that flow so revisit snapshots survive.
+  // Leaving the project (or changing project identity) crosses the boundary:
+  // drop every source snapshot before a later mount can seed content that the
+  // next project/workspace context has not reauthorized.
+  // `viewerOnly` is not a revocation signal: it also represents authorized
+  // read-only members, so this ProjectView lifetime is the fail-closed boundary.
+  useEffect(() => () => {
+    invalidateHtmlSourceSnapshotProject(project.id);
+  }, [project.id]);
   // Team collaboration: presence for a shared project. Dormant (no heartbeat,
   // renders nothing) unless the workspace context marks the viewer an active
   // team member — safe to mount unconditionally.
@@ -1488,6 +1501,16 @@ export function ProjectView({
       ? t('workspace.readonlyNoticeBy', { owner: projectCollab.ownerDisplayName })
       : t('workspace.readonlyNotice')
     : undefined;
+  // Team-share file-sync badge for the design-files tab bar + empty state
+  // (recvqghymxqQQq). A member downloads (their local mirror trails the
+  // published head); the owner uploads (a local edit hasn't published yet).
+  // The two are mutually exclusive — a project has exactly one writer — so at
+  // most one of these is ever true.
+  const fileSyncBadge: 'downloading' | 'uploading' | null = projectCollab.downloadPending
+    ? 'downloading'
+    : projectCollab.enabled && projectCollab.isOwner && projectCollab.syncState === 'pending_upload'
+      ? 'uploading'
+      : null;
   const projectDetail = useProjectDetail(project.id);
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
   const currentProject =
@@ -1654,8 +1677,14 @@ export function ProjectView({
   // Read by `renderPreferredChatPanelWidth` instead of closing over
   // `workspaceFocused` directly, so that callback's identity (and therefore
   // the ResizeObserver effect keyed on it, below) doesn't need to depend on
-  // focus state — see the ref-sync effect near that callback for why.
+  // focus state — see the render-phase mirror below for why.
   const workspaceFocusedRef = useRef(workspaceFocused);
+  // Keep this render-phase mirror synchronous with the state that determines
+  // the committed `.split-focus` class. A child layout effect (and, in the
+  // browser, ResizeObserver delivery before passive effects) can run before a
+  // parent effect, so effect-based synchronization still exposes one stale
+  // frame where the old three-column widths can be written back inline.
+  workspaceFocusedRef.current = workspaceFocused;
   // Mirrors `workspaceFocused` but lags behind it while collapsing, so the
   // chat pane stays mounted/visible until the `.split` width transition
   // actually finishes — see the sync effect near the ResizeObserver below.
@@ -1760,10 +1789,6 @@ export function ProjectView({
       ? brandExtractionStatusOverride.status
       : polledBrandExtractionStatus;
   const terminalBrandPreviewRefreshRef = useRef<string | null>(null);
-  const designSystemEditable =
-    !projectIsProgrammaticBrandExtraction ||
-    brandExtractionAllowsEditing(effectiveBrandExtractionStatus) ||
-    Boolean(brandReady);
   const pendingBrandDesignSystemOpenRef = useRef<string | null>(null);
   const handledBrandReadyDesignSystemRef = useRef<string | null>(null);
   const missingDesignSystemRefreshRef = useRef<string | null>(null);
@@ -1934,6 +1959,14 @@ export function ProjectView({
   useEffect(() => {
     projectIdRef.current = project.id;
   }, [project.id]);
+  // Live mirror of the full project prop, for async handlers whose useCallback
+  // deps only track `project.id` (e.g. the project-events handler below):
+  // comparing a re-fetched record against a stale closure copy would
+  // mis-detect changes after a rename.
+  const projectRef = useRef(project);
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -2729,7 +2762,18 @@ export function ProjectView({
     // post-finalize — bump the refresh key so DESIGN.md staleness
     // recomputes against the new mtimes.
     setDesignMdRefreshKey((n) => n + 1);
-  }, []);
+    // Team-share upload badge (recvqghymxqQQq): this fires on the SAME
+    // chokidar-backed `file-changed` event the daemon's collab-publish-watcher
+    // uses to flip `syncState` to 'pending_upload' (markLocalChangePending in
+    // apps/daemon/src/collab/runtime.ts), and that state typically reverts to
+    // 'synced' within one debounce window (~400ms) plus a publish — far
+    // shorter than CollabClient's 5s status-poll cadence. Without checking
+    // status right here, the owner's own tab almost never catches the
+    // transient and the file-tab "uploading" icon never appears to change.
+    // Mirrors the existing `project-metadata-changed` → `checkStatusNow()`
+    // hub-push pattern below, just triggered by the LOCAL watcher instead.
+    collabCheckStatusNow();
+  }, [collabCheckStatusNow]);
   const coalescedFileChangedRefresh = useCoalescedCallback(
     refreshFilesAndDesignMd,
     { wait: 80, maxWait: 250 },
@@ -2745,6 +2789,7 @@ export function ProjectView({
   const handleProjectEvent = useCallback((evt: ProjectEvent) => {
     if (evt.type === 'file-changed') {
       iframeKeepAlivePool.evictProject(project.id);
+      invalidateHtmlSourceSnapshotProject(project.id);
       coalescedFileChangedRefresh();
       return;
     }
@@ -2767,7 +2812,34 @@ export function ProjectView({
       // Hub push channel: rename or a fresh content publish landed. Run one
       // status check now (drives the member auto-pull) instead of waiting for
       // the next 5s status tick.
-      if (evt.projectId === project.id) collabCheckStatusNow();
+      if (evt.projectId === project.id) {
+        invalidateHtmlSourceSnapshotProject(project.id);
+        collabCheckStatusNow();
+        // The daemon also pushes this signal when a pull just swapped the
+        // shared-project placeholder record for the real name
+        // (registerPulledProject → notifyProjectMetadataChanged). App.tsx's
+        // `projects` state never re-reads a project record on its own, so
+        // without this refetch a member's sidebar/tab title stays on the
+        // "共享项目" placeholder until a full page reload (recvqhwv6RPU1j).
+        // Thin-event model: re-fetch the record, propagate up only when a
+        // rendered field actually changed — an unconditional apply would
+        // re-render the whole App on every content-publish nudge.
+        const capturedProjectId = project.id;
+        void getProject(capturedProjectId).then((fresh) => {
+          if (!fresh) return;
+          // User switched projects while the fetch was in flight.
+          if (projectIdRef.current !== capturedProjectId) return;
+          const current = projectRef.current;
+          if (
+            fresh.name === current.name
+            && fresh.skillId === current.skillId
+            && fresh.designSystemId === current.designSystemId
+          ) {
+            return;
+          }
+          onProjectChange(fresh);
+        });
+      }
       return;
     }
     if (evt.type === 'conversation-created') {
@@ -2815,7 +2887,7 @@ export function ProjectView({
     // Live artifact events come from chat-turn-emitted artifacts; they
     // also imply the conversation transcript changed.
     setDesignMdRefreshKey((n) => n + 1);
-  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectsRefresh, refreshLiveArtifacts, project.id]);
+  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectChange, onProjectsRefresh, refreshLiveArtifacts, project.id]);
   useProjectFileEvents(project.id, daemonLive, handleProjectEvent, {
     onConnectedChange: setProjectEventsSseConnected,
   });
@@ -3587,20 +3659,36 @@ export function ProjectView({
         ? previewComments.find((comment) => comment.id === commentId)
         : undefined;
       const attachments = mergePreviewCommentAttachments(existing?.attachments, uploadedAttachments);
-      const saved = await upsertPreviewComment(project.id, activeConversationId, {
-        ...(commentId ? { id: commentId } : {}),
-        target,
-        note,
-        ...(attachments.length > 0 ? { attachments } : {}),
-      });
-      if (!saved) return null;
+      const saved = await upsertPreviewComment(
+        project.id,
+        activeConversationId,
+        {
+          ...(commentId ? { id: commentId } : {}),
+          target,
+          note,
+          ...(attachments.length > 0 ? { attachments } : {}),
+        },
+        workspaceContext,
+      );
+      if (!saved) {
+        // Do not fail silently (recvq5BVsolIxi follow-up): a missing/expired
+        // workspace context 401s here with zero prior UI feedback, and the
+        // popover otherwise just closes as if the comment had saved.
+        setProjectActionsToast({
+          message: t('project.previewCommentSaveFailed'),
+          details: null,
+          tone: 'error',
+          ttlMs: 5000,
+        });
+        return null;
+      }
       setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
       setAttachedComments((current) =>
         attachAfterSave ? mergeAttachedComments(current, saved) : current.map((comment) => comment.id === saved.id ? saved : comment),
       );
       return saved;
     },
-    [project.id, activeConversationId, previewComments],
+    [project.id, activeConversationId, previewComments, workspaceContext, t],
   );
 
   const removePreviewComment = useCallback(
@@ -3621,7 +3709,10 @@ export function ProjectView({
    * old order, then reconciles with whatever the daemon actually persisted.
    * A failed PATCH leaves the optimistic order in place rather than
    * snapping back — the daemon call is a best-effort persistence layer for a
-   * personal display preference, not content that must round-trip.
+   * personal display preference, not content that must round-trip. Even so,
+   * a failed persist gets a toast (recvq5BVsolIxi follow-up): the local
+   * order still looks right until the next reload silently drops it, and the
+   * user should have a chance to notice and retry before that happens.
    */
   const reorderPreviewComment = useCallback(
     async (commentId: string, sortKey: number) => {
@@ -3629,10 +3720,25 @@ export function ProjectView({
       setPreviewComments((current) =>
         current.map((comment) => (comment.id === commentId ? { ...comment, sortKey } : comment)),
       );
-      const saved = await patchPreviewCommentSortKey(project.id, activeConversationId, commentId, sortKey);
-      if (saved) setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
+      const saved = await patchPreviewCommentSortKey(
+        project.id,
+        activeConversationId,
+        commentId,
+        sortKey,
+        workspaceContext,
+      );
+      if (saved) {
+        setPreviewComments((current) => mergeSavedPreviewComment(current, saved));
+      } else {
+        setProjectActionsToast({
+          message: t('project.previewCommentReorderFailed'),
+          details: null,
+          tone: 'error',
+          ttlMs: 5000,
+        });
+      }
     },
-    [project.id, activeConversationId],
+    [project.id, activeConversationId, workspaceContext, t],
   );
 
   const attachPreviewComment = useCallback((comment: PreviewComment) => {
@@ -5088,7 +5194,14 @@ export function ProjectView({
         }
         amrGateInFlightConversationsRef.current.add(gateConversationId);
         try {
-          const gate = await checkAmrBalanceGate();
+          const gate = await checkAmrBalanceGate(
+            workspaceContext
+              ? {
+                  workspaceType: workspaceContext.workspaceType,
+                  workspaceId: workspaceContext.workspaceId,
+                }
+              : undefined,
+          );
           // A blocked send parks in the conversation queue with its FULL
           // payload (prompt, attachments, comment context) — the composer
           // already cleared itself, and a text-only draft restore would
@@ -7618,6 +7731,40 @@ export function ProjectView({
     if (!projectIsDesignSystemProject || !projectDesignSystemId) return null;
     return designSystems.find((d) => d.id === projectDesignSystemId) ?? null;
   }, [designSystems, projectDesignSystemId, projectIsDesignSystemProject]);
+  // recvqb6mfyqXLD: `designSystemProject.teamSynced`/`canMutate` come off the
+  // exact same `GET /api/design-systems` list this project's design-system
+  // tab already reads (via the `designSystems` prop) — this is a genuinely
+  // separate signal from `projectCollab.viewerOnly` above. Team-sharing a
+  // design system does NOT also register its backing project with the
+  // project-level collab/hub (`/api/projects/:id/collab/status` stays
+  // `local_only` for a teammate's synced copy), so `viewerOnly` alone never
+  // catches this: a plain member opening a teammate's team-synced design
+  // system through this in-project tab (reachable once `DesignSystemFlow`'s
+  // `ensureUserDesignSystemWorkspaceProject` materializes a local project for
+  // it) used to see a fully-live Publish toggle, DESIGN.md editor, and the
+  // logo/image/color edit + delete-project affordances below with no
+  // ownership check at all. `canMutate` mirrors the daemon's own
+  // `canMutateUserDesignSystem` PATCH/DELETE verdict, so this stays in
+  // lockstep with whatever the backend actually allows; `undefined` (not
+  // `teamSynced`, i.e. the caller's own system or a built-in preset) reads as
+  // editable, matching every other consumer of this field.
+  const designSystemEditable =
+    designSystemProject?.canMutate !== false &&
+    (
+      !projectIsProgrammaticBrandExtraction ||
+      brandExtractionAllowsEditing(effectiveBrandExtractionStatus) ||
+      Boolean(brandReady)
+    );
+  // The brand-extraction-only half of the formula above, kept separate from
+  // ownership: FileWorkspace's "Extracting design system…" status pill must
+  // key off whether generation is genuinely still running, not off whether
+  // the caller happens to own the (possibly fully-published) design system —
+  // conflating the two would show a non-owner "still extracting" over a
+  // finished, published teammate's system just because they cannot manage it.
+  const designSystemExtractionInProgress =
+    projectIsProgrammaticBrandExtraction &&
+    !brandExtractionAllowsEditing(effectiveBrandExtractionStatus) &&
+    !brandReady;
   useEffect(() => {
     if (!projectIsDesignSystemProject || !projectDesignSystemId) {
       missingDesignSystemRefreshRef.current = null;
@@ -7810,11 +7957,8 @@ export function ProjectView({
   // every focus toggle forced a synchronous `clientWidth` reflow + style
   // rewrite in the same commit as the collapse/expand — a second, more
   // subtle jitter source layered on top of the grid hard-cut this file's
-  // change fixes. `workspaceFocusedRef` (kept fresh below) gives the callback
+  // change fixes. `workspaceFocusedRef` (kept fresh during render) gives the callback
   // body the current value without making it a dependency.
-  useEffect(() => {
-    workspaceFocusedRef.current = workspaceFocused;
-  }, [workspaceFocused]);
 
   const applyChatPanelWidth = useCallback((
     width: number,
@@ -7883,15 +8027,13 @@ export function ProjectView({
 
   useEffect(() => () => finishChatPanelResize(false), [finishChatPanelResize]);
 
-  // `.split-chat-slot`'s `hidden` attribute used to track `workspaceFocused`
-  // 1:1 — the instant focus mode engaged, the chat pane vanished (`display:
-  // none`) while the grid column collapse played out underneath it. Now that
-  // the collapse animates (see shell.css), hiding the slot immediately reads
-  // as a second, JS-driven jump layered on top of the smooth width
-  // transition: the content disappears a beat before the column visually
-  // reaches zero. Expanding still unhides immediately — the content should
-  // be visible while the column grows back in — but collapsing waits for the
-  // width transition to actually finish.
+  // The chat slot stays in grid flow even after the collapse finishes. Using
+  // the native `hidden` attribute here removes the first grid item with
+  // `display: none`, which shifts FileWorkspace into the zero-width handle
+  // track and leaves the full-width workspace track empty. The settled class
+  // below only hides the collapsed chat visually, preserving all three grid
+  // item positions. Expanding removes it immediately so the content is
+  // visible while the chat column grows back in.
   useEffect(() => {
     if (!workspaceFocused) {
       setChatSlotHidden(false);
@@ -8818,7 +8960,13 @@ export function ProjectView({
         ].filter(Boolean).join(' ')}
         style={projectSplitStyle(workspaceFocused, splitLeftPanelWidth, workspacePanelTrack)}
       >
-        <div className="split-chat-slot" hidden={chatSlotHidden}>
+        <div
+          className={[
+            'split-chat-slot',
+            chatSlotHidden ? 'split-chat-slot-hidden' : '',
+          ].filter(Boolean).join(' ')}
+          aria-hidden={chatSlotHidden || undefined}
+        >
           {commentInspectorActive ? (
             <div
               id={commentInspectorPortalId}
@@ -9055,6 +9203,7 @@ export function ProjectView({
           projectName={project.name}
           viewerOnly={projectCollab.viewerOnly}
           readonlyNotice={readonlyNoticeText}
+          fileSyncBadge={fileSyncBadge}
           projectKind={projectKindFromMetadataToTracking(currentProject.metadata) ?? 'prototype'}
           rootDirName={(() => {
             const baseDir = currentProject.metadata?.baseDir;
@@ -9098,6 +9247,7 @@ export function ProjectView({
           designSystemProject={designSystemProject}
           designSystemBrandId={designSystemBrandId}
           designSystemEditable={designSystemEditable}
+          designSystemExtractionInProgress={designSystemExtractionInProgress}
           defaultDesignSystemId={config.designSystemId}
           onSetDefaultDesignSystem={onChangeDefaultDesignSystem}
           onDesignSystemsRefresh={onDesignSystemsRefresh}
