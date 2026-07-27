@@ -1175,14 +1175,6 @@ test('[P2] home starters search and facet filters narrow the visible gallery', a
   await expect(home.locator('[data-plugin-id="localized-plugin"]')).toHaveCount(0);
   await expect(home.locator('[data-plugin-id="hyperframes-video"]')).toHaveCount(0);
 
-  await home.getByTestId('plugins-home-pill-category-all').click();
-  await expect(home.locator('[data-plugin-id="figma-importer"]')).toBeVisible();
-  await expect(home.locator('[data-plugin-id="localized-plugin"]')).toBeVisible();
-  await expect(home.locator('[data-plugin-id="hyperframes-video"]')).toBeVisible();
-  await expect(home.locator('[data-plugin-id="deck-writer"]')).toBeVisible();
-
-  // Search collapses to an icon; the field only claims width once opened.
-  await home.getByTestId('plugins-home-search-toggle').click();
   const search = home.getByTestId('plugins-home-search');
   await search.fill('Deck Writer');
   await expect(home.locator('[data-plugin-id="deck-writer"]')).toBeVisible();
@@ -1287,9 +1279,8 @@ test('[P2] home starters search can enter a no-results state and recover with cl
   // plugins views (both stay mounted), so scope to the home view to keep these
   // strict-mode locators unambiguous.
   const home = await revealHomeTemplates(page);
-  await home.getByTestId('plugins-home-pill-category-all').click();
-  await home.getByTestId('plugins-home-search-toggle').click();
   const search = home.getByTestId('plugins-home-search');
+  await search.click({ force: true });
   await search.fill('no-such-starter');
   await expect(search).toHaveValue('no-such-starter');
   await expect(home.getByTestId('plugins-home-section')).toContainText(
@@ -1688,27 +1679,16 @@ test('[P1] Community templates sort toggle switches to newest order and persists
     cards.map((card) => card.getAttribute('data-plugin-id')),
   );
 
-  // Sort lives behind the filter trigger, so each assertion on the checked
-  // order has to open the menu first.
-  const openSort = () => home.getByTestId('plugins-home-sort-trigger').click({ force: true });
-
-  await openSort();
   await expect(home.getByTestId('plugins-home-sort-hot')).toHaveAttribute('aria-checked', 'true');
   expect((await cardIds()).slice(0, 3)).toEqual(['sort-hot-visual', 'sort-middle-plain', 'sort-newest-plain']);
 
   await home.getByTestId('plugins-home-sort-newest').click();
-  // Picking an order closes the menu and flags the collapsed trigger.
-  await expect(home.getByTestId('plugins-home-sort-menu')).toHaveCount(0);
-  await expect(home.getByTestId('plugins-home-sort-trigger')).toHaveAttribute(
-    'data-active',
-    'true',
-  );
+  await expect(home.getByTestId('plugins-home-sort-newest')).toHaveAttribute('aria-checked', 'true');
   expect((await cardIds()).slice(0, 3)).toEqual(['sort-newest-plain', 'sort-middle-plain', 'sort-hot-visual']);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await gotoEntryHome(page);
   home = await revealHomeTemplates(page);
-  await home.getByTestId('plugins-home-sort-trigger').click({ force: true });
   await expect(home.getByTestId('plugins-home-sort-newest')).toHaveAttribute('aria-checked', 'true');
   expect((await cardIds()).slice(0, 3)).toEqual(['sort-newest-plain', 'sort-middle-plain', 'sort-hot-visual']);
 });

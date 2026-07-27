@@ -1,7 +1,5 @@
 ---
 name: audio-jingle
-en_name: "Audio Jingle & Voiceover Studio"
-zh_name: "广告音频与配音生成"
 description: |
   Audio generation skill — jingles, beds, voiceover, and sound effects.
   Routes music requests to Suno V5 / Udio / Lyria, speech to MiniMax
@@ -21,7 +19,6 @@ od:
   mode: audio
   surface: audio
   scenario: marketing
-  category: marketing-gtm
   preview:
     type: html
     entry: example.html

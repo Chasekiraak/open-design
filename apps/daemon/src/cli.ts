@@ -6019,7 +6019,6 @@ async function runProject(args) {
                     [--design-system <id>] [--json]
   od project list                         List projects.
   od project info <id>                    Print one project.
-  od project rename <id> --name "<title>" Rename a project.
   od project delete <id>                  Delete a project.
   od project editors                      List locally-installed editors that
                                           can open a project (hand-off targets).
@@ -6216,24 +6215,6 @@ Common options:
       const data = await postImportFolderToDaemon(base, body, folderPath);
       if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
       console.log(`[project] imported ${data.project?.id ?? '-'} from ${folderPath} (conversation ${data.conversationId ?? '-'})`);
-      return;
-    }
-    case 'rename': {
-      const id = positionalArgs(rest, PROJECT_STRING_FLAGS)[0];
-      const name = typeof flags.name === 'string' ? flags.name.trim() : '';
-      if (!id || !name) {
-        console.error('Usage: od project rename <id> --name "<title>" [--json]');
-        process.exit(2);
-      }
-      const resp = await fetch(`${base}/api/projects/${encodeURIComponent(id)}`, {
-        method:  'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body:    JSON.stringify({ name }),
-      });
-      if (!resp.ok) return structuredHttpFailure(resp, 'project-not-found');
-      const data = await resp.json().catch(() => ({}));
-      if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
-      console.log(`[project] renamed ${id} to ${data.project?.name ?? name}`);
       return;
     }
     case 'delete': {

@@ -1,7 +1,5 @@
 ---
 name: image-poster
-en_name: "AI Poster & Key Art Generator"
-zh_name: "AI 海报与主视觉生成"
 description: |
   Single-image generation skill for posters, key art, and editorial
   illustrations. Defaults to gpt-image-2 but is provider-agnostic — the
@@ -17,7 +15,6 @@ triggers:
   - "海报"
   - "插画"
 od:
-  category: design-craft
   mode: image
   surface: image
   scenario: design

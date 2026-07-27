@@ -175,42 +175,6 @@ Active design system exception: the active design system is the visual direction
 - When a downstream framework mentions "active direction" or "theme tokens", bind those fields from the active design system instead of the built-in direction library.
 `;
 
-// Inspiration step for ungrounded runs (no active design system, no picked
-// template). Mirrors apps/daemon/src/prompts/system.ts VERBATIM so daemon and
-// BYOK/API runs offer the same reference-grounding surface; a drift test in
-// apps/daemon/tests/prompts asserts the two copies stay identical.
-export const INSPIRATION_STEP_GUIDANCE = `
-
----
-
-## Inspiration step — ground ungrounded tasks (before the first artifact)
-
-This run has NO active design system and NO picked template. Before generating the FIRST visual artifact of a task (page, prototype, deck, image, video), give the user one structured chance to anchor the result in a concrete reference: emit a \`<question-form id="inspiration">\` whose single question has \`type: "inspiration"\`. The host renders the full picker — design templates by category, design systems with their palettes, and an upload area for the user's own reference images — so never enumerate catalog entries yourself and never fall back to asking for links in plain prose.
-
-<question-form id="inspiration" title="Pick a reference — optional but recommended">
-{
-  "questions": [
-    {
-      "id": "inspiration",
-      "label": "Ground this task in a reference",
-      "type": "inspiration",
-      "query": "<one-line task summary, e.g. product landing page>",
-      "help": "Results are markedly better with a reference — pick a template or design system, or add a few images you like. Skipping is fine."
-    }
-  ]
-}
-</question-form>
-
-Rules:
-- Localize \`title\`, \`label\`, \`help\`, and \`query\` into the user's language (set top-level \`"lang"\` when localizing); keep \`id\` and \`type\` values in English.
-- In the single short intro line before the form, tell the user that reference images or a template markedly improve the result.
-- Emit it AFTER turn-1 discovery is resolved (or as your first working turn when discovery is skipped) — never in the same message as another question-form.
-- This form is part of the locked brief-to-build flow, not a brief re-ask: a transition that says the brief is answered and to build now does not skip it — emit this single form first, then build when the picks return.
-- Stop the turn after \`</question-form>\`. The picks return as the next user message, and the host applies a picked template/design system to the run automatically — honor it, do not re-apply it manually.
-- Emit this form at most ONCE per conversation. If the answer reads \`(skipped)\`, proceed immediately with the built-in design directions and never re-ask.
-- Skip this step when the user already supplied reference images/URLs or named a specific style/brand, when the turn is a small edit to an existing artifact, or when the task produces no visual artifact.
-`;
-
 export interface ComposeInput {
   skillBody?: string | undefined;
   skillName?: string | undefined;
@@ -401,21 +365,6 @@ export function composeSystemPrompt({
   parts.push(
     "\n\n---\n\n## Clarifying questions mid-conversation\n\nWhen you need a clarification AFTER turn 1 and the answer benefits from structured input, emit a `<question-form>` block — the same markup turn-1 discovery uses — instead of writing a bulleted list of options in markdown. The host renders it inline in the originating assistant message; a markdown list renders as plain text and forces the user to type a reply. Use the richest appropriate web form controls (`radio`, `checkbox`, `select`, `text`, `textarea`, `number`, `range`, `date`, `time`, `datetime-local`, `color`, `url`, `email`, `tel`, `file`, `switch`, or `direction-cards`). When the clarification needs reference images, source docs, screenshots, or other user files, combine a `type: \"file\"` question with the text/options in the same form; selected files are uploaded into Design Files and submitted as attached/context files on the answer turn. For every finite-choice question, keep user control by leaving `allowCustom` unset or setting it to `true`, and add localized `customLabel` / `customPlaceholder` when useful. Use free-form prose questions only when a form would add no structure. Do NOT also duplicate the form's questions as markdown text alongside it.\n\n`<question-form>` is assistant text for the Open Design UI, not a native tool call. If you need to clarify direction, emit the complete `<question-form>...</question-form>` block directly in the assistant message before any TodoWrite, file write/edit, Bash, or other native tool call. Do not stop after an introductory sentence such as \"先确认一下方向：\"; the same message must include the full form.",
   );
-
-  // Inspiration step: mirrors the daemon composer's gate — only for runs
-  // with no grounding (no active design system, no picked template/skill),
-  // never in ask mode, and never in the automated direct-generation modes
-  // (example-prompt, skipDiscoveryBrief). Keep in sync with
-  // apps/daemon/src/prompts/system.ts.
-  if (
-    !isAskMode &&
-    metadata?.examplePrompt !== true &&
-    metadata?.skipDiscoveryBrief !== true &&
-    (!activeDesignSystemBody || activeDesignSystemBody.length === 0) &&
-    (!skillBody || skillBody.trim().length === 0)
-  ) {
-    parts.push(INSPIRATION_STEP_GUIDANCE);
-  }
 
   // Mirrors the daemon-side composer in apps/daemon/src/prompts/system.ts —
   // keep both copies of this preamble in sync so a CLI chat and a BYOK

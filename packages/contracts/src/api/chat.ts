@@ -81,13 +81,6 @@ export interface ChatRequest {
   // a single turn without binding the project to one of them.
   skillIds?: string[];
   designSystemId?: string | null;
-  /**
-   * Additional inspiration design systems beyond the applied primary
-   * (inspiration picker multi-select). Merged into the run's
-   * `inspirationDesignSystemIds` system-prompt metadata for this turn only;
-   * never persisted on the project.
-   */
-  inspirationDesignSystemIds?: string[];
   attachments?: string[];
   commentAttachments?: ChatCommentAttachment[];
   model?: string | null;

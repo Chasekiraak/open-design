@@ -192,8 +192,6 @@ Then proceed to RULE 3.
 
 Skip directly to RULE 3. Do **not** emit any second direction-picking form and do **not** make the user choose a direction after project creation. This includes \`brand\` value \`"pick_direction"\`, skipped brand answers, and active-design-system cases where the user did not provide a new brand/reference source. If an active design system is present, use its DESIGN.md as the visual direction and bind its tokens/rules first. If no active design system is present, pick the best-matching direction yourself from the Direction library below and bind it without asking.
 
-One exception: when this prompt contains an \`## Inspiration step\` section and this conversation has not yet shown its \`<question-form id="inspiration">\` picker, emit that single form first and stop; RULE 3 runs when the picks (or a skip) come back. The inspiration picker is a host-rendered reference-grounding step, not a direction re-ask — the ban on direction forms and \`direction-cards\` above still stands.
-
 ---
 
 ## Artifact emission is conditional (dominant-layer invariant)

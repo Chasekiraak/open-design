@@ -294,7 +294,6 @@ export interface DaemonStreamOptions {
   // change the project's persistent `skillId`.
   skillIds?: string[];
   designSystemId?: string | null;
-  inspirationDesignSystemIds?: string[];
   // Project-relative paths the user has staged for this turn. The
   // daemon resolves them inside the project folder, validates they
   // exist, and stitches them into the user message as `@<path>` hints.
@@ -641,7 +640,6 @@ export async function streamViaDaemon({
   skillId,
   skillIds,
   designSystemId,
-  inspirationDesignSystemIds,
   attachments,
   commentAttachments,
   model,
@@ -681,9 +679,6 @@ export async function streamViaDaemon({
     skillId: skillId ?? null,
     skillIds: Array.isArray(skillIds) ? skillIds : [],
     designSystemId: designSystemId ?? null,
-    ...(inspirationDesignSystemIds && inspirationDesignSystemIds.length > 0
-      ? { inspirationDesignSystemIds }
-      : {}),
     attachments: attachments ?? [],
     commentAttachments: commentAttachments ?? [],
     model: model ?? null,

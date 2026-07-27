@@ -167,15 +167,9 @@ describe('Langfuse message finalization gate', () => {
     // Headline must call out that this is a follow-up turn, not turn 1.
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('## OVERRIDE — form already answered');
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('turn 2 or later');
-    // The turn-1 form directive stays in the prompt so turn 1 can still
-    // emit a valid form; OVERRIDE just demotes it to documentation for
-    // follow-up turns. The reference is qualified per charter variant
-    // (classic RULE 1 / slim "Turn 1: one line, one form") because the
-    // slim charter has no RULE headings — asserting them unconditionally
-    // reads as prompt injection to strong models.
-    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('as read-only documentation');
-    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('RULE 1 in the classic charter');
-    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('slim charter');
+    // RULE 1 stays in the prompt so turn 1 can still emit a valid form;
+    // OVERRIDE just demotes it to documentation for follow-up turns.
+    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('Treat RULE 1\nas read-only documentation');
 
     // Forbidden anti-patterns observed in real captures:
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('`<question-form>` tag of any id');
@@ -183,13 +177,11 @@ describe('Langfuse message finalization gate', () => {
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('Form-asking prose');
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('"subagents stopped"');
 
-    // Required path: route to the brief-to-build flow (classic RULE 2 /
-    // RULE 3), with the deliverable shape deferred to the prompt's handoff
-    // contract — filesystem runs write real files, so `<artifact>` may only
-    // be demanded conditionally.
+    // Required path: route to RULE 2 / RULE 3 so the model still
+    // emits the `<artifact>` block on the same turn.
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('RULE 2');
     expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('RULE 3');
-    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('`<artifact>` block only when');
+    expect(FORM_ANSWERED_SYSTEM_OVERRIDE).toContain('`<artifact>`');
   });
 
   it('FORM_ANSWERED_GENERIC_OVERRIDE is used for non-discovery/task-type form ids', () => {
@@ -217,7 +209,7 @@ describe('Langfuse message finalization gate', () => {
 
     const prompt = composeChatUserRequestForAgent(transcript, currentPrompt);
     expect(prompt).not.toContain('OVERRIDE — form already answered');
-    expect(prompt).not.toContain('as read-only documentation');
+    expect(prompt).not.toContain('Treat RULE 1');
   });
 
   it('also drops the transcript on a non-form turn when skipTranscript is true', () => {

@@ -28,7 +28,6 @@ import {
   renderConnectedExternalMcpDirective,
   resolveExclusiveSurface,
 } from './prompts/system.js';
-import { pendingPromptFlowStep } from './prompts/flow-steps.js';
 import {
   computeStableSectionHashes,
   serializeStableSections,
@@ -381,7 +380,7 @@ import { createAgentStderrVisibilityFilter } from './amr-stderr-filter.js';
 import { createQoderStreamHandler } from './runtimes/qoder-stream.js';
 import { subscribe as subscribeFileEvents } from './project-watchers.js';
 import { importFigmaFromBytes } from './figma/figma-import.js';
-import { renderDesignSystemCard, renderDesignSystemPreview } from './design-systems/preview.js';
+import { renderDesignSystemPreview } from './design-systems/preview.js';
 import { renderDesignSystemShowcase } from './design-systems/showcase.js';
 import { createChatRunService } from './runtimes/runs.js';
 import {
@@ -1378,19 +1377,11 @@ const FORM_ANSWERS_HEADER_RE = /^\s*\[form answers\s+(?:\u2014|-)\s*([^\]\r\n]+)
 // anti-patterns we ask the model to skip \u2014 silently weakening the
 // list (e.g. dropping the markdown-fence ban) would reintroduce the
 // form-echo regression on GPT-OSS / Gemini Flash.
-// Wording must stay truthful for BOTH charter variants: classic labels its
-// flow RULE 1/2/3; the slim charter has no RULE headings and its filesystem
-// handoff forbids `<artifact>` blocks outright. An override that asserts
-// labels or contracts the composed prompt does not contain reads as prompt
-// injection to strong models (observed: Fable flagged the block as untrusted
-// and ignored it), so every reference below is qualified by variant.
 export const FORM_ANSWERED_SYSTEM_OVERRIDE = `## OVERRIDE \u2014 form already answered (this is turn 2 or later)
 
 The user already submitted their form answers (see # User request below).
-The turn-1 ask flow is finished. Treat the system prompt's turn-1 form
-directive (RULE 1 in the classic charter, "Turn 1: one line, one form" in
-the slim charter) as read-only documentation for this turn \u2014 do not
-execute any of it.
+RULE 1 documents the turn-1 ask flow; that flow is finished. Treat RULE 1
+as read-only documentation for this turn \u2014 do not execute any of it.
 
 Forbidden output for this turn:
 - A \`<question-form>\` tag of any id, including \`discovery\` or \`task-type\`.
@@ -1402,13 +1393,8 @@ Forbidden output for this turn:
 
 Required output for this turn:
 - Open with a brief prose confirmation of what the brief is.
-- Then continue the brief-to-build flow your system prompt defines:
-  resolve the submitted \`brand\` value (RULE 2 in the classic charter,
-  "When the brand answer arrives" in the slim charter), then plan and
-  build the deliverable this turn (RULE 3 / "Once direction locks").
-  Follow the prompt's handoff contract for the deliverable shape \u2014
-  filesystem runs write real project files; emit a source-code
-  \`<artifact>\` block only when that contract explicitly says so.
+- Then proceed to RULE 2 (branch on the submitted \`brand\` value) and
+  RULE 3 (emit the \`<artifact>\` block with the full HTML document).
 
 `;
 
@@ -1424,52 +1410,7 @@ user instruction and respond accordingly.
 
 `;
 
-export const FORM_ANSWERED_INSPIRATION_OVERRIDE = `## OVERRIDE \u2014 inspiration sources already selected
-
-The user already submitted the inspiration picker. Do not ask the inspiration
-form again. Use the submitted sources as a layered reference contract for the
-deliverable you build now.
-
-Resolve each dimension independently in this strict order:
-1. selected or uploaded image references (highest priority)
-2. selected Design template
-3. selected Style / design system (fallback)
-
-Evaluate information hierarchy, layout and composition, component patterns,
-typography, color, spacing, radii, imagery treatment, and motion separately.
-For each dimension, use the highest-priority source that visibly or explicitly
-defines it. If that source does not define a dimension, let the next source
-fill only that gap. A lower-priority source must never override a dimension
-already established by a higher-priority source.
-
-Extract the references' structural and visual language, not their incidental
-copy, product names, or factual claims. The user's requested subject matter and
-content remain authoritative.
-
-`;
-
-const BRIEF_FORM_IDS = new Set(['discovery', 'task-type']);
-
-/**
- * Pick the `# Instructions` override for a form-answer turn. Brief forms
- * (discovery / task-type) normally transition straight to the build; when a
- * registered prompt flow step (prompts/flow-steps.ts) is still pending —
- * its section composed into this run's system prompt but its form never
- * surfaced in the conversation — that step's override wins so the model
- * emits the step's form (e.g. the inspiration picker) before building.
- * Selection is deterministic here because the daemon knows the run's
- * grounding state; the model must never reconcile contradicting directives.
- */
-export function resolveFormAnsweredOverride({ formId, pendingFlowStep }) {
-  if (typeof formId !== 'string' || formId.length === 0) return '';
-  const normalizedFormId = formId.toLowerCase();
-  if (normalizedFormId === 'inspiration') return FORM_ANSWERED_INSPIRATION_OVERRIDE;
-  if (!BRIEF_FORM_IDS.has(normalizedFormId)) return FORM_ANSWERED_GENERIC_OVERRIDE;
-  if (pendingFlowStep) return pendingFlowStep.formAnsweredOverride;
-  return FORM_ANSWERED_SYSTEM_OVERRIDE;
-}
-
-function formAnswerTransitionForCurrentPrompt(currentPrompt, options = {}) {
+function formAnswerTransitionForCurrentPrompt(currentPrompt) {
   if (typeof currentPrompt !== 'string') return null;
   const trimmed = currentPrompt.trim();
   if (!trimmed) return null;
@@ -1490,13 +1431,9 @@ function formAnswerTransitionForCurrentPrompt(currentPrompt, options = {}) {
     // the exact main wording.
     `The user has answered the ${formId} form. Do not emit another ${formId} form.`,
   ];
-  if (BRIEF_FORM_IDS.has(formId.toLowerCase())) {
-    // Mirrors resolveFormAnsweredOverride: a pending flow step redirects
-    // the brief-answered transition to that step's form before the build.
+  if (formId.toLowerCase() === 'discovery' || formId.toLowerCase() === 'task-type') {
     lines.push(
-      options.pendingFlowStep
-        ? options.pendingFlowStep.transitionLine
-        : 'Continue with RULE 2 / RULE 3 now. For Branch B answers, build now instead of asking another brief.',
+      'Continue with RULE 2 / RULE 3 now. For Branch B answers, build now instead of asking another brief.',
     );
   } else {
     lines.push(
@@ -1509,7 +1446,7 @@ function formAnswerTransitionForCurrentPrompt(currentPrompt, options = {}) {
 export function composeChatUserRequestForAgent(
   message,
   currentPrompt,
-  options: { skipTranscript?: boolean; pendingFlowStep?: import('./prompts/flow-steps.js').PromptFlowStep | null } = {},
+  options: { skipTranscript?: boolean } = {},
 ) {
   // When the adapter resumes its own session (today: `agy -c`), the
   // daemon-rendered `## user` / `## assistant` transcript is a duplicate
@@ -1525,9 +1462,7 @@ export function composeChatUserRequestForAgent(
     typeof bodySource === 'string' && bodySource.trim()
       ? bodySource
       : '(No extra typed instruction.)';
-  const transition = formAnswerTransitionForCurrentPrompt(currentPrompt, {
-    pendingFlowStep: options.pendingFlowStep ?? null,
-  });
+  const transition = formAnswerTransitionForCurrentPrompt(currentPrompt);
   if (!transition) return body;
   if (skip) {
     return [transition, body].join('\n\n');
@@ -3189,7 +3124,6 @@ export async function startServer({
       readDesignSystemWorkspaceTextFile,
       readUserDesignSystemFile,
       renderDesignSystemPreview,
-      renderDesignSystemCard,
       renderDesignSystemShowcase,
       updateUserDesignSystem,
       updateUserDesignSystemRevisionStatus,
@@ -3630,27 +3564,12 @@ export async function startServer({
     projectFiles: projectFileDeps,
   });
 
-  // Prompt budget for the additional-inspiration grounding blocks: the picker
-  // caps selection, and each embedded DESIGN.md is cut so a handful of long
-  // imported systems cannot crowd out the primary system or the skill body.
-  const MAX_INSPIRATION_PROMPT_SYSTEMS = 3;
-  const MAX_INSPIRATION_PROMPT_BODY_CHARS = 6000;
-  const truncateInspirationPromptBody = (body: string): string => {
-    const trimmed = body.trim();
-    if (trimmed.length <= MAX_INSPIRATION_PROMPT_BODY_CHARS) return trimmed;
-    const cut = trimmed.slice(0, MAX_INSPIRATION_PROMPT_BODY_CHARS);
-    const lastBreak = cut.lastIndexOf('\n');
-    const bounded = lastBreak > MAX_INSPIRATION_PROMPT_BODY_CHARS / 2 ? cut.slice(0, lastBreak) : cut;
-    return `${bounded}\n\n… (truncated for prompt budget)`;
-  };
-
   const composeDaemonSystemPrompt = async ({
     agentId,
     projectId,
     skillId,
     skillIds,
     designSystemId,
-    inspirationDesignSystemIds,
     streamFormat,
     locale,
     sessionMode,
@@ -3688,26 +3607,7 @@ export async function startServer({
     }
     const effectiveSkillId =
       typeof skillId === 'string' && skillId ? skillId : project?.skillId;
-    // Turn-level inspiration systems (picker multi-select) extend, never
-    // replace, any project-level inspiration metadata for this run only.
-    const turnInspirationIds = Array.isArray(inspirationDesignSystemIds)
-      ? inspirationDesignSystemIds.filter((id) => typeof id === 'string' && id.length > 0)
-      : [];
-    const projectMetadata = project?.metadata;
-    const metadata =
-      turnInspirationIds.length > 0
-        ? {
-            ...(projectMetadata ?? {}),
-            inspirationDesignSystemIds: Array.from(
-              new Set([
-                ...(Array.isArray(projectMetadata?.inspirationDesignSystemIds)
-                  ? projectMetadata.inspirationDesignSystemIds
-                  : []),
-                ...turnInspirationIds,
-              ]),
-            ),
-          }
-        : projectMetadata;
+    const metadata = project?.metadata;
     // Website Clone runs reproduce someone else's site: the fidelity target
     // is the original page. Treating a project/app design system as
     // authoritative would overwrite the cloned site's palette/typography
@@ -4036,44 +3936,6 @@ export async function startServer({
       }
     }
 
-    // Additional inspiration systems (picker multi-select): resolve each id
-    // through the same reader chain as the primary so the run prompt carries
-    // their actual DESIGN.md content, not just their names — a user-authored
-    // `user:...` system otherwise contributes nothing the agent can honor.
-    // Bounded: primary excluded, capped count, each body truncated.
-    const inspirationDesignSystems = [];
-    const inspirationIdsForPrompt =
-      !isWebCloneRun && Array.isArray(metadata?.inspirationDesignSystemIds)
-        ? Array.from(new Set(metadata.inspirationDesignSystemIds))
-            .filter(
-              (id) =>
-                typeof id === 'string' && id.length > 0 && id !== effectiveDesignSystemId,
-            )
-            .slice(0, MAX_INSPIRATION_PROMPT_SYSTEMS)
-        : [];
-    if (inspirationIdsForPrompt.length > 0) {
-      const systems = await listAllDesignSystems();
-      for (const id of inspirationIdsForPrompt) {
-        const summary = systems.find((s) => s.id === id);
-        if (!summary || !isProjectUsableDesignSystem(summary)) continue;
-        try {
-          const workspaceBody = await readDesignSystemWorkspaceTextFile(db, summary, 'DESIGN.md');
-          const body = workspaceBody ?? (await readAvailableDesignSystem(id));
-          if (typeof body === 'string' && body.trim().length > 0) {
-            inspirationDesignSystems.push({
-              id,
-              title: summary.title,
-              body: truncateInspirationPromptBody(body),
-            });
-          }
-        } catch (err) {
-          console.warn(
-            `[design-systems] inspiration resolve failed for ${id}: ${err?.message ?? err}`,
-          );
-        }
-      }
-    }
-
     const excludedCraft = new Set(designSystemCraftExemptions);
     // Web-clone fidelity exemption — see `isWebCloneRun` above.
     const requestedCraft = isWebCloneRun
@@ -4253,8 +4115,6 @@ export async function startServer({
       designSystemFixtureHtml,
       designSystemPullIndex,
       designSystemImportMode,
-      inspirationDesignSystems:
-        inspirationDesignSystems.length > 0 ? inspirationDesignSystems : undefined,
       craftBody,
       craftSections,
       memoryBody,
@@ -4431,7 +4291,6 @@ export async function startServer({
       skillId,
       skillIds,
       designSystemId,
-      inspirationDesignSystemIds,
       sessionMode,
       attachments = [],
       commentAttachments = [],
@@ -4819,7 +4678,6 @@ export async function startServer({
         skillId,
         skillIds,
         designSystemId,
-        inspirationDesignSystemIds,
         streamFormat: def?.streamFormat ?? 'plain',
         locale,
         sessionMode: runSessionMode,
@@ -5167,15 +5025,6 @@ export async function startServer({
       invalidationReason: agentResumeCtx.invalidationReason,
     });
     publishNativeSessionRecoveryMetadata();
-    // Flow-step gate for the brief-answered turn: a registered step (today
-    // the inspiration picker) whose section the composed prompt carries but
-    // whose form this conversation has never shown must run BEFORE the
-    // build. Detected from the daemon-composed prompt (not the per-turn
-    // send, which may omit cached stable instructions) + full transcript.
-    const pendingFlowStep = pendingPromptFlowStep({
-      composedSystemPrompt: daemonSystemPrompt,
-      transcript: typeof message === 'string' ? message : '',
-    });
     const userRequestPrompt = composeChatUserRequestForAgent(
       message,
       currentPrompt,
@@ -5183,7 +5032,7 @@ export async function startServer({
       // existing session. A create turn still sends the full transcript so
       // a brand-new session (incl. first turn after another agent)
       // is seeded with prior context.
-      { skipTranscript: agentResumeCtx.isResuming, pendingFlowStep },
+      { skipTranscript: agentResumeCtx.isResuming },
     );
     // The stable instruction slice (daemon prompt + tool contract + system
     // prompt = design system / skills / memory) is identical across turns of
@@ -5271,10 +5120,12 @@ export async function startServer({
     const formIdForOverride = formAnswerMatch
       ? ((formAnswerMatch[1] || 'form').trim().replace(/[^\w.-]/g, '') || 'form').toLowerCase()
       : null;
-    const formOverride = resolveFormAnsweredOverride({
-      formId: formIdForOverride,
-      pendingFlowStep,
-    });
+    const formOverride =
+      formIdForOverride === 'discovery' || formIdForOverride === 'task-type'
+        ? FORM_ANSWERED_SYSTEM_OVERRIDE
+        : formIdForOverride !== null
+          ? FORM_ANSWERED_GENERIC_OVERRIDE
+          : '';
     const promptImagePaths = selectPromptImagePaths(
       def.id,
       safeImages,

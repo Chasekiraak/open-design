@@ -1,7 +1,5 @@
 ---
 name: "contact-widget"
-en_name: "Contact & Booking Widget"
-zh_name: "联系与预约挂件"
 description: "Self-contained floating chat widget with welcome screen, social links, meeting button, and message input. Single HTML file, zero dependencies."
 triggers:
   - "contact widget"
@@ -13,7 +11,6 @@ od:
   mode: "prototype"
   platform: "desktop"
   scenario: "engineering"
-  category: marketing-gtm
   preview:
     type: "html"
     entry: "example.html"

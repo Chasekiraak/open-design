@@ -28,7 +28,6 @@ triggers:
   - "html deck"
   - "html slides"
 od:
-  category: consulting
   mode: deck
   upstream: "https://github.com/lewislulu/html-ppt-skill"
   preview:

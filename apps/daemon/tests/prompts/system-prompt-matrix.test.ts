@@ -68,7 +68,6 @@ const SECTION_MARKERS = [
   ['active-ds-visual-direction-override', '## Active design system visual direction'],
   ['filesystem-handoff-override', '## Filesystem handoff'],
   ['clarifying-questions', '## Clarifying questions mid-conversation'],
-  ['inspiration-step', '## Inspiration step — ground ungrounded tasks'],
   ['role-marker-guard', '## CRITICAL: Never fabricate conversation turns'],
 ] as const satisfies ReadonlyArray<readonly [string, string]>;
 

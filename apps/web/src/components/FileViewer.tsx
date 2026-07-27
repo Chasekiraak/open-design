@@ -9343,11 +9343,9 @@ function HtmlViewer({
         setManualEditDraftDirty(true);
       }
       if (patch.kind === 'set-style') {
-        // May set an explanatory error (styles differed / target vanished);
-        // the stale-error clear already ran at the top of this function, so
-        // nothing may clear again after this point or the message is lost.
         reconcileManualEditStyleSave(patch.id, patch.styles, result.source);
       }
+      setManualEditError(null);
       await onFileSaved?.();
       return true;
     } finally {
