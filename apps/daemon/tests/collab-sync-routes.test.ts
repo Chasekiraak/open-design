@@ -780,6 +780,17 @@ describe('collab sync routes', () => {
       },
     );
 
+    const first = await api.json('/api/projects/shared-p/collab/status');
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({
+      publishedVersion: null,
+      materializedVersion: null,
+      ownerMemberId: 'wm-owner',
+    });
+    expect(await api.awaitPublishedVersion(
+      '/api/projects/shared-p/collab/status',
+      null,
+    )).toBe(7);
     const res = await api.json('/api/projects/shared-p/collab/status');
 
     expect(res.status).toBe(200);
@@ -1897,6 +1908,10 @@ describe('collab sync pull handle (daemon-internal proactive pull)', () => {
       },
     });
 
+    expect(await api.awaitPublishedVersion(
+      '/api/projects/cursor-fail/collab/status',
+      null,
+    )).toBe(5);
     const before = await api.json('/api/projects/cursor-fail/collab/status');
     expect(before.body.materializedVersion).toBe(4);
 

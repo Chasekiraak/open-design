@@ -330,6 +330,26 @@ function headerBool(req: { get(name: string): string | undefined }, name: string
   return fallback;
 }
 
+const STATUS_ENRICHMENT_CACHE_LIMIT = 256;
+
+function readLruEntry<K, V>(cache: Map<K, V>, key: K): V | undefined {
+  if (!cache.has(key)) return undefined;
+  const value = cache.get(key)!;
+  cache.delete(key);
+  cache.set(key, value);
+  return value;
+}
+
+function writeLruEntry<K, V>(cache: Map<K, V>, key: K, value: V): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > STATUS_ENRICHMENT_CACHE_LIMIT) {
+    const oldest = cache.keys().next();
+    if (oldest.done) return;
+    cache.delete(oldest.value);
+  }
+}
+
 function headerPrincipalForRequest(req: { get(name: string): string | undefined }): ResourceHubPrincipal | null {
   const teamId = headerValue(req, 'x-od-workspace-id');
   const memberId = headerValue(req, 'x-od-workspace-member-id');
@@ -511,6 +531,20 @@ export function registerCollabSyncRoutes(
     notifyProjectMetadataChanged,
   } = deps;
   const readManifest = deps.readManifest ?? readProjectManifest;
+  const ownerEnrichmentCache = new Map<
+    string,
+    {
+      entry: { displayName: string; role: 'owner' | 'admin' | 'member' } | null;
+      resolvedAt: number;
+    }
+  >();
+  const ownerEnrichmentInFlight = new Map<string, Promise<void>>();
+  const headEnrichmentCache = new Map<
+    string,
+    { head: number | null; scope: TeamMirrorPullScope | null }
+  >();
+  const headEnrichmentInFlight = new Map<string, Promise<void>>();
+  const OWNER_ENRICHMENT_TTL_MS = 30_000;
   const reportPullTiming = (
     event: Parameters<NonNullable<RegisterCollabSyncRoutesDeps['onPullTiming']>>[0],
   ): void => {
@@ -529,6 +563,30 @@ export function registerCollabSyncRoutes(
       ? req.headers.authorization[0]
       : req.headers.authorization;
     return headerPrincipalForRequest(req) ?? contextToResourceHubPrincipal(await workspaceContext.current({ authorization }));
+  }
+
+  async function statusIdentityForRequest(req: {
+    get(name: string): string | undefined;
+    headers: { authorization?: string | string[] | undefined };
+  }): Promise<{
+    principal: ResourceHubPrincipal | null;
+    workspaceId: string | null;
+  }> {
+    const headerPrincipal = headerPrincipalForRequest(req);
+    if (headerPrincipal) {
+      return {
+        principal: headerPrincipal,
+        workspaceId: headerValue(req, 'x-od-workspace-id'),
+      };
+    }
+    const authorization = Array.isArray(req.headers.authorization)
+      ? req.headers.authorization[0]
+      : req.headers.authorization;
+    const context = await workspaceContext.current({ authorization });
+    return {
+      principal: contextToResourceHubPrincipal(context),
+      workspaceId: context?.workspaceId?.trim() || null,
+    };
   }
 
   /**
@@ -553,37 +611,53 @@ export function registerCollabSyncRoutes(
       get(name: string): string | undefined;
       headers: { authorization?: string | string[] | undefined };
     },
+    knownOwnerMemberId?: string | null,
+    capturedIdentity?: {
+      principal: ResourceHubPrincipal | null;
+      workspaceId: string | null;
+    },
   ): Promise<{ principal: ResourceHubPrincipal | null; scope: TeamMirrorPullScope | null }> {
-    const headerPrincipal = headerPrincipalForRequest(req);
+    const headerPrincipal = capturedIdentity ? null : headerPrincipalForRequest(req);
     const authorization = Array.isArray(req.headers.authorization)
       ? req.headers.authorization[0]
       : req.headers.authorization;
-    const context = await workspaceContext.current({ authorization });
-    const viewerPrincipal = headerPrincipal ?? contextToResourceHubPrincipal(context);
-    let ownerMemberId: string | null = null;
-    try {
-      ownerMemberId = (await resolveSharedProjectOwner?.(projectId)) ?? null;
-    } catch {
-      ownerMemberId = null;
+    const context = capturedIdentity
+      ? null
+      : await workspaceContext.current({ authorization });
+    const viewerPrincipal =
+      capturedIdentity?.principal ??
+      headerPrincipal ??
+      contextToResourceHubPrincipal(context);
+    let ownerMemberId = knownOwnerMemberId ?? null;
+    if (knownOwnerMemberId === undefined) {
+      try {
+        ownerMemberId = (await resolveSharedProjectOwner?.(projectId)) ?? null;
+      } catch {
+        ownerMemberId = null;
+      }
     }
-    const workspaceId = headerPrincipal
-      ? req.get('x-od-workspace-id') ?? headerPrincipal.teamId
-      : context?.workspaceId;
+    const workspaceId = capturedIdentity
+      ? capturedIdentity.workspaceId
+      : headerPrincipal
+        ? req.get('x-od-workspace-id') ?? headerPrincipal.teamId
+        : context?.workspaceId;
     const contextMatchesViewer =
       context?.workspaceType === 'team' &&
       context.memberStatus === 'active' &&
       context.lifecycleState === 'active' &&
       context.workspaceId === workspaceId &&
       context.workspaceMemberId === viewerPrincipal?.memberId;
-    const resourceTeamId = contextMatchesViewer
-      ? context.teamId ?? context.workspaceId
-      : viewerPrincipal?.teamId;
+    const resourceTeamId = capturedIdentity
+      ? viewerPrincipal?.teamId
+      : contextMatchesViewer
+        ? context.teamId ?? context.workspaceId
+        : viewerPrincipal?.teamId;
     const scope =
       ownerMemberId &&
       viewerPrincipal &&
       workspaceId &&
       resourceTeamId &&
-      (headerPrincipal != null || context?.workspaceType === 'team')
+      (capturedIdentity != null || headerPrincipal != null || context?.workspaceType === 'team')
         ? {
             workspaceId,
             resourceTeamId,
@@ -1582,7 +1656,10 @@ export function registerCollabSyncRoutes(
 
   app.get('/api/projects/:id/collab/status', async (req, res) => {
     const projectId = req.params.id;
-    const principal = await principalForRequest(req);
+    const {
+      principal,
+      workspaceId: resolvedWorkspaceId,
+    } = await statusIdentityForRequest(req);
     let syncState = projectSyncState(projectId, principal);
     let ownerMemberId = projectOwnerMemberId(projectId, principal);
     let ownerDisplayName: string | undefined;
@@ -1630,37 +1707,91 @@ export function registerCollabSyncRoutes(
     if (ownerMemberId) {
       ensureSharedProjectPlaceholder(projectId);
     }
-    // The owner display-name directory lookup and the hub published-head
-    // round-trip are BOTH uncached ~1-2s vela calls, and ONLY a non-owner member
-    // of a shared project needs either one (the owner never auto-pulls and shows
-    // no "shared by X" banner). They are independent, so run them concurrently:
-    // serialized, they made a member's /collab/status a ~2x round-trip, delaying
-    // the "shared by X" banner and the read-only state for their combined time.
-    // Only a NON-OWNER member of a shared project needs the hub-published head: it
-    // drives their auto-pull cursor. The owner reads their (newest) version from
-    // local state, and a local-only project has no hub head at all.
+    // A verified local mirror binding is enough to return shared identity and
+    // unlock presence immediately. The owner-name directory and published-head
+    // calls are remote enrichment: neither may hold this status response open.
+    // Cache them by the exact viewer/team/owner/project tuple so a later poll can
+    // consume the result without leaking it across workspace scopes. Unknown local
+    // ownership still fails closed above; this path never guesses an owner. The
+    // web's default status poll is 5s, so settled enrichment becomes visible on
+    // the next poll (<=5s); this local-first fix does not add another SSE contract.
     const needsHubHead = (syncState !== 'local_only' || ownerMemberId != null) && !callerIsOwner;
-    const [ownerNameEntry, headResult] = await Promise.all([
-      ownerMemberId && !callerIsOwner && resolveOwnerDisplayName
-        ? resolveOwnerDisplayName(ownerMemberId).catch(() => null)
-        : Promise.resolve(null),
-      needsHubHead
-        ? (async () => {
-            const { principal: resourcePrincipal, scope } =
-              await pullAccessForRequest(projectId, req);
-            let head: number | null;
-            try {
-              head = await publishedHead(projectId, resourcePrincipal);
-            } catch {
-              head = publishedVersion(projectId, principal);
-            }
-            return { head, scope };
-          })()
-        : Promise.resolve({ head: publishedVersion(projectId, principal), scope: null }),
+    const enrichmentKey = JSON.stringify([
+      resolvedWorkspaceId ?? '',
+      principal?.teamId ?? '',
+      principal?.memberId ?? '',
+      ownerMemberId ?? '',
+      projectId,
     ]);
+    const cachedOwnerName = readLruEntry(ownerEnrichmentCache, enrichmentKey);
+    const ownerNameEntry = cachedOwnerName?.entry ?? null;
     if (ownerNameEntry) {
       ownerDisplayName = ownerNameEntry.displayName;
       ownerRole = ownerNameEntry.role;
+    }
+    if (
+      ownerMemberId &&
+      resolvedWorkspaceId &&
+      principal &&
+      !callerIsOwner &&
+      resolveOwnerDisplayName &&
+      (!cachedOwnerName || Date.now() - cachedOwnerName.resolvedAt >= OWNER_ENRICHMENT_TTL_MS) &&
+      !ownerEnrichmentInFlight.has(enrichmentKey)
+    ) {
+      const refreshOwner = resolveOwnerDisplayName(ownerMemberId)
+        .then((entry) => {
+          writeLruEntry(ownerEnrichmentCache, enrichmentKey, {
+            entry,
+            resolvedAt: Date.now(),
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (ownerEnrichmentInFlight.get(enrichmentKey) === refreshOwner) {
+            ownerEnrichmentInFlight.delete(enrichmentKey);
+          }
+        });
+      ownerEnrichmentInFlight.set(enrichmentKey, refreshOwner);
+    }
+
+    let headResult =
+      readLruEntry(headEnrichmentCache, enrichmentKey) ??
+      { head: publishedVersion(projectId, principal), scope: null };
+    if (needsHubHead && !headEnrichmentInFlight.has(enrichmentKey)) {
+      const expectedWorkspaceId = resolvedWorkspaceId;
+      const expectedPrincipal = principal;
+      const expectedOwnerMemberId = ownerMemberId;
+      const refreshHead = (async () => {
+        const { principal: resourcePrincipal, scope } =
+          await pullAccessForRequest(
+            projectId,
+            req,
+            expectedOwnerMemberId,
+            {
+              principal: expectedPrincipal,
+              workspaceId: expectedWorkspaceId,
+            },
+          );
+        if (
+          !scope ||
+          !expectedPrincipal ||
+          scope.workspaceId !== expectedWorkspaceId ||
+          scope.resourceTeamId !== expectedPrincipal.teamId ||
+          scope.viewerMemberId !== expectedPrincipal.memberId ||
+          scope.ownerMemberId !== expectedOwnerMemberId
+        ) {
+          return;
+        }
+        const head = await publishedHead(projectId, resourcePrincipal);
+        writeLruEntry(headEnrichmentCache, enrichmentKey, { head, scope });
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          if (headEnrichmentInFlight.get(enrichmentKey) === refreshHead) {
+            headEnrichmentInFlight.delete(enrichmentKey);
+          }
+        });
+      headEnrichmentInFlight.set(enrichmentKey, refreshHead);
     }
     let materializedVersion: number | null = null;
     if (headResult.scope && deps.readMaterializedVersion) {
