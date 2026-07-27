@@ -189,6 +189,44 @@ describe('POST /api/runs headless fallbacks', () => {
     expect(run2Body.assistantMessageId).toBe(clientId);
   });
 
+  it('rejects cross-project conversationId before seeding omit-pin prompt', async () => {
+    started = await startTestServer();
+    const projectA = await createProject(started.url, 'Ownership project A');
+    const projectB = await createProject(started.url, 'Ownership project B');
+    const foreignPrompt = `cross-project omit-pin seed ${randomUUID()}`;
+
+    const runResponse = await fetch(`${started.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: `missing-agent-${randomUUID()}`,
+        projectId: projectA.projectId,
+        conversationId: projectB.conversationId,
+        message: foreignPrompt,
+      }),
+    });
+    expect(runResponse.status).toBe(404);
+    await expect(runResponse.json()).resolves.toMatchObject({
+      error: {
+        code: 'CONVERSATION_NOT_FOUND',
+        message: 'conversation not found for project',
+      },
+    });
+
+    const messagesResponse = await fetch(
+      `${started.url}/api/projects/${encodeURIComponent(projectB.projectId)}/conversations/${encodeURIComponent(projectB.conversationId)}/messages`,
+    );
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(
+      messagesBody.messages.some(
+        (m) => m.role === 'user' && m.content.includes(foreignPrompt),
+      ),
+    ).toBe(false);
+  });
+
   it('falls back past a stale saved agent to the first detected available runtime', async () => {
     started = await startTestServer();
     const binDir = await mkdtemp(path.join(os.tmpdir(), 'od-headless-run-bin-'));

@@ -706,11 +706,29 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
         console.warn('[runs] mcp conversation fallback failed', err);
       }
     }
+    const conversationSession =
+      typeof meta.conversationId === 'string' && meta.conversationId
+        ? getConversation(db, meta.conversationId)
+        : null;
+    // A run may only attach to a conversation owned by its own project. Without
+    // this guard a request pairing projectId=A with a conversationId owned by
+    // project B runs in A's cwd but pins its messages and native session under
+    // B — corrupting B's chat history and resume identity. Mirror the ownership
+    // check the sibling routes already enforce (handoff.ts, terminal.ts).
+    // Must run before omit-pin mint/seed so a 404 never leaves a prompt in B.
+    if (
+      conversationSession &&
+      typeof meta.projectId === 'string' &&
+      meta.projectId &&
+      conversationSession.projectId !== meta.projectId
+    ) {
+      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
+    }
     // Web always mints assistantMessageId client-side. API clients that already
     // know conversationId (eval runners, scripts, MCP after the bind above) may
     // omit it. Without a server-side pin, pinAssistantMessageOnRunCreate no-ops,
     // lastMessageId stays null, and multi-turn native session resume is skipped
-    // (missing_cursor / resume_skipped).
+    // (missing_cursor / resume_skipped). Ownership is validated above first.
     if (
       typeof meta.conversationId === 'string' &&
       meta.conversationId &&
@@ -734,23 +752,6 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
           console.warn('[runs] api client user message pin failed', err);
         }
       }
-    }
-    const conversationSession =
-      typeof meta.conversationId === 'string' && meta.conversationId
-        ? getConversation(db, meta.conversationId)
-        : null;
-    // A run may only attach to a conversation owned by its own project. Without
-    // this guard a request pairing projectId=A with a conversationId owned by
-    // project B runs in A's cwd but pins its messages and native session under
-    // B — corrupting B's chat history and resume identity. Mirror the ownership
-    // check the sibling routes already enforce (handoff.ts, terminal.ts).
-    if (
-      conversationSession &&
-      typeof meta.projectId === 'string' &&
-      meta.projectId &&
-      conversationSession.projectId !== meta.projectId
-    ) {
-      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'conversation not found for project');
     }
     meta.sessionMode =
       meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
