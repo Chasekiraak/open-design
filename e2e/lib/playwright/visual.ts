@@ -682,7 +682,12 @@ export async function prepareVisualAvatarMenu(page: Page): Promise<Locator> {
 export async function prepareVisualSettingsDialog(page: Page): Promise<Locator> {
   await prepareVisualWorkspaceFileList(page);
   const dialog = await openSettingsDetailsFromHeader(page);
-  await expect(dialog.getByRole('heading', { name: /Settings|General|Execution mode/i })).toBeVisible();
+  // Assert the section nav, not a heading: the surface's own <h2> is consumed as
+  // its accessible name via aria-labelledby, and opening from a project lands on
+  // the execution section whose heading reads "Models & providers" — neither
+  // matches a /Settings|General|Execution mode/ probe. The nav is what proves
+  // Settings opened, in either presentation. (Same check critical-smoke uses.)
+  await expect(dialog.getByTestId('settings-nav-execution')).toBeVisible();
   await waitForVisualStable(page);
   return dialog;
 }
