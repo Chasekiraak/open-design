@@ -89,6 +89,25 @@ export interface CollabSyncStatusResponse {
    * observed a transfer for the project in its current process lifetime.
    */
   contentTransferState?: ProjectContentTransferState | null;
+  /**
+   * True while this daemon's only local record for the project is an
+   * unmaterialized shared-project placeholder — a row registered so the
+   * project's other routes stop 404ing, whose content directory is empty and
+   * is NOT the project's content (see the daemon's
+   * `sharedProjectPlaceholderAt` stamp).
+   *
+   * It is the one download signal that does not depend on remote enrichment.
+   * `publishedVersion` is null on a fresh install's very first status response
+   * — the daemon answers from local state and fetches the real hub head in the
+   * background for a later poll — so a client gated only on
+   * `publishedVersion`/`contentTransferState` cannot distinguish "empty
+   * project" from "content still downloading" on first open, and shows an
+   * empty project with create-a-file CTAs instead of a syncing state.
+   *
+   * Clients must treat this as authoritative over the local file list: while
+   * it is true, zero files means "not downloaded yet", never "nothing here".
+   */
+  awaitingFirstMaterialization?: boolean;
   syncState: ProjectSyncState;
   /**
    * The member who shared this project (its single writer), resolved

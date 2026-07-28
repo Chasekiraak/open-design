@@ -22,6 +22,12 @@ export interface CollabSnapshot {
   publishedVersion: number | null;
   materializedVersion: number | null;
   contentTransferState: ProjectContentTransferState | null;
+  /**
+   * The daemon has only an unmaterialized shared-project placeholder for this
+   * project, so its local file list is provably not the project's content. See
+   * `CollabSyncStatusResponse.awaitingFirstMaterialization`.
+   */
+  awaitingFirstMaterialization: boolean;
   /** Monotonic trigger incremented after every successful status response. */
   statusPollGeneration: number;
   /**  project sync state; null until the first status poll lands. */
@@ -77,6 +83,7 @@ export class CollabClient {
     publishedVersion: null,
     materializedVersion: null,
     contentTransferState: null,
+    awaitingFirstMaterialization: false,
     statusPollGeneration: 0,
     syncState: null,
     ownerMemberId: null,
@@ -239,6 +246,7 @@ export class CollabClient {
       const next: Partial<CollabSnapshot> = {
         publishedVersion: version,
         materializedVersion,
+        awaitingFirstMaterialization: body?.awaitingFirstMaterialization === true,
         statusPollGeneration: this.snapshot.statusPollGeneration + 1,
         syncState,
         ownerMemberId,
