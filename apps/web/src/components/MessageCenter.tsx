@@ -1,5 +1,5 @@
 import { Button } from '@open-design/components';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useI18n, type Locale } from '../i18n';
@@ -39,6 +39,10 @@ interface Props {
   /** Hide the built-in bell trigger — the host renders its own entry point
    *  (e.g. an account-menu row) and drives the panel via `open`/`onOpenChange`. */
   hideTrigger?: boolean;
+  /** The still-mounted host control focus returns to when the panel closes.
+   *  Required alongside `hideTrigger`: the built-in bell is what focus would
+   *  otherwise return to, and a host that hides it owns that duty instead. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   /** Controlled open state; pair with `onOpenChange` when `hideTrigger` is set. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -52,6 +56,7 @@ type SyncState = 'loading' | 'ready' | 'error';
 export function MessageCenter({
   onOpenNotificationSettings,
   hideTrigger = false,
+  returnFocusRef,
   open: controlledOpen,
   onOpenChange,
   onUnreadCountChange,
@@ -174,9 +179,17 @@ export function MessageCenter({
     [filter, messages],
   );
 
+  /** The control keyboard focus must land on after the panel closes. Opening
+   *  focuses the portaled dialog, so closing always unmounts the focused node —
+   *  without a target here focus falls to the document and the user loses their
+   *  place in the rail. The built-in bell owns it by default; under
+   *  `hideTrigger` that button does not exist and the host's opener does. */
+  const returnFocusTarget = (): HTMLElement | null =>
+    triggerRef.current ?? returnFocusRef?.current ?? null;
+
   const closePanel = () => {
     setOpen(false);
-    triggerRef.current?.focus();
+    returnFocusTarget()?.focus();
   };
 
   useEffect(() => {

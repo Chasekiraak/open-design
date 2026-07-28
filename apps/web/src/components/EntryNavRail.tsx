@@ -30,6 +30,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type Ref,
 } from 'react';
 import { coalescedGet } from '../lib/coalesced-get';
 import type {
@@ -127,6 +128,11 @@ interface NavButtonProps {
   onClick: () => void;
   disabled?: boolean;
   testId?: string;
+  /** Rail items that own a popup surface expose the button so the surface can
+   *  return focus here on close, and advertise the popup's kind + open state. */
+  buttonRef?: Ref<HTMLButtonElement>;
+  ariaHasPopup?: 'dialog' | 'menu';
+  ariaExpanded?: boolean;
   children: ReactNode;
 }
 
@@ -134,15 +140,29 @@ interface NavButtonProps {
 // rail's hover bubble (entry-layout.css) would only duplicate visible text.
 // That bubble stays reserved for the rail's icon-only controls (updater,
 // avatar, icon-only sign-out).
-function NavButton({ active, ariaLabel, label, onClick, disabled, testId, children }: NavButtonProps) {
+function NavButton({
+  active,
+  ariaLabel,
+  label,
+  onClick,
+  disabled,
+  testId,
+  buttonRef,
+  ariaHasPopup,
+  ariaExpanded,
+  children,
+}: NavButtonProps) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       className={`entry-nav-rail__btn${active ? ' is-active' : ''}`}
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
       aria-current={active ? 'page' : undefined}
+      aria-haspopup={ariaHasPopup}
+      aria-expanded={ariaHasPopup ? Boolean(ariaExpanded) : undefined}
       {...(testId ? { 'data-testid': testId } : {})}
     >
       <span className="entry-nav-rail__btn-icon" aria-hidden>{children}</span>
@@ -502,6 +522,13 @@ export function EntryNavRail({
   // unread count, which drives the red dot on the account avatar.
   const [messageCenterOpen, setMessageCenterOpen] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
+  // Where the message-center panel returns keyboard focus on close. The
+  // signed-in 消息中心 row cannot be it: the account menu unmounts the row before
+  // the panel opens, so the account trigger it hangs off is the stable control.
+  // Signed-out has no menu — the rail item itself stays mounted.
+  const accountTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const messageCenterRailRef = useRef<HTMLButtonElement | null>(null);
+  const messageCenterReturnFocusRef = context ? accountTriggerRef : messageCenterRailRef;
   // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
   // confirmation dialog; the real logout chain runs on explicit confirm.
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -713,6 +740,7 @@ export function EntryNavRail({
           >
             {accountNotice}
             <button
+              ref={accountTriggerRef}
               type="button"
               className="entry-nav-rail__account-trigger"
               onClick={() => setAccountOpen((v) => !v)}
@@ -808,6 +836,8 @@ export function EntryNavRail({
                     type="button"
                     className="entry-nav-rail__menu-item"
                     role="menuitem"
+                    aria-haspopup="dialog"
+                    aria-expanded={messageCenterOpen}
                     data-testid="account-menu-message-center"
                     onClick={() => {
                       setAccountOpen(false);
@@ -1179,6 +1209,9 @@ export function EntryNavRail({
               label={t('messageCenter.title')}
               onClick={() => setMessageCenterOpen(true)}
               testId="entry-nav-message-center"
+              buttonRef={messageCenterRailRef}
+              ariaHasPopup="dialog"
+              ariaExpanded={messageCenterOpen}
             >
               <Icon name="bell" size={16} />
               {messageUnreadCount > 0 ? (
@@ -1202,6 +1235,7 @@ export function EntryNavRail({
           unmounts when closed); the 消息中心 menu row above just opens it. */}
       <MessageCenter
         hideTrigger
+        returnFocusRef={messageCenterReturnFocusRef}
         open={messageCenterOpen}
         onOpenChange={setMessageCenterOpen}
         onUnreadCountChange={setMessageUnreadCount}
