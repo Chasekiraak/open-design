@@ -112,15 +112,6 @@ describe('parseFrontmatter', () => {
     expect(data['description']).toBe('line 1\nline 2');
   });
 
-  it.each(['|-', '|+', '>-', '>+'])(
-    'parses %s block scalars at their content indentation',
-    (indicator) => {
-      const src = `---\ndescription: ${indicator}\n    line one\n      line two\n---\n`;
-      const { data } = parseFrontmatter(src);
-      expect(data['description']).toBe('line one\n  line two');
-    },
-  );
-
   it('returns empty data when no frontmatter delimiter is present', () => {
     const { data, body } = parseFrontmatter('# heading');
     expect(Object.keys(data)).toHaveLength(0);

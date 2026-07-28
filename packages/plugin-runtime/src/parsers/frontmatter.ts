@@ -3,7 +3,7 @@
 // SKILL.md frontmatter without leaving the pure-TS contract layer. Handles:
 //
 // - scalar strings / numbers / booleans / null
-// - block scalar (`|`, `>`, and their `+` / `-` indicators) strings
+// - block-literal (|) strings
 // - inline arrays (`[a, b, c]`)
 // - dash-prefixed arrays of scalars or single-line objects
 //
@@ -152,7 +152,7 @@ function parseYamlSubset(src: string): FrontmatterObject {
       continue;
     }
 
-    if (/^[|>][+-]?$/.test(val)) {
+    if (val === '|' || val === '|-' || val === '>' || val === '>-') {
       const collected: string[] = [];
       // YAML derives a block scalar's indentation from its first non-empty
       // content line, not a fixed key+2, so content indented deeper than

@@ -1,5 +1,3 @@
-import { parseFrontmatter } from '@open-design/plugin-runtime';
-
 export interface PluginSkillDescriptionSource {
   key: string;
   assetPath: string | null;
@@ -42,6 +40,51 @@ function firstMarkdownParagraph(markdown: string): string {
   return '';
 }
 
+function parseSkillFrontmatter(markdown: string): { description: string; body: string } {
+  const text = markdown.replace(/^﻿/, '');
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!match) return { description: '', body: text };
+
+  const frontmatter = match[1] ?? '';
+  const lines = frontmatter.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index] ?? '';
+    const lineMatch = /^(\s*)description:\s*(.*)$/.exec(rawLine);
+    if (!lineMatch) continue;
+
+    const parentIndent = (lineMatch[1] ?? '').length;
+    const rawValue = (lineMatch[2] ?? '').trim();
+    if (/^[|>][+-]?$/.test(rawValue)) {
+      const collected: string[] = [];
+      let blockIndent: number | null = null;
+      for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+        const child = lines[nextIndex] ?? '';
+        if (!child.trim()) {
+          collected.push('');
+          continue;
+        }
+        const childIndent = child.match(/^\s*/)?.[0].length ?? 0;
+        if (childIndent <= parentIndent) break;
+        blockIndent ??= childIndent;
+        if (childIndent < blockIndent) break;
+        collected.push(child.slice(blockIndent));
+      }
+      return {
+        description: collected.join('\n').trimEnd(),
+        body: text.slice(match[0].length),
+      };
+    }
+
+    const quoted = /^(["'])([\s\S]*)\1$/.exec(rawValue);
+    return {
+      description: (quoted?.[2] ?? rawValue).trim(),
+      body: text.slice(match[0].length),
+    };
+  }
+
+  return { description: '', body: text.slice(match[0].length) };
+}
+
 /**
  * Plugin Markdown is untrusted package content. Detail rows need one short
  * description, not rendered HTML, so strip markup and let React emit only a
@@ -50,12 +93,8 @@ function firstMarkdownParagraph(markdown: string): string {
 function descriptionFromMarkdown(markdown: string): string {
   let source: string;
   try {
-    const { data, body } = parseFrontmatter(markdown);
-    source = (
-      typeof data['description'] === 'string'
-        ? data['description']
-        : firstMarkdownParagraph(body)
-    );
+    const { description, body } = parseSkillFrontmatter(markdown);
+    source = description || firstMarkdownParagraph(body);
   } catch {
     return '';
   }

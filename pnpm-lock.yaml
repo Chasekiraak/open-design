@@ -327,9 +327,6 @@ importers:
       '@open-design/platform':
         specifier: workspace:*
         version: link:../../packages/platform
-      '@open-design/plugin-runtime':
-        specifier: workspace:*
-        version: link:../../packages/plugin-runtime
       '@open-design/sidecar':
         specifier: workspace:*
         version: link:../../packages/sidecar
