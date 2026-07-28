@@ -1,4 +1,4 @@
-export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v1' as const;
+export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v2' as const;
 
 /**
  * Self-contained MCP Apps resource. It intentionally has no remote assets,
@@ -35,20 +35,21 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
     </style>
   </head>
   <body>
-    <main>
-      <h1 id="title">Ready for your brief</h1>
-      <p id="description">Choose one option for each decision, then confirm.</p>
+    <main hidden>
+      <h1 id="title"></h1>
+      <p id="description"></p>
       <form id="brief-form" aria-describedby="description" hidden>
         <div id="questions"></div>
-        <button id="confirm" type="submit">Confirm brief</button>
+        <button id="confirm" type="submit"></button>
       </form>
-      <p id="status" role="status" aria-live="polite">Waiting for the brief…</p>
+      <p id="status" role="status" aria-live="polite"></p>
       <template id="radio-template"><input type="radio"></template>
     </main>
     <script>
       (() => {
         "use strict";
         const form = document.getElementById("brief-form");
+        const main = document.querySelector("main");
         const questions = document.getElementById("questions");
         const title = document.getElementById("title");
         const description = document.getElementById("description");
@@ -59,6 +60,55 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         let requestNumber = 0;
         let draft = null;
         let standardBridgeReady = false;
+        let sizeFrame = 0;
+        let lastWidth = -1;
+        let lastHeight = -1;
+        let hostLocale =
+          window.openai && typeof window.openai.locale === "string"
+            ? window.openai.locale
+            : navigator.language;
+        const COPY = {
+          en: {
+            ready: "Ready to confirm.",
+            confirming: "Confirming…",
+            confirmed: "Brief confirmed.",
+            invalidConfirmation: "The host returned an invalid confirmation.",
+            publishUnavailable: "The host cannot publish the confirmed brief.",
+            contextFailed: "Could not update the host context.",
+            confirmFailed: "Could not confirm the brief.",
+            bridgeUnavailable: "The MCP Apps bridge is unavailable.",
+          },
+          "zh-CN": {
+            ready: "可以确认了。",
+            confirming: "正在确认…",
+            confirmed: "需求已确认。",
+            invalidConfirmation: "宿主返回了无效的确认结果。",
+            publishUnavailable: "宿主无法发布已确认的需求。",
+            contextFailed: "无法更新宿主上下文。",
+            confirmFailed: "无法确认需求。",
+            bridgeUnavailable: "MCP Apps 连接不可用。",
+          },
+          "zh-TW": {
+            ready: "可以確認了。",
+            confirming: "正在確認…",
+            confirmed: "需求已確認。",
+            invalidConfirmation: "宿主回傳了無效的確認結果。",
+            publishUnavailable: "宿主無法發佈已確認的需求。",
+            contextFailed: "無法更新宿主內容。",
+            confirmFailed: "無法確認需求。",
+            bridgeUnavailable: "MCP Apps 連線無法使用。",
+          },
+          ja: {
+            ready: "確認できます。",
+            confirming: "確認中…",
+            confirmed: "ブリーフを確認しました。",
+            invalidConfirmation: "ホストから無効な確認結果が返されました。",
+            publishUnavailable: "ホストは確認済みブリーフを送信できません。",
+            contextFailed: "ホストのコンテキストを更新できませんでした。",
+            confirmFailed: "ブリーフを確認できませんでした。",
+            bridgeUnavailable: "MCP Apps ブリッジを利用できません。",
+          },
+        };
         let parentOrigin = "";
         try {
           parentOrigin = document.referrer ? new URL(document.referrer).origin : "";
@@ -86,6 +136,75 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
           post({ jsonrpc: "2.0", method, params });
         }
 
+        function localeOf(value) {
+          const normalized = String(value || "").replaceAll("_", "-").toLowerCase();
+          if (normalized === "zh" || normalized === "zh-cn" || normalized.startsWith("zh-hans")) return "zh-CN";
+          if (normalized === "zh-tw" || normalized === "zh-hk" || normalized === "zh-mo" || normalized.startsWith("zh-hant")) return "zh-TW";
+          if (normalized === "ja" || normalized.startsWith("ja-")) return "ja";
+          return "en";
+        }
+
+        function effectiveLocale() {
+          if (draft && draft.localeSource === "provided" && draft.locale) {
+            return localeOf(draft.locale);
+          }
+          return localeOf(hostLocale || (draft && draft.locale));
+        }
+
+        function copy() {
+          return COPY[effectiveLocale()];
+        }
+
+        function updateHostLocale(context) {
+          if (context && typeof context.locale === "string") {
+            hostLocale = context.locale;
+            if (draft && draft.localeSource === "fallback") {
+              render(draft);
+            } else if (!draft) {
+              document.documentElement.lang = effectiveLocale();
+            }
+          }
+        }
+
+        function publicErrorMessage(error, fallback) {
+          if (error instanceof Error && Object.values(copy()).includes(error.message)) {
+            return error.message;
+          }
+          return fallback;
+        }
+
+        function intrinsicSize() {
+          const root = document.documentElement;
+          const previousHeight = root.style.height;
+          root.style.height = "max-content";
+          const height = Math.ceil(root.getBoundingClientRect().height);
+          root.style.height = previousHeight;
+          return {
+            width: Math.ceil(window.innerWidth),
+            height,
+          };
+        }
+
+        function scheduleSizeChanged() {
+          if (sizeFrame) window.cancelAnimationFrame(sizeFrame);
+          sizeFrame = window.requestAnimationFrame(() => {
+            sizeFrame = 0;
+            const { width, height } = intrinsicSize();
+            if (width === lastWidth && height === lastHeight) return;
+            lastWidth = width;
+            lastHeight = height;
+            if (standardBridgeReady) {
+              notify("ui/notifications/size-changed", { width, height });
+            }
+            if (
+              window.openai
+              && typeof window.openai.notifyIntrinsicHeight === "function"
+            ) {
+              window.openai.notifyIntrinsicHeight(height);
+            }
+          });
+        }
+
         function toolPayload(message) {
           const params = message && message.params;
           const result = params && (params.result || params);
@@ -94,16 +213,30 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
 
         function render(payload) {
           if (!payload || payload.view !== "brief-form" || !payload.briefDraftId) return;
+          const previousAnswers =
+            draft && draft.briefDraftId === payload.briefDraftId
+              ? selections()
+              : {};
           draft = payload;
-          title.textContent = payload.questionForm && payload.questionForm.title
-            ? payload.questionForm.title
-            : "Choose the artifact direction";
-          description.textContent = payload.questionForm && payload.questionForm.description
-            ? payload.questionForm.description
-            : "Choose one option for each decision, then confirm.";
+          const locale = effectiveLocale();
+          const localizedForms = payload.questionFormsByLocale;
+          const questionForm =
+            localizedForms && localizedForms[locale]
+              ? localizedForms[locale]
+              : payload.questionForm;
+          document.documentElement.lang = locale;
+          title.textContent = questionForm && questionForm.title
+            ? questionForm.title
+            : "";
+          description.textContent = questionForm && questionForm.description
+            ? questionForm.description
+            : "";
+          confirmButton.textContent = questionForm && questionForm.submitLabel
+            ? questionForm.submitLabel
+            : "";
           questions.replaceChildren();
-          const items = payload.questionForm && Array.isArray(payload.questionForm.questions)
-            ? payload.questionForm.questions
+          const items = questionForm && Array.isArray(questionForm.questions)
+            ? questionForm.questions
             : [];
           for (const item of items) {
             const fieldset = document.createElement("fieldset");
@@ -118,7 +251,10 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
               input.name = item.id;
               input.value = candidate.value;
               input.required = true;
-              input.checked = candidate.value === item.defaultValue;
+              const previousValue = Array.isArray(previousAnswers[item.id])
+                ? previousAnswers[item.id][0]
+                : "";
+              input.checked = candidate.value === (previousValue || item.defaultValue);
               const name = document.createElement("strong");
               name.textContent = candidate.label;
               const detail = document.createElement("small");
@@ -129,8 +265,10 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             fieldset.append(choices);
             questions.append(fieldset);
           }
+          main.hidden = false;
           form.hidden = false;
-          status.textContent = items.length === 0 ? "Ready to confirm." : "";
+          status.textContent = items.length === 0 ? copy().ready : "";
+          scheduleSizeChanged();
         }
 
         function selections() {
@@ -152,7 +290,15 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         }
 
         async function publishConfirmation(payload) {
-          const prompt = "Brief confirmed.\\n\\n" + payload.summary + "\\n\\nContinue with this brief.";
+          const activeLocale = effectiveLocale();
+          const prompt = copy().confirmed + "\\n\\n" + payload.summary + "\\n\\n"
+            + (activeLocale === "zh-CN"
+              ? "请根据这份需求继续。"
+              : activeLocale === "zh-TW"
+                ? "請依照這份需求繼續。"
+                : activeLocale === "ja"
+                  ? "このブリーフに沿って続行してください。"
+                  : "Continue with this brief.");
           if (standardBridgeReady) {
             await request("ui/update-model-context", {
               content: [{ type: "text", text: payload.summary }],
@@ -165,13 +311,10 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             return;
           }
           if (window.openai && typeof window.openai.sendFollowUpMessage === "function") {
-            if (typeof window.openai.setWidgetState === "function") {
-              window.openai.setWidgetState({ briefConfirmation: payload });
-            }
             await window.openai.sendFollowUpMessage({ prompt, scrollToBottom: true });
             return;
           }
-          throw new Error("The host cannot publish the confirmed Brief.");
+          throw new Error(copy().publishUnavailable);
         }
 
         form.addEventListener("change", () => {
@@ -181,15 +324,13 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             answers: selections(),
           };
           if (!standardBridgeReady) {
-            if (window.openai && typeof window.openai.setWidgetState === "function") {
-              window.openai.setWidgetState({ briefSelection: context });
-            }
             return;
           }
           void request("ui/update-model-context", {
             content: [{ type: "text", text: JSON.stringify(context) }],
-          }).catch((error) => {
-            status.textContent = error instanceof Error ? error.message : "Could not update the host context.";
+          }).catch(() => {
+            status.textContent = copy().contextFailed;
+            scheduleSizeChanged();
           });
         });
 
@@ -197,20 +338,24 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
           event.preventDefault();
           if (!draft || !form.reportValidity()) return;
           confirmButton.disabled = true;
-          status.textContent = "Confirming…";
+          status.textContent = copy().confirming;
+          scheduleSizeChanged();
           try {
             const result = await callConfirm({
               briefDraftId: draft.briefDraftId,
               nonce: draft.nonce,
               answers: selections(),
+              locale: effectiveLocale(),
             });
             const payload = result && (result.structuredContent || (result.result && result.result.structuredContent) || result);
-            if (!payload || !payload.briefConfirmationId) throw new Error("The host returned an invalid confirmation.");
-            status.textContent = "Brief confirmed.";
+            if (!payload || !payload.briefConfirmationId) throw new Error(copy().invalidConfirmation);
+            status.textContent = copy().confirmed;
+            scheduleSizeChanged();
             await publishConfirmation(payload);
           } catch (error) {
-            status.textContent = error instanceof Error ? error.message : "Could not confirm the brief.";
+            status.textContent = publicErrorMessage(error, copy().confirmFailed);
             confirmButton.disabled = false;
+            scheduleSizeChanged();
           }
         });
 
@@ -228,6 +373,9 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             return;
           }
           if (message.method === "ui/notifications/tool-result") render(toolPayload(message));
+          if (message.method === "ui/notifications/host-context-changed") {
+            updateHostLocale(message.params);
+          }
         });
 
         if (window.openai && window.openai.toolOutput) {
@@ -235,19 +383,28 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         }
         request("ui/initialize", {
           protocolVersion: "2026-01-26",
-          appInfo: { name: "open-design-cloud-brief", version: "v1" },
+          appInfo: { name: "open-design-cloud-brief", version: "v2" },
           appCapabilities: {},
         }).then((result) => {
           standardBridgeReady = true;
+          updateHostLocale(result && result.hostContext);
           notify("ui/notifications/initialized", {});
           render(toolPayload(result));
-        }).catch((error) => {
+          scheduleSizeChanged();
+        }).catch(() => {
           if (window.openai && window.openai.toolOutput) {
             render(window.openai.toolOutput);
             return;
           }
-          status.textContent = error instanceof Error ? error.message : "The MCP Apps bridge is unavailable.";
+          main.hidden = false;
+          status.textContent = copy().bridgeUnavailable;
+          scheduleSizeChanged();
         });
+        if (typeof ResizeObserver !== "undefined") {
+          const observer = new ResizeObserver(scheduleSizeChanged);
+          observer.observe(main);
+        }
+        window.addEventListener("resize", scheduleSizeChanged);
       })();
     </script>
   </body>

@@ -40,6 +40,7 @@ import { randomUUID } from 'node:crypto';
 import { postCreateArtifactRequest } from './artifacts/create.js';
 import {
   createLocalMcpBriefStore as createBriefStore,
+  localMcpBriefResponseCopy,
   type LocalMcpBriefStore,
 } from './mcp-brief.js';
 import {
@@ -62,7 +63,12 @@ const SERVER_NAME = 'open-design';
 const SERVER_VERSION = '0.2.0';
 const MCP_STDIO_IDLE_EXIT_MS = 30 * 60 * 1000;
 const OPEN_DESIGN_BRIEF_APP_RESOURCE =
-  'ui://open-design-cloud/artifact-card-v1.html';
+  'ui://open-design-cloud/artifact-card-v2.html';
+
+export const MCP_SERVER_INSTRUCTIONS = [
+  'Use only these product names in user-facing replies: Open Design Cloud, Local Codex, and Secure BYOK.',
+  'Tool names, runtime ids, endpoints, and correlation values are machine protocol. Never repeat them as product copy.',
+].join('\n');
 
 type JsonObject = Record<string, unknown>;
 interface RunMcpOptions { daemonUrl: string | URL }
@@ -77,7 +83,7 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
 interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
 type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
 interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
-interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; byokProfile?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown }
+interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; byokProfile?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; locale?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown }
 interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
 interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; skippedFileCount?: number; active: ActiveContext | null; resolved?: ResolvedProject | null }
 interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
@@ -96,6 +102,17 @@ interface McpToolCallResult {
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: JsonObject;
   isError?: boolean;
+}
+
+export function _localeFromMcpToolMetadata(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+  const record = meta as Record<string, unknown>;
+  for (const candidate of [record['openai/locale'], record.locale]) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
 }
 
 interface McpIdleExitControllerOptions {
@@ -260,6 +277,11 @@ export const TOOL_DEFS = [
           type: 'string',
           description: 'Concise human-readable project title.',
         },
+        locale: {
+          type: 'string',
+          description:
+            'BCP-47 language of the current user request. Prefer the request language over the host UI language; supported values are en, zh-CN, zh-TW, and ja, with English fallback.',
+        },
         knownAnswers: {
           type: 'object',
           additionalProperties: true,
@@ -302,16 +324,16 @@ export const TOOL_DEFS = [
           additionalProperties: true,
           description: 'Question-id to selected stable option values.',
         },
+        locale: {
+          type: 'string',
+          description:
+            'BCP-47 Host locale used only when collect_brief had no request or tool-call locale.',
+        },
       },
       required: ['briefDraftId', 'nonce', 'answers'],
       additionalProperties: false,
     },
     annotations: { ...WRITE_ANNOTATIONS, title: 'Confirm Open Design brief' },
-    _meta: {
-      ui: { resourceUri: OPEN_DESIGN_BRIEF_APP_RESOURCE },
-      'ui/resourceUri': OPEN_DESIGN_BRIEF_APP_RESOURCE,
-      'openai/outputTemplate': OPEN_DESIGN_BRIEF_APP_RESOURCE,
-    },
   },
   {
     name: 'list_projects',
@@ -607,7 +629,7 @@ export const TOOL_DEFS = [
   {
     name: 'start_vela_login',
     description:
-      'Start Open Design Cloud (Vela/AMR) browser sign-in through the local Open Design daemon. Returns the activation URL and user code when manual browser completion is needed.',
+      'Start Open Design Cloud browser sign-in through the local Open Design daemon. Returns the activation URL and user code when manual browser completion is needed. The tool name is an internal compatibility identifier and must not be repeated to the user.',
     inputSchema: {
       type: 'object',
       properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
@@ -618,7 +640,7 @@ export const TOOL_DEFS = [
   {
     name: 'get_vela_login_status',
     description:
-      'Check whether Open Design Cloud (Vela/AMR) browser sign-in is complete. Does not expose Vela credentials.',
+      'Check whether Open Design Cloud browser sign-in is complete. Does not expose credentials. The tool name is an internal compatibility identifier and must not be repeated to the user.',
     inputSchema: {
       type: 'object',
       properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
@@ -653,7 +675,8 @@ export const TOOL_DEFS = [
         },
         agent: {
           type: 'string',
-          description: "Which agent Open Design should run, e.g. 'claude' | 'codex' | 'opencode'. Optional; defaults to the user's configured agent.",
+          description:
+            'Internal runtime id returned by list_agents. Optional; defaults to the configured runtime. Never display the id as user-facing mode copy.',
         },
         model: {
           type: 'string',
@@ -676,7 +699,7 @@ export const TOOL_DEFS = [
         resume: {
           type: 'boolean',
           description:
-            'Set true only after the user has topped up a failed Cloud/Vela run. Reuse the exact original requestId and payload; Open Design resumes the same logical run.',
+            'Set true only after the user has topped up a paused Open Design Cloud run. Reuse the exact original requestId and payload; Open Design resumes the same logical run.',
         },
         pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
@@ -817,7 +840,7 @@ export function localMcpResourceDefinitions() {
       name: 'Open Design brief',
       title: 'Choose the artifact direction',
       description:
-        'Interactive local Open Design brief card shared by Cloud, Local Codex, and Local BYOK modes.',
+        'Interactive local Open Design brief card shared by Open Design Cloud, Local Codex, and Secure BYOK modes.',
       mimeType: 'text/html;profile=mcp-app',
       _meta: {
         ui: {
@@ -1545,6 +1568,8 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
     {
       capabilities: { tools: {}, resources: {} },
       instructions: [
+        MCP_SERVER_INSTRUCTIONS,
+        '',
         'Open Design (OD) is a local-first design workspace. The user typically',
         'has OD running on their machine; each project contains a rendered',
         'artifact (HTML/JSX/CSS) plus its source files.',
@@ -1587,17 +1612,17 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
         'read/edit files), commission a run - you do not run skills yourself:',
         ' - collect_brief first for a new artifact unless the user explicitly',
         '    asks to skip questions. Let the user complete the rendered card;',
-        '    confirm_brief returns the readable brief to reuse with Cloud,',
-        '    Local Codex, or Local BYOK. Never print or ask the user to copy',
+        '    confirm_brief returns the readable brief to reuse with Open Design',
+        '    Cloud, Local Codex, or Secure BYOK. Never print or ask the user to copy',
         '    briefDraftId, nonce, or any other internal correlation value.',
         ' - list_skills / list_plugins to see what you can ask OD to make.',
         ' - list_byok_profiles returns secure local credential references when',
-        '    the user explicitly chooses Local BYOK. Never request or pass a',
+        '    the user explicitly chooses Secure BYOK. Never request or pass a',
         '    raw API key through MCP; pass only start_run.byokProfile.',
-        ' - for agent:"amr" (Open Design Cloud / Vela), call',
-        '    get_vela_login_status first. If signed out, call',
-        '    start_vela_login once, show its activation URL/code when',
-        '    present, and poll get_vela_login_status until loggedIn:true.',
+        ' - for Open Design Cloud, call the Cloud login-status tool first.',
+        '    If signed out, call the Cloud sign-in tool once, show its activation',
+        '    URL/code when present, and poll login status until loggedIn:true.',
+        '    The tool and runtime ids are internal protocol; never show them.',
         ' - list_agents when you need to pass start_run.agent — do not',
         '    guess "claude" / "codex" / "opencode"; only agents in the',
         '    returned list will actually spawn on this machine.',
@@ -1751,7 +1776,15 @@ export async function runMcpStdio({ daemonUrl }: RunMcpOptions): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, withMcpActivity(async (req) => {
     const name = req.params?.name;
-    const args: McpArgs = (req.params?.arguments ?? {}) as McpArgs;
+    const args: McpArgs = {
+      ...((req.params?.arguments ?? {}) as McpArgs),
+    };
+    if (name === 'collect_brief' && args.locale === undefined) {
+      const locale = _localeFromMcpToolMetadata(
+        (req.params as { _meta?: unknown } | undefined)?._meta,
+      );
+      if (locale) args.locale = locale;
+    }
     observabilityPromise ??= McpObservabilitySession.create(
       baseUrl,
       server.getClientVersion(),
@@ -1856,12 +1889,12 @@ async function handleMcpToolCall(
       case 'collect_brief': {
         const collected = (options.briefStore ?? createLocalMcpBriefStore())
           .collect(args);
+        const copy = localMcpBriefResponseCopy(collected.locale);
         return {
           content: [
             {
               type: 'text' as const,
-              text:
-                'Complete the rendered Open Design brief card. The confirmation will return a readable summary; do not expose its internal draft id or nonce.',
+              text: copy.completeCard,
             },
           ],
           structuredContent: collected as unknown as JsonObject,
@@ -1874,16 +1907,17 @@ async function handleMcpToolCall(
           );
         }
         const confirmed = options.briefStore.confirm(args);
+        const copy = localMcpBriefResponseCopy(confirmed.locale);
         return {
           content: [
             {
               type: 'text' as const,
               text: [
-                'Brief confirmed.',
+                copy.confirmed,
                 '',
                 confirmed.summary,
                 '',
-                'Continue with this brief.',
+                copy.continueWithBrief,
               ].join('\n'),
             },
           ],
@@ -2422,7 +2456,7 @@ async function getRun(baseUrl: string, args: McpArgs) {
     if (status.failureAction === 'recharge') {
       enriched.rechargeUrl = DEFAULT_AMR_RECHARGE_URL;
       enriched.hint =
-        'Open Design Cloud paused this logical run because the wallet balance is insufficient. Preserve the brief and project, show rechargeUrl to the user, and do not switch runtimes. After the user confirms the top-up, call start_run once with the exact original payload, the same requestId, and resume:true; Open Design and Vela will resume the existing local run and cloud billing operation.';
+        'Open Design Cloud paused this logical run because the account balance is insufficient. Preserve the brief and project, show rechargeUrl to the user, and do not switch modes. After the user confirms the top-up, call start_run once with the exact original payload, the same requestId, and resume:true; Open Design Cloud will resume the existing run and billing operation. Do not expose internal runtime or tool identifiers.';
     }
     if (typeof status.eventsLogPath === 'string' && status.eventsLogPath.length > 0) {
       if (status.failureAction !== 'recharge') {
