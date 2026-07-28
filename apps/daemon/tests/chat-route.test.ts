@@ -3141,7 +3141,7 @@ process.stdin.on('end', () => {
     // fired on turn 1 must persist on the conversation row — recomputing it
     // from the scanned text alone lets it flip OFF again and re-sends the
     // ~17K stable block in both directions.
-    const MAYBE_DECK_HEADING = '## If this brief is a slide deck / keynote / presentation';
+    const DECK_DELIVERY_CONTRACT_HEADING = '# Deck delivery contract';
     if (!process.env.OD_DATA_DIR) {
       throw new Error('OD_DATA_DIR is required for intent-signal latch tests');
     }
@@ -3215,7 +3215,7 @@ process.stdin.on('end', () => {
             { message: `## user\n${deckBrief}`, currentPrompt: deckBrief },
             join(captureDir, 'turn1.txt'),
           );
-          expect(turn1Prompt).toContain(MAYBE_DECK_HEADING);
+          expect(turn1Prompt).toContain(DECK_DELIVERY_CONTRACT_HEADING);
 
           // Turn 2 carries no deck vocabulary and a trimmed transcript
           // (agent-switch trim / non-transcript client): the latched
@@ -3225,7 +3225,7 @@ process.stdin.on('end', () => {
             { message: `## user\n${followUp}`, currentPrompt: followUp },
             join(captureDir, 'turn2.txt'),
           );
-          expect(turn2Prompt).toContain(MAYBE_DECK_HEADING);
+          expect(turn2Prompt).toContain(DECK_DELIVERY_CONTRACT_HEADING);
 
           // The latch is persisted on the conversation row.
           const dbFile = resolve(process.env.OD_DATA_DIR as string, 'app.sqlite');
