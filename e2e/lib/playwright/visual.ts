@@ -679,12 +679,33 @@ export async function gotoVisualWorkspace(page: Page): Promise<void> {
   await prepareVisualWorkspaceFileList(page);
 }
 
+/**
+ * Drive the workspace onto its Design Files tab, converging on that state
+ * instead of deciding once whether to click.
+ *
+ * `aria-selected` and the design-file rows both come off FileWorkspace's single
+ * `activeTab === DESIGN_FILES_TAB` expression, so probing the rows to decide
+ * whether to click was never asking the wrong question — the problem is that the
+ * answer can still change after the probe. The tab is *persisted*
+ * (`setPersistedActive`) and restored asynchronously, so a restore that lands
+ * after this helper's one click puts another tab back, and a one-shot helper has
+ * nothing left to re-click. Under the visual lane — fully parallel, `retries: 0`
+ * — that surfaced as a single capture timing out for 10s on `aria-selected`
+ * while its siblings, running this identical prelude, all passed.
+ *
+ * Clicking is safe to repeat: the tab's handler just sets the same active id.
+ */
+export async function activateVisualDesignFilesTab(page: Page): Promise<void> {
+  const tab = page.getByTestId('design-files-tab');
+  await expect(tab).toBeVisible({ timeout: T.medium });
+  await expect(async () => {
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: T.short });
+  }).toPass({ timeout: T.long });
+}
+
 export async function prepareVisualWorkspaceFileList(page: Page): Promise<void> {
-  const fileRow = page.getByTestId('design-file-row-index.html');
-  if (!(await fileRow.isVisible().catch(() => false))) {
-    await page.getByTestId('design-files-tab').click();
-  }
-  await expect(page.getByTestId('design-files-tab')).toHaveAttribute('aria-selected', 'true');
+  await activateVisualDesignFilesTab(page);
   // No pages dropdown to drive: 023937ef4 replaced the tab strip's pages
   // menu with a plain Design Files tab (#5517), deleting
   // `workspace-pages-menu-trigger` from the app and this helper alike. The
