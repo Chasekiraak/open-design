@@ -1,4 +1,5 @@
 import { expect, test } from '@/playwright/suite';
+import { expectStableCount } from '@/playwright/assertions';
 import { openNewProjectModal as openNewProjectModalFromProjects } from '@/playwright/rail';
 import { routeAgents, routeSuccessfulRuns } from '@/playwright/mock-factory';
 import { clickDeckNextSlide, clickDeckPreviousSlide, openAllProjectFiles } from '@/playwright/workspace';
@@ -548,15 +549,14 @@ test('[P1] first-loop onboarding completes once after a successful artifact expo
   const secondHtmlDownload = page.waitForEvent('download');
   await page.locator('.share-menu-popover[role="menu"]').getByRole('menuitem', { name: /Export as standalone HTML/ }).click();
   await secondHtmlDownload;
-  await expect
-    .poll(
-      () => analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0,
-      {
-        timeout: 750,
-        message: 're-exporting the same first-loop artifact should not emit a duplicate completion event',
-      },
-    )
-    .toBe(1);
+  await expectStableCount(
+    () => analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0,
+    1,
+    {
+      timeout: 750,
+      message: 're-exporting the same first-loop artifact should not emit a duplicate completion event',
+    },
+  );
 });
 
 async function selectStyleRowInput(
