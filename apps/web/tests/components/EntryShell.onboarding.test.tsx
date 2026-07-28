@@ -403,10 +403,17 @@ describe('EntryShell project reopen request priority', () => {
             ? input.url
             : String(input);
         if (url === '/api/projects/project-reopen/files') {
+          // Single-flight (`lib/shared-cancellable-get`) gives every `/files`
+          // reader — cancellable or not — one shared request carrying the
+          // shared AbortSignal, so "is this the background scan?" is the
+          // request ordinal, not the presence of a signal. Request #1 is
+          // Home's cover scan and must hang until it is aborted; the
+          // foreground read that follows it must be answered.
+          const isBackgroundCoverScan = fileRequests.length === 0;
           fileRequests.push(init);
-          if (init?.signal) {
+          if (isBackgroundCoverScan) {
             return new Promise<Response>((_resolve, reject) => {
-              init.signal?.addEventListener(
+              init?.signal?.addEventListener(
                 'abort',
                 () => reject(new DOMException('Aborted', 'AbortError')),
                 { once: true },
@@ -477,7 +484,12 @@ describe('EntryShell project reopen request priority', () => {
     expect(homeSignal?.aborted).toBe(true);
     await expect(fetchProjectFiles('project-reopen')).resolves.toEqual(files);
     expect(fileRequests).toHaveLength(2);
-    expect(fileRequests[1]?.signal).toBeUndefined();
+    // The foreground read must own a live request of its own: it neither joins
+    // the abandoned scan's dead entry nor inherits its aborted signal.
+    const foregroundSignal = fileRequests[1]?.signal;
+    expect(foregroundSignal).toBeDefined();
+    expect(foregroundSignal).not.toBe(homeSignal);
+    expect(foregroundSignal?.aborted).toBe(false);
   });
 });
 

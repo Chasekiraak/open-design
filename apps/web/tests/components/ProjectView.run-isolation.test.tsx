@@ -876,19 +876,44 @@ describe('ProjectView conversation run isolation', () => {
         context: workspaceA,
       },
     };
+    // A team-scoped preflight only accepts a wallet whose epoch is proven for
+    // the exact workspace/member it asked about: the daemon must echo a fresh
+    // `workspaceRuntime` plus the `authoritativeWorkspaceRead` that proves this
+    // very response completed the requested refresh (e65b168c3). Anything less
+    // fails closed, so the fixture has to speak that shape.
+    const observedAt = '2026-07-26T00:00:00.000Z';
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/workspace/billing')) {
         const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+        const workspaceMemberId = workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b';
         return new Response(JSON.stringify({
           summary: null,
           workspaceBalance: {
             workspaceId,
-            workspaceMemberId: workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b',
+            workspaceMemberId,
             balanceUsd: '10.00',
             billingScopeVersion: 2,
             expiresAt: null,
-            updatedAt: null,
+            updatedAt: observedAt,
+          },
+          workspaceRuntime: {
+            workspaceId,
+            workspaceMemberId,
+            status: 'fresh',
+            revision: '4',
+            observedAt,
+            softExpiresAt: '2099-07-26T00:00:30.000Z',
+            hardExpiresAt: '2099-07-26T00:02:00.000Z',
+            retryAt: null,
+            errorCode: null,
+            reason: 'authoritative-action-read',
+            sourceGapDetected: false,
+          },
+          authoritativeWorkspaceRead: {
+            workspaceId,
+            workspaceMemberId,
+            observedAt,
           },
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
@@ -916,6 +941,21 @@ describe('ProjectView conversation run isolation', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(`workspaceId=${encodeURIComponent(workspaceA.workspaceId)}`),
       { cache: 'no-store' },
+    );
+    // The ambient workspace must never be consulted for a project bound to
+    // another one, and the run has to spawn under the same workspace the
+    // wallet was checked against.
+    const billingUrls = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes('/api/workspace/billing'));
+    expect(billingUrls.length).toBeGreaterThan(0);
+    expect(
+      billingUrls.filter((url) =>
+        url.includes(`workspaceId=${encodeURIComponent(workspaceB.workspaceId)}`),
+      ),
+    ).toHaveLength(0);
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceContext: workspaceA }),
     );
   });
 
@@ -1349,14 +1389,24 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
 
     fireEvent.click(screen.getByTestId('workspace-focus-mode'));
-    await waitFor(() =>
-      expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(true),
-    );
+    // Focus mode hides the collapsed chat visually only: the native `hidden`
+    // attribute would drop the first grid item and shift FileWorkspace into
+    // the handle track, so the slot keeps its box and is marked `aria-hidden`
+    // once the collapse settles (3284f36c0).
+    await waitFor(() => {
+      const chatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+      expect(chatSlot?.getAttribute('aria-hidden')).toBe('true');
+      expect(chatSlot?.classList.contains('split-chat-slot-hidden')).toBe(true);
+      expect(chatSlot?.hasAttribute('hidden')).toBe(false);
+    });
     fireEvent.click(screen.getByTestId('workspace-open-comments'));
     fireEvent.click(screen.getByTestId('workspace-send-comment'));
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
-    expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(false);
+    const restoredChatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+    expect(restoredChatSlot?.hasAttribute('aria-hidden')).toBe(false);
+    expect(restoredChatSlot?.classList.contains('split-chat-slot-hidden')).toBe(false);
+    expect(restoredChatSlot?.hasAttribute('hidden')).toBe(false);
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 'conv-b',
       projectId: 'project-1',
