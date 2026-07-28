@@ -114,7 +114,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26969,
+    "totalChars": 27486,
   },
   "deck-kind-with-skill-seed": {
     "sections": [
@@ -217,7 +217,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 26938,
+    "totalChars": 27455,
   },
   "freeform-other-no-deck-signal": {
     "sections": [
