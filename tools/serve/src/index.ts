@@ -17,6 +17,8 @@ type CliOptions = {
   port?: string;
   includePayload?: boolean;
   payloadPath?: string;
+  promotionBuildReport?: string;
+  promotionMinimumShellVersion?: string;
   version?: string;
 };
 
@@ -48,9 +50,14 @@ async function start(service: string, options: CliOptions): Promise<void> {
       buildReportPath: options.buildReport,
       host: options.host,
       port: parsePort(options.port),
+      promotionBuildReportPath: options.promotionBuildReport,
+      promotionMinimumShellVersion: options.promotionMinimumShellVersion,
     });
     if (options.json === true) {
-      printJson(server.info);
+      printJson({
+        ...server.info,
+        promotionUrl: server.promotionUrl,
+      });
     } else {
       process.stdout.write(`tools-serve codex-plugin: ${server.info.endpointUrl}\n`);
     }
@@ -132,6 +139,8 @@ cli
   .option("--payload-path <path>", "Serve launcher payload bytes from a real archive")
   .option("--platform <platform>", "Updater platform: mac|win", { default: "mac" })
   .option("--port <port>", "Port to bind, 0 for dynamic", { default: "0" })
+  .option("--promotion-build-report <path>", "Codex plugin build report to publish through the one-shot promotion endpoint")
+  .option("--promotion-minimum-shell-version <version>", "Minimum shell version published after Codex plugin promotion")
   .option("--version <version>", "Fixture update version", { default: "99.0.0" })
   .action((service: string, options: CliOptions) => {
     void start(service, options);
