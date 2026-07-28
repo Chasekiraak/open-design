@@ -12,6 +12,7 @@ import {
   whatsNewNotesFromBody,
 } from '../lib/whats-new';
 import { useAnalytics, useAppVersion } from '../analytics/provider';
+import { isResolvedAppVersion } from '../analytics/app-version';
 import { trackWhatsNewPopupClick, trackWhatsNewPopupSurfaceView } from '../analytics/events';
 import styles from './WhatsNewPopup.module.css';
 
@@ -31,9 +32,33 @@ import styles from './WhatsNewPopup.module.css';
 // Fallback for the CTA when the highlight document omits an explicit link.
 const RELEASES_INDEX_URL = 'https://github.com/nexu-io/open-design/releases';
 
+/**
+ * The version this dialog is allowed to state, or null when nothing real can
+ * name one yet.
+ *
+ * `useAppVersion()` resolves one /api/version round-trip after mount, and
+ * /api/whats-new can win that race — so reading the hook unconditionally would
+ * paint `APP_VERSION_PLACEHOLDER` on first frame, i.e. exactly the invented
+ * version this surface exists to stop telling. Until the hook resolves we state
+ * the highlights document's own `version`, which the daemon stamps with the
+ * running version for display (see contracts/api/whats-new.ts): a second real
+ * source, not a second guess. If neither has landed the dialog waits — the
+ * highlights are worth nothing if the headline above them is a lie.
+ */
+function statedAppVersion(hookVersion: string, documentVersion: string): string | null {
+  if (isResolvedAppVersion(hookVersion)) return hookVersion.trim();
+  if (isResolvedAppVersion(documentVersion)) return documentVersion.trim();
+  return null;
+}
+
 type CardModel = {
   /** Highlight identity — recorded as "seen" so the dialog shows once per id. */
   id: string;
+  /**
+   * The running version as stamped on the highlights document. Stands in for
+   * `useAppVersion()` until that resolves (see `statedAppVersion`).
+   */
+  documentVersion: string;
   /** The release headline from the highlights document; labels the bullets. */
   headline: string;
   /** Release highlights, one row per line of the document's body. */
@@ -48,7 +73,7 @@ type CardModel = {
 export function WhatsNewPopup({ active }: { active: boolean }) {
   const { t, locale } = useI18n();
   const analytics = useAnalytics();
-  const appVersion = useAppVersion();
+  const hookAppVersion = useAppVersion();
   const [card, setCard] = useState<CardModel | null>(null);
   const surfaceTrackedRef = useRef(false);
   // Flips only once a decision is actually REACHED, never merely when a fetch
@@ -57,6 +82,7 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
   // guard down so the next Home activation retries, instead of the teardown
   // re-arming a start-time guard and permanently swallowing the dialog.
   const decisionMadeRef = useRef(false);
+  const appVersion = card == null ? null : statedAppVersion(hookAppVersion, card.documentVersion);
 
   useEffect(() => {
     if (!active || decisionMadeRef.current) return;
@@ -72,6 +98,7 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
       const localized = localizedWhatsNewContent(info.content, locale);
       setCard({
         id: info.id,
+        documentVersion: info.version,
         headline: localized.title,
         notes: whatsNewNotesFromBody(localized.body),
         imageUrl: info.content.imageUrl ?? null,
@@ -87,7 +114,7 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
   }, [active]);
 
   useEffect(() => {
-    if (!active || card == null || surfaceTrackedRef.current) return;
+    if (!active || card == null || appVersion == null || surfaceTrackedRef.current) return;
     surfaceTrackedRef.current = true;
     trackWhatsNewPopupSurfaceView(analytics.track, {
       page_name: 'home',
@@ -102,7 +129,7 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
   // focus-trapping modal cannot receive a stray Escape aimed at other UI, so
   // dismissal is always deliberate here.
   const dismiss = useCallback(() => {
-    if (card == null) return;
+    if (card == null || appVersion == null) return;
     markWhatsNewSeen(card.id);
     trackWhatsNewPopupClick(analytics.track, {
       page_name: 'home',
@@ -115,7 +142,7 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
   }, [analytics.track, appVersion, card]);
 
   const openLink = useCallback(() => {
-    if (card == null) return;
+    if (card == null || appVersion == null) return;
     markWhatsNewSeen(card.id);
     trackWhatsNewPopupClick(analytics.track, {
       page_name: 'home',
@@ -128,7 +155,9 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
     setCard(null);
   }, [analytics.track, appVersion, card]);
 
-  if (!active || card == null) return null;
+  // `appVersion == null` means neither the hook nor the document can name a
+  // version yet; the dialog waits rather than titling itself with a guess.
+  if (!active || card == null || appVersion == null) return null;
 
   const dialog = (
     <Dialog
