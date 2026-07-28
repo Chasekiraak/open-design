@@ -113,7 +113,12 @@ async function ensureEntryRailOpenIfPresent(page: Page) {
  * presentations share, so match on it and keep the dialog role as a fallback.
  */
 export function settingsSurface(page: Page) {
-  return page.locator('.modal-settings').or(page.getByRole('dialog')).first();
+  // Match only `.modal-settings` — the class both presentations share, so the
+  // bare `role="dialog"` fallback this used to carry was already redundant. It
+  // was also actively wrong: AvatarMenu's popover is a `role="dialog"` too, so
+  // the fallback could resolve to the account menu and let a test assert
+  // against the wrong surface.
+  return page.locator('.modal-settings').first();
 }
 
 export async function openSettingsDialog(page: Page) {
