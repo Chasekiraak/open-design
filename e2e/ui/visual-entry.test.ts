@@ -140,7 +140,9 @@ test('[P2] captures the home staged attachment surface', async ({ page }) => {
 
 test('[P2] captures the home plugin use staged surface', async ({ page }) => {
   await configureVisualPage(page);
-  const plugins = await openVisualPluginsCatalog(page);
+  // Stay on Home: every locator below is Home's own plugin section.
+  // `openVisualPluginsCatalog` routes to `/plugins`, which unmounts them.
+  await gotoVisualHome(page);
 
   const home = page.getByTestId('entry-view-home');
   await home.getByTestId('plugins-home-pill-category-prototype').click();
