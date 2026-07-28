@@ -19,7 +19,10 @@
 
 import DOMPurify from 'dompurify';
 
-import { DECK_SLIDE_SELECTOR } from '@open-design/contracts/runtime/deck-stage-fallback';
+import {
+  DECK_SLIDE_SELECTOR,
+  DECK_STRUCTURED_SLIDE_SELECTOR,
+} from '@open-design/contracts/runtime/deck-stage-fallback';
 
 export type DeckThumbnailFallbackReason =
   | 'no-dom-parser'
@@ -71,12 +74,6 @@ const MAX_SLIDES = 200;
 // srcdoc.ts: prefer slides that are direct children of a recognized stage so
 // decorative `.slide` markup elsewhere isn't miscounted, then fall back to the
 // shared selector.
-const STRUCTURED_SLIDE_SELECTOR =
-  'deck-stage > .slide, .deck > .slide, .deck-stage > .slide, .deck-shell > .slide, ' +
-  '#deck > .slide, body > .slide, ' +
-  'deck-stage > [data-screen-label], .deck-stage > [data-screen-label], ' +
-  '#deck > [data-screen-label], body > [data-screen-label]';
-
 const FONT_HOSTS = new Set([
   'fonts.googleapis.com',
   'fonts.gstatic.com',
@@ -101,7 +98,13 @@ function isApprovedFontHref(href: string): boolean {
   return url.protocol === 'https:' && FONT_HOSTS.has(url.hostname.toLowerCase());
 }
 
-function unrenderable(reason: DeckThumbnailFallbackReason): ParsedDeckThumbnails {
+function unrenderable(
+  reason: DeckThumbnailFallbackReason,
+  designSize: DesignSize = {
+    width: DEFAULT_DESIGN_WIDTH,
+    height: DEFAULT_DESIGN_HEIGHT,
+  },
+): ParsedDeckThumbnails {
   return {
     renderable: false,
     reason,
@@ -112,8 +115,8 @@ function unrenderable(reason: DeckThumbnailFallbackReason): ParsedDeckThumbnails
     ancestors: [],
     rootAttributes: { html: [], body: [] },
     stateClasses: [],
-    designWidth: DEFAULT_DESIGN_WIDTH,
-    designHeight: DEFAULT_DESIGN_HEIGHT,
+    designWidth: designSize.width,
+    designHeight: designSize.height,
   };
 }
 
@@ -130,10 +133,10 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
 
   const slideEls = collectSlideElements(doc);
   if (slideEls.length === 0) return unrenderable('no-slides');
-  if (slideEls.some((slide) => slide.matches('canvas, video, iframe, object, embed')
-    || slide.querySelector('canvas, video, iframe, object, embed'))) {
-    return unrenderable('runtime-rendered-content');
-  }
+  const hasRuntimeRenderedContent = slideEls.some((slide) =>
+    slide.matches('canvas, video, iframe, object, embed')
+    || slide.querySelector('canvas, video, iframe, object, embed'),
+  ) || hasScriptBuiltSlideContent(doc, slideEls);
 
   // External layout CSS we cannot inline means the static clone would be
   // unstyled. Font stylesheets are the exception — we re-load those in the host
@@ -162,14 +165,24 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
   // and each `var(--slide-bg)` resolves to transparent, painting nothing over
   // the near-black thumbnail host (black thumbnails). Comments are inert, so
   // removing them changes only which selectors the rewrites can see.
-  const rawStyle = stripCssComments(
+  const rawStyleWithImports = stripCssComments(
     Array.from(doc.querySelectorAll('style'))
       .map((el) => el.textContent || '')
       .join('\n'),
   );
+  const importedStyles = extractCssImports(rawStyleWithImports);
+  if (!importedStyles.valid) return unrenderable('external-stylesheet');
+  for (const href of importedStyles.hrefs) {
+    if (!isApprovedFontHref(href)) return unrenderable('external-stylesheet');
+    if (!fontLinks.includes(href)) fontLinks.push(href);
+  }
+  const rawStyle = importedStyles.css;
   if (!rawStyle.trim()) return unrenderable('no-styles');
 
   const designSize = resolveDesignSize(doc, rawStyle, slideEls[0]!);
+  if (hasRuntimeRenderedContent) {
+    return unrenderable('runtime-rendered-content', designSize);
+  }
 
   // Rewrite viewport units to their px-equivalent against the design canvas so
   // `4vh` on a 1080-tall slide becomes `calc(4 * 10.8px)`. Inside a shadow root
@@ -226,9 +239,54 @@ function rewriteViewportUnits(css: string, width: number, height: number): strin
 }
 
 function collectSlideElements(doc: Document): Element[] {
-  const structured = Array.from(doc.querySelectorAll(STRUCTURED_SLIDE_SELECTOR));
+  const structured = Array.from(doc.querySelectorAll(DECK_STRUCTURED_SLIDE_SELECTOR));
   if (structured.length > 0) return structured;
   return Array.from(doc.querySelectorAll(DECK_SLIDE_SELECTOR));
+}
+
+const SCRIPT_CONTENT_MUTATION_RE =
+  /(?:\.innerHTML\s*=|\.outerHTML\s*=|\.textContent\s*=|\.appendChild\s*\(|\.append\s*\(|\.prepend\s*\(|\.replaceChildren\s*\(|\.insertAdjacentHTML\s*\()/;
+
+/**
+ * Static thumbnails cannot reproduce DOM that a deck builds at runtime.
+ * Detect only high-confidence cases: an executable script both performs a
+ * content-building mutation and directly looks up an element that belongs to
+ * a slide. Ordinary deck navigation (querying slides and toggling classes)
+ * deliberately stays on the cheap static path.
+ */
+function hasScriptBuiltSlideContent(doc: Document, slides: Element[]): boolean {
+  const belongsToSlide = (target: Element): boolean =>
+    slides.some((slide) => slide === target || slide.contains(target));
+
+  for (const script of Array.from(doc.querySelectorAll('script'))) {
+    const type = (script.getAttribute('type') || '').trim().toLowerCase();
+    if (type && type !== 'module' && type !== 'text/javascript' && type !== 'application/javascript') {
+      continue;
+    }
+    const source = script.textContent || '';
+    if (!SCRIPT_CONTENT_MUTATION_RE.test(source)) continue;
+
+    const idLookup = /getElementById\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+    let idMatch: RegExpExecArray | null;
+    while ((idMatch = idLookup.exec(source))) {
+      const target = doc.getElementById(idMatch[2] || '');
+      if (target && belongsToSlide(target)) return true;
+    }
+
+    const selectorLookup = /querySelector(?:All)?\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
+    let selectorMatch: RegExpExecArray | null;
+    while ((selectorMatch = selectorLookup.exec(source))) {
+      try {
+        if (Array.from(doc.querySelectorAll(selectorMatch[2] || '')).some(belongsToSlide)) {
+          return true;
+        }
+      } catch {
+        // Invalid or dynamically escaped selectors are not high-confidence
+        // evidence; the iframe fallback remains available for known media.
+      }
+    }
+  }
+  return false;
 }
 
 const SLIDE_STATE_CLASSES = ['active', 'is-active', 'current', 'visible'] as const;
@@ -351,6 +409,32 @@ function matchPxLength(body: string, prop: 'width' | 'height'): number | null {
 // and deck CSS effectively never puts comment markers inside string values.
 function stripCssComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+interface CssImportExtraction {
+  css: string;
+  hrefs: string[];
+  valid: boolean;
+}
+
+// Constructable stylesheets ignore @import, while the main preview iframe
+// loads it normally. Pull the common quoted font-import forms into the host
+// document and reject anything else instead of silently rendering a different
+// thumbnail. Keeping the URL quoted lets the expression safely include the
+// semicolons used by Google Fonts axis queries such as `wght@400;700`.
+function extractCssImports(css: string): CssImportExtraction {
+  const hrefs: string[] = [];
+  const stripped = css.replace(
+    /(^|})\s*@import\s+(?:url\(\s*)?(['"])([^'"]+)\2\s*\)?\s*;/gim,
+    (_statement, boundary: string, _quote: string, href: string) => {
+      hrefs.push(href.trim());
+      return `${boundary}\n`;
+    },
+  );
+  if (/@import\b/i.test(stripped) || hrefs.some((href) => !href)) {
+    return { css, hrefs: [], valid: false };
+  }
+  return { css: stripped, hrefs, valid: true };
 }
 
 // Keep `:root` variables on the shadow host, and redirect html/body selectors

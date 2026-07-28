@@ -9,6 +9,22 @@ const DECK_STAGE_FALLBACK_MARKER = 'data-od-deck-stage-fallback';
  */
 export const DECK_SLIDE_SELECTOR = '.slide, [data-screen-label], .deck-slide, .ppt-slide';
 
+/**
+ * Direct-child deck containers used before the generic selector. Keeping this
+ * beside DECK_SLIDE_SELECTOR prevents the host counter, iframe bridge, and
+ * thumbnail parser from recognizing different page sets.
+ */
+export const DECK_STRUCTURED_SLIDE_SELECTOR = [
+  'deck-stage',
+  '.deck',
+  '.deck-stage',
+  '.deck-shell',
+  '#deck',
+  'body',
+].flatMap((container) =>
+  DECK_SLIDE_SELECTOR.split(', ').map((slide) => `${container} > ${slide}`),
+).join(', ');
+
 const DECK_STAGE_FALLBACK_SCRIPT = `<script data-od-deck-stage-fallback>(function(){
   if (window.__odDeckStageFallbackInstalled) return;
   window.__odDeckStageFallbackInstalled = true;

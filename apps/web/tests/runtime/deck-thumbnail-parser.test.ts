@@ -128,6 +128,29 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.fontLinks).toEqual(['https://fonts.googleapis.com/css2?family=Inter']);
   });
 
+  it('lifts an approved font @import out of shadow CSS', () => {
+    const html = frameworkDeck(1).replace(
+      '<style>',
+      '<style>@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap");',
+    );
+    const parsed = parseDeckThumbnails(html);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.fontLinks).toContain(
+      'https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap',
+    );
+    expect(parsed.styleText).not.toContain('@import');
+  });
+
+  it('falls back when inline CSS imports a non-font stylesheet', () => {
+    const html = frameworkDeck(1).replace(
+      '<style>',
+      '<style>@import "./layout.css";',
+    );
+    const parsed = parseDeckThumbnails(html, '/api/projects/p1/raw/');
+    expect(parsed.renderable).toBe(false);
+    expect(parsed.reason).toBe('external-stylesheet');
+  });
+
   it('reads design size + ancestors from a <deck-stage> template deck', () => {
     const html = `<!doctype html><html><head><style>
       deck-stage > section.slide { width: 1280px; height: 720px; }
@@ -265,6 +288,41 @@ describe('parseDeckThumbnails', () => {
       expect(parsed.reason).toBe('runtime-rendered-content');
     },
   );
+
+  it('falls back when a script builds content inside a slide-owned element', () => {
+    const deck = `<!doctype html><html><head><style>
+      .deck-stage { width: 1920px; height: 1080px; }
+      .stars { position: absolute; inset: 0; }
+    </style></head><body>
+      <div class="deck-stage" id="deck-stage">
+        <section class="slide active"><div class="stars" id="starfield"></div></section>
+      </div>
+      <script>
+        const starfield = document.getElementById('starfield');
+        const star = document.createElement('i');
+        starfield.appendChild(star);
+      </script>
+    </body></html>`;
+    const parsed = parseDeckThumbnails(deck);
+    expect(parsed.renderable).toBe(false);
+    expect(parsed.reason).toBe('runtime-rendered-content');
+  });
+
+  it('keeps ordinary slide-navigation scripts on the static path', () => {
+    const deck = frameworkDeck(2).replace(
+      '<script>/* nav */</script>',
+      `<script>
+        const slides = document.querySelectorAll('.slide');
+        document.getElementById('deck-prev')?.addEventListener('click', () => {
+          slides[0]?.classList.add('active');
+          slides[1]?.classList.remove('active');
+        });
+      </script>`,
+    );
+    const parsed = parseDeckThumbnails(deck);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.slides).toHaveLength(2);
+  });
 
   it('strips executable content from untrusted slide markup', () => {
     const deck = [
@@ -407,7 +465,7 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.fontLinks).toContain('https://fonts.googleapis.com/css2?family=Inter');
   });
 
-  it('drops a slide-nested <style> element from the sanitized slide body', () => {
+  it('falls back when a slide-nested <style> imports external CSS', () => {
     const deck = [
       '<!doctype html><html><head><style>.deck-stage { width: 1920px; height: 1080px; }</style></head><body>',
       '  <div class="deck-stage" id="deck-stage">',
@@ -419,18 +477,7 @@ describe('parseDeckThumbnails', () => {
       '</body></html>',
     ].join('\n');
     const parsed = parseDeckThumbnails(deck, '/api/projects/p1/raw/');
-    expect(parsed.renderable).toBe(true);
-    const slide = parsed.slides[0] ?? '';
-    // DOMPurify removes the <style> element from the slide body markup.
-    expect(slide).not.toMatch(/<style/i);
-    expect(slide).not.toContain('evil.example');
-    expect(slide).toContain('Title');
-    // Note the deferred gap: parseDeckThumbnails harvests every <style> in the
-    // document into styleText independently of this DOMPurify pass, so the
-    // nested rule's CSS (including its @import) still lands in styleText. CSS
-    // @import stripping is intentionally left to the CSS-tokenizer follow-up,
-    // so this stays unchanged from main and is asserted here, not silently
-    // assumed closed.
-    expect(parsed.styleText).toContain('evil.example');
+    expect(parsed.renderable).toBe(false);
+    expect(parsed.reason).toBe('external-stylesheet');
   });
 });

@@ -16,6 +16,10 @@ import {
   type TrackingProjectKind,
   type TrackingDeployProvider,
 } from '@open-design/contracts/analytics';
+import {
+  DECK_SLIDE_SELECTOR,
+  DECK_STRUCTURED_SLIDE_SELECTOR,
+} from '@open-design/contracts/runtime/deck-stage-fallback';
 import { useAnalytics } from '../analytics/provider';
 import { exportErrorCode } from '../analytics/export-error-code';
 import { deployErrorCode } from '../analytics/deploy-error-code';
@@ -2695,14 +2699,9 @@ export function countDeckSlidesInSource(source: string | null | undefined): numb
   if (typeof DOMParser !== 'undefined') {
     try {
       const doc = new DOMParser().parseFromString(source, 'text/html');
-      const structured = doc.querySelectorAll(
-        'deck-stage > .slide, .deck > .slide, .deck-stage > .slide, .deck-shell > .slide, ' +
-        '#deck > .slide, body > .slide, ' +
-        'deck-stage > [data-screen-label], .deck-stage > [data-screen-label], ' +
-        '#deck > [data-screen-label], body > [data-screen-label]',
-      );
+      const structured = doc.querySelectorAll(DECK_STRUCTURED_SLIDE_SELECTOR);
       if (structured.length > 0) return structured.length;
-      return doc.querySelectorAll('.slide, [data-screen-label], .deck-slide, .ppt-slide').length;
+      return doc.querySelectorAll(DECK_SLIDE_SELECTOR).length;
     } catch {
       // Fall through to the cheap string count below.
     }
@@ -7617,13 +7616,21 @@ function HtmlViewer({
   // renderable, DeckThumbnailRail mounts a single cloned slide per thumbnail
   // instead of a full-deck iframe — no scripts, no deck bridge, no N documents
   // saturating the main thread on entry. Decks we can't statically render
-  // (external CSS, viewport-sized slides, no inline styles) keep the iframe
-  // fallback via `parsedDeck = null`.
-  const parsedDeckThumbnails = useMemo(() => {
+  // (external layout CSS, runtime-built content, or no inline styles) keep the
+  // iframe fallback, while the analysis still supplies their real aspect ratio.
+  const deckThumbnailAnalysis = useMemo(() => {
     if (!effectiveDeck || !deckVisualSource) return null;
-    const parsed = parseDeckThumbnails(deckVisualSource, projectRawUrl(projectId, baseDirFor(file.name)));
-    return parsed.renderable ? parsed : null;
+    return parseDeckThumbnails(
+      deckVisualSource,
+      projectRawUrl(projectId, baseDirFor(file.name)),
+    );
   }, [effectiveDeck, deckVisualSource, projectId, file.name]);
+  const parsedDeckThumbnails = deckThumbnailAnalysis?.renderable
+    ? deckThumbnailAnalysis
+    : null;
+  const deckThumbnailAspectRatio = deckThumbnailAnalysis
+    ? `${deckThumbnailAnalysis.designWidth} / ${deckThumbnailAnalysis.designHeight}`
+    : undefined;
   // Stable thunk so HtmlViewer's frequent re-renders (slide state, streaming
   // edits) never invalidate the memoized rail; the ref always calls the
   // freshest goToSlide closure.
@@ -12264,6 +12271,7 @@ function HtmlViewer({
                 labelTotal={deckNavTotal}
                 buildThumbSrcDoc={buildDeckThumbnailSrcDoc}
                 parsedDeck={parsedDeckThumbnails}
+                aspectRatio={deckThumbnailAspectRatio}
                 onSelect={(index) => {
                   fireDeckViewerClick('thumbnail_select', {
                     slide_index: index,
