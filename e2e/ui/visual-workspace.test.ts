@@ -224,17 +224,18 @@ test('[P2] captures the topbar BYOK execution switcher surface', async ({ page }
   const popover = page.getByTestId('inline-model-switcher-popover');
   await expect(popover).toBeVisible();
   // ef9c8cd8b's compact popover carries neither the mode segmented control nor
-  // an in-place BYOK model dropdown — a BYOK config has no local agent, so the
-  // popover is the "configure the provider in Settings" hint plus the route
-  // there. Both moved to Settings → Execution and are captured in this same
-  // lane by visual-settings.test.ts ("settings BYOK" and "settings BYOK model
-  // dropdown"), which is also why the old separate
+  // the old searchable BYOK model dropdown. It renders the current runtime's
+  // compact model radio list plus the route to Settings → Execution. The full
+  // provider picker is captured in this same lane by visual-settings.test.ts,
+  // which is also why the old separate
   // `visual-topbar-byok-model-dropdown` case is gone rather than recast: on
   // this surface it would have re-captured exactly this popover. Its guard —
   // no in-place dropdown in the top bar — is folded in below.
   await expect(popover.getByTestId('inline-model-switcher-mode-api')).toHaveCount(0);
   await expect(popover.getByTestId('inline-model-switcher-api-model')).toHaveCount(0);
-  await expect(popover.locator('.inline-switcher__hint')).toContainText(/Settings/i);
+  const modelList = popover.getByRole('radiogroup');
+  await expect(modelList).toBeVisible();
+  await expect(modelList.getByRole('radio', { name: 'Default' })).toBeChecked();
   await expect(popover.getByTestId('inline-model-switcher-open-settings')).toBeVisible();
 
   await captureVisual(page, 'visual-topbar-byok-switcher');

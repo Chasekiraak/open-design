@@ -79,7 +79,11 @@ import {
   openHostExternalUrl,
 } from '@open-design/host';
 import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
-import { sharedCancellableGet } from '../lib/shared-cancellable-get';
+import {
+  evictSharedCancellableGet,
+  forceSharedCancellableGet,
+  sharedCancellableGet,
+} from '../lib/shared-cancellable-get';
 import { workspaceProjectHeaders } from '../state/projects';
 
 export const DEFAULT_DEPLOY_PROVIDER_ID = 'vercel-self';
@@ -1619,7 +1623,7 @@ export async function createSocialSharePayload(
 
 export async function fetchProjectFiles(
   projectId: string,
-  options?: { signal?: AbortSignal },
+  options?: { fresh?: boolean; signal?: AbortSignal },
 ): Promise<ProjectFile[]> {
   // Every reader of the same project's file list shares one request
   // (Batch A §4.3). Cancellable callers (project-card cover scans aborted
@@ -1627,7 +1631,8 @@ export async function fetchProjectFiles(
   // only when no reader is left awaiting it, so a foreground project read
   // can never be killed by an abandoned card scan.
   try {
-    return await sharedCancellableGet(
+    const get = options?.fresh ? forceSharedCancellableGet : sharedCancellableGet;
+    return await get(
       `project-files:${projectId}`,
       async (signal): Promise<ProjectFile[]> => {
         const url = `/api/projects/${encodeURIComponent(projectId)}/files`;
@@ -2453,6 +2458,13 @@ export async function uploadProjectFiles(
         files: { name: string; path: string; size?: number; originalName?: string }[];
       };
       const responseFiles = json.files ?? [];
+      if (responseFiles.length > 0) {
+        // The display-read cache deliberately survives for one second to
+        // collapse project-open bursts. An upload is authoritative mutation
+        // evidence, so the next file-list consumer must not reuse the
+        // pre-upload snapshot from that window.
+        evictSharedCancellableGet(`project-files:${projectId}`);
+      }
       uploaded.push(
         ...responseFiles.map((f) => ({
           path: f.path,

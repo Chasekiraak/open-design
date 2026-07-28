@@ -15,8 +15,8 @@ import {
   mockAmrWalletSnapshot,
   openSettingsDialog,
   putAppConfig,
+  routePersonalProjectWorkspaceScope,
   seedBrowserConfig,
-  sendPrompt,
 } from '@/playwright/amr';
 
 test.describe.configure({ timeout: T.xlong });
@@ -48,7 +48,7 @@ function amrAgentToggle(settings: Locator): Locator {
   return settings.getByTestId('settings-agent-card-amr').getByRole('button').first();
 }
 
-test('[P0] after local Sign out, AMR runs require re-login and Settings keeps AMR selected', async ({ page }) => {
+test('[P0] after local Sign out, AMR runs require re-login and the saved AMR selection persists', async ({ page }) => {
   await stubCatalogsEmpty(page);
   const root = join(tmpdir(), `open-design-amr-logout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const reloginVelaBin = await writeFakeVelaBin(join(root, 'bin-relogin'), {
@@ -111,7 +111,13 @@ test('[P0] after local Sign out, AMR runs require re-login and Settings keeps AM
   await putAppConfig(page, config);
 
   const projectId = `amr-logout-${Date.now()}`.replace(/[^A-Za-z0-9._-]/g, '-');
-  await createProjectViaApi(page, projectId, 'AMR logout requires relogin');
+  const workspaceContext = await routePersonalProjectWorkspaceScope(page, projectId);
+  await createProjectViaApi(
+    page,
+    projectId,
+    'AMR logout requires relogin',
+    workspaceContext,
+  );
   await gotoProject(page, projectId);
 
   const settings = await openSettingsDialog(page);
@@ -127,32 +133,23 @@ test('[P0] after local Sign out, AMR runs require re-login and Settings keeps AM
     const response = await fetch('/api/integrations/vela/logout', { method: 'POST' });
     if (!response.ok) throw new Error(`logout failed: ${response.status}`);
   });
-  const reopenedSettings = await openSettingsDialog(page);
-  await expect(amrAgentToggle(reopenedSettings)).toHaveAttribute('aria-pressed', 'true');
-  await expect(reopenedSettings.getByRole('button', { name: /^Authorize$|^Sign in$/i })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(reopenedSettings).toHaveCount(0);
-  const reloginConfig = {
-    ...config,
-    agentCliEnv: {
-      amr: { VELA_BIN: reloginVelaBin },
-    },
-  };
-  await putAppConfig(page, reloginConfig);
-  await page.evaluate((next) => {
-    window.localStorage.setItem('open-design:config', JSON.stringify(next));
-  }, reloginConfig);
-  await gotoProject(page, projectId);
-  await sendPrompt(page, 'AMR logout should require relogin');
+  const configResponse = await page.request.get('/api/app-config');
+  expect(configResponse.ok(), await configResponse.text()).toBeTruthy();
+  const body = (await configResponse.json()) as { config?: { agentId?: string } };
+  expect(body.config?.agentId).toBe('amr');
+
+  // Signed-out users now return to Home instead of entering project-scoped
+  // Settings or reopening a bound project. Exercise the supported Home send:
+  // the saved AMR selection must survive, but the run must stop at re-login.
+  const homeInput = page.getByTestId('home-hero-input');
+  await expect(homeInput).toBeVisible({ timeout: T.long });
+  await homeInput.fill('AMR logout should require relogin');
+  await expect(page.getByTestId('home-hero-submit')).toBeEnabled();
+  await page.getByTestId('home-hero-submit').click();
 
   const balanceGate = page.getByTestId('amr-balance-dialog');
   await expect(balanceGate).toBeVisible({ timeout: 15_000 });
   await expect(balanceGate).toContainText(/Sign in to start creating/i);
   await expect(balanceGate).toContainText(/sign in and this task can start right away/i);
   await expect(balanceGate.getByRole('button', { name: /^Sign in$/i })).toBeVisible();
-
-  const configResponse = await page.request.get('/api/app-config');
-  expect(configResponse.ok(), await configResponse.text()).toBeTruthy();
-  const body = (await configResponse.json()) as { config?: { agentId?: string } };
-  expect(body.config?.agentId).toBe('amr');
 });

@@ -1,5 +1,9 @@
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
+import type {
+  ProjectWorkspaceScopeResponse,
+  WorkspaceCollabContext,
+} from '@open-design/contracts';
 import { ensureRailOpen } from './rail.js';
 import { T } from '@/timeouts';
 
@@ -238,8 +242,31 @@ export async function sendPrompt(page: Page, prompt: string) {
   await input.press('Enter');
 }
 
-export async function createProjectViaApi(page: Page, projectId: string, name: string) {
+export async function createProjectViaApi(
+  page: Page,
+  projectId: string,
+  name: string,
+  workspaceContext?: WorkspaceCollabContext,
+) {
   const response = await page.request.post('/api/projects', {
+    ...(workspaceContext
+      ? {
+          headers: {
+            'x-od-workspace-id': workspaceContext.workspaceId,
+            'x-od-workspace-type': workspaceContext.workspaceType,
+            'x-od-workspace-member-id': workspaceContext.workspaceMemberId,
+            'x-od-workspace-role': workspaceContext.role,
+            'x-od-workspace-lifecycle-state': workspaceContext.lifecycleState,
+            'x-od-workspace-member-status': workspaceContext.memberStatus,
+            'x-od-workspace-can-share-projects': String(
+              workspaceContext.permissions.canShareProjects,
+            ),
+            'x-od-workspace-can-write-synced-files': String(
+              workspaceContext.permissions.canWriteSyncedFiles,
+            ),
+          },
+        }
+      : {}),
     data: {
       id: projectId,
       name,
@@ -251,6 +278,62 @@ export async function createProjectViaApi(page: Page, projectId: string, name: s
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   return (await response.json()) as { conversationId: string };
+}
+
+/**
+ * AMR runs fail closed until the daemon resolves the project's persisted
+ * billing principal. Route a personal-owner scope for tests whose fake Vela
+ * account is explicitly entitled to run; an unbound local project is not a
+ * valid AMR fixture anymore.
+ */
+export async function routePersonalProjectWorkspaceScope(
+  page: Page,
+  projectId: string,
+): Promise<WorkspaceCollabContext & { workspaceType: 'personal' }> {
+  const workspaceId = `personal-${projectId}`;
+  const context: WorkspaceCollabContext & { workspaceType: 'personal' } = {
+    workspaceId,
+    workspaceType: 'personal',
+    workspaceMemberId: `owner-${projectId}`,
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: {
+      seatLimit: 1,
+      usedSeats: 1,
+      availableSeats: 0,
+      isSeatFull: true,
+    },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+  };
+  const response: ProjectWorkspaceScopeResponse = {
+    scope: {
+      kind: 'personal',
+      projectId,
+      workspaceId,
+      visibility: 'personal',
+      context,
+    },
+  };
+  await page.route(
+    `**/api/projects/${encodeURIComponent(projectId)}/workspace-scope`,
+    async (route) => {
+      await route.fulfill({ json: response });
+    },
+  );
+  return context;
 }
 
 export async function gotoProject(page: Page, projectId: string) {

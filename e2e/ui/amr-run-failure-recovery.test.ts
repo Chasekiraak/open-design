@@ -14,8 +14,10 @@ import {
   createProjectViaApi,
   gotoEntryHome,
   gotoProject,
+  mockAmrWalletSnapshot,
   openSettingsDialog,
   putAppConfig,
+  routePersonalProjectWorkspaceScope,
   seedBrowserConfig,
   sendPrompt,
   settingsSurface,
@@ -117,6 +119,12 @@ test('[P0] @critical AMR insufficient-balance failures surface Top up AMR and re
         user: { id: 'balance-user', email: 'balance-ui@example.com', plan: 'free' },
       }),
     });
+  });
+  await mockAmrWalletSnapshot(page, {
+    balanceUsd: '20.00',
+    email: 'balance-ui@example.com',
+    plan: 'free',
+    profile,
   });
 
   await page.addInitScript(() => {
@@ -1048,6 +1056,15 @@ async function setupAmrWorkspace(
   await putAppConfig(page, config);
 
   const projectId = `amr-ui-${Date.now()}`.replace(/[^A-Za-z0-9._-]/g, '-');
-  const { conversationId } = await createProjectViaApi(page, projectId, 'AMR UI failure smoke');
+  const workspaceContext =
+    options.selectedAgentId === 'amr'
+      ? await routePersonalProjectWorkspaceScope(page, projectId)
+      : undefined;
+  const { conversationId } = await createProjectViaApi(
+    page,
+    projectId,
+    'AMR UI failure smoke',
+    workspaceContext,
+  );
   return { projectId, conversationId, homeDir, root, velaBin };
 }

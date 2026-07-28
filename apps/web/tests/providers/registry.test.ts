@@ -1148,6 +1148,37 @@ describe('uploadProjectFiles', () => {
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(init.headers).toBeUndefined();
   });
+
+  it('invalidates the shared file-list read after a successful upload', async () => {
+    const projectId = 'project-upload-invalidates-files';
+    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+    let listReadCount = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init): Promise<Response> => {
+      const url = String(input);
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          files: [{ name: 'hello.txt', path: 'hello.txt', size: 5, originalName: 'hello.txt' }],
+        }), { status: 200 });
+      }
+      listReadCount += 1;
+      return new Response(JSON.stringify({
+        files: listReadCount === 1
+          ? []
+          : [{ name: 'hello.txt', path: 'hello.txt', size: 5, kind: 'text' }],
+      }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchProjectFiles(projectId)).resolves.toEqual([]);
+    await expect(uploadProjectFiles(projectId, [file])).resolves.toMatchObject({
+      failed: [],
+      uploaded: [{ path: 'hello.txt' }],
+    });
+    await expect(fetchProjectFiles(projectId)).resolves.toEqual([
+      expect.objectContaining({ name: 'hello.txt' }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('deploy provider registry helpers', () => {

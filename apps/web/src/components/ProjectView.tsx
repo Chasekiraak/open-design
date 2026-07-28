@@ -2555,7 +2555,10 @@ export function ProjectView({
   }, []);
 
   const refreshProjectFiles = useCallback(async (): Promise<ProjectFile[]> => {
-    const next = await fetchProjectFiles(project.id);
+    // This callback runs after explicit mutation/event signals. Bypass the
+    // short project-open sharing cache so a just-uploaded or agent-written
+    // file cannot be hidden by the pre-mutation snapshot.
+    const next = await fetchProjectFiles(project.id, { fresh: true });
     projectFilesRef.current = next;
     setProjectFiles(next);
     return next;
