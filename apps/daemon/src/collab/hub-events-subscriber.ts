@@ -36,6 +36,8 @@ export interface HubReadyFrame {
 }
 
 const BILLING_REVISION_CLOCKS_CAPABILITY = 'billing-revision-clocks-v1';
+export const AUTHORITATIVE_PROJECT_PRESENCE_CAPABILITY =
+  'authoritative-project-presence-v1';
 const MAX_HANDLED_SOURCE_GAP_EPOCHS = 64;
 
 export interface HubWorkspaceEvent {
@@ -208,7 +210,11 @@ export interface HubEventsSubscriberOptions {
   onStateChange?: (state: 'connected' | 'disconnected') => void;
   /** Fired after a `ready` frame verifies the stream workspace. Unlike
    *  `onReconnect`, this includes the first successful connection. */
-  onConnect?: (connection: { reconnect: boolean; workspaceId?: string }) => void;
+  onConnect?: (connection: {
+    reconnect: boolean;
+    workspaceId?: string;
+    capabilities: readonly string[];
+  }) => void;
   /** One catch-up nudge per healthy producer-listener epoch that reports a gap. */
   onSourceGap?: (gap: { workspaceId?: string; listenerEpoch: string }) => void;
   /** Secret-free parser/scope diagnostics. Raw payloads are never exposed. */
@@ -333,13 +339,20 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
           });
         }
       };
-      const notifyVerifiedConnection = (workspaceId?: string) => {
+      const notifyVerifiedConnection = (
+        workspaceId: string | undefined,
+        capabilities: readonly string[],
+      ) => {
         if (connectionNotified) return;
         connectionNotified = true;
         const reconnect = everConnected;
         everConnected = true;
         try {
-          options.onConnect?.({ reconnect, ...(workspaceId ? { workspaceId } : {}) });
+          options.onConnect?.({
+            reconnect,
+            ...(workspaceId ? { workspaceId } : {}),
+            capabilities: [...capabilities],
+          });
           if (reconnect) options.onReconnect?.();
         } catch (error) {
           options.onError?.(error);
@@ -394,7 +407,7 @@ export function startHubEventsSubscriber(options: HubEventsSubscriberOptions): H
               BILLING_REVISION_CLOCKS_CAPABILITY,
             );
             const reconnect = everConnected;
-            notifyVerifiedConnection(actualWorkspaceId);
+            notifyVerifiedConnection(actualWorkspaceId, ready.capabilities);
             // Transport reconnect already invokes the broader onReconnect
             // catch-up. A first connection has no such callback, so a healthy
             // producer-side gap reported in ready must trigger it here.

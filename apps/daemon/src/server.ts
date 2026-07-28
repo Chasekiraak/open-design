@@ -709,7 +709,10 @@ import {
   shouldEmitWorkspaceBillingRuntimeNudge,
   WorkspaceBillingAccessRevokedError,
 } from './collab/workspace-billing-runtime.js';
-import { startHubEventsSubscriber } from './collab/hub-events-subscriber.js';
+import {
+  AUTHORITATIVE_PROJECT_PRESENCE_CAPABILITY,
+  startHubEventsSubscriber,
+} from './collab/hub-events-subscriber.js';
 import {
   createWorkspaceHubSubscriptionManager,
   type WorkspaceHubSubscriptionManager,
@@ -3434,6 +3437,7 @@ export async function startServer({
   // the local selection, which in exactly that case still holds the real team
   // workspace. Refusals are logged once per workspace rather than swallowed.
   const refusedPresenceScopes = new Set<string>();
+  const authoritativePresenceWorkspaces = new Set<string>();
   const presenceScopeFor = (projectId: string): string | undefined =>
     projectCollabScope({
       projectId,
@@ -3460,6 +3464,12 @@ export async function startServer({
         velaCliCollabClient.leavePresence(projectId, input, presenceScopeFor(projectId)),
     },
     isProjectShared: isSharedTeamProject,
+    cloudAuthorizesProjectPresence: (projectId) => {
+      const workspaceId = findTeamWorkspaceIdForProject(db, projectId)?.trim();
+      return Boolean(
+        workspaceId && authoritativePresenceWorkspaces.has(workspaceId),
+      );
+    },
   });
   // Author-side publish TRIGGER (C spec §D1): watch the projects THIS daemon's
   // member owns + has shared, and coalesce every file edit into a debounced
@@ -4018,9 +4028,18 @@ export async function startServer({
       };
     },
     onStateChange: (state) => {
+      if (state === 'disconnected') {
+        authoritativePresenceWorkspaces.delete(subscribedWorkspaceId);
+      }
       console.info(`[od] hub events channel ${state}`);
     },
-    onConnect: ({ reconnect, workspaceId }) => {
+    onConnect: ({ reconnect, workspaceId, capabilities }) => {
+      const verifiedWorkspaceId = workspaceId ?? subscribedWorkspaceId;
+      if (capabilities.includes(AUTHORITATIVE_PROJECT_PRESENCE_CAPABILITY)) {
+        authoritativePresenceWorkspaces.add(verifiedWorkspaceId);
+      } else {
+        authoritativePresenceWorkspaces.delete(verifiedWorkspaceId);
+      }
       console.info(
         `[od] hub events workspace verified workspaceId=${workspaceId ?? 'unknown'} reconnect=${reconnect}`,
       );

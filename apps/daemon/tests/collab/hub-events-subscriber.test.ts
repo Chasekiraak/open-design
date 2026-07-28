@@ -316,6 +316,40 @@ describe('startHubEventsSubscriber', () => {
     expect(connections).toEqual([false, true]);
   });
 
+  it('reports ready capabilities per verified connection without retaining stale values', async () => {
+    const capabilities: string[][] = [];
+    let fetches = 0;
+    let resolveSecond!: () => void;
+    const second = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({
+        url: 'https://hub/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
+      onEvent: () => undefined,
+      onConnect: ({ capabilities: readyCapabilities }) => {
+        capabilities.push([...readyCapabilities]);
+        if (capabilities.length === 2) resolveSecond();
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () => {
+        fetches += 1;
+        return sseResponse([
+          fetches === 1
+            ? 'event: ready\ndata: {"workspaceId":"w1","capabilities":["authoritative-project-presence-v1"]}\n\n'
+            : 'event: ready\ndata: {"workspaceId":"w1","capabilities":[]}\n\n',
+        ]);
+      },
+    });
+
+    await second;
+    expect(capabilities).toEqual([['authoritative-project-presence-v1'], []]);
+  });
+
   it('immediately re-resolves and reconnects when the active workspace changes', async () => {
     let activeWorkspaceId = 'w1';
     const resolvedScopes: string[] = [];

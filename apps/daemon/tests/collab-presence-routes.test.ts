@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import http from 'node:http';
 import { createCollabRuntime } from '../src/collab/runtime.js';
@@ -17,7 +17,10 @@ afterEach(async () => {
 
 async function startPresenceServer(
   cloud?: CollabPresenceCloudClient,
-  options: { isProjectShared?: (projectId: string) => Promise<boolean> } = {},
+  options: {
+    isProjectShared?: (projectId: string) => Promise<boolean>;
+    cloudAuthorizesProjectPresence?: (projectId: string) => boolean;
+  } = {},
 ) {
   const app = express();
   app.use(express.json());
@@ -25,6 +28,9 @@ async function startPresenceServer(
     collab: createCollabRuntime(),
     ...(cloud ? { cloud } : {}),
     ...(options.isProjectShared ? { isProjectShared: options.isProjectShared } : {}),
+    ...(options.cloudAuthorizesProjectPresence
+      ? { cloudAuthorizesProjectPresence: options.cloudAuthorizesProjectPresence }
+      : {}),
   });
   server = http.createServer(app);
   await new Promise<void>((resolve) => server!.listen(0, resolve));
@@ -170,5 +176,38 @@ describe('collab presence routes', () => {
     expect(heartbeat.status).toBe(200);
     expect(heartbeat.body.present).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  it('delegates project authorization to an authoritative cloud presence route', async () => {
+    const isProjectShared = vi.fn(async () => false);
+    const calls: string[] = [];
+    const cloud: CollabPresenceCloudClient = {
+      async heartbeatPresence(projectId) {
+        calls.push(`heartbeat:${projectId}`);
+        return [{ memberId: 'm1', name: 'Ada', role: 'owner' }];
+      },
+      async listPresence(projectId) {
+        calls.push(`list:${projectId}`);
+        return [{ memberId: 'm1', name: 'Ada', role: 'owner' }];
+      },
+      async leavePresence() {
+        return [];
+      },
+    };
+    const api = await startPresenceServer(cloud, {
+      isProjectShared,
+      cloudAuthorizesProjectPresence: () => true,
+    });
+
+    const list = await api.json('/api/projects/p1/presence');
+    const heartbeat = await api.json('/api/projects/p1/presence/heartbeat', {
+      method: 'POST',
+      body: { memberId: 'm1', name: 'Ada', role: 'owner' },
+    });
+
+    expect(list.status).toBe(200);
+    expect(heartbeat.status).toBe(200);
+    expect(calls).toEqual(['list:p1', 'heartbeat:p1']);
+    expect(isProjectShared).not.toHaveBeenCalled();
   });
 });
