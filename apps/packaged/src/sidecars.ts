@@ -398,14 +398,31 @@ export function resolvePackagedChildBaseEnv(
 }
 
 /**
- * AMR profiles whose vela backend has the workspace-team feature deployed,
- * mapped to that profile's vela web origin.
+ * AMR profiles whose vela backend has the workspace-team feature deployed.
  *
  * A packaged build turns the vela-cli workspace transports on only when its
  * baked AMR profile appears here. Every other profile — `prod` above all —
  * leaves team projects / collab / resource sharing dormant, which is what keeps
  * an unreleased feature out of production builds. Add a profile here only once
  * its backend actually serves the workspace-team API.
+ */
+const WORKSPACE_TEAM_AMR_PROFILES: ReadonlySet<string> = new Set(["feature-test", "test"]);
+
+/**
+ * The workspace-team daemon env for this build, or nothing when the build must
+ * leave the feature dormant.
+ *
+ * Both halves of the gate are required: an allowlisted AMR profile AND a vela
+ * web origin that packaging actually injected. `prod` can never satisfy the
+ * first half, so a stable build stays dormant no matter what origin it is
+ * handed; a `feature-test` / `test` build whose CI secret was never configured
+ * fails the second half and also stays dormant rather than pointing the
+ * transports at an unknown backend.
+ *
+ * The origin is injected (tools/pack reads it from a per-profile CI secret and
+ * bakes it into open-design-config.json) rather than checked in, because the
+ * non-prod AMR environments are internal deployments and this repository is
+ * public.
  *
  * The vela API/Link endpoints themselves are NOT set here: the daemon resolves
  * them from the AMR profile via the vela CLI. The web origin is the exception —
@@ -413,19 +430,13 @@ export function resolvePackagedChildBaseEnv(
  * (shown in the nav for owner/admin) from `OD_VELA_WEB_URL`, and without it
  * those entries stay hidden even for the owner.
  */
-const WORKSPACE_TEAM_VELA_WEB_ORIGIN_BY_AMR_PROFILE = new Map<string, string>([
-  ["feature-test", "https://amr-feature.powerformer.net"],
-  ["test", "https://vela.powerformer.net"],
-]);
-
 function workspaceTeamTransportEnv(
   amrProfile: string | null | undefined,
+  velaWebUrl: string | null | undefined,
 ): Record<string, string> {
-  const webOrigin =
-    amrProfile == null
-      ? undefined
-      : WORKSPACE_TEAM_VELA_WEB_ORIGIN_BY_AMR_PROFILE.get(amrProfile);
-  if (webOrigin == null) return {};
+  if (amrProfile == null || !WORKSPACE_TEAM_AMR_PROFILES.has(amrProfile)) return {};
+  const webOrigin = velaWebUrl?.trim().replace(/\/+$/, "") ?? "";
+  if (webOrigin.length === 0) return {};
   return {
     OD_WORKSPACE_CONTEXT_SOURCE: "vela",
     OD_TEAM_PROJECTS_TRANSPORT: "vela-cli",
@@ -465,6 +476,11 @@ export type PackagedDaemonSpawnEnvOptions = {
   telemetryRelayUrl?: string | null;
   posthogKey?: string | null;
   posthogHost?: string | null;
+  /**
+   * Vela web console origin baked into the bundle at packaging time. Half of
+   * the workspace-team gate — see {@link workspaceTeamTransportEnv}.
+   */
+  velaWebUrl?: string | null;
 };
 
 /**
@@ -499,7 +515,7 @@ export function buildPackagedDaemonSpawnEnv(
     ...(options.amrProfile == null || options.amrProfile.length === 0
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
-    ...workspaceTeamTransportEnv(options.amrProfile),
+    ...workspaceTeamTransportEnv(options.amrProfile, options.velaWebUrl),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
     ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
     ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
@@ -649,6 +665,7 @@ export async function startPackagedSidecars(
     telemetryRelayUrl: string | null;
     posthogKey: string | null;
     posthogHost: string | null;
+    velaWebUrl: string | null;
     /**
      * PR #974 round-5 (lefarcen P2): caller asserts whether a desktop
      * runtime is being started in this packaged process group. The
@@ -724,6 +741,7 @@ export async function startPackagedSidecars(
         telemetryRelayUrl: options.telemetryRelayUrl,
         posthogKey: options.posthogKey,
         posthogHost: options.posthogHost,
+        velaWebUrl: options.velaWebUrl,
       }),
       electronNodeCommand: options.electronNodeCommand,
       nodeCommand: options.nodeCommand,

@@ -228,6 +228,30 @@ export interface VelaLoginStatus {
   userCode?: string;
   /** True when vela warned it could not open the browser automatically. */
   browserOpenFailed?: boolean;
+  /**
+   * Origin of the vela web console this runtime talks to, when it was given
+   * one. See {@link resolveVelaConsoleOrigin} — the client needs it to build
+   * wallet / plans / upgrade links for a non-public AMR environment.
+   */
+  consoleOrigin?: string;
+}
+
+/**
+ * The vela web console origin this runtime was configured with, normalized
+ * without a trailing slash, or undefined when it was given none.
+ *
+ * Non-prod AMR environments are internal deployments, so their hostnames are
+ * not literals in this public repository: packaging injects the origin from a
+ * CI secret and the packaged runtime forwards it as `OD_VELA_WEB_URL`. Reporting
+ * it on the login status is how the web client learns which console to link to
+ * without needing a hostname table of its own. Undefined for prod and fork
+ * builds, where the client falls back to the public product console.
+ */
+export function resolveVelaConsoleOrigin(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const origin = env.OD_VELA_WEB_URL?.trim().replace(/\/+$/, '') ?? '';
+  return origin.length > 0 ? origin : undefined;
 }
 
 export interface VelaLoginActivation {

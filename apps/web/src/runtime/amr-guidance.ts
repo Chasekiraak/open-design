@@ -12,15 +12,56 @@ export const AMR_CONSOLE_URL =
 export const DEFAULT_AMR_RECHARGE_URL = AMR_CONSOLE_URL;
 export const AMR_RECHARGE_URL = DEFAULT_AMR_RECHARGE_URL;
 
+// Path + attribution the console wallet is always reached through, so a runtime
+// origin only has to carry the host.
+const AMR_CONSOLE_PATH = '/wallet?source=open_design';
+
 const AMR_CONSOLE_URL_BY_PROFILE: Record<string, string> = {
   prod: DEFAULT_AMR_RECHARGE_URL,
   test: 'https://vela.powerformer.net/wallet?source=open_design',
-  'feature-test': 'https://amr-feature.powerformer.net/wallet?source=open_design',
   local: 'http://localhost:5173/wallet?source=open_design',
 };
 
+// Every AMR profile the packaged runtime can be built with (mirrors the daemon's
+// resolveAmrProfile allowlist). Anything else is treated as prod.
+const KNOWN_AMR_PROFILES: ReadonlySet<string> = new Set([
+  'prod',
+  'test',
+  'feature-test',
+  'local',
+]);
+
+// Console origin the daemon reported for THIS runtime (GET
+// /api/integrations/vela/status -> consoleOrigin, sourced from OD_VELA_WEB_URL).
+//
+// The web bundle ships publicly, so the hostnames of internal (non-public) AMR
+// environments are not literals in this source tree: packaging injects the
+// origin from a CI secret and the daemon hands it to the client at runtime.
+// Kept module-level rather than threaded through every caller because it is a
+// property of the runtime, not of any one call site, and it is written once per
+// status fetch (see setRuntimeAmrConsoleOrigin's single caller in
+// providers/daemon.ts).
+let runtimeAmrConsoleOrigin: string | null = null;
+
+/**
+ * Record the vela console origin the daemon reported, or clear it with a blank
+ * value. Normalizes away a trailing slash so callers can append console paths.
+ */
+export function setRuntimeAmrConsoleOrigin(origin: string | null | undefined): void {
+  const normalized = origin?.trim().replace(/\/$/, '') ?? '';
+  runtimeAmrConsoleOrigin = normalized.length > 0 ? normalized : null;
+}
+
 export function amrConsoleUrlForProfile(profile: string | null | undefined): string {
   const normalized = profile?.trim() || 'prod';
+  // prod's console is the public product URL and stays pinned to it: a runtime
+  // origin must never be able to redirect a production user's wallet, plan, or
+  // upgrade links somewhere else. Unrecognized profiles are treated as prod for
+  // the same reason.
+  if (normalized === 'prod' || !KNOWN_AMR_PROFILES.has(normalized)) {
+    return DEFAULT_AMR_RECHARGE_URL;
+  }
+  if (runtimeAmrConsoleOrigin) return `${runtimeAmrConsoleOrigin}${AMR_CONSOLE_PATH}`;
   return AMR_CONSOLE_URL_BY_PROFILE[normalized] ?? DEFAULT_AMR_RECHARGE_URL;
 }
 

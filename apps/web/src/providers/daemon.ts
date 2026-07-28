@@ -33,6 +33,7 @@ import type {
 } from '@open-design/contracts';
 import type { StreamHandlers } from './anthropic';
 import { workspaceProjectHeaders } from '../state/projects';
+import { setRuntimeAmrConsoleOrigin } from '../runtime/amr-guidance';
 
 /**
  * Returns the front-end carrier that's about to send this request:
@@ -896,6 +897,12 @@ export interface VelaLoginStatus {
   activationUrl?: string;
   userCode?: string;
   browserOpenFailed?: boolean;
+  // Origin of the vela web console this runtime talks to, when the daemon was
+  // given one (OD_VELA_WEB_URL, baked into packaged builds from a CI secret).
+  // The client builds wallet / plans / upgrade links from it; internal AMR
+  // environments therefore need no hostname literal in this public bundle.
+  // Absent for prod and fork builds.
+  consoleOrigin?: string;
 }
 
 // AMR (vela) login surfaces three thin endpoints on the daemon:
@@ -909,7 +916,14 @@ export async function fetchVelaLoginStatus(options: { refresh?: boolean } = {}):
     const query = options.refresh ? '?refresh=1' : '';
     const resp = await fetch(`/api/integrations/vela/status${query}`, { cache: 'no-store' });
     if (!resp.ok) return null;
-    return (await resp.json()) as VelaLoginStatus;
+    const status = (await resp.json()) as VelaLoginStatus;
+    // Every AMR status read refreshes the runtime console origin, so the console
+    // links stay correct no matter which surface (login pill, model switcher,
+    // avatar menu, low-balance dialog) triggered the fetch. Doing it here rather
+    // than in each caller is what keeps the origin out of web source: no caller
+    // needs to know the hostname of the environment it is pointed at.
+    setRuntimeAmrConsoleOrigin(status.consoleOrigin);
+    return status;
   } catch {
     return null;
   }
