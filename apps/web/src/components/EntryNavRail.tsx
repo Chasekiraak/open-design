@@ -1171,6 +1171,20 @@ export function EntryNavRail({
             >
               <Icon name="settings" size={16} />
             </NavButton>
+            {/* Signed-out has no account menu (where the 消息中心 row lives when
+                signed in), which left the message panel with no opener at all.
+                It rides here as the rail item under 设置. */}
+            <NavButton
+              ariaLabel={t('messageCenter.title')}
+              label={t('messageCenter.title')}
+              onClick={() => setMessageCenterOpen(true)}
+              testId="entry-nav-message-center"
+            >
+              <Icon name="bell" size={16} />
+              {messageUnreadCount > 0 ? (
+                <span className="entry-nav-rail__btn-dot" aria-hidden />
+              ) : null}
+            </NavButton>
           </>
         )}
       </div>
