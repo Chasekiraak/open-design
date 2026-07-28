@@ -163,6 +163,9 @@ import type { CreateInput, CreateTab, ImportClaudeDesignOutcome } from './NewPro
 import type { PluginLoopSubmit } from './PluginLoopHome';
 import {
   createProject,
+  duplicatePluginAsProject,
+  patchProject,
+  resolvedWorkspaceContextForWrite,
   type PluginShareAction,
   type PluginShareProjectOutcome,
 } from '../state/projects';
@@ -577,7 +580,11 @@ export function EntryShell({
   // The one shared workspace context. Any non-null context is a real workspace
   // (personal or team); workspace surfaces gate on B's permission bits, not on
   // workspaceType.
-  const { context: workspaceContext, loading: workspaceLoading } = useWorkspaceContext();
+  // The whole state (not just `context`) so workspace-scoped WRITES can go
+  // through `resolvedWorkspaceContextForWrite`, which refuses to collapse an
+  // unresolved or unavailable authority into an anonymous, unbound create.
+  const workspaceContextState = useWorkspaceContext();
+  const { context: workspaceContext, loading: workspaceLoading } = workspaceContextState;
   const workspaceContextRef = useRef(workspaceContext);
   workspaceContextRef.current = workspaceContext;
   const workspaceBillingResponse = useWorkspaceBillingResponse();
@@ -1578,19 +1585,57 @@ export function EntryShell({
             ) : null}
             {view === 'community' ? (
               <CommunityView
-                onRemixTemplate={({ prompt }) => {
-                  // Remix drops the user straight into a running project
-                  // instead of just prefilling Home's composer: create a
-                  // project seeded with this template's prompt (the same
-                  // auto-send-on-mount path Home's own submit uses) and let
-                  // onCreateProject open it.
-                  void onCreateProject({
-                    name: summarizeProjectNameFromPrompt(prompt) || t('common.untitled'),
-                    skillId: null,
-                    designSystemId: null,
-                    metadata: { kind: 'other', nameSource: 'prompt' },
-                    pendingPrompt: prompt,
-                  });
+                onRemixTemplate={({ templateId, prompt }) => {
+                  // Remix carries the template's PROJECT along, not just its
+                  // prompt: duplicate the plugin's example artifact into a
+                  // fresh project (the same daemon flow as the plugin
+                  // gallery's 创建副本), seed the composer with the template
+                  // prompt for review, then open it on the copied entry file.
+                  // Templates without a duplicable artifact fall back to the
+                  // old prompt-only project.
+                  void (async () => {
+                    const name =
+                      summarizeProjectNameFromPrompt(prompt) || t('common.untitled');
+                    try {
+                      // One resolved authority for BOTH requests: the create
+                      // binds the copied project to this workspace, and the
+                      // seed patch is then authorized against that same
+                      // binding. A headerless create is read by the daemon as a
+                      // legacy caller and leaves the project bound to no
+                      // workspace at all, which is what kept remixed projects
+                      // out of the member's own 草稿 list.
+                      const writeContext =
+                        resolvedWorkspaceContextForWrite(workspaceContextState);
+                      const result = await duplicatePluginAsProject(
+                        templateId,
+                        { name },
+                        writeContext,
+                      );
+                      const seeded = await patchProject(
+                        result.projectId,
+                        { pendingPrompt: prompt },
+                        writeContext,
+                      );
+                      if (!seeded) {
+                        // The project itself exists and is bound — only the
+                        // prompt seed was refused. Keep the user on it
+                        // (retrying through the catch below would leave the
+                        // copy orphaned and create a second, empty project)
+                        // and surface the dropped seed instead of discarding
+                        // it silently.
+                        console.error('Community remix: could not seed the template prompt.');
+                      }
+                      await Promise.resolve(onOpenProject(result.projectId, result.relPath));
+                    } catch {
+                      await onCreateProject({
+                        name,
+                        skillId: null,
+                        designSystemId: null,
+                        metadata: { kind: 'other', nameSource: 'prompt' },
+                        pendingPrompt: prompt,
+                      });
+                    }
+                  })();
                 }}
                 onUsePrompt={(prompt) => {
                   // Seed the Home composer with the template's starting prompt,

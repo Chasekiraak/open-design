@@ -66,6 +66,7 @@ import {
   type PublicFilePublishFailureKey,
 } from '../collab/public-file-publish';
 import { moveWorkspaceProject } from '../state/projects';
+import { MoveToTeamConfirmDialog, moveConfirmSkipped } from './MoveToTeamConfirmDialog';
 import type { Dict, Locale } from '../i18n/types';
 import {
   fetchLiveArtifact,
@@ -3199,6 +3200,30 @@ function FileVersionManagerModal({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [downloadMenuVersionId]);
 
+  // Clicking anywhere outside dismisses the panel, like every other popover
+  // on this surface — but dismissal is LAYERED: while an inner popover
+  // (download menu / restore confirm) is open, the outside click belongs to
+  // that layer's own dismiss handler and must not also tear down the whole
+  // panel. The toolbar entry that toggles the panel is excluded so its own
+  // toggle keeps working without a close/reopen race.
+  useEffect(() => {
+    if (confirmRestore || downloadMenuVersionId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          '.artifact-version-panel, .file-version-download-menu, .file-version-restore-confirm, [data-od-version-entry]',
+        )
+      ) {
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [onClose, confirmRestore, downloadMenuVersionId]);
+
   useEffect(() => {
     if (!selectedId) {
       setSelectedContent(null);
@@ -3525,9 +3550,10 @@ function FileVersionManagerModal({
         aria-label={t('fileViewer.versions.title')}
       >
         <header className="artifact-version-panel__head">
+          {/* Title first, the 历史版本·N count as a subline under it. */}
           <div>
-            <p>{`${t('fileViewer.versions.entryFull')} · ${versionCountLabel}`}</p>
             <strong title={panelFileName}>{panelFileName}</strong>
+            <p>{`${t('fileViewer.versions.entryFull')} · ${versionCountLabel}`}</p>
           </div>
           <div className="artifact-version-panel__head-actions">
             <button
@@ -3656,7 +3682,7 @@ function FileVersionManagerModal({
                 <button
                   key={version.id}
                   type="button"
-                  className={`artifact-version-card${selected ? ' is-selected' : ''}`}
+                  className={`artifact-version-card${selected ? ' is-selected' : ''}${version.current ? ' is-current' : ''}`}
                   role="option"
                   aria-selected={selected}
                   onClick={selectVersion}
@@ -5942,6 +5968,7 @@ function ReactComponentViewer({
   const [unifiedActionTab, setUnifiedActionTab] = useState<'share' | 'export' | 'send'>('share');
   const [shareAccess, setShareAccess] = useState<'private' | 'workspace'>('private');
   const [shareAccessMenuOpen, setShareAccessMenuOpen] = useState(false);
+  const [shareAccessConfirm, setShareAccessConfirm] = useState<'private' | 'workspace' | null>(null);
   const [shareAccessBusy, setShareAccessBusy] = useState(false);
   const [publishedFileUrl, setPublishedFileUrl] = useState('');
   const [publishedFileSlug, setPublishedFileSlug] = useState('');
@@ -6178,10 +6205,20 @@ function ReactComponentViewer({
     }, 1800);
   }
 
-  async function setWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
+  // Crossing the team-space boundary routes through the shared 转入/移出
+  // 团队空间 confirmation (same dialog + 不再提示 skip key as the project
+  // grid) instead of silently moving the project.
+  function setWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
     setShareAccessMenuOpen(false);
     if (nextAccess === shareAccess || shareAccessBusy || viewerOnly) return;
+    if (moveConfirmSkipped()) {
+      void commitWorkspaceShareAccess(nextAccess);
+      return;
+    }
+    setShareAccessConfirm(nextAccess);
+  }
 
+  async function commitWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
     setShareAccessBusy(true);
     try {
       await moveWorkspaceProject({
@@ -6232,6 +6269,17 @@ function ReactComponentViewer({
 
   return (
     <div className="viewer react-component-viewer">
+      {shareAccessConfirm ? (
+        <MoveToTeamConfirmDialog
+          action={shareAccessConfirm === 'workspace' ? 'to-team' : 'to-personal'}
+          onCancel={() => setShareAccessConfirm(null)}
+          onConfirm={() => {
+            const next = shareAccessConfirm;
+            setShareAccessConfirm(null);
+            if (next) void commitWorkspaceShareAccess(next);
+          }}
+        />
+      ) : null}
       <div className="viewer-toolbar">
         <div className="viewer-toolbar-left">
           <button
@@ -7039,6 +7087,7 @@ function HtmlViewer({
   const [unifiedActionTab, setUnifiedActionTab] = useState<'share' | 'export' | 'send'>('share');
   const [shareAccess, setShareAccess] = useState<'private' | 'workspace'>('private');
   const [shareAccessMenuOpen, setShareAccessMenuOpen] = useState(false);
+  const [shareAccessConfirm, setShareAccessConfirm] = useState<'private' | 'workspace' | null>(null);
   const [shareAccessBusy, setShareAccessBusy] = useState(false);
   const [publishedFileUrl, setPublishedFileUrl] = useState('');
   const [publishedFileSlug, setPublishedFileSlug] = useState('');
@@ -7270,10 +7319,19 @@ function HtmlViewer({
       setPublishLinkFeedback((current) => (current === feedback ? null : current));
     }, 1800);
   }
-  async function setWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
+  // Same shared 转入/移出团队空间 confirmation as the project grid — see the
+  // ReactComponentViewer copy above for the rationale.
+  function setWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
     setShareAccessMenuOpen(false);
     if (nextAccess === shareAccess || shareAccessBusy || viewerOnly) return;
+    if (moveConfirmSkipped()) {
+      void commitWorkspaceShareAccess(nextAccess);
+      return;
+    }
+    setShareAccessConfirm(nextAccess);
+  }
 
+  async function commitWorkspaceShareAccess(nextAccess: 'private' | 'workspace') {
     setShareAccessBusy(true);
     try {
       await moveWorkspaceProject({
@@ -13014,6 +13072,7 @@ function HtmlViewer({
                 {versioningAvailable ? (
                   <button
                     type="button"
+                    data-od-version-entry="true"
                     className="viewer-toolbar-more-item"
                     role="menuitem"
                     disabled={source === null}
@@ -13203,6 +13262,7 @@ function HtmlViewer({
           {versioningAvailable && (rawCanShare || rawCanDownload) ? (
             <button
               type="button"
+              data-od-version-entry="true"
               className={`chrome-action chrome-action-secondary chrome-action-icon od-tooltip${versionModalOpen ? ' is-active' : ''}`}
               // Same disabled contract as the Share button directly below:
               // `viewerOnly` + `viewerOnlyDisabledTitle`. A readonly shared
@@ -14837,6 +14897,17 @@ function HtmlViewer({
           onDismiss={() => setDeployActionToast(null)}
         />,
         document.body,
+      ) : null}
+      {shareAccessConfirm ? (
+        <MoveToTeamConfirmDialog
+          action={shareAccessConfirm === 'workspace' ? 'to-team' : 'to-personal'}
+          onCancel={() => setShareAccessConfirm(null)}
+          onConfirm={() => {
+            const next = shareAccessConfirm;
+            setShareAccessConfirm(null);
+            if (next) void commitWorkspaceShareAccess(next);
+          }}
+        />
       ) : null}
       {versionRestoredToast && typeof document !== 'undefined' ? createPortal(
         <Toast

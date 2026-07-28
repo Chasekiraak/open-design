@@ -545,9 +545,9 @@ function UpdaterPopupPanel({
       exit="exit"
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className="updater-popup__icon">
-        <Icon name="arrow-up" size={20} strokeWidth={2.2} />
-      </div>
+      {/* No cover art: this panel has no cover source. Covers on the update
+          surfaces come from the what's-new document's `imageUrl` (see
+          WhatsNewPopup), never from a bundled asset or a hardcoded URL. */}
       <div className="updater-popup__body">
         <h2 id="updater-popup-title">{quitRecoverable ? t('updater.quitFailedTitle') : t('updater.ready')}</h2>
         {quitRecoverable && model.updateKind === 'payload'
