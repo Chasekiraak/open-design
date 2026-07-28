@@ -13,7 +13,6 @@ import {
   type ProjectFileVersion,
   type SocialShareRequest,
   type SocialShareResponse,
-  type WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
 import {
   anonymizeArtifactId,
@@ -188,27 +187,7 @@ import type {
 } from '../types';
 import { Icon } from './Icon';
 import { RemixIcon } from './RemixIcon';
-
-async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean> {
-  try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/status`);
-    if (response.ok) {
-      const body = (await response.json()) as { syncState?: unknown; ownerMemberId?: unknown };
-      if (typeof body.ownerMemberId === 'string' && body.ownerMemberId.trim()) return true;
-      if (typeof body.syncState === 'string' && body.syncState !== 'local_only') return true;
-    }
-  } catch {
-    // Fall through to the team-project directory below.
-  }
-  try {
-    const response = await fetch('/api/workspace/projects/team');
-    if (!response.ok) return false;
-    const body = (await response.json()) as WorkspaceTeamProjectsResponse;
-    return body.projects.some((project) => project.projectId === projectId);
-  } catch {
-    return false;
-  }
-}
+import { projectIsSharedWithWorkspace } from '../collab/project-shared-status';
 import { HandoffButton } from './HandoffButton';
 import { SocialShareGrid } from './SocialShareGrid';
 import { Toast } from './Toast';
@@ -3144,7 +3123,7 @@ function FileVersionManagerModal({
   const loadVersions = useCallback(async (preferredId?: string | null) => {
     setLoading(true);
     setError(null);
-    const result = await fetchProjectFileVersions(projectId, file.name);
+    const result = await fetchProjectFileVersions(projectId, file.name, workspaceContext);
     if (!result) {
       setError(tRef.current('fileViewer.versions.loadFailed'));
       setLoading(false);
@@ -3165,7 +3144,7 @@ function FileVersionManagerModal({
       null;
     setSelectedId(nextSelected?.id ?? null);
     setLoading(false);
-  }, [currentSource, file.name, projectId]);
+  }, [currentSource, file.name, projectId, workspaceContext]);
 
   useEffect(() => {
     void loadVersions();
@@ -6057,6 +6036,12 @@ function ReactComponentViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -6079,7 +6064,7 @@ function ReactComponentViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
@@ -7142,6 +7127,12 @@ function HtmlViewer({
     setPublishFailureKey(null);
     // Off-team the read can only 409; don't spend a request per file open on it.
     if (!canPublishPublic) return;
+    // A readonly viewer's publish surface is disabled outright, and the daemon
+    // answers its probe with a slow fixed 403 (2.1 s in the packaged trace) —
+    // skip it from the already-resolved capability state instead of asking and
+    // failing (Batch A §4.4). `viewerOnly` fails closed while ownership is
+    // still unknown, and this effect re-runs when it flips writable.
+    if (viewerOnly) return;
     void fetchProjectFilePublicPublication(projectId, file.name, workspaceContext)
       .then((publication) => {
         const current = publicFileIdentityRef.current;
@@ -7164,7 +7155,7 @@ function HtmlViewer({
     // loads asynchronously, so a team member's first render looks off-team. Without
     // it the hydrate would be skipped for good and an already-published file would
     // render as unpublished.
-  }, [projectId, file.name, canPublishPublic]);
+  }, [projectId, file.name, canPublishPublic, viewerOnly]);
 
   async function publishCurrentFilePublic() {
     if (viewerOnly || publishingPublicFile) return;
@@ -8327,19 +8318,44 @@ function HtmlViewer({
       setManualEditFrozenSource(livePreviewSource);
     }
   }, [manualEditMode, manualEditFrozenSource, livePreviewSource]);
-  // Capture / release the annotation snapshot at mode entry / exit. Captured
-  // once (the `=== null` guard), so a mid-pass file change can't slip a fresh
-  // snapshot in; cleared on exit so `previewSource` falls back to the latest
-  // live source and the deferred update lands in one clean render.
+  // Capture / release the annotation snapshot at mode entry / exit, and keep
+  // it following SETTLED content versions while the mode stays open.
+  //
+  // Two different "background changes" hit this freeze and they need opposite
+  // handling:
+  //   - Streaming repaints (`liveHtml` defined — an agent run rewriting the
+  //     artifact chunk by chunk) must stay invisible until mode exit; that
+  //     anti-thrash hold is the snapshot's original purpose.
+  //   - A settled on-disk version (raw lane, `liveHtml === undefined`) — e.g.
+  //     the daemon auto-pull landing an owner's published update into a
+  //     team-shared mirror — must atomically REPLACE the snapshot. Comment
+  //     mode is a read-only member's resting interaction state, so "deferred
+  //     until mode exit" degrades to "never": the slide rail (unfrozen
+  //     `deckVisualSource`) repaints with the new version while the canvas
+  //     pins the stale bytes indefinitely. The srcDoc transport already knows
+  //     how to remount cleanly when srcDoc changes under Comment mode (see
+  //     the boardMode branch in canActivateSrcDocTransport), so one snapshot
+  //     swap per settled version is a clean atomic repaint — old content
+  //     stays up until the new bytes have fully arrived.
+  //
+  // Cleared on exit so `previewSource` falls back to the latest live source
+  // and any still-deferred streaming update lands in one clean render.
   useEffect(() => {
     if (annotationFreezeActive) {
       if (annotationFrozenSource === null && livePreviewSource != null) {
+        setAnnotationFrozenSource(livePreviewSource);
+      } else if (
+        annotationFrozenSource !== null &&
+        liveHtml === undefined &&
+        livePreviewSource != null &&
+        livePreviewSource !== annotationFrozenSource
+      ) {
         setAnnotationFrozenSource(livePreviewSource);
       }
     } else if (annotationFrozenSource !== null) {
       setAnnotationFrozenSource(null);
     }
-  }, [annotationFreezeActive, annotationFrozenSource, livePreviewSource]);
+  }, [annotationFreezeActive, annotationFrozenSource, livePreviewSource, liveHtml]);
   const previewSource = (manualEditMode && manualEditFrozenSource !== null)
     ? manualEditFrozenSource
     : (annotationFreezeActive && annotationFrozenSource !== null)
@@ -13130,20 +13146,20 @@ function HtmlViewer({
             <button
               type="button"
               className={`chrome-action chrome-action-secondary chrome-action-icon od-tooltip${versionModalOpen ? ' is-active' : ''}`}
-              // Browsing history is a read action, not an edit — a viewer-only
-              // shared project should open this exactly like it already opens
-              // Present (recvq56vFjQKfT). `FileVersionManagerModal` already
-              // disables its own Restore button on `viewerOnly` (see
-              // `restoreDisabled` below); gating the ENTRY POINT on the same
-              // flag was the actual bug, and this button disagreed with the
-              // equivalent "more" menu item just below, which never had this
-              // gate.
-              disabled={source === null}
+              // Same disabled contract as the Share button directly below:
+              // `viewerOnly` + `viewerOnlyDisabledTitle`. A readonly shared
+              // project has no history to show a member in the first place —
+              // `.file-versions` is excluded from member mirrors, so the
+              // owner's real history never arrives — so an openable entry only
+              // ever led to an empty panel. This supersedes recvq56vFjQKfT,
+              // which had un-gated the entry on the reasoning that browsing
+              // history is a read action.
+              disabled={source === null || viewerOnly}
               aria-label={t('fileViewer.versions.entry')}
               aria-expanded={Boolean(versionModalOpen)}
-              data-tooltip={t('fileViewer.versions.entryFull')}
+              data-tooltip={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               data-tooltip-placement="bottom"
-              title={t('fileViewer.versions.entryFull')}
+              title={viewerOnly ? viewerOnlyDisabledTitle : t('fileViewer.versions.entryFull')}
               onClick={() => {
                 // The version history is a floating panel now, not a modal, so
                 // the toolbar icon is a toggle: a second click dismisses it.

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WorkspaceCollabContext } from '@open-design/contracts';
+import type {
+  WorkspaceBillingResponse,
+  WorkspaceCollabContext,
+} from '@open-design/contracts';
 
 import { resetCoalescedGet } from '../src/lib/coalesced-get';
 import {
@@ -12,6 +15,8 @@ import {
   shouldRefreshWorkspaceBilling,
   useWorkspaceBilling,
   useWorkspaceBillingResponse,
+  workspaceBillingBalanceUsd,
+  workspaceBillingSnapshotForContext,
 } from '../src/collab/useWorkspaceContext';
 
 function teamContext(workspaceId: string): WorkspaceCollabContext {
@@ -42,11 +47,37 @@ function billingResponse(workspaceId: string, balanceUsd: string) {
       workspaceId,
       workspaceMemberId: `member-${workspaceId}`,
       balanceUsd,
-      billingScopeVersion: 2,
+      billingScopeVersion: 2 as const,
       expiresAt: null,
       updatedAt: '2026-07-26T12:00:00Z',
     },
   };
+}
+
+function billingInterestResponse(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Response | null {
+  const url = String(input);
+  if (!url.startsWith('/api/workspace/billing/interests/')) return null;
+  if (init?.method === 'DELETE') {
+    return new Response(JSON.stringify({ ok: true, released: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  const body = JSON.parse(String(init?.body)) as { generation: string };
+  const clientId = decodeURIComponent(
+    new URL(url, 'http://open-design.test').pathname.split('/').at(-1)!,
+  );
+  return new Response(JSON.stringify({
+    clientId,
+    acceptedGeneration: body.generation,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 type EventSourceListener = (event: unknown) => void;
@@ -79,6 +110,125 @@ class MockWorkspaceEventSource {
 }
 
 describe('useWorkspaceBilling explicit scope', () => {
+  it.each(['fresh', 'stale', 'refreshing', 'error'] as const)(
+    'stops consuming last-good money and plan after a %s runtime reaches hard TTL',
+    (status) => {
+      const response = {
+        ...billingResponse('workspace-a', '1.25'),
+        workspaceSnapshot: {
+          schemaVersion: 1 as const,
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          billingScopeVersion: 2 as const,
+          billing: { billingState: 'active', planId: 'team_pro' },
+          wallet: {
+            balanceUsd: '1.25',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+          revisions: { billing: '1', wallet: '1' },
+        },
+        workspaceRuntime: {
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          status,
+          revision: '8',
+          observedAt: '2020-01-01T00:00:00.000Z',
+          softExpiresAt: '2020-01-01T00:00:30.000Z',
+          hardExpiresAt: '2020-01-01T00:02:00.000Z',
+          retryAt: null,
+          errorCode: status === 'error' ? 'workspace_billing_unavailable' : null,
+          reason: status === 'error' ? 'bounded-retry' : 'poll-floor',
+          sourceGapDetected: false,
+        },
+      } satisfies WorkspaceBillingResponse;
+
+      expect(workspaceBillingBalanceUsd(
+        response,
+        teamContext('workspace-a'),
+      )).toBeNull();
+      expect(workspaceBillingSnapshotForContext(
+        response,
+        teamContext('workspace-a'),
+      )).toBeNull();
+    },
+  );
+
+  it('expires runtime-managed money and plan on a hard-expiry timer and revalidates', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-27T00:00:00.000Z'));
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls > 1) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_billing_unavailable' }),
+              { status: 503, headers: { 'content-type': 'application/json' } },
+            );
+          }
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            workspaceSnapshot: {
+              schemaVersion: 1,
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              billingScopeVersion: 2,
+              billing: { billingState: 'active', planId: 'team_pro' },
+              wallet: {
+                balanceUsd: '1.25',
+                expiresAt: null,
+                updatedAt: '2026-07-27T00:00:00.000Z',
+              },
+              revisions: { billing: '1', wallet: '1' },
+            },
+            workspaceRuntime: {
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              status: 'fresh',
+              revision: '8',
+              observedAt: '2026-07-27T00:00:00.000Z',
+              softExpiresAt: '2026-07-27T00:00:30.000Z',
+              hardExpiresAt: '2026-07-27T00:00:01.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'explicit-billing-read',
+              sourceGapDetected: false,
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await vi.waitFor(() => {
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25');
+      expect(hook.result.current?.workspaceSnapshot?.billing.planId).toBe('team_pro');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_001);
+    });
+    await vi.waitFor(() => expect(billingCalls).toBe(2));
+    expect(hook.result.current?.workspaceBalance).toBeNull();
+    expect(hook.result.current?.workspaceSnapshot).toBeNull();
+  });
+
   beforeEach(() => {
     window.sessionStorage.clear();
     resetCoalescedGet();
@@ -90,6 +240,7 @@ describe('useWorkspaceBilling explicit scope', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     window.sessionStorage.clear();
     resetCoalescedGet();
@@ -230,6 +381,239 @@ describe('useWorkspaceBilling explicit scope', () => {
     expect(billingCalls.length - beforeAliases).toBe(1);
   });
 
+  it('keeps ambient B and explicit project A in one renderer interest set', async () => {
+    const projectA = teamContext('workspace-a');
+    let ambientBalance = '1.25';
+    const observedClientIds = new Map<string, string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
+        if (url === '/api/workspace/context') {
+          return new Response(
+            JSON.stringify({ context: teamContext('workspace-b') }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          const workspaceId = new URL(
+            url,
+            'http://open-design.test',
+          ).searchParams.get('workspaceId')!;
+          const headers = new Headers(init?.headers);
+          const clientId =
+            headers.get('x-od-workspace-runtime-client-id') ?? '';
+          observedClientIds.set(workspaceId, clientId);
+          return new Response(
+            JSON.stringify(billingResponse(
+              workspaceId,
+              workspaceId === 'workspace-b' ? ambientBalance : '8.50',
+            )),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => ({
+      ambient: useWorkspaceBillingResponse(),
+      project: useWorkspaceBillingResponse({
+        context: projectA,
+        loading: false,
+        revision: 'project-a',
+      }),
+    }));
+    await waitFor(() => {
+      expect(hook.result.current.ambient?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+      expect(hook.result.current.project?.workspaceBalance?.balanceUsd).toBe(
+        '8.50',
+      );
+    });
+    expect(observedClientIds.get('workspace-a')).toBeTruthy();
+    expect(observedClientIds.get('workspace-b')).toBeTruthy();
+    expect(observedClientIds.get('workspace-a')).toBe(
+      observedClientIds.get('workspace-b'),
+    );
+
+    ambientBalance = '3.75';
+    act(() => {
+      for (const source of MockWorkspaceEventSource.instances) {
+        source.dispatch('wallet-balance-changed', {
+          type: 'wallet-balance-changed',
+          workspaceId: 'workspace-b',
+          workspaceMemberId: 'member-workspace-b',
+          revision: 'wallet-b-2',
+        });
+      }
+    });
+    await waitFor(() => {
+      expect(hook.result.current.ambient?.workspaceBalance?.balanceUsd).toBe(
+        '3.75',
+      );
+    });
+    expect(hook.result.current.project?.workspaceBalance?.balanceUsd).toBe(
+      '8.50',
+    );
+  });
+
+  it('idles after the final same-scope consumer unmounts and reactivates on remount', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const context = teamContext('workspace-a');
+    const traffic: Array<{
+      kind: 'interest' | 'billing';
+      method: string;
+      generation: string;
+    }> = [];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/workspace/billing/interests/')) {
+          if (init?.method === 'DELETE') {
+            traffic.push({
+              kind: 'interest',
+              method: 'DELETE',
+              generation:
+                new URL(url, 'http://open-design.test').searchParams.get(
+                  'generation',
+                ) ?? '',
+            });
+            return new Response(JSON.stringify({ ok: true, released: true }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          const body = JSON.parse(String(init?.body)) as {
+            generation: string;
+          };
+          traffic.push({
+            kind: 'interest',
+            method: init?.method ?? 'GET',
+            generation: body.generation,
+          });
+          const clientId = decodeURIComponent(
+            new URL(url, 'http://open-design.test').pathname.split('/').at(-1)!,
+          );
+          return new Response(JSON.stringify({
+            clientId,
+            acceptedGeneration: body.generation,
+            leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          traffic.push({
+            kind: 'billing',
+            method: init?.method ?? 'GET',
+            generation:
+              new Headers(init?.headers).get(
+                'x-od-workspace-runtime-generation',
+              ) ?? '',
+          });
+          return new Response(
+            JSON.stringify(billingResponse('workspace-a', '1.25')),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const firstMount = renderHook(() => ({
+      first: useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+      second: useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+    }));
+    await vi.waitFor(() => {
+      expect(firstMount.result.current.first?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+      expect(firstMount.result.current.second?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+    });
+    expect(traffic.filter(({ kind }) => kind === 'billing')).toEqual([
+      { kind: 'billing', method: 'GET', generation: '1' },
+    ]);
+    expect(
+      traffic.filter(
+        ({ kind, method }) => kind === 'interest' && method === 'PUT',
+      ),
+    ).toEqual([{ kind: 'interest', method: 'PUT', generation: '1' }]);
+
+    firstMount.unmount();
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(
+          ({ kind, method }) => kind === 'interest' && method === 'DELETE',
+        ),
+      ).toEqual([{ kind: 'interest', method: 'DELETE', generation: '2' }]);
+    });
+    const billingReadsAtIdle = traffic.filter(
+      ({ kind }) => kind === 'billing',
+    ).length;
+    const idleStartedAt = traffic.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_000);
+    });
+    expect(traffic.filter(({ kind }) => kind === 'billing')).toHaveLength(
+      billingReadsAtIdle,
+    );
+    expect(traffic.slice(idleStartedAt)).toEqual([]);
+
+    const remountStartedAt = traffic.length;
+    const remount = renderHook(() =>
+      useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(({ kind }) => kind === 'billing'),
+      ).toHaveLength(billingReadsAtIdle + 1);
+    });
+    expect(traffic.slice(remountStartedAt)).toEqual([
+      { kind: 'interest', method: 'PUT', generation: '3' },
+      { kind: 'billing', method: 'GET', generation: '3' },
+    ]);
+    remount.unmount();
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(
+          ({ kind, method }) => kind === 'interest' && method === 'DELETE',
+        ),
+      ).toEqual([
+        { kind: 'interest', method: 'DELETE', generation: '2' },
+        { kind: 'interest', method: 'DELETE', generation: '4' },
+      ]);
+    });
+  });
+
   it('rejects a late response from the first A after switching A to B to A', async () => {
     let currentContext = teamContext('workspace-a');
     let billingACalls = 0;
@@ -361,6 +745,131 @@ describe('useWorkspaceBilling explicit scope', () => {
     );
   }, 7_000);
 
+  it('keeps daemon-authored last-good state on a retryable directory outage', async () => {
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls === 2) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_directory_unavailable' }),
+              {
+                status: 503,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', '1.25'),
+            workspaceRuntime: {
+              workspaceId: 'workspace-a',
+              workspaceMemberId: 'member-workspace-a',
+              status: 'fresh',
+              revision: '7',
+              observedAt: '2026-07-27T00:00:00.000Z',
+              softExpiresAt: '2099-07-27T00:00:30.000Z',
+              hardExpiresAt: '2099-07-27T00:02:00.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'explicit-billing-read',
+              sourceGapDetected: false,
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25'));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('billing-changed', {
+        type: 'billing-changed',
+        at: 3,
+      });
+    });
+
+    await waitFor(() => {
+      expect(billingCalls).toBe(2);
+      expect(hook.result.current).toMatchObject({
+        workspaceBalance: {
+          workspaceId: 'workspace-a',
+          balanceUsd: '1.25',
+        },
+        workspaceRuntime: {
+          workspaceId: 'workspace-a',
+          workspaceMemberId: 'member-workspace-a',
+          status: 'fresh',
+          errorCode: null,
+        },
+      });
+    });
+  });
+
+  it('clears same-scope last-good money on a confirmed 403 revocation', async () => {
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          if (billingCalls === 2) {
+            return new Response(
+              JSON.stringify({ error: 'workspace_not_authorized' }),
+              {
+                status: 403,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+          return new Response(
+            JSON.stringify(billingResponse('workspace-a', '1.25')),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await waitFor(() => expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25'));
+
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('billing-changed', {
+        type: 'billing-changed',
+        at: 4,
+      });
+    });
+
+    await waitFor(() => {
+      expect(billingCalls).toBe(2);
+      expect(hook.result.current).toBeNull();
+    });
+  });
+
   it('projects the authoritative workspace plan over stale account metadata', async () => {
     vi.stubGlobal(
       'fetch',
@@ -420,6 +929,8 @@ describe('useWorkspaceBilling explicit scope', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
         if (url === '/api/workspace/context') {
           return new Response(JSON.stringify({ context: currentContext }), {
             status: 200,
@@ -497,6 +1008,8 @@ describe('useWorkspaceBilling explicit scope', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        const interestResponse = billingInterestResponse(input, init);
+        if (interestResponse) return interestResponse;
         if (url === '/api/workspace/context') {
           return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
             status: 200,
@@ -577,6 +1090,193 @@ describe('useWorkspaceBilling explicit scope', () => {
       revision: '7',
       reason: 'poll-floor',
     }));
+  });
+
+  it('keeps the browser safety floor only until daemon runtime metadata appears', async () => {
+    vi.useFakeTimers();
+    let billingCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-a') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls += 1;
+          return new Response(JSON.stringify({
+            ...billingResponse('workspace-a', String(billingCalls)),
+            ...(billingCalls > 1
+              ? {
+                  workspaceRuntime: {
+                    workspaceId: 'workspace-a',
+                    workspaceMemberId: 'member-workspace-a',
+                    status: 'fresh',
+                    revision: String(billingCalls),
+                    observedAt: '2026-07-27T00:00:00.000Z',
+                    retryAt: null,
+                    errorCode: null,
+                    reason: 'poll-floor',
+                    sourceGapDetected: false,
+                  },
+                }
+              : {}),
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() => useWorkspaceBillingResponse());
+    await vi.waitFor(() => expect(billingCalls).toBe(1));
+    expect(hook.result.current?.workspaceRuntime).toBeUndefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    await vi.waitFor(() => expect(billingCalls).toBe(2));
+    expect(hook.result.current?.workspaceRuntime?.status).toBe('fresh');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(billingCalls).toBe(2);
+  });
+
+  it('keeps explicit project billing pinned while ambient navigation is elsewhere', async () => {
+    let balance = '13.10';
+    const billingCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-b') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls.push(url);
+          const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+          if (workspaceId !== 'workspace-a') {
+            return new Response(JSON.stringify({ error: 'wrong_scope' }), { status: 409 });
+          }
+          return new Response(JSON.stringify(billingResponse('workspace-a', balance)), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() =>
+      useWorkspaceBillingResponse({
+        context: teamContext('workspace-a'),
+        revision: 'project-a:workspace-a',
+      }),
+    );
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('13.10'),
+    );
+    expect(billingCalls).toEqual([
+      '/api/workspace/billing?scope=workspace&workspaceId=workspace-a',
+    ]);
+
+    const beforeForeign = billingCalls.length;
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('wallet-balance-changed', {
+        type: 'wallet-balance-changed',
+        workspaceId: 'workspace-b',
+        workspaceMemberId: 'member-workspace-b',
+        revision: 'foreign-b',
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(billingCalls).toHaveLength(beforeForeign);
+
+    balance = '14.20';
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('wallet-balance-changed', {
+        type: 'wallet-balance-changed',
+        workspaceId: 'workspace-a',
+        workspaceMemberId: 'member-workspace-a',
+        revision: 'project-a-wallet',
+      });
+    });
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('14.20'),
+    );
+  });
+
+  it('moves the explicit project cache key when its authoritative member changes', async () => {
+    const billingMembers: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-b') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          const memberId = billingMembers.length === 0 ? 'member-old' : 'member-new';
+          billingMembers.push(memberId);
+          const response = billingResponse(
+            'workspace-a',
+            memberId === 'member-old' ? '1.00' : '2.00',
+          );
+          response.workspaceBalance.workspaceMemberId = memberId;
+          return new Response(JSON.stringify(response), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(
+      ({ context }) =>
+        useWorkspaceBillingResponse({
+          context,
+          revision: 'project-a:workspace-a',
+        }),
+      {
+        initialProps: {
+          context: {
+            ...teamContext('workspace-a'),
+            workspaceMemberId: 'member-old',
+          },
+        },
+      },
+    );
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.workspaceMemberId).toBe('member-old'),
+    );
+
+    hook.rerender({
+      context: {
+        ...teamContext('workspace-a'),
+        workspaceMemberId: 'member-new',
+      },
+    });
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance).toMatchObject({
+        workspaceMemberId: 'member-new',
+        balanceUsd: '2.00',
+      }),
+    );
+    expect(billingMembers).toEqual(['member-old', 'member-new']);
   });
 
   it('keeps B when the initial A context response arrives after the explicit switch', async () => {
@@ -689,6 +1389,133 @@ describe('useWorkspaceBilling explicit scope', () => {
       expect(hook.result.current?.summary).toBeNull();
       expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('1.25');
     });
+  });
+
+  it('keeps project billing pinned to its explicit workspace while ambient navigation is elsewhere', async () => {
+    let balance = '13.10';
+    const billingCalls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-b') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          billingCalls.push(url);
+          const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+          if (workspaceId !== 'workspace-a') {
+            return new Response(JSON.stringify({ error: 'wrong scope' }), { status: 409 });
+          }
+          return new Response(JSON.stringify(billingResponse('workspace-a', balance)), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(() =>
+      useWorkspaceBillingResponse({
+        context: teamContext('workspace-a'),
+        revision: 'project-a:workspace-a',
+      }),
+    );
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('13.10'),
+    );
+    expect(billingCalls).toEqual([
+      '/api/workspace/billing?scope=workspace&workspaceId=workspace-a',
+    ]);
+
+    const beforeForeign = billingCalls.length;
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('wallet-balance-changed', {
+        type: 'wallet-balance-changed',
+        workspaceId: 'workspace-b',
+        workspaceMemberId: 'member-workspace-b',
+        revision: 'foreign-b',
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(billingCalls).toHaveLength(beforeForeign);
+
+    balance = '14.20';
+    act(() => {
+      MockWorkspaceEventSource.instances[0]!.dispatch('wallet-balance-changed', {
+        type: 'wallet-balance-changed',
+        workspaceId: 'workspace-a',
+        workspaceMemberId: 'member-workspace-a',
+        revision: 'project-a-wallet',
+      });
+    });
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.balanceUsd).toBe('14.20'),
+    );
+  });
+
+  it('moves the project billing cache key when the exact workspace member changes', async () => {
+    const billingMembers: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context: teamContext('workspace-b') }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          const memberId = billingMembers.length === 0 ? 'member-old' : 'member-new';
+          billingMembers.push(memberId);
+          const response = billingResponse('workspace-a', memberId === 'member-old' ? '1.00' : '2.00');
+          response.workspaceBalance.workspaceMemberId = memberId;
+          return new Response(JSON.stringify(response), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const hook = renderHook(
+      ({ context }) =>
+        useWorkspaceBillingResponse({
+          context,
+          revision: 'project-a:workspace-a',
+        }),
+      {
+        initialProps: {
+          context: {
+            ...teamContext('workspace-a'),
+            workspaceMemberId: 'member-old',
+          },
+        },
+      },
+    );
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance?.workspaceMemberId).toBe('member-old'),
+    );
+
+    hook.rerender({
+      context: {
+        ...teamContext('workspace-a'),
+        workspaceMemberId: 'member-new',
+      },
+    });
+    await waitFor(() =>
+      expect(hook.result.current?.workspaceBalance).toMatchObject({
+        workspaceMemberId: 'member-new',
+        balanceUsd: '2.00',
+      }),
+    );
+    expect(billingMembers).toEqual(['member-old', 'member-new']);
   });
 
   it('uses the explicit account route for a personal workspace', async () => {

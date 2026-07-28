@@ -5,16 +5,29 @@
 //
 // Polling-based by design (live cursors were cut; content is polled — the spec).
 
-import type { CollabMemberRole, CollabPresenceMember, ProjectSyncState } from '@open-design/contracts';
+import type {
+  CollabMemberRole,
+  CollabPresenceMember,
+  ProjectContentTransferState,
+  ProjectSyncState,
+} from '@open-design/contracts';
 
 // Presence identity is the shared contract DTO; re-export so collab consumers
 // keep importing it from the client module.
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 export type { CollabPresenceMember };
 
 export interface CollabSnapshot {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
   materializedVersion: number | null;
+  contentTransferState: ProjectContentTransferState | null;
+  /**
+   * The daemon has only an unmaterialized shared-project placeholder for this
+   * project, so its local file list is provably not the project's content. See
+   * `CollabSyncStatusResponse.awaitingFirstMaterialization`.
+   */
+  awaitingFirstMaterialization: boolean;
   /** Monotonic trigger incremented after every successful status response. */
   statusPollGeneration: number;
   /**  project sync state; null until the first status poll lands. */
@@ -69,12 +82,24 @@ export class CollabClient {
     present: [],
     publishedVersion: null,
     materializedVersion: null,
+    contentTransferState: null,
+    awaitingFirstMaterialization: false,
     statusPollGeneration: 0,
     syncState: null,
     ownerMemberId: null,
     ownerDisplayName: null,
     ownerRole: null,
   };
+  /**
+   * Local ordering fences for status requests racing each other and project
+   * SSE. Server timestamps cannot safely order states across a daemon restart,
+   * and a null tombstone has no timestamp at all. Therefore every status
+   * response, concrete or null, may change transfer state only when it is the
+   * newest request issued and no local transfer update landed while it was in
+   * flight.
+   */
+  private contentTransferStateGeneration = 0;
+  private contentTransferStatusRequestGeneration = 0;
   private running = false;
   private onVisibilityChange: (() => void) | null = null;
 
@@ -188,29 +213,87 @@ export class CollabClient {
   }
 
   async pollStatus(): Promise<void> {
+    const statusRequestGeneration =
+      ++this.contentTransferStatusRequestGeneration;
+    const transferGenerationAtStart =
+      this.contentTransferStateGeneration;
     try {
       const wasShared = this.isSharedProject();
+      // Deliberately NOT the shared single-flight read: the poll's transfer
+      // fences (`statusRequestGeneration` / `transferGenerationAtStart`) order
+      // responses by request START time. Joining an already-in-flight GET
+      // would let a poll issued AFTER a restart tombstone receive a body
+      // captured BEFORE it and apply pre-restart transfer state over the
+      // tombstone. One-shot consumers without ordering fences share
+      // `fetchProjectCollabStatus` below instead.
       const body = await this.get('/collab/status');
       const version = typeof body?.publishedVersion === 'number' ? body.publishedVersion : null;
       const materializedVersion =
         typeof body?.materializedVersion === 'number' ? body.materializedVersion : null;
+      const contentTransferState =
+        parseProjectContentTransferState(body?.contentTransferState);
+      const reportsContentTransferState =
+        body != null
+        && typeof body === 'object'
+        && Object.prototype.hasOwnProperty.call(
+          body,
+          'contentTransferState',
+        );
       const syncState = (body?.syncState as ProjectSyncState | undefined) ?? null;
       const ownerMemberId = typeof body?.ownerMemberId === 'string' ? body.ownerMemberId : null;
       const ownerDisplayName = typeof body?.ownerDisplayName === 'string' ? body.ownerDisplayName : null;
       const ownerRole = isCollabMemberRole(body?.ownerRole) ? body.ownerRole : null;
-      this.update({
+      const next: Partial<CollabSnapshot> = {
         publishedVersion: version,
         materializedVersion,
+        awaitingFirstMaterialization: body?.awaitingFirstMaterialization === true,
         statusPollGeneration: this.snapshot.statusPollGeneration + 1,
         syncState,
         ownerMemberId,
         ownerDisplayName,
         ownerRole,
-      });
+      };
+      const transferResponseIsCurrent =
+        reportsContentTransferState
+        && statusRequestGeneration
+          === this.contentTransferStatusRequestGeneration
+        && transferGenerationAtStart
+          === this.contentTransferStateGeneration;
+      if (transferResponseIsCurrent) {
+        if (
+          contentTransferState
+          && (
+            this.snapshot.contentTransferState == null
+            || contentTransferState.updatedAt
+              >= this.snapshot.contentTransferState.updatedAt
+          )
+        ) {
+          next.contentTransferState = contentTransferState;
+        } else if (body?.contentTransferState == null) {
+          next.contentTransferState = null;
+        }
+        // Even an invalid or timestamp-older concrete response is a settled
+        // request-generation tombstone. Older in-flight requests must not
+        // become eligible merely because this response made no visible patch.
+        this.contentTransferStateGeneration += 1;
+      }
+      this.update(next);
       if (!wasShared && this.isSharedProject()) void this.heartbeat();
     } catch (error) {
       this.onError?.(error);
     }
+  }
+
+  /**
+   * Apply the project SSE lifecycle update immediately. Timestamp ordering
+   * prevents a slower status response from restoring an already-finished
+   * download badge.
+   */
+  applyContentTransferState(state: ProjectContentTransferState): void {
+    const current = this.snapshot.contentTransferState;
+    if (current && current.updatedAt > state.updatedAt) return;
+    this.contentTransferStateGeneration += 1;
+    this.update({ contentTransferState: state });
   }
 
   private async leave(): Promise<void> {
@@ -280,6 +363,75 @@ export class CollabClient {
   }
 }
 
+/**
+ * Single-flight `/collab/status` read for one-shot consumers without local
+ * ordering fences (shared-status checks in FileWorkspace/FileViewer and
+ * similar display reads, Batch A §4.3). CollabClient's poll loop does NOT use
+ * this — see the comment in `pollStatus`. Short burst TTL only; call
+ * `evictProjectCollabStatusRead` when an authoritative change event demands a
+ * guaranteed-fresh read.
+ */
+export function fetchProjectCollabStatus(
+  projectId: string,
+  options?: { baseUrl?: string; fetchImpl?: typeof fetch },
+): Promise<Record<string, unknown> | null> {
+  const baseUrl = options?.baseUrl ?? '';
+  const fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  return coalescedGet(`collab-status:${baseUrl}|${projectId}`, async () => {
+    const response = await fetchImpl(
+      `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/collab/status`,
+    );
+    if (!response.ok) {
+      throw new Error(`collab GET /collab/status failed: ${response.status}`);
+    }
+    return (await response.json()) as Record<string, unknown>;
+  });
+}
+
+/** Thin invalidation for the shared status read (authoritative SSE change). */
+export function evictProjectCollabStatusRead(projectId: string, baseUrl = ''): void {
+  evictCoalescedGet(`collab-status:${baseUrl}|${projectId}`);
+}
+
 function isCollabMemberRole(value: unknown): value is CollabMemberRole {
   return value === 'owner' || value === 'admin' || value === 'member';
+}
+
+function parseProjectContentTransferState(
+  value: unknown,
+): ProjectContentTransferState | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.status !== 'downloading'
+    && candidate.status !== 'idle'
+  ) {
+    return null;
+  }
+  if (
+    typeof candidate.startedAt !== 'number'
+    || !Number.isFinite(candidate.startedAt)
+    || typeof candidate.updatedAt !== 'number'
+    || !Number.isFinite(candidate.updatedAt)
+  ) {
+    return null;
+  }
+  if (
+    candidate.version !== undefined
+    && (
+      typeof candidate.version !== 'number'
+      || !Number.isSafeInteger(candidate.version)
+      || candidate.version < 0
+    )
+  ) {
+    return null;
+  }
+  return {
+    status: candidate.status,
+    ...(typeof candidate.version === 'number'
+      ? { version: candidate.version }
+      : {}),
+    startedAt: candidate.startedAt,
+    updatedAt: candidate.updatedAt,
+  };
 }

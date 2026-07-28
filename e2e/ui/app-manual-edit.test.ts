@@ -382,7 +382,7 @@ test('[P1] powered WebGL HTML artifacts open through the isolated preview route'
   await expect(frame.getByTestId('powered-status')).toContainText(/isolated|not-isolated/);
 });
 
-test('[P1] HTML preview toolbar exposes screenshot, comments, mark, and edit workflows', async ({ page }) => {
+test('[P1] HTML preview toolbar exposes comments, mark, and edit workflows', async ({ page }) => {
   test.setTimeout(60_000);
 
   await page.addInitScript(() => {
@@ -412,11 +412,9 @@ test('[P1] HTML preview toolbar exposes screenshot, comments, mark, and edit wor
   await expect(artifactPreview(page)).toBeVisible();
   await expect(artifactPreviewFrame(page).getByRole('heading', { name: 'Original Hero' })).toBeVisible();
 
-  await page.getByTestId('screenshot-copy-button').click();
-  await expect(
-    page.getByText(/Screenshot copied to clipboard|Browser blocked clipboard access|Could not capture the preview|Preview is still loading/),
-  ).toBeVisible();
-
+  // The screenshot step is gone: `screenshot-copy-button` no longer exists in
+  // apps/web, and FileViewer's own suite asserts its absence. Comments, mark
+  // and edit below are still live, so the rest of this spec stands.
   await page.getByTestId('board-mode-toggle').click();
   await expect(page.getByTestId('board-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
   await artifactPreviewFrame(page).locator('[data-od-id="hero-title"]').click();
@@ -1327,16 +1325,14 @@ async function openDesignFile(page: Page, fileName: string) {
       await fileTabButton.click();
     }
   } else {
-    const fileButton = page.getByRole('button', { name: filePattern }).first();
-    await fileButton.click();
-    if (!(await preview.isVisible().catch(() => false))) {
-      const openButton = page.getByTestId('design-file-preview').getByRole('button', { name: 'Open' });
-      if (await openButton.isVisible().catch(() => false)) {
-        await openButton.click();
-      } else {
-        await fileButton.dblclick();
-      }
-    }
+    // #5517 deleted the design-file preview pane and its "Open" button: the
+    // Design Files row's primary target opens the file in a workspace tab on
+    // a single click, so the preview renders straight away.
+    const fileRow = page
+      .locator(`[data-testid^="design-file-row-"][data-testid$="${fileName}"]`)
+      .first();
+    await expect(fileRow).toBeVisible();
+    await fileRow.getByRole('button').first().click();
   }
   await expect(preview).toBeVisible();
 }

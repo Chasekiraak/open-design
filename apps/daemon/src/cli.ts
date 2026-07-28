@@ -217,7 +217,7 @@ const PROJECT_STRING_FLAGS = new Set([
   'daemon-url', 'name', 'skill', 'design-system', 'plugin', 'metadata-json',
   'pending-prompt', 'project', 'conversation', 'message', 'prompt',
   'prompt-file', 'path', 'dir', 'as',
-  'agent', 'model', 'snapshot-id', 'inputs', 'grant-caps', 'editor',
+  'agent', 'model', 'service-tier', 'snapshot-id', 'inputs', 'grant-caps', 'editor',
   'title', 'label', 'against', 'seed-from', 'fork-after', 'mode',
   'source',
 ]);
@@ -785,6 +785,10 @@ Options:
       const account = merged?.user?.email ?? merged?.user?.id ?? '-';
       console.log(`AMR account\t${account}`);
       console.log(`Profile\t${merged?.profile ?? '-'}`);
+      // Only present when this build was given a vela web console origin
+      // (OD_VELA_WEB_URL); printing it makes "which backend is this app
+      // pointed at" answerable without reading the packaged config.
+      if (merged?.consoleOrigin) console.log(`Console\t${merged.consoleOrigin}`);
       if (merged?.account?.plan) console.log(`Plan\t${merged.account.plan}`);
       if (merged?.account?.balanceUsd) {
         console.log(`Wallet balance\t$${merged.account.balanceUsd}`);
@@ -980,6 +984,11 @@ async function runCollab(args) {
       return emit(body, () => {
         console.log(`publishedVersion\t${body?.publishedVersion ?? '-'}`);
         console.log(`materializedVersion\t${body?.materializedVersion ?? '-'}`);
+        // Whether this daemon's local files are the project's content at all:
+        // true means it holds only an unmaterialized shared-project
+        // placeholder, so an `od files list` here would report an empty
+        // project that is really still downloading.
+        console.log(`awaitingFirstMaterialization\t${body?.awaitingFirstMaterialization === true}`);
         console.log(`syncState\t${body?.syncState ?? '-'}`);
       });
     }
@@ -6822,9 +6831,9 @@ async function runRun(args) {
     console.log(`Usage:
   od run start --project <projectId> [--conversation <id>] [--message "<text>"]
                [--plugin <id>] [--inputs <json>] [--grant-caps a,b]
-               [--agent claude|codex|opencode] [--model <id>] [--follow] [--json]
+               [--agent claude|codex|opencode] [--model <id>] [--service-tier <id>] [--follow] [--json]
   od run redesign [--path <folder>] [--message "<text>" | --prompt-file <path|->]
-               [--agent claude] [--model <id>] [--follow] [--json]
+               [--agent claude] [--model <id>] [--service-tier <id>] [--follow] [--json]
   od run watch  <runId>                     ND-JSON event stream on stdout.
   od run cancel <runId>                     Request cancellation.
   od run continue <runId> [--follow]        Continue a resumable failed run.
@@ -7007,6 +7016,7 @@ Common options:
         designSystemId,
         ...(flags.agent ? { agentId: flags.agent } : {}),
         ...(flags.model ? { model: flags.model } : {}),
+        ...(flags['service-tier'] ? { serviceTier: flags['service-tier'] } : {}),
       };
       const data = await postJsonToDaemon(base, '/api/runs', body);
       if (flags.json && !flags.follow) {
@@ -7034,6 +7044,7 @@ Common options:
       if (flags['design-system']) body.designSystemId = flags['design-system'];
       if (flags.agent) body.agentId = flags.agent;
       if (flags.model) body.model = flags.model;
+      if (flags['service-tier']) body.serviceTier = flags['service-tier'];
       if (flags.inputs) {
         try { body.pluginInputs = JSON.parse(flags.inputs); } catch (err) {
           console.error(`--inputs must be valid JSON: ${err.message}`);

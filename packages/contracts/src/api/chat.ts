@@ -85,6 +85,7 @@ export interface ChatRequest {
   commentAttachments?: ChatCommentAttachment[];
   model?: string | null;
   reasoning?: string | null;
+  serviceTier?: string | null;
   /**
    * Run-scoped BYOK provider credentials for the daemon-backed OpenCode
    * adapter. The daemon must not persist this object; it is translated into
@@ -301,6 +302,7 @@ export interface McpRunCreateRequest {
   skillId?: string;
   pluginId?: string;
   model?: string;
+  serviceTier?: string;
   pluginInputs?: Record<string, unknown>;
   mediaExecution?: MediaExecutionPolicy;
   toolBundle?: RunScopedToolBundle;
@@ -608,7 +610,14 @@ export type PersistedAgentEvent =
       refreshedSourceCount?: number;
       error?: string;
     }
-  | { kind: 'tool_use'; id: string; name: string; input: unknown }
+  | {
+      kind: 'tool_use';
+      id: string;
+      name: string;
+      input: unknown;
+      /** Optional wall-clock ms when the tool first started (e.g. ACP first frame). */
+      startedAt?: number;
+    }
   | { kind: 'tool_result'; toolUseId: string; content: string; isError: boolean }
   | {
       kind: 'diagnostic';

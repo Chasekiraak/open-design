@@ -140,13 +140,30 @@ test('[P2] captures the home staged attachment surface', async ({ page }) => {
 
 test('[P2] captures the home plugin use staged surface', async ({ page }) => {
   await configureVisualPage(page);
+  // #5517 removed Home's own plugin grid: `PluginsHomeSection` (and with it
+  // `plugins-home-pill-category-*` / `plugins-home__card`) now lives only in
+  // the unrendered legacy `PluginsView`; `EntryShell` mounts
+  // `ExtensionsMarketplace` on /plugins instead. The journey this capture
+  // exists for is unchanged — narrow the catalog, open the plugin's details,
+  // Use it — and Use still hands the plugin to Home's hero, which is the
+  // state being captured.
   const plugins = await openVisualPluginsCatalog(page);
 
-  const home = page.getByTestId('entry-view-home');
-  await home.getByTestId('plugins-home-pill-category-prototype').click();
-  const card = home.locator('article.plugins-home__card[data-plugin-id="visual-prototype-starter"]');
+  // Category chips are derived from the same `extractCategories` taxonomy the
+  // old Home pills used, so the fixture still lands under Prototype; the chips
+  // carry no per-slug testid, only the taxonomy's `Prototype` label.
+  await plugins
+    .getByTestId('plugins-category-tags')
+    .getByRole('button', { name: 'Prototype', exact: true })
+    .click();
+  // The filter has to really bite: Deck Writer is the deck-mode fixture.
+  await expect(pluginMarketplaceCard(plugins, 'Deck Writer')).toHaveCount(0);
+
+  const card = plugins.getByTestId('plugins-card-visual-prototype-starter');
   await expect(card).toBeVisible();
-  await home.getByTestId('plugins-home-details-visual-prototype-starter').click({ force: true });
+  // The row's own "Try it" button stops propagation, so target the row body —
+  // clicking the card anywhere else is what opens the details modal.
+  await card.locator('.plugin-marketplace__row-main').click();
   await expect(page.getByRole('dialog', { name: /Prototype Starter details/i })).toBeVisible();
   await page.getByTestId('plugin-details-use-visual-prototype-starter').click();
   await expect(page.getByTestId('home-hero-active-plugin')).toContainText('Prototype Starter');
@@ -187,8 +204,9 @@ async function openVisualPluginsCatalog(page: import('@playwright/test').Page) {
   await page.getByTestId('entry-nav-plugins').click();
   await expect(page).toHaveURL(/\/plugins$/);
   const plugins = page.getByTestId('entry-view-plugins');
-  // #5517 renamed the surface: the view renders `entry.navExtensions`.
-  await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
+  // The view renders `entry.navPlugins`: #5517 briefly called this surface
+  // 扩展/Extensions, then reverted to 插件/Plugins to match the @-mention picker.
+  await expect(plugins.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   // The marketplace opens on the 官方 scope, which is fed by `/api/marketplaces`
   // — empty in this harness. The visual fixture plugins are user-installed, so
   // switch to 个人; it is also the only scope whose cards carry the per-card

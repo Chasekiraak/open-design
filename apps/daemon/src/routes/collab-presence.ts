@@ -25,6 +25,11 @@ export interface RegisterCollabPresenceRoutesDeps {
   collab: Pick<CollabRuntime, 'presence'>;
   cloud?: CollabPresenceCloudClient | null;
   isProjectShared?: (projectId: string) => Promise<boolean>;
+  /**
+   * The configured cloud route authoritatively rejects projects outside the
+   * requested workspace, so a separate remote team-project lookup is redundant.
+   */
+  cloudAuthorizesProjectPresence?: (projectId: string) => boolean;
 }
 
 function readHeartbeat(body: unknown): {
@@ -89,8 +94,20 @@ export function registerCollabPresenceRoutes(app: Express, deps: RegisterCollabP
     }
   }
 
+  function cloudAuthorizesProject(projectId: string): boolean {
+    if (!cloud || !deps.cloudAuthorizesProjectPresence) return false;
+    try {
+      return deps.cloudAuthorizesProjectPresence(projectId);
+    } catch {
+      return false;
+    }
+  }
+
   app.get('/api/projects/:id/presence', async (req, res) => {
-    if (!(await projectIsShared(req.params.id))) {
+    if (
+      !cloudAuthorizesProject(req.params.id) &&
+      !(await projectIsShared(req.params.id))
+    ) {
       return res.json({ present: [] });
     }
     if (cloud) {
@@ -106,7 +123,10 @@ export function registerCollabPresenceRoutes(app: Express, deps: RegisterCollabP
   app.post('/api/projects/:id/presence/heartbeat', async (req, res) => {
     const heartbeat = readHeartbeat(req.body);
     if (!heartbeat) return res.status(400).json({ error: 'memberId required' });
-    if (!(await projectIsShared(req.params.id))) {
+    if (
+      !cloudAuthorizesProject(req.params.id) &&
+      !(await projectIsShared(req.params.id))
+    ) {
       return res.json({ present: [] });
     }
     if (cloud) {

@@ -64,6 +64,10 @@ const WORKSPACE_SNAPSHOT_SAMPLE = JSON.stringify({
     billing: 'billing-rev-1',
     wallet: 'wallet-rev-1',
   },
+  revisionClocks: {
+    billing: { epoch: 'billing-epoch-a', counter: '12' },
+    wallet: { epoch: 'wallet-epoch-a', counter: '34' },
+  },
 });
 
 describe('vela billing 收口', () => {
@@ -170,6 +174,10 @@ describe('vela billing 收口', () => {
         billing: 'billing-rev-1',
         wallet: 'wallet-rev-1',
       },
+      revisionClocks: {
+        billing: { epoch: 'billing-epoch-a', counter: '12' },
+        wallet: { epoch: 'wallet-epoch-a', counter: '34' },
+      },
     });
     expect(parseWorkspaceBillingSnapshot(WORKSPACE_SNAPSHOT_SAMPLE, 'ws_other')).toBeNull();
     expect(
@@ -181,6 +189,22 @@ describe('vela billing 收口', () => {
         'ws_team',
       ),
     ).toBeNull();
+  });
+
+  it('drops malformed additive revision clocks without rejecting the legacy snapshot', () => {
+    const raw = JSON.parse(WORKSPACE_SNAPSHOT_SAMPLE);
+    raw.revisionClocks = {
+      billing: { epoch: 'billing-epoch-a', counter: '-1' },
+      wallet: { epoch: '', counter: '34' },
+    };
+
+    const parsed = parseWorkspaceBillingSnapshot(JSON.stringify(raw), 'ws_team');
+    expect(parsed).not.toBeNull();
+    expect(parsed).not.toHaveProperty('revisionClocks');
+    expect(parsed?.revisions).toEqual({
+      billing: 'billing-rev-1',
+      wallet: 'wallet-rev-1',
+    });
   });
 
   it('uses the additive workspace snapshot command when the CLI supports it', async () => {

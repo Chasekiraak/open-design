@@ -102,7 +102,12 @@ import { UpdaterPopup } from './UpdaterPopup';
 import { WhatsNewPopup } from './WhatsNewPopup';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
-import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
+import {
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
+  checkAmrBalanceGate,
+  type AmrBalanceGateScope,
+} from '../runtime/amr-balance-gate';
 import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
 import { HomeView, seedHomeComposerPrompt } from './HomeView';
 import { EntryBlankState } from './EntryBlankState';
@@ -286,9 +291,8 @@ type EntryCreateProjectInput = Omit<CreateInput, 'metadata'> & {
   initialRunContext?: RunContextSelection | null;
   conversationMode?: ChatSessionMode;
   autoSendFirstMessage?: boolean;
-  /** The home submit already ran the Open Design Cloud balance gate; the
-   *  project's first auto-send must not re-gate. */
-  amrGatePrechecked?: boolean;
+  /** Exact workspace/member authority checked by the Home AMR preflight. */
+  amrGatePrecheckWitness?: AmrBalanceGateScope;
   requestId?: string;
   pendingFiles?: File[];
   userWorkingDirToken?: string;
@@ -374,6 +378,19 @@ function defaultPluginInputsForCreate(
   };
 }
 
+export interface ProjectTitleHint {
+  name: string;
+  /** Workspace whose catalog produced this hint; null for a local-only row. */
+  workspaceId: string | null;
+  /** Member authorization lifetime that produced the catalog row. */
+  workspaceMemberId: string | null;
+  /**
+   * The team catalog is the title authority for a project shared by another
+   * member. Own/private projects may still accept a newer local rename.
+   */
+  authoritative: boolean;
+}
+
 interface Props {
   skills: SkillSummary[];
   designTemplates: SkillSummary[];
@@ -407,7 +424,7 @@ interface Props {
   onAgentChange: (id: string) => void;
   onAgentModelChange: (
     id: string,
-    choice: { model?: string; reasoning?: string },
+    choice: { model?: string; reasoning?: string; serviceTier?: string },
   ) => void;
   onApiProtocolChange: (protocol: ApiProtocol) => void;
   onApiModelChange: (model: string) => void;
@@ -430,7 +447,11 @@ interface Props {
   ) => Promise<ImportClaudeDesignOutcome | void> | ImportClaudeDesignOutcome | void;
   onImportFolder?: (baseDir: string) => Promise<void> | void;
   onImportFolderResponse?: (response: OpenDesignHostProjectImportSuccess) => Promise<void> | void;
-  onOpenProject: (id: string, fileName?: string) => Promise<boolean> | boolean | void;
+  onOpenProject: (
+    id: string,
+    fileName?: string,
+    projectTitleHint?: ProjectTitleHint,
+  ) => Promise<boolean> | boolean | void;
   onOpenLiveArtifact: (projectId: string, artifactId: string) => void;
   onDeleteProject: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicateProject?: (id: string) => Promise<void> | void;
@@ -584,6 +605,8 @@ export function EntryShell({
   // (personal or team); workspace surfaces gate on B's permission bits, not on
   // workspaceType.
   const { context: workspaceContext, loading: workspaceLoading } = useWorkspaceContext();
+  const workspaceContextRef = useRef(workspaceContext);
+  workspaceContextRef.current = workspaceContext;
   const workspaceBillingResponse = useWorkspaceBillingResponse();
   const workspaceBilling = workspaceBillingResponse?.summary ?? null;
   const workspaceBalanceUsd = workspaceBillingBalanceUsd(
@@ -782,8 +805,30 @@ export function EntryShell({
   // the useProjectCollab single-writer path keeps it read-only.
   const [pullingProjectId, setPullingProjectId] = useState<string | null>(null);
   async function handleOpenAllProjects(id: string): Promise<boolean> {
+    // The grid already reconciled the local row with the authoritative team
+    // catalog (notably the owner's current project name). Carry its title and
+    // provenance into App before navigation. Passing only the id made App reopen its local
+    // SQLite placeholder ("共享项目"), throwing away data already visible on the
+    // list and leaving the project header stale until a later metadata event.
+    const projectName = allProjectsList.find((project) => project.id === id)?.name.trim();
+    const teamProject = teamProjects.projects.find((project) => project.projectId === id);
+    const projectTitleHint = projectName
+      ? {
+          name: projectName,
+          workspaceId: workspaceContext?.workspaceId ?? null,
+          workspaceMemberId: workspaceContext?.workspaceMemberId ?? null,
+          // A member must render the owner's catalog title even when their
+          // local mirror has a newer timestamp or an older non-placeholder
+          // title. The owner may rename locally before the catalog catches up.
+          authoritative: Boolean(
+            teamProject
+            && teamProject.ownerMemberId !== workspaceContext?.workspaceMemberId,
+          ),
+        }
+      : undefined;
+    const open = () => Promise.resolve(onOpenProject(id, undefined, projectTitleHint));
     if (localProjectIds.has(id) || contentReadyProjectIdsRef.current.has(id)) {
-      await Promise.resolve(onOpenProject(id));
+      await open();
       return true;
     }
     const scopeKey = contentReadyScopeKeyRef.current;
@@ -793,7 +838,7 @@ export function EntryShell({
     if (hydration) {
       const hydrated = await hydration;
       if (hydrated) {
-        await Promise.resolve(onOpenProject(id));
+        await open();
         return true;
       }
       if (contentReadyScopeKeyRef.current !== scopeKey) return false;
@@ -812,7 +857,7 @@ export function EntryShell({
     } finally {
       setPullingProjectId(null);
     }
-    await Promise.resolve(onOpenProject(id));
+    await open();
     return true;
   }
   // Resolve the effective light/dark theme so the rail's account-menu theme toggle
@@ -1113,57 +1158,58 @@ export function EntryShell({
     // project is created, so the dialog appears right here on the home page
     // and the composer keeps its draft. In-project sends are gated separately
     // in ProjectView.handleSend.
-    let amrGatePrechecked = false;
+    let amrGatePrecheckWitness: AmrBalanceGateScope | undefined;
     if (config.mode === 'daemon' && config.agentId === 'amr') {
-      let gate = await checkAmrBalanceGate(
-        workspaceContext
-          ? {
-              workspaceType: workspaceContext.workspaceType,
-              workspaceId: workspaceContext.workspaceId,
-            }
-          : undefined,
-      );
-      // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
-      // its blocking condition clears (sign-in completed, recharge landed)
-      // and the gate re-runs, so the task auto-continues through the normal
-      // accept path. Still hard after the re-check (e.g. signed in but the
-      // wallet is empty) → the dialog re-shows with the fresh snapshot.
-      while (gate.kind === 'hard') {
-        const blocked = gate;
-        const decision = await new Promise<'retry' | 'dismiss'>((resolve) => {
-          setAmrBalanceGateBlock({
-            reason: blocked.reason,
-            snapshot: blocked.snapshot,
-            resolve,
-          });
-        });
-        setAmrBalanceGateBlock(null);
-        if (decision === 'dismiss') return 'blocked' as const;
-        gate = await checkAmrBalanceGate(
-          workspaceContext
-            ? {
-                workspaceType: workspaceContext.workspaceType,
-                workspaceId: workspaceContext.workspaceId,
-              }
-            : undefined,
+      // Awaiting the wallet or either dialog can outlive a workspace switch.
+      // Re-run once against the latest exact workspace/member authority; if it
+      // changes again, fail closed instead of reusing a stale decision.
+      for (let workspaceAttempt = 0; workspaceAttempt < 2; workspaceAttempt += 1) {
+        const gateScope = amrBalanceGateScopeForWorkspaceContext(
+          workspaceContextRef.current,
         );
-      }
-      if (gate.kind === 'soft') {
-        // Hold THIS submit while the reminder waits for a decision; 'proceed'
-        // resumes the same create-and-run below, so HomeView's normal accept
-        // path (draft clearing, context consumption) still applies.
-        const plan = await resolveAmrPlan(gate.snapshot);
-        if (isPaidAmrPlan(plan)) {
-          const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
-            setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
+        let gate = await checkAmrBalanceGate(gateScope);
+        // Hard blocks hold THIS submit open: the dialog resolves 'retry' when
+        // its blocking condition clears (sign-in completed, recharge landed)
+        // and the gate re-runs, so the task auto-continues through the normal
+        // accept path. Still hard after the re-check (e.g. signed in but the
+        // wallet is empty) → the dialog re-shows with the fresh snapshot.
+        while (gate.kind === 'hard') {
+          const blocked = gate;
+          const decision = await new Promise<'retry' | 'dismiss'>((resolve) => {
+            setAmrBalanceGateBlock({
+              reason: blocked.reason,
+              snapshot: blocked.snapshot,
+              resolve,
+            });
           });
-          setAmrLowBalanceWarn(null);
-          if (decision !== 'proceed') return 'blocked' as const;
+          setAmrBalanceGateBlock(null);
+          if (decision === 'dismiss') return 'blocked' as const;
+          gate = await checkAmrBalanceGate(gateScope);
         }
+        if (gate.kind === 'unavailable') return 'blocked' as const;
+        if (gate.kind === 'soft') {
+          // Hold THIS submit while the reminder waits for a decision; 'proceed'
+          // resumes the same create-and-run below, so HomeView's normal accept
+          // path (draft clearing, context consumption) still applies.
+          const plan = await resolveAmrPlan(gate.snapshot);
+          if (isPaidAmrPlan(plan)) {
+            const decision = await new Promise<AmrLowBalanceDecision>((resolve) => {
+              setAmrLowBalanceWarn({ snapshot: gate.snapshot, resolve });
+            });
+            setAmrLowBalanceWarn(null);
+            if (decision !== 'proceed') return 'blocked' as const;
+          }
+        }
+        const currentScope = amrBalanceGateScopeForWorkspaceContext(
+          workspaceContextRef.current,
+        );
+        if (!amrBalanceGateScopesMatch(gateScope, currentScope)) continue;
+        amrGatePrecheckWitness = gateScope;
+        break;
       }
-      // The decision (or clean pass) carries into the created project's first
-      // auto-send, which must not re-prompt what the user just answered.
-      amrGatePrechecked = true;
+      if (!amrGatePrecheckWitness) {
+        return 'blocked' as const;
+      }
     }
     // Starting from the Home composer is a concrete entry — retire the
     // recommendation (spec §7.4). Done only once the submit actually proceeds
@@ -1235,7 +1281,7 @@ export function EntryShell({
       // not need the desktop main-process trust token that baseDir imports
       // require for write access.
       autoSendFirstMessage: true,
-      amrGatePrechecked,
+      ...(amrGatePrecheckWitness ? { amrGatePrecheckWitness } : {}),
     });
   }
 
@@ -1643,6 +1689,11 @@ export function EntryShell({
                   seedHomeComposerPrompt(prompt);
                   changeView('home');
                 }}
+                // The gallery card's full details modal routes Use through the
+                // same Home hand-off the plugin library uses, so the plugin
+                // becomes the composer's active driver instead of only seeding
+                // prompt text.
+                onUsePlugin={usePluginFromLibrary}
               />
             ) : null}
             {/* Team destinations — the entry shell owns the nav frame only; each
@@ -1789,7 +1840,7 @@ function OnboardingView({
   onAgentChange: (id: string) => void;
   onAgentModelChange: (
     id: string,
-    choice: { model?: string; reasoning?: string },
+    choice: { model?: string; reasoning?: string; serviceTier?: string },
   ) => void;
   onApiProtocolChange: (protocol: ApiProtocol) => void;
   onApiModelChange: (model: string) => void;
@@ -3258,7 +3309,10 @@ function OnboardingView({
                     }}
                     onSelectModel={(model) => {
                       if (!selectedAgent) return;
-                      onAgentModelChange(selectedAgent.id, { model });
+                      onAgentModelChange(selectedAgent.id, {
+                        model,
+                        serviceTier: undefined,
+                      });
                     }}
                     testState={visibleAgentTestState}
                     canTest={canTestAgent}

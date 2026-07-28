@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../../src/App';
+import type { ProjectNameAuthorityResolution } from '../../src/components/ProjectView';
 import type { AgentInfo, AppConfig, Project } from '../../src/types';
 import {
   fetchComposioConfigFromDaemon,
@@ -33,6 +34,11 @@ import {
   listTemplates,
   patchProject,
 } from '../../src/state/projects';
+import {
+  notifyWorkspaceContextRefresh,
+  resetTeamProjectsCache,
+  resetWorkspaceContextCache,
+} from '../../src/collab/useWorkspaceContext';
 
 vi.mock('../../src/components/EntryView', () => ({
   EntryView: ({
@@ -52,7 +58,16 @@ vi.mock('../../src/components/EntryView', () => ({
       ok: true;
       projectId: string;
     }) => Promise<void> | void;
-    onOpenProject: (id: string) => Promise<boolean> | boolean | void;
+    onOpenProject: (
+      id: string,
+      fileName?: string,
+      projectTitleHint?: {
+        authoritative: boolean;
+        name: string;
+        workspaceId: string | null;
+        workspaceMemberId: string | null;
+      },
+    ) => Promise<boolean> | boolean | void;
     onRefreshAgents: () => void | Promise<void>;
     agents: AgentInfo[];
     projects: Project[];
@@ -120,6 +135,71 @@ vi.mock('../../src/components/EntryView', () => ({
       <button type="button" onClick={() => void onOpenProject('project-missing')}>
         Open missing project
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onOpenProject('project-shared', undefined, {
+            authoritative: true,
+            name: 'Catalog authority',
+            workspaceId: 'ws-1',
+            workspaceMemberId: 'wm-1',
+          })
+        }
+      >
+        Open catalog project
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onOpenProject('project-shared', undefined, {
+            authoritative: true,
+            name: 'New card authority',
+            workspaceId: 'ws-1',
+            workspaceMemberId: 'wm-1',
+          })
+        }
+      >
+        Open updated catalog project
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onOpenProject('project-own', undefined, {
+            authoritative: false,
+            name: 'Own local project',
+            workspaceId: 'ws-1',
+            workspaceMemberId: 'wm-1',
+          })
+        }
+      >
+        Open own unbound project
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onOpenProject('project-same', undefined, {
+            authoritative: true,
+            name: 'Workspace A catalog',
+            workspaceId: 'ws-a',
+            workspaceMemberId: 'member-ws-a',
+          })
+        }
+      >
+        Open workspace A project
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void onOpenProject('project-same', undefined, {
+            authoritative: false,
+            name: 'Workspace A stale own title',
+            workspaceId: 'ws-a',
+            workspaceMemberId: 'member-ws-a',
+          })
+        }
+      >
+        Open stale own workspace A project
+      </button>
       <div data-testid="entry-agent-list">
         {agents.map((agent) => (
           <span key={agent.id} data-testid={`entry-agent-${agent.id}`}>
@@ -149,15 +229,26 @@ vi.mock('../../src/components/ProjectView', () => ({
     onProjectsRefresh,
     project,
     routeConversationId,
+    authoritativeProjectName,
+    projectAuthorizationKey,
+    resolveAuthoritativeProjectName,
   }: {
     onBack: () => void;
     onCreateProjectFromDesignSystem?: (designSystemId: string, title: string) => Promise<void> | void;
     onProjectsRefresh: () => Promise<void>;
     project: Project;
     routeConversationId?: string | null;
+    authoritativeProjectName?: string;
+    projectAuthorizationKey?: string;
+    resolveAuthoritativeProjectName?: (
+      projectId: string,
+      expectedAuthorizationKey: string,
+    ) => Promise<ProjectNameAuthorityResolution>;
   }) => (
     <main data-testid="project-view">
       <span data-testid="project-title">{project.name}</span>
+      <span data-testid="project-authoritative-title">{authoritativeProjectName ?? 'none'}</span>
+      <span data-testid="project-workspace-id">{project.workspaceId ?? 'unbound'}</span>
       <span data-testid="project-route-conversation">{routeConversationId ?? 'none'}</span>
       <button type="button" onClick={onBack}>
         Back to projects
@@ -170,6 +261,17 @@ vi.mock('../../src/components/ProjectView', () => ({
         onClick={() => void onCreateProjectFromDesignSystem?.('slack', 'Slack')}
       >
         Create design from design system
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          void resolveAuthoritativeProjectName?.(
+            project.id,
+            projectAuthorizationKey ?? project.id,
+          )
+        }
+      >
+        Refresh catalog title
       </button>
     </main>
   ),
@@ -314,8 +416,54 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function workspaceContextPayload(
+  workspaceId: string,
+  workspaceMemberId: string,
+) {
+  return {
+    context: {
+      workspaceId,
+      workspaceType: 'team',
+      workspaceMemberId,
+      role: 'member',
+      memberStatus: 'active',
+      lifecycleState: 'active',
+      billingState: 'active',
+      planId: null,
+      providerMode: 'platform_credits',
+      seatSummary: { seatLimit: 5, usedSeats: 1, availableSeats: 4 },
+      permissions: {
+        canCreateProjects: true,
+        canWriteSyncedFiles: true,
+      },
+      displayName: workspaceId,
+    },
+  };
+}
+
+function stubWorkspaceContext(
+  workspaceId: string,
+  workspaceMemberId: string,
+) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      return {
+        ok: true,
+        json: async () =>
+          pathname.endsWith('/workspace/context')
+            ? workspaceContextPayload(workspaceId, workspaceMemberId)
+            : {},
+      } as Response;
+    }),
+  );
+}
+
 describe('App project creation routing', () => {
   beforeEach(() => {
+    resetWorkspaceContextCache();
+    resetTeamProjectsCache();
     window.history.replaceState(null, '', '/');
     mockedDaemonIsLive.mockResolvedValue(true);
     mockedFetchAgentsStream.mockResolvedValue([]);
@@ -350,6 +498,8 @@ describe('App project creation routing', () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    resetWorkspaceContextCache();
+    resetTeamProjectsCache();
   });
 
   it('auto-picks the first available agent in registry order after streamed probes settle', async () => {
@@ -1000,6 +1150,568 @@ describe('App project creation routing', () => {
     });
     expect(window.location.pathname).toBe('/');
     expect(screen.queryByTestId('project-view')).toBeNull();
+  });
+
+  it('renders the catalog title on the first project frame instead of the local placeholder', async () => {
+    stubWorkspaceContext('ws-1', 'wm-1');
+    mockedListProjects.mockResolvedValue([{
+      id: 'project-shared',
+      name: '共享项目',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-1',
+      createdAt: 20,
+      updatedAt: 20,
+    }]);
+
+    render(<App />);
+
+    await screen.findByTestId('entry-project-project-shared');
+    fireEvent.click(await screen.findByRole('button', { name: 'Open catalog project' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('Catalog authority');
+    });
+    expect(window.location.pathname).toBe('/projects/project-shared');
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it('uses a title hint only after loading the workspace-bound local row', async () => {
+    stubWorkspaceContext('ws-1', 'wm-1');
+    mockedListProjects.mockResolvedValue([]);
+    mockedGetProject.mockResolvedValueOnce({
+      id: 'project-shared',
+      name: '共享项目',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-1',
+      createdAt: 20,
+      updatedAt: 20,
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open catalog project' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('Catalog authority');
+      expect(screen.getByTestId('project-workspace-id').textContent).toBe('ws-1');
+    });
+    expect(mockedGetProject).toHaveBeenCalledWith('project-shared');
+  });
+
+  it('keeps the original local-open behavior for an own unbound legacy project', async () => {
+    stubWorkspaceContext('ws-1', 'wm-1');
+    mockedListProjects.mockResolvedValue([{
+      id: 'project-own',
+      name: 'Legacy local name',
+      skillId: null,
+      designSystemId: null,
+      createdAt: 20,
+      updatedAt: 20,
+    }]);
+
+    render(<App />);
+
+    await screen.findByTestId('entry-project-project-own');
+    fireEvent.click(screen.getByRole('button', { name: 'Open own unbound project' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('Own local project');
+      expect(screen.getByTestId('project-workspace-id').textContent).toBe('unbound');
+    });
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it('rejects an authoritative card whose workspace/member scope is already stale', async () => {
+    let activeWorkspaceId = 'ws-a';
+    mockedListProjects.mockResolvedValue([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        return {
+          ok: true,
+          json: async () =>
+            pathname.endsWith('/workspace/context')
+              ? workspaceContextPayload(
+                  activeWorkspaceId,
+                  `member-${activeWorkspaceId}`,
+                )
+              : {},
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.some(
+        ([options]) => options?.workspaceContext?.workspaceId === 'ws-a',
+      )).toBe(true);
+    });
+
+    activeWorkspaceId = 'ws-b';
+    notifyWorkspaceContextRefresh();
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.some(
+        ([options]) => options?.workspaceContext?.workspaceId === 'ws-b',
+      )).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace A project' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockedGetProject).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-view')).toBeNull();
+  });
+
+  it('rejects an authoritative card from a previous member in the same workspace', async () => {
+    let activeWorkspaceMemberId = 'member-ws-a';
+    mockedListProjects.mockResolvedValue([]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      return {
+        ok: true,
+        json: async () =>
+          pathname.endsWith('/workspace/context')
+            ? workspaceContextPayload('ws-a', activeWorkspaceMemberId)
+            : {},
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) =>
+        new URL(String(input), 'http://d.local').pathname.endsWith('/workspace/context'),
+      ).length).toBeGreaterThanOrEqual(1);
+    });
+
+    activeWorkspaceMemberId = 'replacement-member';
+    notifyWorkspaceContextRefresh();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) =>
+        new URL(String(input), 'http://d.local').pathname.endsWith('/workspace/context'),
+      ).length).toBeGreaterThanOrEqual(2);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace A project' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockedGetProject).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-view')).toBeNull();
+  });
+
+  it('ignores a stale non-authoritative title while opening the current bound row', async () => {
+    stubWorkspaceContext('ws-b', 'member-ws-b');
+    mockedListProjects.mockResolvedValue([{
+      id: 'project-same',
+      name: 'Workspace B current title',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-b',
+      createdAt: 30,
+      updatedAt: 30,
+    }]);
+
+    render(<App />);
+    await screen.findByTestId('entry-project-project-same');
+    fireEvent.click(screen.getByRole(
+      'button',
+      { name: 'Open stale own workspace A project' },
+    ));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe(
+        'Workspace B current title',
+      );
+      expect(screen.getByTestId('project-workspace-id').textContent).toBe('ws-b');
+    });
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it('does not open a project bound to another workspace through a non-hint path', async () => {
+    stubWorkspaceContext('ws-b', 'member-ws-b');
+    const workspaceAProject: Project = {
+      id: 'project-bound-a',
+      name: 'Workspace A local',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-a',
+      createdAt: 20,
+      updatedAt: 20,
+    };
+    mockedListProjects.mockResolvedValue([workspaceAProject]);
+    mockedGetProject.mockResolvedValue(workspaceAProject);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole(
+      'button',
+      { name: 'Open Workspace A local' },
+    ));
+
+    await waitFor(() => {
+      expect(mockedGetProject).toHaveBeenCalledWith('project-bound-a');
+    });
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-view')).toBeNull();
+  });
+
+  it('does not let an async open from workspace A navigate or overwrite same-id workspace B', async () => {
+    let activeWorkspaceId = 'ws-a';
+    const delayedAProject = deferred<Project | null>();
+    mockedGetProject.mockReturnValueOnce(delayedAProject.promise);
+    mockedListProjects.mockImplementation(async (options) => {
+      const workspaceId = options?.workspaceContext?.workspaceId;
+      if (workspaceId === 'ws-b') {
+        return [{
+          id: 'project-same',
+          name: 'Workspace B local',
+          skillId: null,
+          designSystemId: null,
+          workspaceId: 'ws-b',
+          createdAt: 30,
+          updatedAt: 30,
+        }];
+      }
+      return [];
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        if (pathname.endsWith('/workspace/context')) {
+          return {
+            ok: true,
+            json: async () => workspaceContextPayload(
+              activeWorkspaceId,
+              `member-${activeWorkspaceId}`,
+            ),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({}),
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.some(
+        ([options]) => options?.workspaceContext?.workspaceId === 'ws-a',
+      )).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace A project' }));
+    activeWorkspaceId = 'ws-b';
+    notifyWorkspaceContextRefresh();
+    await screen.findByTestId('entry-project-project-same');
+
+    delayedAProject.resolve({
+      id: 'project-same',
+      name: 'Workspace A stale',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-a',
+      createdAt: 20,
+      updatedAt: 20,
+    });
+    await act(async () => {
+      await delayedAProject.promise;
+      await Promise.resolve();
+    });
+
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-view')).toBeNull();
+    expect(screen.getByTestId('entry-project-project-same').textContent).toContain(
+      'Workspace B local',
+    );
+  });
+
+  it('rejects a delayed same-id open after workspace A to B to A returns to the same key', async () => {
+    let activeWorkspaceId = 'ws-a';
+    let workspaceContextReads = 0;
+    const delayedAProject = deferred<Project | null>();
+    mockedGetProject.mockReturnValueOnce(delayedAProject.promise);
+    mockedListProjects.mockResolvedValue([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        if (pathname.endsWith('/workspace/context')) workspaceContextReads += 1;
+        return {
+          ok: true,
+          json: async () =>
+            pathname.endsWith('/workspace/context')
+              ? workspaceContextPayload(
+                  activeWorkspaceId,
+                  `member-${activeWorkspaceId}`,
+                )
+              : {},
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.some(
+        ([options]) => options?.workspaceContext?.workspaceId === 'ws-a',
+      )).toBe(true);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace A project' }));
+
+    activeWorkspaceId = 'ws-b';
+    notifyWorkspaceContextRefresh();
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.some(
+        ([options]) => options?.workspaceContext?.workspaceId === 'ws-b',
+      )).toBe(true);
+    });
+
+    // `notifyWorkspaceContextRefresh()` deliberately coalesces one broadcast
+    // burst for 250ms. Model two real user switches, not duplicate listeners
+    // reacting to the same switch.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    activeWorkspaceId = 'ws-a';
+    notifyWorkspaceContextRefresh();
+    await waitFor(() => {
+      expect(workspaceContextReads).toBeGreaterThanOrEqual(3);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    delayedAProject.resolve({
+      id: 'project-same',
+      name: 'Workspace A stale result',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-a',
+      createdAt: 20,
+      updatedAt: 20,
+    });
+    await act(async () => {
+      await delayedAProject.promise;
+      await Promise.resolve();
+    });
+
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByTestId('project-view')).toBeNull();
+  });
+
+  it('does not let an older catalog read roll back a newer card title', async () => {
+    let projectListReads = 0;
+    mockedListProjects.mockImplementation(async () => {
+      const name = projectListReads === 0 ? '共享项目' : 'New card authority';
+      projectListReads += 1;
+      return [{
+        id: 'project-shared',
+        name,
+        skillId: null,
+        designSystemId: null,
+        workspaceId: 'ws-1',
+        createdAt: 20,
+        updatedAt: 20,
+      }];
+    });
+    const olderCatalog = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        if (pathname.endsWith('/workspace/context')) {
+          return {
+            ok: true,
+            json: async () => workspaceContextPayload('ws-1', 'wm-1'),
+          } as Response;
+        }
+        if (pathname.endsWith('/workspace/projects/team')) {
+          return olderCatalog.promise;
+        }
+        return {
+          ok: true,
+          json: async () => ({}),
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+    await screen.findByTestId('entry-project-project-shared');
+    fireEvent.click(screen.getByRole('button', { name: 'Open catalog project' }));
+    await screen.findByTestId('project-view');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalog title' }));
+    const listReadsBeforeBack = mockedListProjects.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }));
+    await waitFor(() => {
+      expect(mockedListProjects.mock.calls.length).toBeGreaterThan(listReadsBeforeBack);
+    });
+    fireEvent.click(await screen.findByRole(
+      'button',
+      { name: 'Open updated catalog project' },
+    ));
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('New card authority');
+    });
+
+    olderCatalog.resolve({
+      ok: true,
+      json: async () => ({
+        projects: [{
+          projectId: 'project-shared',
+          ownerMemberId: 'owner',
+          sharedAt: '2026-07-27T00:00:00.000Z',
+          name: 'Old catalog title',
+        }],
+      }),
+    } as Response);
+    await act(async () => {
+      await olderCatalog.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('project-title').textContent).toBe('New card authority');
+    expect(screen.getByTestId('project-authoritative-title').textContent).toBe(
+      'New card authority',
+    );
+  });
+
+  it('rejects an out-of-order older catalog response after a newer rename wins', async () => {
+    mockedListProjects.mockResolvedValue([{
+      id: 'project-shared',
+      name: '共享项目',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-1',
+      createdAt: 20,
+      updatedAt: 20,
+    }]);
+    const olderCatalog = deferred<Response>();
+    const newerCatalog = deferred<Response>();
+    let catalogReads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        if (pathname.endsWith('/workspace/context')) {
+          return {
+            ok: true,
+            json: async () => workspaceContextPayload('ws-1', 'wm-1'),
+          } as Response;
+        }
+        if (pathname.endsWith('/workspace/projects/team')) {
+          catalogReads += 1;
+          return catalogReads === 1 ? olderCatalog.promise : newerCatalog.promise;
+        }
+        return {
+          ok: true,
+          json: async () => ({}),
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+    await screen.findByTestId('entry-project-project-shared');
+    fireEvent.click(screen.getByRole('button', { name: 'Open catalog project' }));
+    await screen.findByTestId('project-view');
+
+    const refresh = screen.getByRole('button', { name: 'Refresh catalog title' });
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+    await waitFor(() => expect(catalogReads).toBe(2));
+
+    newerCatalog.resolve({
+      ok: true,
+      json: async () => ({
+        projects: [{
+          projectId: 'project-shared',
+          ownerMemberId: 'owner',
+          sharedAt: '2026-07-27T00:00:00.000Z',
+          name: 'New catalog rename',
+        }],
+      }),
+    } as Response);
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('New catalog rename');
+    });
+
+    olderCatalog.resolve({
+      ok: true,
+      json: async () => ({
+        projects: [{
+          projectId: 'project-shared',
+          ownerMemberId: 'owner',
+          sharedAt: '2026-07-27T00:00:00.000Z',
+          name: 'Old catalog title',
+        }],
+      }),
+    } as Response);
+    await act(async () => {
+      await olderCatalog.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('project-title').textContent).toBe('New catalog rename');
+  });
+
+  it('calibrates a deep-linked local placeholder from the other-owner hub catalog', async () => {
+    window.history.replaceState(null, '', '/projects/project-shared');
+    mockedListProjects.mockResolvedValue([{
+      id: 'project-shared',
+      name: '共享项目',
+      skillId: null,
+      designSystemId: null,
+      workspaceId: 'ws-1',
+      createdAt: 20,
+      updatedAt: 999,
+    }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        if (pathname.endsWith('/workspace/context')) {
+          return {
+            ok: true,
+            json: async () => workspaceContextPayload('ws-1', 'wm-1'),
+          } as Response;
+        }
+        if (pathname.endsWith('/workspace/projects/team')) {
+          return {
+            ok: true,
+            json: async () => ({
+              projects: [{
+                projectId: 'project-shared',
+                ownerMemberId: 'wm-owner',
+                sharedAt: '2026-07-27T00:00:00.000Z',
+                name: 'Catalog rename',
+                updatedAt: 42,
+              }],
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({}),
+        } as Response;
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('project-title').textContent).toBe('Catalog rename');
+      expect(screen.getByTestId('project-authoritative-title').textContent).toBe('Catalog rename');
+      expect(screen.getByTestId('project-workspace-id').textContent).toBe('ws-1');
+    });
   });
 
   it('opens the seeded brand extraction conversation after creating a design system', async () => {

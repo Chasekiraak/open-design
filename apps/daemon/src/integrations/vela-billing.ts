@@ -1,5 +1,6 @@
 import type {
   WorkspaceBillingCatalog,
+  WorkspaceBillingRevisionClock,
   WorkspaceBillingSnapshot,
   WorkspaceBillingState,
   WorkspaceBillingSummary,
@@ -308,10 +309,17 @@ export function parseWorkspaceBillingSnapshot(
   const billing = objectRecord(raw.billing);
   const wallet = objectRecord(raw.wallet);
   const revisions = objectRecord(raw.revisions);
+  const revisionClocks = objectRecord(raw.revisionClocks);
   const billingState = nullableBillingState(billing.billingState);
   const balanceUsd = str(wallet.balanceUsd).trim();
   const billingRevision = str(revisions.billing).trim();
   const walletRevision = str(revisions.wallet).trim();
+  const billingRevisionClock = parseWorkspaceBillingRevisionClock(
+    revisionClocks.billing,
+  );
+  const walletRevisionClock = parseWorkspaceBillingRevisionClock(
+    revisionClocks.wallet,
+  );
   if (
     raw.schemaVersion !== 1 ||
     raw.billingScopeVersion !== 2 ||
@@ -348,7 +356,25 @@ export function parseWorkspaceBillingSnapshot(
       billing: billingRevision,
       wallet: walletRevision,
     },
+    ...(billingRevisionClock && walletRevisionClock
+      ? {
+          revisionClocks: {
+            billing: billingRevisionClock,
+            wallet: walletRevisionClock,
+          },
+        }
+      : {}),
   };
+}
+
+function parseWorkspaceBillingRevisionClock(
+  value: unknown,
+): WorkspaceBillingRevisionClock | null {
+  if (!isObjectRecord(value)) return null;
+  const epoch = str(value.epoch).trim();
+  const counter = str(value.counter).trim();
+  if (!epoch || !/^(?:0|[1-9]\d*)$/.test(counter)) return null;
+  return { epoch, counter };
 }
 
 /** B sends credit buckets as decimal strings; a missing/garbage bucket is 0. */

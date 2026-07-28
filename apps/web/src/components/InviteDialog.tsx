@@ -10,7 +10,8 @@
 // dialog shows a brief success state and closes; on failure it surfaces an inline
 // error and stays open. The UI never blocks on the backend being present.
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import {
   normalizeWorkspaceInviteCreateErrorCode,
   type WorkspaceInviteRole,
@@ -20,6 +21,10 @@ import { Icon } from './Icon';
 import { useI18n } from '../i18n';
 
 const ROLE_OPTIONS = ['admin', 'member'] as const;
+
+// Vertical gap between the role trigger and its menu (was the CSS
+// `top: calc(100% + var(--spacing-6))` before the menu moved to a portal).
+const ROLE_MENU_GAP = 6;
 
 function roleLabel(role: string, t: ReturnType<typeof useI18n>['t']) {
   return role === 'admin' ? t('invite.role.admin') : t('invite.role.member');
@@ -82,6 +87,9 @@ export function InviteDialog({
   const [error, setError] = useState<string | null>(null);
   const [openRoleIndex, setOpenRoleIndex] = useState<number | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
+  const roleTriggerRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const roleMenuRef = useRef<HTMLDivElement | null>(null);
+  const [roleMenuPos, setRoleMenuPos] = useState<CSSProperties | null>(null);
   const roleListboxId = useId();
 
   useEffect(() => {
@@ -89,12 +97,41 @@ export function InviteDialog({
     setRows((prev) => prev.map((row) => ({ ...row, role: DEFAULT_ROLE })));
   }, [canAssignRoles, open]);
 
+  // The rows list is a scroll container (`overflow-y: auto`), which clips any
+  // in-flow descendant to its box — a dropdown rendered inside it can never
+  // extend past the row. The role menu therefore lives in a portal on <body>,
+  // anchored to its trigger's viewport rect; re-anchor on resize and on any
+  // scroll (capture phase covers the rows container itself). Same pattern as
+  // ComposerModePicker.
+  useLayoutEffect(() => {
+    if (openRoleIndex === null) {
+      setRoleMenuPos(null);
+      return;
+    }
+    const update = () => {
+      const rect = roleTriggerRefs.current[openRoleIndex]?.getBoundingClientRect();
+      if (!rect) return;
+      setRoleMenuPos({ left: rect.left, top: rect.bottom + ROLE_MENU_GAP, width: rect.width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [openRoleIndex]);
+
   useEffect(() => {
     if (openRoleIndex === null) return;
     function onDown(e: MouseEvent) {
-      if (rowsRef.current && !rowsRef.current.contains(e.target as Node)) {
-        setOpenRoleIndex(null);
-      }
+      const target = e.target as Node;
+      // The menu is portaled outside the rows container, so it must count as
+      // "inside" here — otherwise this dismisser unmounts an option on
+      // mousedown before its click can land.
+      if (rowsRef.current?.contains(target)) return;
+      if (roleMenuRef.current?.contains(target)) return;
+      setOpenRoleIndex(null);
     }
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
@@ -249,6 +286,9 @@ export function InviteDialog({
                 <div className="entry-invite__role-picker">
                   <button
                     type="button"
+                    ref={(el) => {
+                      roleTriggerRefs.current[i] = el;
+                    }}
                     className="entry-invite__role"
                     onClick={() => {
                       if (!canAssignRoles) return;
@@ -263,26 +303,35 @@ export function InviteDialog({
                     <span>{roleLabel(canAssignRoles ? row.role : DEFAULT_ROLE, t)}</span>
                     <Icon name="chevron-down" size={16} />
                   </button>
-                  {openRoleIndex === i ? (
-                    <div className="entry-invite__role-menu" id={`${roleListboxId}-${i}`} role="listbox">
-                      {ROLE_OPTIONS.map((role) => (
-                        <button
-                          type="button"
-                          key={role}
-                          className={`entry-invite__role-option${(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? ' is-selected' : ''}`}
-                          role="option"
-                          aria-selected={(canAssignRoles ? row.role : DEFAULT_ROLE) === role}
-                          onClick={() => {
-                            updateRow(i, { role });
-                            setOpenRoleIndex(null);
-                          }}
+                  {openRoleIndex === i && roleMenuPos && typeof document !== 'undefined'
+                    ? createPortal(
+                        <div
+                          ref={roleMenuRef}
+                          className="entry-invite__role-menu"
+                          id={`${roleListboxId}-${i}`}
+                          role="listbox"
+                          style={roleMenuPos}
                         >
-                          <span>{roleLabel(role, t)}</span>
-                          {(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? <Icon name="check" size={16} /> : null}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
+                          {ROLE_OPTIONS.map((role) => (
+                            <button
+                              type="button"
+                              key={role}
+                              className={`entry-invite__role-option${(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? ' is-selected' : ''}`}
+                              role="option"
+                              aria-selected={(canAssignRoles ? row.role : DEFAULT_ROLE) === role}
+                              onClick={() => {
+                                updateRow(i, { role });
+                                setOpenRoleIndex(null);
+                              }}
+                            >
+                              <span>{roleLabel(role, t)}</span>
+                              {(canAssignRoles ? row.role : DEFAULT_ROLE) === role ? <Icon name="check" size={16} /> : null}
+                            </button>
+                          ))}
+                        </div>,
+                        document.body,
+                      )
+                    : null}
                 </div>
                 {rows.length > 1 ? (
                   <button

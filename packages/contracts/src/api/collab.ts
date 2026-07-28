@@ -33,6 +33,23 @@ export interface CollabPresenceResponse {
   present: CollabPresenceMember[];
 }
 
+/**
+ * Daemon-local lifecycle for an inbound shared-project content transfer.
+ *
+ * This is deliberately transport-agnostic: the UI only needs to know whether
+ * bytes are still being fetched/materialized. `updatedAt` lets an SSE update
+ * and a racing `/collab/status` response resolve in last-write-wins order.
+ */
+export interface ProjectContentTransferState {
+  status: 'downloading' | 'idle';
+  /** Hub version associated with the transfer, when the event supplied one. */
+  version?: number;
+  /** First observation of this transfer (epoch ms). */
+  startedAt: number;
+  /** Last transition (epoch ms, monotonic within one daemon process). */
+  updatedAt: number;
+}
+
 /** POST /api/projects/:id/presence/heartbeat request body. */
 export interface CollabPresenceHeartbeatRequest {
   memberId: string;
@@ -67,6 +84,30 @@ export interface CollabSyncStatusResponse {
    * treat a non-null published head as potentially pending.
    */
   materializedVersion: number | null;
+  /**
+   * Latest daemon-local inbound-transfer state. Null means this daemon has not
+   * observed a transfer for the project in its current process lifetime.
+   */
+  contentTransferState?: ProjectContentTransferState | null;
+  /**
+   * True while this daemon's only local record for the project is an
+   * unmaterialized shared-project placeholder — a row registered so the
+   * project's other routes stop 404ing, whose content directory is empty and
+   * is NOT the project's content (see the daemon's
+   * `sharedProjectPlaceholderAt` stamp).
+   *
+   * It is the one download signal that does not depend on remote enrichment.
+   * `publishedVersion` is null on a fresh install's very first status response
+   * — the daemon answers from local state and fetches the real hub head in the
+   * background for a later poll — so a client gated only on
+   * `publishedVersion`/`contentTransferState` cannot distinguish "empty
+   * project" from "content still downloading" on first open, and shows an
+   * empty project with create-a-file CTAs instead of a syncing state.
+   *
+   * Clients must treat this as authoritative over the local file list: while
+   * it is true, zero files means "not downloaded yet", never "nothing here".
+   */
+  awaitingFirstMaterialization?: boolean;
   syncState: ProjectSyncState;
   /**
    * The member who shared this project (its single writer), resolved
@@ -387,6 +428,14 @@ export interface WorkspaceWalletBalance {
   updatedAt: string | null;
 }
 
+/** Persistent producer cursor for one workspace-billing change domain. */
+export interface WorkspaceBillingRevisionClock {
+  /** Changes only when the producer's persistent revision sequence is rebuilt. */
+  epoch: string;
+  /** Unsigned decimal counter, monotonic within one epoch. */
+  counter: string;
+}
+
 /**
  * One authoritative, explicitly scoped workspace billing snapshot from Vela.
  *
@@ -412,6 +461,16 @@ export interface WorkspaceBillingSnapshot {
     billing: string;
     wallet: string;
   };
+  /**
+   * Additive persistent cursors advertised by
+   * `billing-revision-clocks-v1`. Missing means the producer/CLI predates the
+   * capability, so consumers keep treating `revisions` as opaque equality
+   * tokens and rely on reconnect/poll catch-up.
+   */
+  revisionClocks?: {
+    billing: WorkspaceBillingRevisionClock;
+    wallet: WorkspaceBillingRevisionClock;
+  };
 }
 
 /**
@@ -434,12 +493,53 @@ export interface WorkspaceBillingRuntimeState {
   /** Daemon-local uint64 rendered as a decimal string. */
   revision: string;
   observedAt: string | null;
+  /** Last-good data becomes stale after this point and must be revalidated. */
+  softExpiresAt: string | null;
+  /** Last-good money/plan data must not be consumed after this point. */
+  hardExpiresAt: string | null;
   retryAt: string | null;
   errorCode: string | null;
   /** Why the most recent state transition or authoritative read occurred. */
   reason: string;
   /** True when an ordered upstream revision skipped at least one value. */
   sourceGapDetected: boolean;
+}
+
+/**
+ * Proof that this exact response completed the caller-requested authoritative
+ * workspace projection refresh. Its absence is intentional compatibility
+ * signaling: a newer client must not treat an older daemon's cached 200 as
+ * execution/precharge authority.
+ */
+export interface WorkspaceBillingAuthoritativeRead {
+  workspaceId: string;
+  workspaceMemberId: string;
+  observedAt: string;
+}
+
+/**
+ * One exact workspace/member projection a renderer wants the daemon to keep
+ * warm. Renderers replace their whole set atomically; the daemon owns
+ * authorization, refresh, retries, upstream subscriptions, and expiry.
+ */
+export interface WorkspaceBillingInterestScope {
+  workspaceId: string;
+  workspaceMemberId: string;
+}
+
+/** PUT /api/workspace/billing/interests/:clientId request body. */
+export interface WorkspaceBillingInterestRequest {
+  /** Monotonic unsigned decimal scoped to this renderer-lifetime client id. */
+  generation: string;
+  /** Full replacement set, not a delta. */
+  interests: WorkspaceBillingInterestScope[];
+}
+
+/** Successful interest declaration/renewal response. */
+export interface WorkspaceBillingInterestResponse {
+  clientId: string;
+  acceptedGeneration: string;
+  leaseExpiresAt: string;
 }
 
 /**
@@ -505,6 +605,11 @@ export interface WorkspaceBillingResponse {
    * daemon predates the runtime coordinator; values above remain authoritative.
    */
   workspaceRuntime?: WorkspaceBillingRuntimeState;
+  /**
+   * Present only for `freshness=authoritative` after a new projection was
+   * observed for the exact workspace/member in this response.
+   */
+  authoritativeWorkspaceRead?: WorkspaceBillingAuthoritativeRead;
 }
 
 export type WorkspaceTeamBillingPlanId = 'team_plus' | 'team_pro' | 'team_max';

@@ -49,6 +49,7 @@ import {
   listPlugins,
   refreshPluginMarketplace,
   removePluginMarketplace,
+  resolvedWorkspaceContextForWrite,
   setPluginMarketplaceTrust,
   uninstallPlugin,
   type PluginInstallOutcome,
@@ -216,7 +217,8 @@ export function PluginsView({
   // stamp new installs with the acting workspace. `useWorkspaceContext` is a
   // coalesced read shared across the nav shell, so calling it again here does
   // not fan out an extra fetch.
-  const { context: pluginsWorkspaceContext } = useWorkspaceContext();
+  const pluginsWorkspaceContextState = useWorkspaceContext();
+  const { context: pluginsWorkspaceContext } = pluginsWorkspaceContextState;
   const pluginsPageViewFiredRef = useRef(false);
   useEffect(() => {
     if (pluginsPageViewFiredRef.current) return;
@@ -330,7 +332,7 @@ export function PluginsView({
     try {
       const result = await duplicatePluginAsProject(record.id, {
         name: localizePluginTitle(locale, record),
-      });
+      }, resolvedWorkspaceContextForWrite(pluginsWorkspaceContextState));
       setDetailsRecord(null);
       navigate({
         kind: 'project',
@@ -1056,7 +1058,7 @@ export function ExtensionsMarketplace({
     }
     setCreateBusy('import');
     try {
-      const outcome = await installPluginSource(url);
+      const outcome = await installPluginSource(url, workspaceContext);
       if (outcome.ok) {
         await refresh();
         setCreateOpen(false);

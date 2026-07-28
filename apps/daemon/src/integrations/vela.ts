@@ -228,6 +228,30 @@ export interface VelaLoginStatus {
   userCode?: string;
   /** True when vela warned it could not open the browser automatically. */
   browserOpenFailed?: boolean;
+  /**
+   * Origin of the vela web console this runtime talks to, when it was given
+   * one. See {@link resolveVelaConsoleOrigin} — the client needs it to build
+   * wallet / plans / upgrade links for a non-public AMR environment.
+   */
+  consoleOrigin?: string;
+}
+
+/**
+ * The vela web console origin this runtime was configured with, normalized
+ * without a trailing slash, or undefined when it was given none.
+ *
+ * Non-prod AMR environments are internal deployments, so their hostnames are
+ * not literals in this public repository: packaging injects the origin from a
+ * CI secret and the packaged runtime forwards it as `OD_VELA_WEB_URL`. Reporting
+ * it on the login status is how the web client learns which console to link to
+ * without needing a hostname table of its own. Undefined for prod and fork
+ * builds, where the client falls back to the public product console.
+ */
+export function resolveVelaConsoleOrigin(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const origin = env.OD_VELA_WEB_URL?.trim().replace(/\/+$/, '') ?? '';
+  return origin.length > 0 ? origin : undefined;
 }
 
 export interface VelaLoginActivation {
@@ -290,12 +314,9 @@ export interface VelaControlApiContext {
   configMtimeMs: number | null;
 }
 
-export interface VelaControlApiContext {
+export interface VelaApiContext {
   profile: string;
   apiUrl: string;
-  controlKey: string;
-  user: VelaUser | null;
-  configMtimeMs: number | null;
 }
 
 interface VelaProfileShape {
@@ -308,6 +329,12 @@ interface VelaProfileShape {
 
 interface VelaConfigFileShape {
   profiles?: Record<string, VelaProfileShape>;
+}
+
+interface VelaProfileConfigSnapshot {
+  profile: string;
+  stored: VelaProfileShape | undefined;
+  configMtimeMs: number | null;
 }
 
 export function mergeVelaEnv(
@@ -343,6 +370,20 @@ function readConfigFile(): VelaConfigFileShape | null {
   } catch {
     return null;
   }
+}
+
+function readVelaProfileConfigSnapshot(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+): VelaProfileConfigSnapshot {
+  const mergedEnv = mergeVelaEnv(env, configuredEnv);
+  const profile = resolveAmrProfile(mergedEnv);
+  const file = readConfigFile();
+  return {
+    profile,
+    stored: file?.profiles?.[profile],
+    configMtimeMs: existsSync(amrConfigPath()) ? statSync(amrConfigPath()).mtimeMs : null,
+  };
 }
 
 export function readVelaLoginStatus(
@@ -550,16 +591,31 @@ export function readVelaControlApiContext(
       configMtimeMs: null,
     };
   }
-  const file = readConfigFile();
-  const stored = file?.profiles?.[profile];
+  const snapshot = readVelaProfileConfigSnapshot(env, configuredEnv);
+  const apiContext = readVelaApiContext(env, configuredEnv, snapshot);
+  const stored = snapshot.stored;
   const controlKey = stored?.controlKey?.trim() ?? '';
   if (!controlKey) return null;
   return {
-    profile,
-    apiUrl: stored?.apiUrl?.trim() || envApiUrl || 'https://amr-api.open-design.ai',
+    ...apiContext,
     controlKey,
     user: stored?.user ?? null,
-    configMtimeMs: existsSync(amrConfigPath()) ? statSync(amrConfigPath()).mtimeMs : null,
+    configMtimeMs: snapshot.configMtimeMs,
+  };
+}
+
+export function readVelaApiContext(
+  env: NodeJS.ProcessEnv = process.env,
+  configuredEnv: Record<string, string> = {},
+  snapshot: VelaProfileConfigSnapshot = readVelaProfileConfigSnapshot(env, configuredEnv),
+): VelaApiContext {
+  const mergedEnv = mergeVelaEnv(env, configuredEnv);
+  return {
+    profile: snapshot.profile,
+    apiUrl:
+      snapshot.stored?.apiUrl?.trim()
+      || mergedEnv.VELA_API_URL?.trim()
+      || 'https://amr-api.open-design.ai',
   };
 }
 

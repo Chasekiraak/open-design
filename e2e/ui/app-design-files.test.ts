@@ -336,16 +336,6 @@ async function selectComposerSessionMode(page: Page, modeTitle: 'Ask mode' | 'Pl
   await expect(trigger).toHaveAttribute('aria-label', `Mode: ${modeName}`);
 }
 
-async function clickDesignFilePreviewOpen(page: Page) {
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await expect(async () => {
-    const openButton = preview.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible({ timeout: 1_000 });
-    await openButton.click({ timeout: 1_000 });
-  }).toPass({ timeout: T.medium });
-}
-
 async function openDesignFile(page: Page, fileName: string) {
   const preview = page.getByTestId('artifact-preview-frame');
   if (await preview.isVisible()) return;
@@ -357,12 +347,34 @@ async function openDesignFile(page: Page, fileName: string) {
   }
 
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: fileName,
-  });
-  await expect(fileRow).toBeVisible();
+  const fileRow = await revealDesignFileRow(page, fileName);
+  // #5517 deleted the preview pane and its Open button: a single click on the
+  // row's primary target opens the file in a workspace tab.
   await fileRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+}
+
+// Uploaded files can land under a deduplicated name, and #5517 image cards
+// render no filename text, so match Design Files rows on the `data-testid`
+// suffix rather than on rendered text.
+function designFileRow(page: Page, fileName: string): Locator {
+  return page.locator(`[data-testid^="design-file-row-"][data-testid$="${fileName}"]`).first();
+}
+
+// #5517 groups the panel behind per-category tabs, so a file is only listed
+// while its own category tab is active. Land on the row the way a user would:
+// look under the default category, otherwise page through the tab bar.
+async function revealDesignFileRow(page: Page, fileName: string): Promise<Locator> {
+  const row = designFileRow(page, fileName);
+  if (await row.isVisible().catch(() => false)) return row;
+  const categoryTabs = page.getByTestId('design-files-tabs').getByRole('tab');
+  const count = await categoryTabs.count();
+  for (let index = 0; index < count; index += 1) {
+    await categoryTabs.nth(index).click();
+    if (await row.isVisible().catch(() => false)) return row;
+  }
+  await expect(row).toBeVisible();
+  return row;
 }
 
 async function waitForLoadingToClear(page: Page) {
@@ -437,21 +449,22 @@ async function runDesignFilesUploadFlow(page: Page) {
 
   await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'moodboard.png',
-  });
+  // #5517 deleted the preview pane that used to spell out kind / size /
+  // download for the picked file. The panel's category tab bar is what states
+  // the kind now, and the card grid itself is the preview: uploading an image
+  // has to file it under Images and reopen it on a single click. (The row's ⋯
+  // menu still carries Download — covered by the single-file actions spec.)
+  const imagesTab = page.getByTestId('design-files-tab-cat:image');
+  await expect(imagesTab).toBeVisible();
+  await imagesTab.click();
+  const fileRow = designFileRow(page, 'moodboard.png');
   await expect(fileRow).toBeVisible();
-  const nameBtn = fileRow.getByRole('button').first();
-  await nameBtn.click();
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await expect(preview.getByText(/moodboard\.png/i)).toBeVisible();
-  await expect(preview.getByText(/Image/i)).toBeVisible();
-  await expect(preview.getByText(/1 KB|1024 B|67 B|68 B/i)).toBeVisible();
-  await expect(preview.getByRole('link', { name: /Download/i })).toHaveAttribute('download', /moodboard\.png$/);
 
-  await preview.getByRole('button', { name: 'Open' }).click();
-  await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
+  await fileRow.getByRole('button').first().click();
+  await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expectProjectFilesToIncludeSuffixes(page, projectId, ['moodboard.png']);
 }
 
@@ -482,9 +495,7 @@ async function runDesignFilesDeleteFlow(page: Page) {
   await expect(page.getByRole('tab', { name: /trash-me\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'trash-me.png',
-  });
+  const fileRow = designFileRow(page, 'trash-me.png');
   await expect(fileRow).toBeVisible();
   await fileRow.hover();
   await fileRow.locator('[data-testid^="design-file-menu-"]').click();
@@ -869,12 +880,9 @@ test('[P0] @critical file workspace restores HTML preview after switching throug
   })).toBeVisible();
 
   await openAllProjectFiles(page);
-  const sourceRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'logic.ts',
-  });
-  await expect(sourceRow).toBeVisible();
+  const sourceRow = await revealDesignFileRow(page, 'logic.ts');
+  // #5517: one click on the row opens the file — no preview card in between.
   await sourceRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
   await expect(page.getByRole('tab', { name: /logic\.ts/i })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.code-viewer')).toContainText('riskScore');
 
@@ -931,12 +939,10 @@ async function runDesignFilesTabPersistenceFlow(page: Page) {
     // Depending on restoration timing, inactive files can either be restored as
     // tabs already or remain available from the Design Files list.
     await openAllProjectFiles(page);
-    const secondFileRow = page.locator('[data-testid^="design-file-row-"]', {
-      hasText: 'second-tab.png',
-    });
+    const secondFileRow = designFileRow(page, 'second-tab.png');
     await expect(secondFileRow).toBeVisible();
+    // #5517: one click on the row opens the file — no preview card in between.
     await secondFileRow.getByRole('button').first().click();
-    await clickDesignFilePreviewOpen(page);
   }
 
   await expect(restoredSecondTab).toBeVisible();

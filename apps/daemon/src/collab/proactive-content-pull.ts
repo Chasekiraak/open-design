@@ -257,6 +257,12 @@ export interface ProactiveContentPullDeps {
    *  to invalidate list-level cover reads that do not subscribe to the
    *  project's own SSE stream. */
   onPulled?: (target: ProactiveContentPullTarget, version: number) => void | Promise<void>;
+  /**
+   * Called when handling the original hub event reaches a terminal decision
+   * without leaving a retry/recovery lane behind. Successful pulls also call
+   * this after `onPulled`; consumers should treat it as idempotent.
+   */
+  onEventSettled?: (event: ProactiveContentPullEvent) => void;
   /** Opt-in, secret-free timing observer. It must not affect pull behavior. */
   onTiming?: (event: {
     phase:
@@ -334,6 +340,15 @@ export interface ProactiveContentPull {
   materializeMissingProjects(
     expectedWorkspaceId?: string,
     expectedProjectId?: string,
+  ): Promise<void>;
+  /**
+   * Adopt an exact-scope version that another pull lane durably committed.
+   * The caller must invoke this only after bytes, mirror binding, and cursor
+   * persistence all succeed.
+   */
+  observeMaterialized(
+    target: ProactiveContentPullTarget,
+    version: number,
   ): Promise<void>;
   /** Stop background recovery and release every pending retry timer. */
   dispose(): void;
@@ -573,6 +588,42 @@ export function createProactiveContentPull(
     return version;
   };
 
+  const notifyPulled = async (
+    target: ProactiveContentPullTarget,
+    version: number,
+  ): Promise<void> => {
+    try {
+      const callbackTarget = { ...target };
+      delete callbackTarget.authorizationWitness;
+      delete callbackTarget.authorizedStageInvocation;
+      await deps.onPulled?.(callbackTarget, version);
+    } catch (error) {
+      // Content and its durable cursor are already committed. List
+      // invalidation is recoverable via its polling floor.
+      deps.onError?.(error);
+    }
+  };
+
+  const observeMaterialized = async (
+    target: ProactiveContentPullTarget,
+    version: number,
+  ): Promise<void> => {
+    if (!Number.isSafeInteger(version) || version < 0) return;
+    const scopeKey = pullScopeKey(target);
+    const cursor = pulledVersions.get(scopeKey);
+    const advanced = cursor == null || version > cursor;
+    if (advanced) pulledVersions.set(scopeKey, version);
+    const intent = intents.get(scopeKey);
+    if (
+      intent &&
+      intent.desiredVersion != null &&
+      version >= intent.desiredVersion
+    ) {
+      clearIntent(intent);
+    }
+    if (advanced) await notifyPulled(target, version);
+  };
+
   function readTargetedCatalog(
     workspaceId: string,
   ): Promise<readonly ProactiveContentPullProjectRef[]> {
@@ -728,16 +779,7 @@ export function createProactiveContentPull(
         if (cursor == null || outcome.version > cursor) {
           pulledVersions.set(scopeKey, outcome.version);
         }
-        try {
-          const callbackTarget = { ...targetForPull };
-          delete callbackTarget.authorizationWitness;
-          delete callbackTarget.authorizedStageInvocation;
-          await deps.onPulled?.(callbackTarget, outcome.version);
-        } catch (error) {
-          // Content is already durable and the cursor must stay advanced; a
-          // failed list invalidation is recoverable via its polling floor.
-          deps.onError?.(error);
-        }
+        await notifyPulled(targetForPull, outcome.version);
         return { scopeKey, outcome };
       } catch (error) {
         // Silent degradation: the web's status polling keeps pulling as the
@@ -1029,6 +1071,34 @@ export function createProactiveContentPull(
         } catch (error) {
           deps.onError?.(error);
           return { kind: 'failed' };
+        }
+      }
+      if (!intent.force) {
+        const persistedVersion = Number(
+          deps.materializedVersion?.(target) ?? NaN,
+        );
+        if (
+          Number.isSafeInteger(persistedVersion) &&
+          persistedVersion >= 0 &&
+          (
+            intent.desiredVersion == null ||
+            persistedVersion >= intent.desiredVersion
+          )
+        ) {
+          try {
+            const hasMaterializedBytes = deps.hasMaterializedProject
+              ? await deps.hasMaterializedProject(projectId, target)
+              : true;
+            if (hasMaterializedBytes) {
+              const cursor = pulledVersions.get(scopeKey);
+              if (cursor == null || persistedVersion > cursor) {
+                pulledVersions.set(scopeKey, persistedVersion);
+              }
+            }
+          } catch (error) {
+            deps.onError?.(error);
+            return { kind: 'failed' };
+          }
         }
       }
       const cursor = pulledVersions.get(scopeKey);
@@ -2176,7 +2246,19 @@ export function createProactiveContentPull(
         cancelForegroundResumeTimer();
       }
       try {
-        await processContentChanged(event, undefined, false, isForeground);
+        const settled = await processContentChanged(
+          event,
+          undefined,
+          false,
+          isForeground,
+        );
+        if (settled) {
+          try {
+            deps.onEventSettled?.(event);
+          } catch {
+            // Lifecycle observation must never affect pull behavior.
+          }
+        }
       } finally {
         if (isForeground) {
           foregroundEventsInFlight -= 1;
@@ -2198,6 +2280,7 @@ export function createProactiveContentPull(
       projectId && workspaceId
         ? requestCatalogProjectRecovery(workspaceId, projectId, 'external')
         : requestCatchUp('missing-only', workspaceId),
+    observeMaterialized,
     dispose(): void {
       if (disposed) return;
       disposed = true;

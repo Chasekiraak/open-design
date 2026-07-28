@@ -4,11 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   workspaceContextHasWorkspaceIdentity,
+  type ProjectContentTransferState,
   type ProjectMetadata,
   type ProjectSyncIntentEvent,
   type TeamProject,
   type WorkspaceCollabContext,
 } from '@open-design/contracts';
+import type {
+  ProjectContentTransferToken,
+} from '../collab/project-content-transfer-state.js';
 import type { CollabRuntime } from '../collab/runtime.js';
 import {
   contextToResourceHubPrincipal,
@@ -33,9 +37,15 @@ import {
   promoteAuthorizedTeamProjectStage,
   type PromoteAuthorizedTeamProjectStageInput,
 } from '../collab/team-mirror-promotion.js';
-import { parseVelaResourceSnapshot, runVelaResourceCommand } from '../collab/vela-cli-resource-adapter.js';
+import { isUnmaterializedSharedPlaceholder } from '../collab/shared-project-placeholder.js';
+import {
+  isRetractedHubResourceError,
+  parseVelaResourceSnapshot,
+  runVelaResourceCommand,
+} from '../collab/vela-cli-resource-adapter.js';
 import { readVelaControlApiContext } from '../integrations/vela.js';
 import { readProjectManifest } from '../project-locations.js';
+import { redactSecrets } from '../redact.js';
 
 /** The fields register-on-pull reads out of a pulled project's manifest. */
 export interface PulledProjectManifest {
@@ -64,7 +74,7 @@ export interface TeamMirrorPullScope {
 }
 
 export interface PulledProjectStore {
-  get?: (projectId: string) => { name?: string | null } | null;
+  get?: (projectId: string) => { name?: string | null; metadata?: unknown } | null;
   has(projectId: string): boolean;
   register(input: RegisterPulledProjectInput): void;
   update?: (input: RegisterPulledProjectInput) => void;
@@ -113,6 +123,28 @@ export interface RegisterCollabSyncRoutesDeps {
   /** Set/clear the non-destructive "team mirror revoked" flag on a local
    *  project so read routes stop serving a project that has left the team. */
   markTeamProjectRevoked?: (projectId: string, revoked: boolean) => void;
+  /**
+   * Set/clear the `sharedProjectPlaceholderAt` stamp on a local project's
+   * metadata (see collab/shared-project-placeholder.ts). Set when
+   * `ensureSharedProjectPlaceholder` registers a placeholder record; cleared
+   * exactly once a pull has materialized real hub content locally. While the
+   * stamp is set, the publish paths refuse to treat the local copy as content
+   * authority (the recvqzaDvUU6B3 fresh-install wipe guard).
+   */
+  markSharedProjectPlaceholder?: (projectId: string, placeholder: boolean) => void;
+  /**
+   * Delete a local project record that is still an unmaterialized
+   * shared-project placeholder (and its empty content directory). Called by
+   * the retracted-share heal below ONLY for a record the placeholder stamp
+   * proves contentless — implementations must re-check
+   * `isUnmaterializedSharedPlaceholder` before deleting so a concurrent pull
+   * that just materialized real content can never be destroyed.
+   */
+  retireUnmaterializedSharedPlaceholder?: (projectId: string) => void;
+  /** Drop the daemon's cached team-project catalog listing so a heal that
+   *  removed a catalog row is visible on the next list read, not one
+   *  stale-while-revalidate TTL later. */
+  invalidateTeamProjectCatalog?: () => void;
   resolveOwnerDisplayName?: (
     memberId: string,
   ) => Promise<{ displayName: string; role: 'owner' | 'admin' | 'member' } | null>;
@@ -124,8 +156,37 @@ export interface RegisterCollabSyncRoutesDeps {
     projectId: string,
     scope: TeamMirrorPullScope,
   ) => number | null;
+  /** Read the daemon-local inbound content-transfer lifecycle snapshot. */
+  readContentTransferState?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+  ) => ProjectContentTransferState | null;
+  /** Begin one exact-scope transfer generation after authorization resolves. */
+  beginContentTransfer?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    version?: number,
+  ) => ProjectContentTransferToken;
+  /** Only the matching exact-scope generation token may complete a transfer. */
+  finishContentTransfer?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    token: ProjectContentTransferToken,
+    version?: number,
+  ) => void;
   /** Persist the actual version after either HTTP or proactive pull lands. */
   writeMaterializedVersion?: (
+    projectId: string,
+    scope: TeamMirrorPullScope,
+    version: number,
+  ) => void | Promise<void>;
+  /**
+   * Tell the proactive coordinator that the fallback HTTP/legacy lane
+   * durably landed this exact scope + version. This runs only after the
+   * cursor commit, so consumers may settle a queued same-head retry without
+   * trusting an in-memory claim that is ahead of disk.
+   */
+  onLegacyPullMaterialized?: (
     projectId: string,
     scope: TeamMirrorPullScope,
     version: number,
@@ -260,6 +321,36 @@ interface PublicFilePublication {
 }
 
 const publicFilePublications = new Map<string, PublicFilePublication>();
+const MAX_ERROR_LOG_FIELD_LENGTH = 2_048;
+
+function redactedErrorLogText(value: unknown): string {
+  const text = value instanceof Error
+    ? value.message || value.name
+    : String(value);
+  return redactSecrets(text).slice(0, MAX_ERROR_LOG_FIELD_LENGTH);
+}
+
+function errorLogFields(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  errorCause?: string;
+} {
+  const errorName = redactSecrets(
+    error instanceof Error ? error.name : typeof error,
+  ).slice(0, MAX_ERROR_LOG_FIELD_LENGTH);
+  const errorMessage = redactedErrorLogText(error);
+  const cause =
+    error && typeof error === 'object' && 'cause' in error
+      ? (error as { cause?: unknown }).cause
+      : undefined;
+  return {
+    errorName,
+    errorMessage,
+    ...(cause == null
+      ? {}
+      : { errorCause: redactedErrorLogText(cause) }),
+  };
+}
 
 function cleanPulledProjectName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -526,6 +617,9 @@ export function registerCollabSyncRoutes(
     resolveSharedProjectOwner,
     resolveSharedProject,
     markTeamProjectRevoked,
+    markSharedProjectPlaceholder,
+    retireUnmaterializedSharedPlaceholder,
+    invalidateTeamProjectCatalog,
     resolveOwnerDisplayName,
     notifyFilesChanged,
     notifyProjectMetadataChanged,
@@ -826,6 +920,84 @@ export function registerCollabSyncRoutes(
       createdAt: now,
       updatedAt: now,
     });
+    // Stamp the record as an unmaterialized placeholder so no publish path
+    // ever treats its (empty) content directory as content authority until a
+    // pull lands real hub content (the recvqzaDvUU6B3 fresh-install wipe
+    // guard — see collab/shared-project-placeholder.ts).
+    markSharedProjectPlaceholder?.(projectId, true);
+  }
+
+  /**
+   * Invariant: opening a shared project whose only local record is an
+   * unmaterialized placeholder starts that project's content pull on the very
+   * request that discovered it — for EVERY viewer, owner or member.
+   *
+   * Neither side of the product had another way to start it on first open. The
+   * web's auto-pull is gated on `publishedVersion` advancing past its cursor,
+   * and a fresh daemon's first status response cannot carry a published head:
+   * `collab.publishedVersion()` reads an in-process map that has never been
+   * written, and the real hub head is fetched fire-and-forget into
+   * `headEnrichmentCache` for a LATER poll to consume. So a brand-new member
+   * who opened a shared project on a fresh install got a placeholder, an empty
+   * file list, and no pull at all — materialization arrived only whenever a
+   * proactive lane (hub push / reconnect catch-up / the recovery floor) next
+   * fired, which is why the content appeared to show up "only on the second
+   * open".
+   *
+   * Fire-and-forget by design: the pull replaces the whole project tree and
+   * must never hold the status response open. Callers surface progress through
+   * `awaitingFirstMaterialization` + `contentTransferState` instead.
+   */
+  function materializePlaceholderOnOpen(
+    projectId: string,
+    req: Parameters<typeof pullAccessForRequest>[1],
+    viewer: {
+      principal: ResourceHubPrincipal | null;
+      workspaceId: string | null;
+      ownerMemberId: string | null;
+      callerIsOwner: boolean;
+    },
+  ): void {
+    if (!viewer.ownerMemberId) return;
+    void (async () => {
+      const { principal: resourcePrincipal, scope } = await pullAccessForRequest(
+        projectId,
+        req,
+        viewer.ownerMemberId,
+        { principal: viewer.principal, workspaceId: viewer.workspaceId },
+      );
+      if (!scope) return;
+      try {
+        await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
+      } catch (error) {
+        // Retracted-share heal (飞书 recvqA6qhV7St1): the catalog names this
+        // caller as the project's owner, yet the published pull answered
+        // `resource_not_found` — the hub's tombstone gate. A live share can
+        // never produce that pair; it is the hub-authoritative signature of a
+        // HALF-LANDED retraction: an unshare's `resource remove` landed but
+        // its `team-projects remove` did not, leaving a dangling catalog row.
+        // On a fresh data root there is no `cloudTombstonedAt` left to
+        // suppress it, so the retracted project revives as a ghost team card
+        // for every member (reproduced live on the feature-test hub,
+        // 2026-07-27). Finish the retraction from the hub's own state instead
+        // of trusting local memory: complete the catalog removal (unpublish is
+        // idempotent against the tombstone), retire the contentless
+        // placeholder this open registered, and drop the cached listing.
+        //
+        // Owner-only: retracting a share is the sharer's action. A member who
+        // hits the same tombstone has merely lost access and must not unshare
+        // anyone's project on their behalf.
+        if (!viewer.callerIsOwner) throw error;
+        if (!isRetractedHubResourceError(error)) throw error;
+        if (
+          !projectStore?.get ||
+          !isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
+        ) return;
+        await requestTeamUnshare(projectId, resourcePrincipal ?? undefined);
+        retireUnmaterializedSharedPlaceholder?.(projectId);
+        invalidateTeamProjectCatalog?.();
+      }
+    })().catch(() => undefined);
   }
 
   app.post('/api/projects/:id/collab/changed', (req, res) => {
@@ -1205,7 +1377,11 @@ export function registerCollabSyncRoutes(
           capabilityUnavailable ? 'capability-unavailable' : 'failed',
         );
         if (!capabilityUnavailable) {
-          console.warn('[od] authorized proactive team pull failed closed:', error);
+          console.warn('[od] authorized proactive team pull failed closed:', {
+            projectId,
+            version: expectedVersion,
+            ...errorLogFields(error),
+          });
           return complete({ status: 'register_failed' });
         }
         // Old CLIs can materialize successfully while returning no version.
@@ -1282,7 +1458,11 @@ export function registerCollabSyncRoutes(
             onPostCommitCleanupError: (error) => {
               console.warn(
                 '[od] authorized team project committed; deferred promotion cleanup:',
-                error,
+                {
+                  projectId,
+                  version: expectedVersion,
+                  ...errorLogFields(error),
+                },
               );
             },
           });
@@ -1319,19 +1499,26 @@ export function registerCollabSyncRoutes(
               workspaceMatches,
               generationMatches,
             },
-            errorName: error instanceof Error ? error.name : typeof error,
+            ...errorLogFields(error),
           });
           return complete({ status: 'register_failed' });
         } finally {
           try {
             await staged.cleanup();
           } catch (error) {
-            console.warn('[od] failed to clean authorized team project stage:', error);
+            console.warn('[od] failed to clean authorized team project stage:', {
+              projectId,
+              version: expectedVersion,
+              ...errorLogFields(error),
+            });
           }
         }
         notifyFilesChanged?.(projectId);
         if (localRecordChanged) notifyProjectMetadataChanged?.(projectId);
         markTeamProjectRevoked?.(projectId, false);
+        // Real hub content is on disk and registered — the local record is no
+        // longer an unmaterialized placeholder, so publishing may resume.
+        markSharedProjectPlaceholder?.(projectId, false);
         return complete({
           status: 'pulled',
           version: staged.receipt.version,
@@ -1524,6 +1711,25 @@ export function registerCollabSyncRoutes(
             version: materializedVersion,
             atMs: Date.now(),
           });
+          try {
+            await deps.onLegacyPullMaterialized?.(
+              projectId,
+              scope,
+              materializedVersion,
+            );
+          } catch (error) {
+            // The bytes, mirror binding, and durable cursor are already
+            // committed. Coordinator notification is recoverable from that
+            // cursor on its next retry and must never turn success into 502.
+            console.warn(
+              '[od] failed to notify proactive coordinator of legacy team pull:',
+              {
+                projectId,
+                version: materializedVersion,
+                ...errorLogFields(error),
+              },
+            );
+          }
         } catch (error) {
           console.warn('[od] failed to persist pulled team project version:', error);
           return complete({ status: 'register_failed' });
@@ -1544,6 +1750,9 @@ export function registerCollabSyncRoutes(
         // manual reload (recvqhwv6RPU1j).
         notifyProjectMetadataChanged?.(projectId);
       }
+      // Real hub content is on disk and registered — the local record is no
+      // longer an unmaterialized placeholder, so publishing may resume.
+      markSharedProjectPlaceholder?.(projectId, false);
     }
     // A successful pull means the project is shared again (or still is): clear
     // any prior revocation so its files are served normally.
@@ -1591,31 +1800,55 @@ export function registerCollabSyncRoutes(
       scope?.viewerMemberId ?? null,
       scope?.ownerMemberId ?? null,
     ]);
-    const key = JSON.stringify([
-      mutationKey,
-      authorizedStageInvocation === undefined
-        ? 'legacy'
-        : isBoundProactivePullInvocation(
-            authorizedStageInvocation,
-            {
-              projectId,
-              workspaceId: scope?.workspaceId ?? '',
-              resourceTeamId: scope?.resourceTeamId ?? '',
-              viewerMemberId: scope?.viewerMemberId ?? '',
-              ownerMemberId: scope?.ownerMemberId ?? '',
-            },
-            expectedVersion,
-          )
-          ? 'authorized-stage'
-          : 'invalid-stage',
-    ]);
+    const hasInvalidAuthorizedInvocation =
+      authorizedStageInvocation !== undefined &&
+      !isAuthorizedProactivePullInvocation(
+        authorizedStageInvocation,
+        {
+          projectId,
+          workspaceId: scope?.workspaceId ?? '',
+          resourceTeamId: scope?.resourceTeamId ?? '',
+          viewerMemberId: scope?.viewerMemberId ?? '',
+          ownerMemberId: scope?.ownerMemberId ?? '',
+        },
+        expectedVersion,
+      );
+    // Valid legacy and authorized callers share one exact-scope mutation key:
+    // both replace the same live project tree. Invalid/stale authorized
+    // invocations stay isolated so they can only fail closed, never borrow a
+    // successful legacy result.
+    const key = hasInvalidAuthorizedInvocation
+      ? JSON.stringify([mutationKey, 'invalid-stage'])
+      : mutationKey;
     const existing = pullsInFlight.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (!authorizedStageInvocation) return existing;
+      return existing.then((outcome) =>
+        isAuthorizedProactivePullInvocation(
+          authorizedStageInvocation,
+          {
+            projectId,
+            workspaceId: scope?.workspaceId ?? '',
+            resourceTeamId: scope?.resourceTeamId ?? '',
+            viewerMemberId: scope?.viewerMemberId ?? '',
+            ownerMemberId: scope?.ownerMemberId ?? '',
+          },
+          expectedVersion,
+        )
+          ? outcome
+          : { status: 'register_failed' },
+      );
+    }
+    const transferToken = scope
+      ? deps.beginContentTransfer?.(projectId, scope, expectedVersion)
+      : undefined;
     const previous = projectPullTails.get(projectId) ?? Promise.resolve();
-    const run = (async () => {
+    let run!: Promise<CollabSyncPullOutcome>;
+    run = (async () => {
+      let outcome: CollabSyncPullOutcome | null = null;
       try {
         await previous.catch(() => undefined);
-        return await pullSharedProjectOnce(
+        outcome = await pullSharedProjectOnce(
           projectId,
           principal,
           scope,
@@ -1623,8 +1856,21 @@ export function registerCollabSyncRoutes(
           expectedVersion,
           authorizedStageInvocation,
         );
+        return outcome;
       } finally {
-        pullsInFlight.delete(key);
+        if (scope && transferToken) {
+          deps.finishContentTransfer?.(
+            projectId,
+            scope,
+            transferToken,
+            outcome?.status === 'pulled'
+              ? outcome.version ?? expectedVersion
+              : expectedVersion,
+          );
+        }
+        if (pullsInFlight.get(key) === run) {
+          pullsInFlight.delete(key);
+        }
       }
     })();
     const tail = run.then(
@@ -1706,6 +1952,22 @@ export function registerCollabSyncRoutes(
     // retry storm builds up.
     if (ownerMemberId) {
       ensureSharedProjectPlaceholder(projectId);
+    }
+    // Whether this daemon's only local record for the project is still an
+    // unmaterialized placeholder. Purely local and synchronous — it needs no
+    // hub round-trip, which is exactly why it is the signal the client can act
+    // on from the FIRST status response (see `awaitingFirstMaterialization` on
+    // CollabSyncStatusResponse).
+    const awaitingFirstMaterialization = Boolean(
+      projectStore?.get && isUnmaterializedSharedPlaceholder(projectStore.get(projectId)),
+    );
+    if (awaitingFirstMaterialization) {
+      materializePlaceholderOnOpen(projectId, req, {
+        principal,
+        workspaceId: resolvedWorkspaceId ?? null,
+        ownerMemberId,
+        callerIsOwner,
+      });
     }
     // A verified local mirror binding is enough to return shared identity and
     // unlock presence immediately. The owner-name directory and published-head
@@ -1802,9 +2064,25 @@ export function registerCollabSyncRoutes(
         materializedVersion = null;
       }
     }
+    const transferScope =
+      resolvedWorkspaceId
+      && principal
+      && ownerMemberId
+        ? {
+            workspaceId: resolvedWorkspaceId,
+            resourceTeamId: principal.teamId,
+            viewerMemberId: principal.memberId,
+            ownerMemberId,
+          }
+        : null;
     res.json({
       publishedVersion: headResult.head,
       materializedVersion,
+      contentTransferState:
+        transferScope
+          ? deps.readContentTransferState?.(projectId, transferScope) ?? null
+          : null,
+      awaitingFirstMaterialization,
       syncState,
       ownerMemberId,
       ...(ownerDisplayName ? { ownerDisplayName } : {}),

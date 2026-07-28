@@ -513,8 +513,7 @@ test('[P0] sending preview comments opens the refreshed follow-up artifact', asy
 
   await page.getByTestId('board-mode-toggle').click();
   await page.getByTestId('comment-panel-toggle').click();
-  const frame = artifactPreviewFrame(page);
-  await frame.locator('[data-od-id="hero-title"]').click();
+  await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();
@@ -690,18 +689,12 @@ async function seedHtmlArtifact(
 
 async function openDesignFile(page: Page, fileName: string) {
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: fileName,
-  });
+  const fileRow = page.locator(`[data-testid^="design-file-row-"][data-testid$="${fileName}"]`).first();
   await expect(fileRow).toBeVisible();
-  const mainButton = fileRow.getByRole('button').first();
-  await mainButton.click();
-  const openButton = page.getByTestId('design-file-preview').getByRole('button', { name: 'Open' });
-  if (await openButton.isVisible().catch(() => false)) {
-    await openButton.click();
-    return;
-  }
-  await mainButton.dblclick();
+  // #5517 removed the preview pane and its "Open" button: the row's primary
+  // target opens the file in a workspace tab on a single click.
+  await fileRow.getByRole('button').first().click();
+  await expect(tabBySuffix(page, fileName)).toHaveAttribute('aria-selected', 'true');
 }
 
 async function expectFileSource(
@@ -1104,14 +1097,22 @@ async function runGenerationDoesNotCreateExtraFileFlow(
   await expectScenarioProjectState(page, entry, projectId);
 }
 
+async function clickCommentTargetInPreview(page: Page, selector: string) {
+  const target = artifactPreviewFrame(page).locator(selector);
+  await expect(target).toBeVisible();
+  // Auto-fit zoom + comment-bridge injection can keep the iframe target
+  // moving for long enough that Playwright's stability check never settles
+  // (CI: "element is not stable" until test timeout). Force once visible.
+  await target.click({ force: true });
+}
+
 async function runCommentAttachmentFlow(
   page: Page,
   entry: UiScenario,
 ) {
   await page.getByTestId('board-mode-toggle').click();
   await page.getByTestId('comment-panel-toggle').click();
-  const frame = artifactPreviewFrame(page);
-  await frame.locator('[data-od-id="hero-title"]').click();
+  await clickCommentTargetInPreview(page, '[data-od-id="hero-title"]');
   await expect(page.getByTestId('comment-popover')).toBeVisible();
   await page.getByTestId('comment-popover-input').fill('Make the headline more specific.');
   await page.getByTestId('comment-popover-save').click();

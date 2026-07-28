@@ -177,6 +177,12 @@ function migrate(db: SqliteDb): void {
       agent_id        TEXT NOT NULL,
       session_id      TEXT NOT NULL,
       stable_prompt_hash TEXT,
+      -- Per-section digests of the stable prefix inputs behind
+      -- stable_prompt_hash, as JSON (see prompts/stable-sections.ts). Purely
+      -- diagnostic: when the hash moves, diffing this against the current turn
+      -- names WHICH input drifted. Never gates a re-send -- stable_prompt_hash
+      -- stays the only source of truth for that.
+      stable_prompt_sections TEXT,
       -- Resume identity guard: the session is only safe to resume when the
       -- conversation has not changed shape under it. model/cwd are the runtime
       -- identity the upstream session was created with; a change forces a fresh
@@ -497,6 +503,12 @@ function migrate(db: SqliteDb): void {
   const agentSessionCols = db.prepare(`PRAGMA table_info(agent_sessions)`).all() as DbRow[];
   if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_hash')) {
     db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_hash TEXT`);
+  }
+  // Drift attribution (see agent_sessions CREATE TABLE comment). Rows written
+  // before this column exists read back null and report `unattributed` for one
+  // turn, then self-heal on the next write.
+  if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'stable_prompt_sections')) {
+    db.exec(`ALTER TABLE agent_sessions ADD COLUMN stable_prompt_sections TEXT`);
   }
   // Resume identity guard columns (see agent_sessions CREATE TABLE comment).
   if (agentSessionCols.length > 0 && !agentSessionCols.some((c: DbRow) => c.name === 'model')) {
@@ -2233,6 +2245,7 @@ export function upsertAgentSession(
     agentId: string;
     sessionId: string;
     stablePromptHash?: string | null;
+    stablePromptSections?: string | null;
     model?: string | null;
     cwd?: string | null;
     lastMessageId?: string | null;
@@ -2240,11 +2253,13 @@ export function upsertAgentSession(
 ): void {
   db.prepare(
     `INSERT INTO agent_sessions
-       (conversation_id, agent_id, session_id, stable_prompt_hash, model, cwd, last_message_id, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (conversation_id, agent_id, session_id, stable_prompt_hash, stable_prompt_sections,
+        model, cwd, last_message_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(conversation_id, agent_id)
        DO UPDATE SET session_id = excluded.session_id,
                      stable_prompt_hash = excluded.stable_prompt_hash,
+                     stable_prompt_sections = excluded.stable_prompt_sections,
                      model = excluded.model,
                      cwd = excluded.cwd,
                      last_message_id = excluded.last_message_id,
@@ -2254,6 +2269,7 @@ export function upsertAgentSession(
     input.agentId,
     input.sessionId,
     input.stablePromptHash ?? null,
+    input.stablePromptSections ?? null,
     input.model ?? null,
     input.cwd ?? null,
     input.lastMessageId ?? null,
@@ -2268,13 +2284,15 @@ export function getAgentSessionRecord(
 ): {
   sessionId: string;
   stablePromptHash: string | null;
+  stablePromptSections: string | null;
   model: string | null;
   cwd: string | null;
   lastMessageId: string | null;
 } | null {
   const row = db
     .prepare(
-      `SELECT session_id, stable_prompt_hash, model, cwd, last_message_id FROM agent_sessions
+      `SELECT session_id, stable_prompt_hash, stable_prompt_sections, model, cwd, last_message_id
+         FROM agent_sessions
         WHERE conversation_id = ? AND agent_id = ?`,
     )
     .get(conversationId, agentId) as DbRow | undefined;
@@ -2283,6 +2301,8 @@ export function getAgentSessionRecord(
     sessionId: row.session_id,
     stablePromptHash:
       typeof row.stable_prompt_hash === 'string' ? row.stable_prompt_hash : null,
+    stablePromptSections:
+      typeof row.stable_prompt_sections === 'string' ? row.stable_prompt_sections : null,
     model: typeof row.model === 'string' ? row.model : null,
     cwd: typeof row.cwd === 'string' ? row.cwd : null,
     lastMessageId: typeof row.last_message_id === 'string' ? row.last_message_id : null,

@@ -7,6 +7,7 @@ import {
 } from "@open-design/sidecar-proto";
 import {
   parseLauncherAfterQuitArgs,
+  parseLauncherDelegatedArgs,
   parseLauncherHandoffResumeArgs,
 } from "@open-design/launcher-proto";
 import {
@@ -41,6 +42,7 @@ import {
   applyPackagedElectronPathOverrides,
   claimPackagedSingleInstanceLock,
   ensurePackagedNamespacePaths,
+  stabilizePackagedWorkingDirectory,
 } from "./launch.js";
 import {
   attachPackagedDesktopProcessLogging,
@@ -48,13 +50,13 @@ import {
   type PackagedDesktopLogger,
 } from "./logging.js";
 import { resolvePackagedNamespacePaths } from "./paths.js";
+import { createObsoleteInstalledOuterRetirement } from "./obsolete-installed-outer.js";
 import { launchPackagedPayloadDesktop } from "./payload-desktop-launch.js";
 import { packagedEntryUrl, registerOdProtocol } from "./protocol.js";
 import { startPackagedSidecars } from "./sidecars.js";
 import { reportStartupFailure, resolveStartupDistinctId } from "./startup-telemetry.js";
 import { resolvePackagedWindowTitle } from "./window-title.js";
 import { syncWindowsUninstallDisplayVersion } from "./windows-lifecycle.js";
-import { createObsoleteInstalledOuterRetirement } from "./obsolete-installed-outer.js";
 
 let packagedLogger: PackagedDesktopLogger | null = null;
 let pendingSecondInstanceFocus = false;
@@ -128,6 +130,7 @@ async function main(): Promise<void> {
   const config = await readPackagedConfig();
   const afterQuit = parseLauncherAfterQuitArgs(process.argv.slice(1));
   const handoffResume = parseLauncherHandoffResumeArgs(process.argv.slice(1));
+  const delegated = parseLauncherDelegatedArgs(process.argv.slice(1));
   const argvStamp = readProcessStamp(process.argv.slice(1), OPEN_DESIGN_SIDECAR_CONTRACT);
   const namespace = argvStamp?.namespace ?? config.namespace;
   const namespaceConfig = namespace === config.namespace ? config : { ...config, namespace };
@@ -146,6 +149,7 @@ async function main(): Promise<void> {
   }
   const stamp = argvStamp ?? createPackagedDesktopStamp(namespace);
   const launcherRuntime = await resolvePackagedLauncherRuntime(namespaceConfig, initialPaths, {
+    delegated,
     resume: handoffResume,
   });
   if (await launchPackagedPayloadDesktop(launcherRuntime, stamp)) {
@@ -182,6 +186,7 @@ async function main(): Promise<void> {
   };
 
   await ensurePackagedNamespacePaths(paths);
+  stabilizePackagedWorkingDirectory(paths);
   const downloadAttribution = await discoverPackagedDownloadAttribution(paths, console).catch((error: unknown) => {
     console.warn("[attribution] failed to discover packaged download attribution", error);
     return null;
@@ -238,6 +243,7 @@ async function main(): Promise<void> {
     telemetryRelayUrl: activeConfig.telemetryRelayUrl,
     posthogKey: activeConfig.posthogKey,
     posthogHost: activeConfig.posthogHost,
+    velaWebUrl: activeConfig.velaWebUrl,
     // PR #974 round-5 (lefarcen P2): the Electron entry runs desktop
     // main alongside the daemon, so the import-folder gate must be
     // pinned ON from request 0. See `apps/packaged/src/headless.ts` for
@@ -274,7 +280,12 @@ async function main(): Promise<void> {
   // mounting the web bundle (the runtime re-asserts this stage at its reveal
   // gate, which is a no-op when the label is already current).
   setSplashStage(splash.window, "workspace");
-  registerOdProtocol(sidecars.web.url ?? "http://127.0.0.1:0");
+  // Resolve the web sidecar address per request instead of freezing it here.
+  // `startPackagedSidecars` already rejects a web sidecar that reports no URL,
+  // so in practice this reads a stable value — but the protocol layer no
+  // longer *depends* on that, and a null (however it arises) now surfaces as a
+  // structured 503 rather than a connection attempt against `127.0.0.1:0`.
+  registerOdProtocol(() => sidecars.web.url);
 
   const { runDesktopMain } = await import("@open-design/desktop/main");
   await runDesktopMain(runtime, {

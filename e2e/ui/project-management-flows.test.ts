@@ -32,7 +32,12 @@ const AGENTS = [
     version: '0.134.0',
     models: [
       { id: 'default', label: 'Default (CLI config)' },
-      { id: 'gpt-5.5', label: 'GPT 5.5' },
+      {
+        id: 'gpt-5.5',
+        label: 'GPT 5.5',
+        additionalSpeedTiers: ['fast'],
+        serviceTierOptions: [{ id: 'priority', label: 'Fast' }],
+      },
     ],
   },
   {
@@ -462,7 +467,7 @@ test('[P2] project detail header keeps the title and execution controls aligned 
   await page.setViewportSize({ width: 1365, height: 900 });
 
   const title = page.getByTestId('project-title');
-  const settingsButton = page.locator('.settings-icon-btn');
+  const settingsButton = page.getByTestId('entry-settings-menu-trigger');
   const handoffButton = page.getByRole('button', { name: /Choose hand-off target/i });
 
   await expect(title).toBeVisible();
@@ -1728,7 +1733,9 @@ test('[P1] project detail workspace keeps design file tabs and preview controls 
   const fileTab = tabBySuffix(page, uploadedName);
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('workspace-pages-menu-trigger')).toBeVisible();
+  // #5517 replaced the tab strip's pages dropdown with a plain Design Files
+  // tab; that tab is the file-navigation entry this assertion guards now.
+  await expect(page.getByTestId('design-files-tab')).toBeVisible();
 
   await openUploadedHtmlArtifactPreview(page, uploadedName);
 
@@ -1780,6 +1787,223 @@ test('[P1] project detail session mode switch carries Ask and Plan semantics int
   await expect.poll(() => runRequestBodies.length).toBe(2);
   expect(runRequestBodies[1]?.sessionMode).toBe('chat');
   await expect(page.getByTestId('msg-session-mode-chip').last()).toContainText('Ask');
+});
+
+test('[P1] BYOK OpenCode project run sends provider config through the daemon contract', async ({ page }) => {
+  const byokConfig = {
+    mode: 'api',
+    apiKey: 'sk-openai-e2e',
+    apiProtocol: 'openai',
+    apiVersion: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiProviderBaseUrl: 'https://api.openai.com/v1',
+    agentId: null,
+    skillId: null,
+    designSystemId: null,
+    onboardingCompleted: true,
+    privacyDecisionAt: 1,
+    telemetry: { metrics: false, content: false, artifactManifest: false },
+    agentModels: {},
+    agentCliEnv: {},
+  };
+  await page.addInitScript(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    },
+    { key: STORAGE_KEY, value: byokConfig },
+  );
+  await page.route('**/api/app-config', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ json: { config: byokConfig } });
+  });
+  await routeAgents(page, [
+    ...AGENTS,
+    {
+      id: 'byok-opencode',
+      name: 'BYOK OpenCode',
+      bin: 'opencode',
+      available: true,
+      version: '0.12.0',
+      models: [{ id: 'default', label: 'Default' }],
+    },
+  ]);
+  await page.route('**/api/memory/extract', async (route) => {
+    await route.fulfill({ json: { ok: true, extracted: [] } });
+  });
+  const runRequestBodies: Array<Record<string, unknown>> = [];
+  await routeSuccessfulRuns(page, runRequestBodies, 'byok-opencode-run');
+
+  await page.goto('/');
+  await createProject(page, 'BYOK OpenCode daemon contract');
+  await expectWorkspaceReady(page);
+
+  const input = page.getByTestId('chat-composer-input');
+  await input.fill('Create a landing page with the configured BYOK provider.');
+  await Promise.all([
+    page.waitForRequest((request) => request.url().includes('/api/runs') && request.method() === 'POST'),
+    page.getByTestId('chat-send').click(),
+  ]);
+
+  await expect.poll(() => runRequestBodies.length).toBe(1);
+  expect(runRequestBodies[0]).toMatchObject({
+    agentId: 'byok-opencode',
+    model: 'gpt-4o-mini',
+    byokProvider: {
+      protocol: 'openai',
+      apiKey: 'sk-openai-e2e',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini',
+      apiVersion: '',
+    },
+    analyticsHints: {
+      runtimeType: 'byok',
+    },
+  });
+});
+
+test('[P1] BYOK OpenCode keyless vLLM run keeps auth fields out of the daemon contract', async ({ page }) => {
+  const byokConfig = {
+    mode: 'api',
+    apiKey: '',
+    apiProtocol: 'openai',
+    apiVersion: '',
+    baseUrl: 'http://127.0.0.1:8000/v1',
+    model: 'model',
+    apiProviderBaseUrl: 'http://127.0.0.1:8000/v1',
+    agentId: null,
+    skillId: null,
+    designSystemId: null,
+    onboardingCompleted: true,
+    privacyDecisionAt: 1,
+    telemetry: { metrics: false, content: false, artifactManifest: false },
+    agentModels: {},
+    agentCliEnv: {},
+  };
+  await page.addInitScript(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    },
+    { key: STORAGE_KEY, value: byokConfig },
+  );
+  await page.route('**/api/app-config', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ json: { config: byokConfig } });
+  });
+  await routeAgents(page, [
+    ...AGENTS,
+    {
+      id: 'byok-opencode',
+      name: 'BYOK OpenCode',
+      bin: 'opencode',
+      available: true,
+      version: '0.12.0',
+      models: [{ id: 'default', label: 'Default' }],
+    },
+  ]);
+  await page.route('**/api/memory/extract', async (route) => {
+    await route.fulfill({ json: { ok: true, extracted: [] } });
+  });
+  const runRequestBodies: Array<Record<string, unknown>> = [];
+  await routeSuccessfulRuns(page, runRequestBodies, 'byok-opencode-keyless-run');
+
+  await page.goto('/');
+  await createProject(page, 'BYOK OpenCode keyless vLLM contract');
+  await expectWorkspaceReady(page);
+
+  await page.getByTestId('chat-composer-input').fill('Use the local vLLM BYOK endpoint.');
+  await Promise.all([
+    page.waitForRequest((request) => request.url().includes('/api/runs') && request.method() === 'POST'),
+    page.getByTestId('chat-send').click(),
+  ]);
+
+  await expect.poll(() => runRequestBodies.length).toBe(1);
+  expect(runRequestBodies[0]).toMatchObject({
+    agentId: 'byok-opencode',
+    model: 'model',
+    byokProvider: {
+      protocol: 'openai',
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:8000/v1',
+      model: 'model',
+      apiVersion: '',
+      requiresApiKey: false,
+    },
+    analyticsHints: {
+      runtimeType: 'byok',
+    },
+  });
+});
+
+test('[P1] BYOK OpenCode unavailable blocks the project run before daemon routing', async ({ page }) => {
+  const byokConfig = {
+    mode: 'api',
+    apiKey: 'sk-openai-e2e',
+    apiProtocol: 'openai',
+    apiVersion: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiProviderBaseUrl: 'https://api.openai.com/v1',
+    agentId: null,
+    skillId: null,
+    designSystemId: null,
+    onboardingCompleted: true,
+    privacyDecisionAt: 1,
+    telemetry: { metrics: false, content: false, artifactManifest: false },
+    agentModels: {},
+    agentCliEnv: {},
+  };
+  await page.addInitScript(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    },
+    { key: STORAGE_KEY, value: byokConfig },
+  );
+  await page.route('**/api/app-config', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ json: { config: byokConfig } });
+  });
+  await routeAgents(page, [
+    ...AGENTS,
+    {
+      id: 'byok-opencode',
+      name: 'BYOK OpenCode',
+      bin: 'opencode',
+      available: false,
+      version: null,
+      models: [],
+    },
+  ]);
+
+  let runRequestSent = false;
+  page.on('request', (request) => {
+    if (request.url().includes('/api/runs') && request.method() === 'POST') {
+      runRequestSent = true;
+    }
+  });
+
+  await page.goto('/');
+  await createProject(page, 'BYOK OpenCode unavailable contract');
+  await expectWorkspaceReady(page);
+
+  const input = page.getByTestId('chat-composer-input');
+  await input.fill('Create a landing page with unavailable OpenCode.');
+  await page.getByTestId('chat-send').click();
+
+  await expect(page.locator('.run-error__description')).toContainText(
+    /BYOK API runs require OpenCode/i,
+  );
+  await page.waitForTimeout(750);
+  expect(runRequestSent).toBe(false);
 });
 
 test('[P1] project detail active file context is sent with the run and shown on the user message', async ({ page }) => {
@@ -3161,6 +3385,22 @@ async function pickComposerModel(page: Page, name: RegExp): Promise<void> {
   await expect(page.locator('.avatar-popover[role="dialog"]')).toHaveCount(0);
 }
 
+async function selectAvatarModelOption(
+  page: Page,
+  modelSelect: Locator,
+  optionName: RegExp,
+) {
+  await expect(modelSelect).toBeVisible();
+  const option = page.getByRole('option', { name: optionName });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await modelSelect.click();
+    if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) break;
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.click();
+}
+
 async function selectComposerSessionMode(page: Page, modeTitle: 'Ask mode' | 'Plan mode' | 'Design mode') {
   // #5517 composer mode picker: Ask maps to the real `chat` session mode.
   const modeId = modeTitle === 'Ask mode' ? 'chat' : modeTitle === 'Plan mode' ? 'plan' : 'design';
@@ -3347,10 +3587,10 @@ async function openUploadedHtmlArtifactPreview(page: Page, uploadedName: string)
   await openAllProjectFiles(page);
   const fileRow = rowByFileName(page, uploadedName);
   await expect(fileRow).toBeVisible();
+  // #5517 deleted the preview card and its Open button: the row's primary
+  // target opens the artifact in a workspace tab on a single click.
   await fileRow.getByRole('button').first().click();
-  const previewCard = page.getByTestId('design-file-preview');
-  await expect(previewCard).toBeVisible();
-  await previewCard.getByRole('button', { name: 'Open' }).click();
+  await expect(tabBySuffix(page, uploadedName)).toHaveAttribute('aria-selected', 'true');
 }
 
 function tabBySuffix(page: Page, name: string): Locator {

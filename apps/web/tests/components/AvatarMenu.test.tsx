@@ -3,13 +3,112 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { WorkspaceCollabContext } from '@open-design/contracts';
+
 import { AvatarMenu } from '../../src/components/AvatarMenu';
+import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
 import type { AgentInfo, AppConfig, ExecMode } from '../../src/types';
+
+const { openExternalUrlMock } = vi.hoisted(() => ({
+  openExternalUrlMock: vi.fn<(url: string) => Promise<boolean>>(),
+}));
 
 vi.mock('../../src/i18n', () => ({
   useT: () => (key: string) => key,
 }));
 
+vi.mock('../../src/providers/registry', () => ({
+  openExternalUrl: openExternalUrlMock,
+}));
+
+
+function personalWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    workspaceId: 'ws-personal',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'personal_byok',
+    seatSummary: { seatLimit: 1, usedSeats: 1, availableSeats: 0, isSeatFull: false },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+// A team MEMBER (not owner/admin) — `canManageBilling` folds in role, so this
+// is the "cannot act on billing" case the upgrade entry must hide for.
+function teamMemberWorkspaceContext(
+  overrides: Partial<WorkspaceCollabContext> = {},
+): WorkspaceCollabContext {
+  return {
+    ...personalWorkspaceContext(),
+    workspaceId: 'ws-team',
+    workspaceType: 'team',
+    role: 'member',
+    teamId: 'team-1',
+    teamName: 'OD Feature Team',
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    ...overrides,
+  } as WorkspaceCollabContext;
+}
+
+function workspaceContextResponse(context: WorkspaceCollabContext | null) {
+  return new Response(JSON.stringify({ context }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function workspaceSnapshot(
+  workspaceId: string,
+  workspaceMemberId: string,
+  planId: string,
+  balanceUsd: string,
+) {
+  return {
+    schemaVersion: 1,
+    workspaceId,
+    workspaceMemberId,
+    billingScopeVersion: 2,
+    billing: {
+      billingState: 'active',
+      planId,
+    },
+    wallet: {
+      balanceUsd,
+      expiresAt: null,
+      updatedAt: '2026-07-27T00:00:00.000Z',
+    },
+    revisions: {
+      billing: 'billing-1',
+      wallet: 'wallet-1',
+    },
+  };
+}
 
 const codexAgent: AgentInfo = {
   id: 'codex',
@@ -54,6 +153,35 @@ const baseConfig: AppConfig = {
   agentCliEnv: {},
 };
 
+type EventSourceListener = (event: unknown) => void;
+class MockAvatarEventSource {
+  static instances: MockAvatarEventSource[] = [];
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<EventSourceListener>>();
+
+  constructor(readonly url: string) {
+    MockAvatarEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, listener: EventSourceListener): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+
+  removeEventListener(name: string, listener: EventSourceListener): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name: string, data: unknown): void {
+    for (const listener of this.listeners.get(name) ?? []) {
+      listener({ data: JSON.stringify(data) });
+    }
+  }
+
+  close(): void {}
+}
+
 type ModeChangeHandler = (mode: ExecMode) => void;
 type AgentChangeHandler = (id: string) => void;
 type AgentModelChangeHandler = (
@@ -72,6 +200,7 @@ function renderMenu({
   onAgentModelChange = vi.fn<AgentModelChangeHandler>(),
   onOpenSettings = vi.fn<OpenSettingsHandler>(),
   onRefreshAgents = vi.fn<VoidHandler>(),
+  projectWorkspaceScope,
 }: {
   config?: AppConfig;
   agents?: AgentInfo[];
@@ -81,6 +210,7 @@ function renderMenu({
   onAgentModelChange?: ReturnType<typeof vi.fn<AgentModelChangeHandler>>;
   onOpenSettings?: ReturnType<typeof vi.fn<OpenSettingsHandler>>;
   onRefreshAgents?: ReturnType<typeof vi.fn<VoidHandler>>;
+  projectWorkspaceScope?: ProjectWorkspaceScopeState;
 } = {}) {
   render(
     <AvatarMenu
@@ -92,6 +222,7 @@ function renderMenu({
       onAgentModelChange={onAgentModelChange}
       onOpenSettings={onOpenSettings}
       onRefreshAgents={onRefreshAgents}
+      projectWorkspaceScope={projectWorkspaceScope}
     />,
   );
   return {
@@ -114,6 +245,7 @@ describe('AvatarMenu', () => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
     vi.clearAllMocks();
+    MockAvatarEventSource.instances = [];
   });
 
   // The composer popover is a one-decision surface: pick the model for the
@@ -247,13 +379,48 @@ describe('AvatarMenu', () => {
     expect(custom.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('routes plan-gated Open Design models to the plans page instead of selecting them', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
-    const openSpy = vi.fn();
-    vi.stubGlobal('open', openSpy);
+  it('fails closed for a locked model when the project scope is unavailable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '247.5087' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/context') {
+        return workspaceContextResponse(personalWorkspaceContext({
+          workspaceId: 'workspace-ambient',
+        }));
+      }
+      return new Response('{}', { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    openExternalUrlMock.mockResolvedValue(true);
 
     const { onAgentModelChange } = renderMenu({
-      config: { ...baseConfig, agentId: 'amr' },
+      config: {
+        ...baseConfig,
+        agentId: 'amr',
+        agentCliEnv: { amr: { OPEN_DESIGN_AMR_PROFILE: 'feature-test' } },
+      },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'unavailable',
+          projectId: 'project-a',
+          workspaceId: 'workspace-a',
+          visibility: 'personal',
+          context: null,
+        },
+      },
       agents: [
         {
           id: 'amr',
@@ -269,6 +436,16 @@ describe('AvatarMenu', () => {
     });
 
     openMenu();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/integrations/vela/status',
+        expect.anything(),
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Plus')).toBeNull();
     const list = screen.getByTestId('avatar-model-list');
     const locked = within(list).getByRole('radio', { name: /Paid model/i });
     expect(locked.getAttribute('aria-disabled')).toBe('true');
@@ -276,8 +453,168 @@ describe('AvatarMenu', () => {
     fireEvent.click(locked);
 
     expect(onAgentModelChange).not.toHaveBeenCalled();
-    await waitFor(() => expect(openSpy).toHaveBeenCalled());
-    expect(String(openSpy.mock.calls[0]![0])).toContain('view=plans');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(openExternalUrlMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('$247.51')).toBeNull();
+    expect(screen.queryByRole('link', {
+      name: 'settings.amrUpgrade',
+    })).toBeNull();
+    expect(screen.queryByRole('button', {
+      name: /settings\.amrBalance/,
+    })).toBeNull();
+  });
+
+  it('does not borrow account money for an unbound project', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input.toString() === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'plus', balanceUsd: '247.5087' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 202 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderMenu({
+      config: { ...baseConfig, agentId: 'amr' },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'unbound',
+          projectId: 'project-a',
+          workspaceId: null,
+          context: null,
+        },
+      },
+      agents: [{
+        id: 'amr',
+        name: 'Open Design AMR',
+        bin: 'vela',
+        available: true,
+        models: [{ id: 'default', label: 'Default (CLI config)' }],
+      }],
+    });
+
+    openMenu();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/integrations/vela/status',
+        expect.anything(),
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Plus')).toBeNull();
+    expect(screen.queryByText('$247.51')).toBeNull();
+    expect(screen.queryByRole('button', {
+      name: /settings\.amrBalance/,
+    })).toBeNull();
+    expect(screen.queryByRole('link', {
+      name: 'settings.amrUpgrade',
+    })).toBeNull();
+  });
+
+  it('routes a locked model only when the exact project member can upgrade', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/integrations/vela/status') {
+        return new Response(JSON.stringify({
+          loggedIn: true,
+          loginInFlight: false,
+          profile: 'feature-test',
+          user: { id: 'u1', email: 'a@b.c' },
+          account: { plan: 'max', balanceUsd: '9.12' },
+          configPath: '/Users/test/.amr/config.json',
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === '/api/workspace/billing?scope=workspace&workspaceId=workspace-a') {
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'workspace-a',
+            workspaceMemberId: 'member-a',
+            balanceUsd: '9.12',
+            expiresAt: null,
+            updatedAt: '2026-07-27T00:00:00.000Z',
+          },
+          workspaceSnapshot: workspaceSnapshot(
+            'workspace-a',
+            'member-a',
+            'team_pro',
+            '9.12',
+          ),
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{}', { status: 202 });
+    }));
+    openExternalUrlMock.mockResolvedValue(true);
+    const projectContext = teamMemberWorkspaceContext({
+      workspaceId: 'workspace-a',
+      workspaceMemberId: 'member-a',
+      role: 'owner',
+      permissions: {
+        ...teamMemberWorkspaceContext().permissions,
+        canManageBilling: true,
+      },
+    }) as WorkspaceCollabContext & { workspaceType: 'team' };
+
+    const { onAgentModelChange } = renderMenu({
+      config: {
+        ...baseConfig,
+        agentId: 'amr',
+        agentCliEnv: { amr: { OPEN_DESIGN_AMR_PROFILE: 'feature-test' } },
+      },
+      projectWorkspaceScope: {
+        loading: false,
+        scope: {
+          kind: 'team',
+          projectId: 'project-a',
+          workspaceId: 'workspace-a',
+          visibility: 'personal',
+          context: projectContext,
+        },
+      },
+      agents: [{
+        id: 'amr',
+        name: 'Open Design AMR',
+        bin: 'vela',
+        available: true,
+        models: [{ id: 'paid-model', label: 'Paid model', enabled: false }],
+      }],
+    });
+
+    openMenu();
+    // The popover no longer renders an upgrade link (the account row is
+    // retired), so synchronize on the routing outcome itself: openAmrUpgrade
+    // fails closed until the async account + billing scope land, so retry the
+    // locked-model click until the route actually fires.
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('radio', { name: /Paid model/i }));
+      expect(openExternalUrlMock).toHaveBeenCalled();
+    });
+
+    expect(onAgentModelChange).not.toHaveBeenCalled();
+    const target = new URL(openExternalUrlMock.mock.calls[0]![0]);
+    expect(target.searchParams.get('workspaceId')).toBe('workspace-a');
+    expect(target.searchParams.get('view')).toBe('plans');
   });
 
 });

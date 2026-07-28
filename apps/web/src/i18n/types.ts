@@ -561,6 +561,7 @@ export interface Dict {
   'settings.modelUsesCliDefault': string;
   'settings.modelSourceFallback': string;
   'settings.reasoningPicker': string;
+  'settings.serviceTierPicker': string;
   'settings.modelPickerHint': string;
   'settings.modelPickerLiveHint': string;
   'settings.modelPickerLiveCatalogOnlyHint': string;
@@ -1090,6 +1091,11 @@ export interface Dict {
   'updater.ready': string;
   'updater.readyGeneric': string;
   'updater.readyVersion': string;
+  // Forced installer reinstall (feed control.launcher.version.min gate).
+  // Copy priority: operator jump link (reinstall.url) > these defaults.
+  'updater.reinstallLearnMore': string;
+  'updater.reinstallReadyGeneric': string;
+  'updater.reinstallReadyVersion': string;
   'updater.restartAnyway': string;
   'updater.upToDate': string;
   'updater.viewVersionFeatures': string;
@@ -1523,6 +1529,7 @@ export interface Dict {
   'recentProjects.moveOutOfTeam': string;
   'recentProjects.unshareFailed': string;
   'recentProjects.shareFailed': string;
+  'recentProjects.shareOwnerConflict': string;
   'recentProjects.clearFilters': string;
   'pluginsHome.title': string;
   'pluginsHome.subtitle': string;
@@ -2762,6 +2769,7 @@ export interface Dict {
   'avatar.modelSection': string;
   'avatar.modelLabel': string;
   'avatar.reasoningLabel': string;
+  'avatar.serviceTierLabel': string;
   'avatar.customSuffix': string;
   'socialShare.openDesignSection': string;
   'socialShare.openDesignTitle': string;
@@ -3960,13 +3968,14 @@ export interface Dict {
   'manualEdit.minHeight': string;
   'manualEdit.deleteElement': string;
   'manualEdit.deleteElementConfirm': string;
+  'manualEdit.alignCenter': string;
+  'manualEdit.opacity': string;
   'manualEdit.uploadImage': string;
   'manualEdit.uploadingImage': string;
   'manualEdit.uploadImageFailed': string;
   'manualEdit.focusSlides': string;
   'manualEdit.showPanels': string;
   'manualEdit.parameters': string;
-  'manualEdit.opacity': string;
   'manualEdit.fontFamily': string;
   'manualEdit.borderColor': string;
   'manualEdit.borderWidth': string;
@@ -3990,7 +3999,6 @@ export interface Dict {
   'manualEdit.justifyAround': string;
   'manualEdit.justifyEvenly': string;
   'manualEdit.alignStart': string;
-  'manualEdit.alignCenter': string;
   'manualEdit.alignEnd': string;
   'manualEdit.alignStretch': string;
   'manualEdit.alignBaseline': string;
@@ -4024,6 +4032,9 @@ export interface Dict {
   'fileViewer.presentInTab': string;
   'fileViewer.presentFullscreen': string;
   'fileViewer.presentNewTab': string;
+  'fileViewer.presentFromBeginning': string;
+  'fileViewer.presentFromCurrentSlide': string;
+  'fileViewer.presenterMode': string;
   'fileViewer.exitPresentation': string;
   'fileViewer.shareLabel': string;
   'fileViewer.shareMenuShareLink': string;
@@ -4729,6 +4740,13 @@ export interface Dict {
   'settings.resetOnboarding': string;
   'settings.resetOnboardingDesc': string;
   'settings.resetOnboardingButton': string;
+  // Manual updater/launcher cache clear (disaster recovery, About pane).
+  'settings.clearUpdaterCacheTitle': string;
+  'settings.clearUpdaterCacheHint': string;
+  'settings.clearUpdaterCacheButton': string;
+  'settings.clearUpdaterCacheConfirmButton': string;
+  'settings.clearUpdaterCacheSuccess': string;
+  'settings.clearUpdaterCacheFailed': string;
   'onboarding.brandTitle': string;
   'onboarding.brandSubtitle': string;
   'onboarding.brandSkip': string;

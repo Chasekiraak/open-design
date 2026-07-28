@@ -4,6 +4,8 @@ import type { AmrWalletSnapshot } from '@open-design/contracts';
 import {
   AMR_HARD_BLOCK_BALANCE_USD,
   AMR_LOW_BALANCE_WARN_USD,
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
   amrWalletBalanceInsufficient,
   amrWalletBalanceUsd,
   checkAmrBalanceGate,
@@ -29,6 +31,43 @@ function snapshot(overrides: Partial<AmrWalletSnapshot> = {}): AmrWalletSnapshot
     stale: false,
     source: 'vela_api',
     ...overrides,
+  };
+}
+
+function authoritativeWorkspaceBillingResponse(
+  workspaceId: string,
+  workspaceMemberId: string,
+  balanceUsd: string,
+) {
+  const observedAt = '2026-07-26T00:00:00.000Z';
+  return {
+    summary: null,
+    workspaceBalance: {
+      billingScopeVersion: 2,
+      workspaceId,
+      workspaceMemberId,
+      balanceUsd,
+      expiresAt: null,
+      updatedAt: observedAt,
+    },
+    workspaceRuntime: {
+      workspaceId,
+      workspaceMemberId,
+      status: 'fresh',
+      revision: '4',
+      observedAt,
+      softExpiresAt: '2099-07-26T00:00:30.000Z',
+      hardExpiresAt: '2099-07-26T00:02:00.000Z',
+      retryAt: null,
+      errorCode: null,
+      reason: 'authoritative-action-read',
+      sourceGapDetected: false,
+    },
+    authoritativeWorkspaceRead: {
+      workspaceId,
+      workspaceMemberId,
+      observedAt,
+    },
   };
 }
 
@@ -64,6 +103,43 @@ describe('amrWalletBalanceInsufficient', () => {
     expect(amrWalletBalanceInsufficient(snapshot({ balanceUsd: '0.01' }))).toBe(false);
     expect(amrWalletBalanceInsufficient(null)).toBe(false);
     expect(amrWalletBalanceInsufficient(snapshot({ balanceUsd: ' ' }))).toBe(false);
+  });
+});
+
+describe('AMR balance gate workspace witness', () => {
+  const teamA = {
+    workspaceType: 'team' as const,
+    workspaceId: 'ws-team-a',
+    workspaceMemberId: 'wm-a',
+  };
+
+  it('matches only the exact workspace and member epoch', () => {
+    const witness = amrBalanceGateScopeForWorkspaceContext(teamA);
+    expect(witness).toEqual(teamA);
+    expect(amrBalanceGateScopesMatch(witness, { ...teamA })).toBe(true);
+    expect(
+      amrBalanceGateScopesMatch(witness, {
+        ...teamA,
+        workspaceId: 'ws-team-b',
+      }),
+    ).toBe(false);
+    expect(
+      amrBalanceGateScopesMatch(witness, {
+        ...teamA,
+        workspaceMemberId: 'wm-new-epoch',
+      }),
+    ).toBe(false);
+    expect(amrBalanceGateScopesMatch(witness, undefined)).toBe(false);
+  });
+
+  it('does not mint a reusable witness from an unresolved workspace', () => {
+    expect(amrBalanceGateScopeForWorkspaceContext(null)).toBeUndefined();
+    expect(
+      amrBalanceGateScopeForWorkspaceContext({
+        ...teamA,
+        workspaceMemberId: ' ',
+      }),
+    ).toBeUndefined();
   });
 });
 
@@ -198,7 +274,7 @@ describe('checkAmrBalanceGate', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         expect(input.toString()).toBe(
-          '/api/workspace/billing?scope=workspace&workspaceId=ws-team-a',
+          '/api/workspace/billing?scope=workspace&workspaceId=ws-team-a&freshness=authoritative',
         );
         return new Response(
           JSON.stringify({
@@ -211,6 +287,24 @@ describe('checkAmrBalanceGate', () => {
               expiresAt: null,
               updatedAt: '2026-07-26T00:00:00.000Z',
             },
+            workspaceRuntime: {
+              workspaceId: 'ws-team-a',
+              workspaceMemberId: 'wm-a',
+              status: 'fresh',
+              revision: '4',
+              observedAt: '2026-07-26T00:00:00.000Z',
+              softExpiresAt: '2099-07-26T00:00:30.000Z',
+              hardExpiresAt: '2099-07-26T00:02:00.000Z',
+              retryAt: null,
+              errorCode: null,
+              reason: 'authoritative-action-read',
+              sourceGapDetected: false,
+            },
+            authoritativeWorkspaceRead: {
+              workspaceId: 'ws-team-a',
+              workspaceMemberId: 'wm-a',
+              observedAt: '2026-07-26T00:00:00.000Z',
+            },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
@@ -220,6 +314,7 @@ describe('checkAmrBalanceGate', () => {
     const result = await checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
     });
     expect(result.kind).toBe('soft');
     if (result.kind === 'soft') {
@@ -227,7 +322,47 @@ describe('checkAmrBalanceGate', () => {
     }
   });
 
-  it('fails open for an unavailable team workspace balance without using account zero', async () => {
+  it('does not authorize a positive balance from a daemon that cannot prove an authoritative read', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({
+        summary: null,
+        workspaceBalance: {
+          billingScopeVersion: 2,
+          workspaceId: 'ws-team-a',
+          workspaceMemberId: 'wm-a',
+          balanceUsd: '50',
+          expiresAt: null,
+          updatedAt: '2026-07-26T00:00:00.000Z',
+        },
+        workspaceRuntime: {
+          workspaceId: 'ws-team-a',
+          workspaceMemberId: 'wm-a',
+          status: 'fresh',
+          revision: '3',
+          observedAt: '2026-07-26T00:00:00.000Z',
+          softExpiresAt: '2099-07-26T00:00:30.000Z',
+          hardExpiresAt: '2099-07-26T00:02:00.000Z',
+          retryAt: null,
+          errorCode: null,
+          reason: 'explicit-billing-read',
+          sourceGapDetected: false,
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })),
+    );
+
+    await expect(checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
+    })).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('fails closed for an unavailable team workspace balance without using account zero', async () => {
     const emptyAccount = snapshot({ balanceUsd: '0' });
     mockedFetch.mockResolvedValueOnce(emptyAccount).mockResolvedValueOnce(emptyAccount);
     vi.stubGlobal(
@@ -239,8 +374,76 @@ describe('checkAmrBalanceGate', () => {
       checkAmrBalanceGate({
         workspaceType: 'team',
         workspaceId: 'ws-team-a',
+        workspaceMemberId: 'wm-a',
       }),
-    ).resolves.toEqual({ kind: 'allow' });
+    ).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('does not use a last-good balance when the authoritative runtime is in error', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'ws-team-a',
+            workspaceMemberId: 'wm-a',
+            balanceUsd: '50',
+            expiresAt: null,
+            updatedAt: '2026-07-26T00:00:00.000Z',
+          },
+          workspaceRuntime: {
+            workspaceId: 'ws-team-a',
+            workspaceMemberId: 'wm-a',
+            status: 'error',
+            revision: '4',
+            observedAt: '2026-07-26T00:00:00.000Z',
+            softExpiresAt: '2026-07-26T00:00:30.000Z',
+            hardExpiresAt: '2026-07-26T00:02:00.000Z',
+            retryAt: null,
+            errorCode: 'workspace_billing_unavailable',
+            reason: 'authoritative-action-read',
+            sourceGapDetected: false,
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )),
+    );
+
+    await expect(checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
+    })).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('rejects a response from an older workspace-member epoch', async () => {
+    mockedFetch.mockResolvedValue(snapshot({ balanceUsd: '247.50' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            billingScopeVersion: 2,
+            workspaceId: 'ws-team-a',
+            workspaceMemberId: 'wm-old',
+            balanceUsd: '50',
+            expiresAt: null,
+            updatedAt: '2026-07-26T00:00:00.000Z',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )),
+    );
+
+    await expect(checkAmrBalanceGate({
+      workspaceType: 'team',
+      workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-new',
+    })).resolves.toEqual({ kind: 'unavailable' });
   });
 
   it('keeps concurrent team A/B checks keyed by explicit workspace id', async () => {
@@ -256,17 +459,11 @@ describe('checkAmrBalanceGate', () => {
       if (url.includes('workspaceId=ws-team-b')) {
         return Promise.resolve(
           new Response(
-            JSON.stringify({
-              summary: null,
-              workspaceBalance: {
-                billingScopeVersion: 2,
-                workspaceId: 'ws-team-b',
-                workspaceMemberId: 'wm-b',
-                balanceUsd: '50',
-                expiresAt: null,
-                updatedAt: '2026-07-26T00:00:00.000Z',
-              },
-            }),
+            JSON.stringify(authoritativeWorkspaceBillingResponse(
+              'ws-team-b',
+              'wm-b',
+              '50',
+            )),
             { status: 200, headers: { 'content-type': 'application/json' } },
           ),
         );
@@ -278,27 +475,23 @@ describe('checkAmrBalanceGate', () => {
     const teamA = checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-a',
+      workspaceMemberId: 'wm-a',
     });
     const teamB = checkAmrBalanceGate({
       workspaceType: 'team',
       workspaceId: 'ws-team-b',
+      workspaceMemberId: 'wm-b',
     });
 
     await expect(teamB).resolves.toEqual({ kind: 'allow' });
     expect(resolveA).toBeTypeOf('function');
     resolveA(
       new Response(
-        JSON.stringify({
-          summary: null,
-          workspaceBalance: {
-            billingScopeVersion: 2,
-            workspaceId: 'ws-team-a',
-            workspaceMemberId: 'wm-a',
-            balanceUsd: '1.50',
-            expiresAt: null,
-            updatedAt: '2026-07-26T00:00:00.000Z',
-          },
-        }),
+        JSON.stringify(authoritativeWorkspaceBillingResponse(
+          'ws-team-a',
+          'wm-a',
+          '1.50',
+        )),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
     );

@@ -19,6 +19,12 @@ import {
   enforceWorkspaceResourceMutation,
   headerValue,
 } from '../../collab/workspace-resource-mutation.js';
+import {
+  authorizeCreatedProjectWorkspace,
+  bindCreatedProjectToWorkspace,
+  sendCreatedProjectWorkspaceError,
+} from '../../collab/created-project-workspace.js';
+import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
 import type { PluginShareAction } from '../../services/plugin-share-tasks.js';
 
 export interface RegisterPluginEventRoutesDeps {
@@ -35,6 +41,7 @@ interface SqliteDbLike {
     get(...params: unknown[]): unknown;
     run(...params: unknown[]): unknown;
   };
+  transaction<T>(run: () => T): () => T;
 }
 
 interface InstalledPluginLike {
@@ -131,9 +138,11 @@ export interface RegisterPluginRoutesDeps {
   projectStore: {
     insertProject(db: SqliteDbLike, project: unknown): Project | null;
     getProject(db: SqliteDbLike, id: string): Project | null;
+    ensureWorkspaceProject(db: SqliteDbLike, input: unknown): unknown;
     dbDeleteProject(db: SqliteDbLike, id: string): unknown;
     removeProjectDir(projectsRoot: string, projectId: string): Promise<unknown>;
   };
+  fetchProjectCreationWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   conversations: {
     insertConversation(db: SqliteDbLike, conversation: unknown): unknown;
   };
@@ -269,6 +278,13 @@ export function registerPluginRoutes(app: Express, deps: RegisterPluginRoutesDep
       if (teamResources) {
         await enforceTeamResourceCopyAllowed(teamResources, { kind: 'plugin', resourceId: plugin.id });
       }
+      const createWorkspace = await authorizeCreatedProjectWorkspace(
+        req,
+        deps.fetchProjectCreationWorkspaceDirectory,
+      );
+      if (!createWorkspace.ok) {
+        return sendCreatedProjectWorkspaceError(res, createWorkspace);
+      }
       const body = req.body && typeof req.body === 'object'
         ? req.body as PluginDuplicateProjectRequest
         : {};
@@ -295,24 +311,33 @@ export function registerPluginRoutes(app: Express, deps: RegisterPluginRoutesDep
       });
       metadata.duplicatedFromPluginEntry = duplicate.sourceEntry;
       metadata.entryFile = duplicate.relPath;
-      const project = projectStore.insertProject(db, {
-        id: projectId,
-        name: projectName,
-        skillId: null,
-        designSystemId: null,
-        pendingPrompt: null,
-        metadata,
-        createdAt: now,
-        updatedAt: now,
-      });
-      insertedProject = true;
-      conversations.insertConversation(db, {
-        id: conversationId,
-        projectId,
-        title: null,
-        createdAt: now,
-        updatedAt: now,
-      });
+      const project = db.transaction(() => {
+        const createdProject = projectStore.insertProject(db, {
+          id: projectId,
+          name: projectName,
+          skillId: null,
+          designSystemId: null,
+          pendingPrompt: null,
+          metadata,
+          createdAt: now,
+          updatedAt: now,
+        });
+        insertedProject = true;
+        conversations.insertConversation(db, {
+          id: conversationId,
+          projectId,
+          title: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        bindCreatedProjectToWorkspace(
+          (input) => projectStore.ensureWorkspaceProject(db, input),
+          createWorkspace.context,
+          projectId,
+          now,
+        );
+        return createdProject;
+      })();
       const loadedProject = projectStore.getProject(db, projectId) ?? project;
       if (!loadedProject) {
         throw new PluginDuplicateProjectError(
@@ -336,8 +361,14 @@ export function registerPluginRoutes(app: Express, deps: RegisterPluginRoutesDep
       res.status(201).json(response);
     } catch (err: unknown) {
       if (cleanupProjectId) {
-        if (insertedProject) projectStore.dbDeleteProject(db, cleanupProjectId);
-        await projectStore.removeProjectDir(paths.PROJECTS_DIR, cleanupProjectId).catch(() => {});
+        try {
+          if (insertedProject) projectStore.dbDeleteProject(db, cleanupProjectId);
+        } catch {
+          // The transaction normally rolled the rows back already. A failed
+          // compensating DELETE must never strand the managed filesystem copy.
+        } finally {
+          await projectStore.removeProjectDir(paths.PROJECTS_DIR, cleanupProjectId).catch(() => {});
+        }
       }
       if (err instanceof TeamResourceCopyForbiddenError) {
         return res.status(403).json({ error: { code: err.code, message: err.message } });

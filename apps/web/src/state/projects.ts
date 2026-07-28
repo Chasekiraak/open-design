@@ -5,8 +5,9 @@
 // These helpers fail soft (returning null / [] on transport errors) so
 // the UI can stay rendered when the daemon is briefly unreachable.
 
-import { coalescedGet } from '../lib/coalesced-get';
+import { coalescedGet, evictCoalescedGet } from '../lib/coalesced-get';
 import { markProjectCreatedByViewer } from '../collab/useProjectCollab';
+import { API_ERROR_CODES, type ApiErrorCode } from '@open-design/contracts';
 import type {
   AppliedPluginSnapshot,
   ApplyResult,
@@ -44,6 +45,25 @@ export type { PluginShareAction } from '@open-design/contracts';
 
 export type WorkspaceProjectListView = 'all' | 'recent' | 'drafts' | 'team';
 
+export type WorkspaceContextForWrite = {
+  context: WorkspaceCollabContext | null;
+  loading: boolean;
+  failure?: 'unsupported' | 'unavailable';
+};
+
+/**
+ * Preserve headerless old-daemon/anonymous compatibility, but never collapse
+ * an unresolved or unavailable modern workspace authority into "anonymous".
+ */
+export function resolvedWorkspaceContextForWrite(
+  state: WorkspaceContextForWrite,
+): WorkspaceCollabContext | null {
+  if (state.loading || state.failure === 'unavailable') {
+    throw new Error('Workspace context is unavailable. Try again when workspace sync finishes.');
+  }
+  return state.context;
+}
+
 export function workspaceProjectHeaders(context: WorkspaceCollabContext): HeadersInit {
   return {
     'x-od-workspace-id': context.workspaceId,
@@ -55,6 +75,37 @@ export function workspaceProjectHeaders(context: WorkspaceCollabContext): Header
     'x-od-workspace-can-share-projects': String(context.permissions.canShareProjects),
     'x-od-workspace-can-write-synced-files': String(context.permissions.canWriteSyncedFiles),
   };
+}
+
+/**
+ * A workspace project move the daemon refused, carrying the contract error
+ * code (`ApiError.code`) when the response body names one. Kept as a named
+ * class so UI callers can branch on `code` — `TEAM_PROJECT_OWNER_CONFLICT`
+ * is a permanent ownership conflict that must not render as the generic
+ * "try again later" hint.
+ */
+export class WorkspaceProjectMoveError extends Error {
+  readonly code: ApiErrorCode | null;
+
+  constructor(message: string, code: ApiErrorCode | null) {
+    super(message);
+    this.name = 'WorkspaceProjectMoveError';
+    this.code = code;
+  }
+}
+
+/**
+ * The contract error code a failed move carries, or null. Duck-typed on a
+ * string `code` property (validated against `API_ERROR_CODES`) instead of
+ * `instanceof`, so callers and tests can classify any conforming error
+ * without importing the concrete class.
+ */
+export function workspaceProjectMoveErrorCode(error: unknown): ApiErrorCode | null {
+  if (!(error instanceof Error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && (API_ERROR_CODES as readonly string[]).includes(code)
+    ? (code as ApiErrorCode)
+    : null;
 }
 
 export async function moveWorkspaceProject(input: {
@@ -75,7 +126,28 @@ export async function moveWorkspaceProject(input: {
       body: JSON.stringify({ visibility: input.visibility }),
     },
   );
-  if (!resp.ok) throw new Error(`workspace project move failed with status ${resp.status}`);
+  if (!resp.ok) {
+    let message = `workspace project move failed with status ${resp.status}`;
+    let code: ApiErrorCode | null = null;
+    try {
+      const body = await resp.json() as { error?: unknown };
+      if (body.error && typeof body.error === 'object') {
+        const errorBody = body.error as { code?: unknown; message?: unknown };
+        if (
+          typeof errorBody.code === 'string' &&
+          (API_ERROR_CODES as readonly string[]).includes(errorBody.code)
+        ) {
+          code = errorBody.code as ApiErrorCode;
+        }
+        if (typeof errorBody.message === 'string' && errorBody.message.trim()) {
+          message = errorBody.message;
+        }
+      }
+    } catch {
+      // Keep the generic fallback when the error body is absent or invalid.
+    }
+    throw new WorkspaceProjectMoveError(message, code);
+  }
   const json = (await resp.json()) as { project: WorkspaceProjectSummary };
   return json.project;
 }
@@ -373,10 +445,14 @@ export async function pickLocalFolderPath(): Promise<string | null> {
 
 export async function importFolderProject(
   input: ImportFolderRequest,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<ImportFolderResponse> {
   const resp = await fetch('/api/import/folder', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+    },
     body: JSON.stringify(input),
   });
   if (!resp.ok) {
@@ -392,11 +468,13 @@ export async function importFolderProject(
 
 export async function importClaudeDesignZip(
   file: File,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<{ project: Project; conversationId: string; entryFile: string }> {
   const form = new FormData();
   form.append('file', file);
   const resp = await fetch('/api/import/claude-design', {
     method: 'POST',
+    ...(workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : {}),
     body: form,
   });
   if (!resp.ok) {
@@ -533,19 +611,28 @@ export async function listConversations(
   options?: { throwOnError?: boolean },
 ): Promise<Conversation[]> {
   try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+    // Concurrent consumers of one project's conversation list share a single
+    // request per burst (Batch A §4.3); conversation writes below evict.
+    const json = await coalescedGet(
+      `project-conversations:${projectId}`,
+      async () => {
+        const resp = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+        );
+        if (!resp.ok) throw new Error(`conversations ${resp.status}`);
+        return (await resp.json()) as { conversations: Conversation[] };
+      },
     );
-    if (!resp.ok) {
-      if (options?.throwOnError) throw new Error(`conversations ${resp.status}`);
-      return [];
-    }
-    const json = (await resp.json()) as { conversations: Conversation[] };
     return json.conversations ?? [];
   } catch (err) {
     if (options?.throwOnError) throw err;
     return [];
   }
+}
+
+/** Thin invalidation for the shared conversations read after a write. */
+function evictConversationsRead(projectId: string): void {
+  evictCoalescedGet(`project-conversations:${projectId}`);
 }
 
 export async function createConversation(
@@ -589,6 +676,7 @@ export async function createConversation(
     );
     if (!resp.ok) return null;
     const json = (await resp.json()) as { conversation: Conversation };
+    evictConversationsRead(projectId);
     return json.conversation;
   } catch {
     return null;
@@ -611,6 +699,7 @@ export async function patchConversation(
     );
     if (!resp.ok) return null;
     const json = (await resp.json()) as { conversation: Conversation };
+    evictConversationsRead(projectId);
     return json.conversation;
   } catch {
     return null;
@@ -626,6 +715,7 @@ export async function deleteConversation(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}`,
       { method: 'DELETE' },
     );
+    if (resp.ok) evictConversationsRead(projectId);
     return resp.ok;
   } catch {
     return false;
@@ -851,6 +941,8 @@ function newestTabsState(
 }
 
 async function persistTabsToDaemon(projectId: string, state: OpenTabsState): Promise<void> {
+  // Thin invalidation: a write makes any burst-shared read stale.
+  evictCoalescedGet(`project-tabs:${projectId}`);
   await fetch(`/api/projects/${encodeURIComponent(projectId)}/tabs`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -862,11 +954,15 @@ async function persistTabsToDaemon(projectId: string, state: OpenTabsState): Pro
 export async function loadTabs(projectId: string): Promise<OpenTabsState> {
   const cached = readCachedTabs(projectId);
   try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/tabs`,
-    );
-    if (!resp.ok) return cached ?? { tabs: [], active: null };
-    const saved = normalizeTabsState(await resp.json());
+    // Concurrent mounts share one daemon read per burst (Batch A §4.3); the
+    // per-caller cache reconciliation below still runs for every caller.
+    const saved = await coalescedGet(`project-tabs:${projectId}`, async () => {
+      const resp = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/tabs`,
+      );
+      if (!resp.ok) throw new Error(`tabs ${resp.status}`);
+      return normalizeTabsState(await resp.json());
+    });
     const latest = newestTabsState(cached, saved);
     if (cached && latest === cached && (cached.updatedAt ?? 0) > (saved?.updatedAt ?? 0)) {
       void persistTabsToDaemon(projectId, cached).catch(() => {});
@@ -1005,12 +1101,16 @@ export function isVisiblePlugin(plugin: InstalledPluginRecord): boolean {
 export async function duplicatePluginAsProject(
   pluginId: string,
   input: { name?: string } = {},
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<PluginDuplicateProjectResponse> {
   const resp = await fetch(
     `/api/plugins/${encodeURIComponent(pluginId)}/duplicate-project`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+      },
       body: JSON.stringify(input),
     },
   );

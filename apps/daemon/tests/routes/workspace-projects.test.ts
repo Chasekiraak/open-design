@@ -205,6 +205,71 @@ describe('workspace project routes', () => {
     expect(allB.projects.map((item) => item.id)).not.toContain(projectId);
   });
 
+  it('rejects partial or revoked workspace-aware creates without leaving an unbound project', async () => {
+    const suffix = Date.now();
+    const partialId = `workspace-create-partial-${suffix}`;
+    const partial = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-od-workspace-id': `${workspaceId}-partial`,
+      },
+      body: JSON.stringify({
+        id: partialId,
+        name: 'Must not become unbound',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(partial.status).toBe(400);
+    expect(await fetch(`${baseUrl}/api/projects/${partialId}`).then((response) => response.status))
+      .toBe(404);
+
+    const revokedId = `workspace-create-revoked-${suffix}`;
+    const revoked = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: workspaceHeaders(`${workspaceId}-revoked`, 'member-revoked', {
+        'x-od-workspace-member-status': 'removed',
+      }),
+      body: JSON.stringify({
+        id: revokedId,
+        name: 'Must fail closed',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(revoked.status).toBe(403);
+    expect(await fetch(`${baseUrl}/api/projects/${revokedId}`).then((response) => response.status))
+      .toBe(404);
+  });
+
+  it('keeps the persisted workspace binding on the project detail read model', async () => {
+    const suffix = Date.now();
+    const projectId = `workspace-detail-scope-${suffix}`;
+    const workspaceA = `${workspaceId}-detail-a-${suffix}`;
+    const createResp = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: workspaceHeaders(workspaceA, 'member-detail-a'),
+      body: JSON.stringify({
+        id: projectId,
+        name: 'Project detail scope fixture',
+        skillId: null,
+        designSystemId: null,
+      }),
+    });
+    expect(createResp.status).toBe(200);
+
+    const detailResp = await fetch(`${baseUrl}/api/projects/${projectId}`);
+    expect(detailResp.status).toBe(200);
+    const detail = (await detailResp.json()) as {
+      project: { id: string; workspaceId?: string | null };
+    };
+    expect(detail.project).toMatchObject({
+      id: projectId,
+      workspaceId: workspaceA,
+    });
+  });
+
   // Adoption must never mint a second row for a project that already has one.
   // The narrowed primary key would reject it, so a regression here surfaces as a
   // 500 rather than a silent duplicate — but the read path must not get there.

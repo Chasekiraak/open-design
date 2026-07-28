@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   contextHasTeamIdentity,
   createVelaCliResourceAdapter,
   shouldUseVelaCliResourceTransport,
 } from '../src/collab/vela-cli-resource-adapter.js';
+import { createCollabRuntime } from '../src/collab/runtime.js';
+import type { ResourceHubPrincipal } from '../src/collab/resource-principal.js';
 
 function recordingRun(outputs: Record<string, string>) {
   const calls: string[][] = [];
@@ -419,5 +421,78 @@ describe('transport selection', () => {
         memberStatus: 'removed',
       } as never),
     ).toBe(false);
+  });
+});
+
+// Red spec for the "unshare retry-trap / fresh-install ghost" family: an
+// unshare is two hub writes (resource remove → team-projects catalog remove).
+// When the first landed but the second did not (crash or network between
+// them), the hub is left dangling: the team_project_catalog row still lists
+// the project while its backing resource row is tombstoned. Reproduced live
+// on the feature-test hub (2026-07-27, workspace res-wipe-0727): every
+// subsequent unshare attempt died re-removing the already-tombstoned resource
+// (`vela resource remove` → 404 `resource_not_found`, surfaced as HTTP 400
+// and a local-row rollback), so the catalog row could NEVER be removed — and
+// after a reinstall (fresh data root, local `cloudTombstonedAt` gone) the
+// retracted project came back as a normal-looking team card for everyone.
+//
+// The invariant under test: `unpublish` is a retraction toward one end state
+// — "the hub no longer serves this resource". A hub answer that the resource
+// is already absent IS that end state, so retraction must treat it as
+// success and let the caller finish the rest of the unshare (the catalog
+// removal), instead of failing the whole operation forever.
+describe('unpublish retraction idempotency (dangling team-catalog heal)', () => {
+  const retractedError = () =>
+    new Error(
+      'Command failed: vela resource remove project-p1 --json\n' +
+        'Error: remove resource: API request failed with status 404: resource_not_found\n',
+    );
+
+  it('treats an already-retracted hub resource as unpublish success, not failure', async () => {
+    const { run, calls } = scriptedRun([
+      { match: ['remove', 'project-p1', '--json'], error: retractedError() },
+    ]);
+    const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
+    await expect(adapter.unpublish!({ projectId: 'p1' })).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('still surfaces unpublish failures that do not prove the resource is gone', async () => {
+    const { run } = scriptedRun([
+      {
+        match: ['remove', 'project-p1', '--json'],
+        error: new Error('Command failed: vela resource remove project-p1 --json\nError: network unreachable\n'),
+      },
+    ]);
+    const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
+    await expect(adapter.unpublish!({ projectId: 'p1' })).rejects.toThrow('network unreachable');
+  });
+
+  it('an unshare retry against an already-retracted resource completes the catalog removal', async () => {
+    // The exact retry a stuck sharer fires from the UI: the resource row is
+    // already tombstoned (first attempt half-landed), the catalog row is the
+    // one thing left to remove. Before the fix the retry rejected at the
+    // resource step and never reached the catalog.
+    const principal: ResourceHubPrincipal = {
+      teamId: 't1',
+      memberId: 'owner-1',
+      role: 'owner',
+      lifecycleState: 'active',
+    };
+    const { run } = scriptedRun([
+      { match: ['remove', 'project-p1', '--json'], error: retractedError() },
+    ]);
+    const adapter = createVelaCliResourceAdapter({ ...OPTS, run });
+    const catalogRemove = vi.fn(async () => ({}));
+    const runtime = createCollabRuntime({
+      adapter,
+      teamProjectCatalog: { upsert: async () => ({}), remove: catalogRemove },
+    });
+    try {
+      await expect(runtime.requestTeamUnshare('p1', principal)).resolves.toBeUndefined();
+      expect(catalogRemove).toHaveBeenCalledWith('p1', principal);
+    } finally {
+      runtime.dispose();
+    }
   });
 });

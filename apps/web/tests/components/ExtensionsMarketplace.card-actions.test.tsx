@@ -26,8 +26,34 @@ vi.mock('../../src/analytics/provider', async (importOriginal) => {
   return { ...actual, useAnalytics: () => ({ track: vi.fn() }) };
 });
 
+const TEAM_CONTEXT = {
+  workspaceId: 'ws-team',
+  workspaceType: 'team',
+  workspaceMemberId: 'mem-owner',
+  role: 'owner',
+  memberStatus: 'active',
+  lifecycleState: 'active',
+  billingState: 'active',
+  planId: 'team-pro',
+  teamId: 'ws-team',
+  permissions: {
+    canManageMembers: true,
+    canManageBilling: true,
+    canInviteMembers: true,
+    canManageAutoRecharge: true,
+    canShareProjects: true,
+    canWriteSyncedFiles: true,
+    canViewWorkspaceSettings: true,
+    canManageSharedResources: true,
+  },
+  seatSummary: { seatLimit: 5, usedSeats: 1, availableSeats: 4, isSeatFull: false },
+  providerMode: 'cloud',
+};
+
+let workspaceContext: unknown = null;
+
 vi.mock('../../src/collab/useWorkspaceContext', () => ({
-  useWorkspaceContext: () => ({ context: null, loading: false, refresh: vi.fn() }),
+  useWorkspaceContext: () => ({ context: workspaceContext, loading: false, refresh: vi.fn() }),
   useWorkspaceBilling: () => null,
 }));
 
@@ -92,6 +118,7 @@ function installSuccessStream(id: string): Response {
 }
 
 beforeEach(() => {
+  workspaceContext = null;
   skills = [USER_SKILL, OFFICIAL_SKILL];
   installResolvers = [];
   skillDetailFailuresRemaining = 0;
@@ -351,7 +378,8 @@ describe('ExtensionsMarketplace card affordances', () => {
 });
 
 describe('ExtensionsMarketplace import', () => {
-  it('#132 — a successful import lands the catalog on the tab that holds the result', async () => {
+  it('#132 — a successful plugin URL import keeps workspace authority and reveals the result', async () => {
+    workspaceContext = TEAM_CONTEXT;
     const { container } = renderMarketplace();
     await waitFor(() => {
       expect(container.querySelectorAll('.plugin-marketplace__item').length).toBeGreaterThan(0);
@@ -378,6 +406,18 @@ describe('ExtensionsMarketplace import', () => {
       expect(
         screen.getByTestId('plugins-tab-installed').classList.contains('is-active'),
       ).toBe(true);
+    });
+
+    const installCall = vi.mocked(globalThis.fetch).mock.calls.find(
+      ([input, init]) =>
+        String(input) === '/api/plugins/install'
+        && JSON.parse(String(init?.body ?? '{}')).source === IMPORT_URL,
+    );
+    expect(installCall).toBeTruthy();
+    expect(installCall?.[1]?.headers).toMatchObject({
+      'x-od-workspace-id': TEAM_CONTEXT.workspaceId,
+      'x-od-workspace-member-id': TEAM_CONTEXT.workspaceMemberId,
+      'x-od-workspace-type': TEAM_CONTEXT.workspaceType,
     });
   });
 

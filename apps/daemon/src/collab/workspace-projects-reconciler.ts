@@ -58,6 +58,55 @@ export interface RemoteTeamProjectRef {
   ownerMemberId: string;
 }
 
+/** The two remote reads a daemon can consult for catalog MEMBERSHIP. */
+export interface ReconcilerRemoteTeamProjectSources {
+  /**
+   * The raw workspace catalog (`vela team-projects list` via the richer
+   * `VelaTeamProjectCatalogClient`), which carries EVERY registered row —
+   * including rows whose `syncState` is `pending_upload`/`syncing`/`failed`.
+   * Null when the vela transport is not active for this daemon.
+   */
+  listCatalogMembership: (() => Promise<readonly RemoteTeamProjectRef[]>) | null;
+  /**
+   * The display catalog (`teamProjectsForDisplay`), which deliberately DROPS
+   * rows whose latest publish is not `synced` so teammates never open empty
+   * project shells (see `toTeamProject` in collab/vela-cli-team-projects.ts).
+   */
+  listDisplayTeamProjects: () => Promise<readonly RemoteTeamProjectRef[]>;
+}
+
+/**
+ * THE INVARIANT: reconciliation must judge membership against the raw
+ * catalog, never against the display list.
+ *
+ * "Is project X still registered to my team, and who owns it" and "should
+ * project X render in the team space right now" are different questions. The
+ * display read answers the second one by hiding rows whose latest publish is
+ * not `synced` — but a row whose publish FAILED is still a registered,
+ * owner-occupied catalog row (the hub's `upsertTeamProject` keeps refusing
+ * every other member with `team_project_owner_conflict` for it). Feeding that
+ * display-filtered list to `planWorkspaceProjectReconciliation` made a mere
+ * sync failure indistinguishable from a real unshare, so the demote direction
+ * rewrote a teammate's mirror into a personal draft ATTRIBUTED TO THE LOCAL
+ * VIEWER (`createdByWorkspaceMemberId: workspaceMemberId`) — which then
+ * surfaced in the viewer's drafts as "created by me" with an enabled
+ * "move to team space" action that could only ever 403 (recvqzjnshIlOe).
+ *
+ * A genuine unshare/delete removes the hub row itself, so it disappears from
+ * the raw catalog too — using membership here does not delay the legitimate
+ * demote convergence this module exists for.
+ *
+ * The display read stays as the fallback for transports without a raw
+ * catalog client; it is also the safe direction to fail toward, because a
+ * FAILED read (rejection) already aborts the pass upstream.
+ */
+export async function reconcilerRemoteTeamProjects(
+  sources: ReconcilerRemoteTeamProjectSources,
+): Promise<readonly RemoteTeamProjectRef[]> {
+  if (sources.listCatalogMembership) return sources.listCatalogMembership();
+  return sources.listDisplayTeamProjects();
+}
+
 export interface WorkspaceProjectBindPatch {
   workspaceId: string;
   visibility: 'team';

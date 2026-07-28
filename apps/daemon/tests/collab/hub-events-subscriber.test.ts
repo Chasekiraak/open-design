@@ -5,6 +5,8 @@ import {
   startHubEventsSubscriber,
   type HubEventsSubscriber,
 } from '../../src/collab/hub-events-subscriber.js';
+import { createWorkspaceBillingRuntimeCoordinator } from '../../src/collab/workspace-billing-runtime.js';
+import type { VelaWorkspaceBillingProjection } from '../../src/integrations/vela-billing.js';
 
 function sseResponse(frames: string[], opts: { holdOpen?: boolean } = {}) {
   const encoder = new TextEncoder();
@@ -25,10 +27,56 @@ function sseResponse(frames: string[], opts: { holdOpen?: boolean } = {}) {
   return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+function abortableSseResponse(
+  frames: string[],
+  signal: AbortSignal | null | undefined,
+  onAbort: () => void,
+) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(encoder.encode(frame));
+      const abort = () => {
+        onAbort();
+        controller.close();
+      };
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
 const READY = 'event: ready\ndata: {"workspaceId":"w1"}\n\n';
 const HEARTBEAT = 'event: heartbeat\ndata: {}\n\n';
 const COMMENT_EVENT =
   'event: workspace-event\ndata: {"type":"comment-changed","workspaceId":"w1","projectId":"p1","seq":7}\n\n';
+const BILLING_KEY = { workspaceId: 'w1', workspaceMemberId: 'm1' };
+
+function billingProjection(balanceUsd: string): VelaWorkspaceBillingProjection {
+  return {
+    snapshot: {
+      schemaVersion: 1,
+      workspaceId: BILLING_KEY.workspaceId,
+      workspaceMemberId: BILLING_KEY.workspaceMemberId,
+      billingScopeVersion: 2,
+      billing: { billingState: 'active', planId: 'team_plus' },
+      wallet: {
+        balanceUsd,
+        expiresAt: null,
+        updatedAt: '2026-07-28T00:00:00.000Z',
+      },
+      revisions: { billing: 'billing-1', wallet: `wallet-${balanceUsd}` },
+    },
+    workspaceBalance: {
+      ...BILLING_KEY,
+      billingScopeVersion: 2,
+      balanceUsd,
+      expiresAt: null,
+      updatedAt: '2026-07-28T00:00:00.000Z',
+    },
+  };
+}
 
 let subscriber: HubEventsSubscriber | null = null;
 
@@ -62,12 +110,16 @@ describe('parseHubWorkspaceEvent', () => {
     });
     expect(
       parseHubWorkspaceEvent(
-        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing-3"}',
+        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing-3","revisionClock":{"epoch":"billing-epoch-a","counter":"3"}}',
       ),
     ).toEqual({
       type: 'billing-subscription-changed',
       workspaceId: 'w1',
       revision: 'billing-3',
+      revisionClock: {
+        epoch: 'billing-epoch-a',
+        counter: '3',
+      },
     });
     expect(
       parseHubWorkspaceEvent(
@@ -77,6 +129,18 @@ describe('parseHubWorkspaceEvent', () => {
       type: 'billing-changed',
       workspaceId: 'w1',
       revision: 'billing-3',
+    });
+  });
+
+  it('drops malformed additive revision clocks and preserves the legacy event', () => {
+    expect(
+      parseHubWorkspaceEvent(
+        '{"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing:v1:3","revisionClock":{"epoch":"","counter":"-1"}}',
+      ),
+    ).toEqual({
+      type: 'billing-subscription-changed',
+      workspaceId: 'w1',
+      revision: 'billing:v1:3',
     });
   });
 
@@ -119,6 +183,81 @@ describe('parseHubWorkspaceEvent', () => {
 });
 
 describe('startHubEventsSubscriber', () => {
+  it('uses revision clocks only when the ready frame advertises the capability', async () => {
+    const clockEvent =
+      'event: workspace-event\ndata: {"type":"billing-subscription-changed","workspaceId":"w1","revision":"billing:v1:2","revisionClock":{"epoch":"billing-epoch-a","counter":"2"}}\n\n';
+    const events: unknown[] = [];
+    let fetches = 0;
+    let resolveBoth!: () => void;
+    const both = new Promise<void>((resolve) => {
+      resolveBoth = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({ url: 'https://hub/events', headers: {} }),
+      onEvent: (event) => {
+        events.push(event);
+        if (events.length === 2) resolveBoth();
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () => {
+        fetches += 1;
+        return fetches === 1
+          ? sseResponse([
+              'event: ready\ndata: {"workspaceId":"w1","capabilities":[]}\n\n',
+              clockEvent,
+            ])
+          : sseResponse([
+              'event: ready\ndata: {"workspaceId":"w1","capabilities":["billing-revision-clocks-v1"]}\n\n',
+              clockEvent,
+            ], { holdOpen: true });
+      },
+    });
+
+    await both;
+    expect(events[0]).not.toHaveProperty('revisionClock');
+    expect(events[1]).toMatchObject({
+      revisionClock: { epoch: 'billing-epoch-a', counter: '2' },
+    });
+  });
+
+  it('reports one healthy source gap per listener epoch from status and heartbeat frames', async () => {
+    const gaps: unknown[] = [];
+    let resolveGaps!: () => void;
+    const twoGaps = new Promise<void>((resolve) => {
+      resolveGaps = resolve;
+    });
+    const recordGap = (gap: unknown) => {
+      gaps.push(gap);
+      if (gaps.length === 2) resolveGaps();
+    };
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({
+        url: 'https://hub/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
+      onEvent: () => undefined,
+      onSourceGap: recordGap,
+      fetchImpl: async () => sseResponse([
+        'event: source-status\ndata: {"listenerEpoch":"listener-before-ready","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: ready\ndata: {"workspaceId":"w1","capabilities":["billing-revision-clocks-v1"],"listenerEpoch":"listener-a","listenerHealth":"starting","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-a","listenerHealth":"mystery","sourceGap":true}\n\n',
+        'event: heartbeat\ndata: {"listenerEpoch":"listener-a","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-a","listenerHealth":"healthy","sourceGap":true}\n\n',
+        'event: source-status\ndata: {"listenerEpoch":"listener-b","listenerHealth":"healthy","sourceGap":true}\n\n',
+      ], { holdOpen: true }),
+    });
+
+    await twoGaps;
+    expect(gaps).toEqual([
+      { workspaceId: 'w1', listenerEpoch: 'listener-a' },
+      { workspaceId: 'w1', listenerEpoch: 'listener-b' },
+    ]);
+  });
+
   it('delivers workspace-events and reports connected state', async () => {
     const events: unknown[] = [];
     const states: string[] = [];
@@ -203,6 +342,177 @@ describe('startHubEventsSubscriber', () => {
     subscriber.stop();
     expect(fetches).toBeGreaterThanOrEqual(2);
     expect(connections).toEqual([false, true]);
+  });
+
+  it('authoritatively catches up an interested wallet mutation made while SSE is disconnected', async () => {
+    let upstreamBalance = '1.00';
+    let projectionReads = 0;
+    let endpointResolutions = 0;
+    const timeline: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        projectionReads += 1;
+        timeline.push(`projection:${upstreamBalance}`);
+        return billingProjection(upstreamBalance);
+      },
+    });
+
+    await runtime.read(BILLING_KEY, {
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+    });
+
+    let resolveRecovered!: () => void;
+    const recovered = new Promise<void>((resolve) => {
+      resolveRecovered = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => {
+        endpointResolutions += 1;
+        timeline.push(`resolve:${endpointResolutions}`);
+        if (endpointResolutions === 2) {
+          // The wallet commits after the first stream has closed and before
+          // the reconnect becomes ready. No wallet invalidation is delivered.
+          upstreamBalance = '2.00';
+          timeline.push('wallet:2.00');
+        }
+        return { url: 'https://hub/events', headers: {} };
+      },
+      onEvent: () => undefined,
+      onConnect: ({ reconnect }) => {
+        timeline.push(reconnect ? 'ready:reconnect' : 'ready:first');
+        if (!reconnect) return;
+        runtime.reconnect(BILLING_KEY.workspaceId);
+        void runtime
+          .read(BILLING_KEY, {
+            clientId: 'renderer-1',
+            clientGeneration: '1',
+          })
+          .then((result) => {
+            timeline.push(
+              `fresh:${result.state.status}:${result.projection.workspaceBalance?.balanceUsd}`,
+            );
+            resolveRecovered();
+          });
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () =>
+        endpointResolutions === 1
+          ? sseResponse([READY])
+          : sseResponse([READY], { holdOpen: true }),
+    });
+
+    await recovered;
+    expect(projectionReads).toBe(2);
+    expect(runtime.peek(BILLING_KEY)).toMatchObject({
+      projection: { workspaceBalance: { balanceUsd: '2.00' } },
+      state: { status: 'fresh', reason: 'reconnect' },
+    });
+    expect(timeline).toEqual([
+      'projection:1.00',
+      'resolve:1',
+      'ready:first',
+      'resolve:2',
+      'wallet:2.00',
+      'ready:reconnect',
+      'projection:2.00',
+      'fresh:fresh:2.00',
+    ]);
+    runtime.dispose();
+  });
+
+  it('reports ready capabilities per verified connection without retaining stale values', async () => {
+    const capabilities: string[][] = [];
+    let fetches = 0;
+    let resolveSecond!: () => void;
+    const second = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => ({
+        url: 'https://hub/events',
+        headers: {},
+        workspaceId: 'w1',
+      }),
+      onEvent: () => undefined,
+      onConnect: ({ capabilities: readyCapabilities }) => {
+        capabilities.push([...readyCapabilities]);
+        if (capabilities.length === 2) resolveSecond();
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () => {
+        fetches += 1;
+        return sseResponse([
+          fetches === 1
+            ? 'event: ready\ndata: {"workspaceId":"w1","capabilities":["authoritative-project-presence-v1"]}\n\n'
+            : 'event: ready\ndata: {"workspaceId":"w1","capabilities":[]}\n\n',
+        ]);
+      },
+    });
+
+    await second;
+    expect(capabilities).toEqual([['authoritative-project-presence-v1'], []]);
+  });
+
+  it('immediately re-resolves and reconnects when the active workspace changes', async () => {
+    let activeWorkspaceId = 'w1';
+    const resolvedScopes: string[] = [];
+    const connectedScopes: string[] = [];
+    const abortedScopes: string[] = [];
+    const errors: unknown[] = [];
+    let resolveFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let resolveSecond!: () => void;
+    const second = new Promise<void>((resolve) => {
+      resolveSecond = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => {
+        const workspaceId = activeWorkspaceId;
+        resolvedScopes.push(workspaceId);
+        return {
+          url: 'https://hub/events',
+          headers: { 'x-vela-workspace-id': workspaceId },
+          workspaceId,
+        };
+      },
+      onEvent: () => undefined,
+      onConnect: ({ workspaceId }) => {
+        if (!workspaceId) return;
+        connectedScopes.push(workspaceId);
+        if (workspaceId === 'w1') resolveFirst();
+        if (workspaceId === 'w2') resolveSecond();
+      },
+      onError: (error) => errors.push(error),
+      backoffMinMs: 1_000_000,
+      backoffMaxMs: 1_000_000,
+      fetchImpl: async (_url, init) => {
+        const workspaceId = String(
+          (init?.headers as Record<string, string>)?.['x-vela-workspace-id'],
+        );
+        return abortableSseResponse(
+          [`event: ready\ndata: {"workspaceId":"${workspaceId}"}\n\n`],
+          init?.signal,
+          () => abortedScopes.push(workspaceId),
+        );
+      },
+    });
+
+    await first;
+    activeWorkspaceId = 'w2';
+    subscriber.refreshEndpoint();
+    await second;
+
+    expect(resolvedScopes.slice(0, 2)).toEqual(['w1', 'w2']);
+    expect(connectedScopes).toEqual(['w1', 'w2']);
+    expect(abortedScopes).toContain('w1');
+    expect(errors).toEqual([]);
   });
 
   it('does not verify or dispatch a workspace event before the ready frame', async () => {

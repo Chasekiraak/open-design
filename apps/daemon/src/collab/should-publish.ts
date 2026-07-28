@@ -17,6 +17,15 @@ export interface CreateShouldPublishOptions {
   workspaceContext: WorkspaceContextProvider;
   /** Remember the resolved principal so the scheduler/adapter scope the publish under it. */
   rememberTeamShare: (projectId: string, principal: ResourceHubPrincipal) => void;
+  /**
+   * Whether the local record for `projectId` is still an unmaterialized
+   * shared-project placeholder (`isUnmaterializedSharedPlaceholder` over the
+   * local project row — see collab/shared-project-placeholder.ts). Required,
+   * not optional: forgetting to wire it is exactly the fresh-install wipe of
+   * recvqzaDvUU6B3, where an empty placeholder on a wiped data root passed
+   * the owner check and was published over the team's real content.
+   */
+  hasUnmaterializedPlaceholder: (projectId: string) => boolean;
 }
 
 /**
@@ -50,6 +59,12 @@ export function createShouldPublish(
   options: CreateShouldPublishOptions,
 ): (projectId: string) => Promise<boolean> {
   return async (projectId: string): Promise<boolean> => {
+    // Fresh-install wipe guard (recvqzaDvUU6B3): a local record that is still
+    // an unmaterialized shared-project placeholder is not content authority —
+    // it must never be watched or publish, no matter what the owner check
+    // says. Checked before the hub round-trips so a placeholder never even
+    // reaches the catalog.
+    if (options.hasUnmaterializedPlaceholder(projectId)) return false;
     const owner = await options.resolveSharedProjectOwner(projectId);
     if (!owner) return false;
     const ctx = await options.workspaceContext.current({});

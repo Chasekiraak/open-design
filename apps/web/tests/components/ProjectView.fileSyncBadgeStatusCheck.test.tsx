@@ -140,6 +140,7 @@ const mockedLoadTabs = vi.mocked(loadTabs);
 const mockedFetchPreviewComments = vi.mocked(fetchPreviewComments);
 
 const checkStatusNowMock = vi.fn();
+const applyContentTransferStateMock = vi.fn();
 
 const config: AppConfig = {
   mode: 'api',
@@ -211,6 +212,7 @@ function sharedOwnerCollab(overrides?: Partial<ProjectCollab>): ProjectCollab {
     requestPublish: vi.fn(),
     refreshPresence: vi.fn(),
     checkStatusNow: checkStatusNowMock,
+    applyContentTransferState: applyContentTransferStateMock,
     ...overrides,
   };
 }
@@ -299,5 +301,34 @@ describe('ProjectView file-sync badge — status check on local file change', ()
     await waitFor(() => {
       expect(checkStatusNowMock).toHaveBeenCalled();
     });
+  });
+
+  it('re-reads exact-scoped status instead of applying an unscoped transfer event', () => {
+    renderProjectView();
+
+    const handleProjectEvent = mockedUseProjectFileEvents.mock.calls[0]?.[2] as
+      | ((evt: ProjectEvent) => void)
+      | undefined;
+    checkStatusNowMock.mockClear();
+    applyContentTransferStateMock.mockClear();
+    handleProjectEvent?.({
+      type: 'project-content-transfer-state',
+      projectId: project.id,
+      // Legacy/foreign scope A payload. Even if an older daemon still sends
+      // it, this view may currently be workspace B and must never apply it.
+      state: {
+        status: 'idle',
+        version: 8,
+        startedAt: 100,
+        updatedAt: 200,
+      },
+    } as unknown as ProjectEvent);
+
+    // The same project id may exist under another workspace/owner/resource
+    // binding. Applying A's idle payload directly could hide B's download.
+    // The event is only an invalidation; /collab/status resolves B's exact
+    // current scope and the CollabClient ordering fences arbitrate the result.
+    expect(checkStatusNowMock).toHaveBeenCalledTimes(1);
+    expect(applyContentTransferStateMock).not.toHaveBeenCalled();
   });
 });

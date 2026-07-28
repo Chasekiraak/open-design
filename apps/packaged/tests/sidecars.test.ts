@@ -19,13 +19,14 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, posix } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createJsonIpcServer, resolveAppIpcPath } from '@open-design/sidecar';
 import { APP_KEYS, OPEN_DESIGN_SIDECAR_CONTRACT } from '@open-design/sidecar-proto';
 
 import {
   buildPackagedDaemonSpawnEnv,
+  createPackagedSidecarSpawnOptions,
   resolveDaemonStatusTimeoutMs,
   resolvePackagedChildBaseEnv,
   resolvePackagedElectronNodeCommand,
@@ -352,6 +353,28 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     };
   }
 
+  it('uses the namespace runtime root for child processes without reading cwd', () => {
+    const cwd = vi.spyOn(process, 'cwd').mockImplementation(() => {
+      throw new Error('uv_cwd');
+    });
+
+    try {
+      expect(createPackagedSidecarSpawnOptions({
+        env: { NODE_ENV: 'production' },
+        logFd: 42,
+        paths: fakePaths(),
+      })).toEqual({
+        cwd: '/tmp/od-pkg/runtime',
+        env: { NODE_ENV: 'production' },
+        stdio: ['ignore', 42, 42],
+        windowsHide: true,
+      });
+      expect(cwd).not.toHaveBeenCalled();
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it('sets OD_REQUIRE_DESKTOP_AUTH=1 when requireDesktopAuth=true (Electron entry)', () => {
     const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
       appVersion: '1.2.3',
@@ -364,6 +387,26 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect(env.OD_RESOURCE_ROOT).toBe('/tmp/od-pkg/resources');
     expect(env.OD_APP_VERSION).toBe('1.2.3');
     expect(env.OD_LEGACY_DATA_DIR).toBeUndefined();
+  });
+
+  it('forwards updater controls needed by a historical desktop handoff', () => {
+    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+      appVersion: '1.2.3',
+      daemonCliEntry: null,
+      desktopHandoffEnv: {
+        OD_UPDATE_CURRENT_VERSION: '1.2.3',
+        OD_UPDATE_INSTALLED_VERSION: '1.0.0',
+        OD_UPDATE_METADATA_URL: 'http://127.0.0.1:54321/stable/latest/metadata.json',
+        PATH: 'must-not-leak-through-handoff-env',
+      },
+      legacyDataDir: null,
+      requireDesktopAuth: true,
+    });
+
+    expect(env.OD_UPDATE_CURRENT_VERSION).toBe('1.2.3');
+    expect(env.OD_UPDATE_INSTALLED_VERSION).toBe('1.0.0');
+    expect(env.OD_UPDATE_METADATA_URL).toBe('http://127.0.0.1:54321/stable/latest/metadata.json');
+    expect(env.PATH).toBeUndefined();
   });
 
   it('omits OD_REQUIRE_DESKTOP_AUTH entirely when requireDesktopAuth=false (headless)', () => {
@@ -451,30 +494,80 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect(env.OPEN_DESIGN_AMR_PROFILE).toBe('test');
   });
 
-  it('enables the vela-cli workspace-team transport for a feature-test build', () => {
-    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
-      appVersion: null,
-      amrProfile: 'feature-test',
-      daemonCliEntry: null,
-      legacyDataDir: null,
-      requireDesktopAuth: true,
-    });
-    expect(env.OPEN_DESIGN_AMR_PROFILE).toBe('feature-test');
-    expect(env.OD_WORKSPACE_CONTEXT_SOURCE).toBe('vela');
-    expect(env.OD_TEAM_PROJECTS_TRANSPORT).toBe('vela-cli');
-    expect(env.OD_COLLAB_TRANSPORT).toBe('vela-cli');
-    expect(env.OD_RESOURCE_TRANSPORT).toBe('vela-cli');
-    expect(env.OD_VELA_WEB_URL).toBe('https://amr-feature.powerformer.net');
-  });
-
-  it('leaves the workspace-team transport off for non-feature-test builds', () => {
-    for (const amrProfile of ['prod', 'test', null] as const) {
+  it.each(['feature-test', 'test'] as const)(
+    'enables the vela-cli workspace-team transport for a %s build with an injected vela web origin',
+    (amrProfile) => {
       const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
         appVersion: null,
         amrProfile,
         daemonCliEntry: null,
         legacyDataDir: null,
         requireDesktopAuth: true,
+        velaWebUrl: 'https://vela.example.invalid',
+      });
+      expect(env.OPEN_DESIGN_AMR_PROFILE).toBe(amrProfile);
+      expect(env.OD_WORKSPACE_CONTEXT_SOURCE).toBe('vela');
+      expect(env.OD_TEAM_PROJECTS_TRANSPORT).toBe('vela-cli');
+      expect(env.OD_COLLAB_TRANSPORT).toBe('vela-cli');
+      expect(env.OD_RESOURCE_TRANSPORT).toBe('vela-cli');
+      expect(env.OD_VELA_WEB_URL).toBe('https://vela.example.invalid');
+    },
+  );
+
+  // The gate is profile AND origin. A build whose CI secret was never
+  // configured must degrade to "workspace-team dormant" rather than turn the
+  // transports on against an unknown backend.
+  it.each(['feature-test', 'test'] as const)(
+    'leaves the workspace-team transport off for a %s build with no injected vela web origin',
+    (amrProfile) => {
+      for (const velaWebUrl of [undefined, null, '', '   ']) {
+        const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+          appVersion: null,
+          amrProfile,
+          daemonCliEntry: null,
+          legacyDataDir: null,
+          requireDesktopAuth: true,
+          velaWebUrl,
+        });
+        expect('OD_WORKSPACE_CONTEXT_SOURCE' in env).toBe(false);
+        expect('OD_TEAM_PROJECTS_TRANSPORT' in env).toBe(false);
+        expect('OD_COLLAB_TRANSPORT' in env).toBe(false);
+        expect('OD_RESOURCE_TRANSPORT' in env).toBe(false);
+        expect('OD_VELA_WEB_URL' in env).toBe(false);
+      }
+    },
+  );
+
+  it('leaves the workspace-team transport off for builds without a workspace-team backend', () => {
+    for (const amrProfile of ['prod', 'local', null] as const) {
+      const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+        appVersion: null,
+        amrProfile,
+        daemonCliEntry: null,
+        legacyDataDir: null,
+        requireDesktopAuth: true,
+      });
+      expect('OD_WORKSPACE_CONTEXT_SOURCE' in env).toBe(false);
+      expect('OD_TEAM_PROJECTS_TRANSPORT' in env).toBe(false);
+      expect('OD_COLLAB_TRANSPORT' in env).toBe(false);
+      expect('OD_RESOURCE_TRANSPORT' in env).toBe(false);
+      expect('OD_VELA_WEB_URL' in env).toBe(false);
+    }
+  });
+
+  // The profile allowlist is the load-bearing half of the gate: moving the
+  // origin out of the source tree and into a build-time injection must not
+  // create a path where a `prod` bundle can be handed an origin and quietly
+  // turn the unreleased workspace-team transports on for every stable user.
+  it('never enables the workspace-team transport for a prod build, even with an injected vela web origin', () => {
+    for (const amrProfile of ['prod', 'local', null] as const) {
+      const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+        appVersion: null,
+        amrProfile,
+        daemonCliEntry: null,
+        legacyDataDir: null,
+        requireDesktopAuth: true,
+        velaWebUrl: 'https://vela.example.invalid',
       });
       expect('OD_WORKSPACE_CONTEXT_SOURCE' in env).toBe(false);
       expect('OD_TEAM_PROJECTS_TRANSPORT' in env).toBe(false);

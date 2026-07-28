@@ -13,6 +13,7 @@ import type {
   ProjectFilesResponse,
 } from '@open-design/contracts';
 import { parseProvenance } from '../lib/parse-provenance';
+import { listConversations } from '../state/projects';
 
 const DESIGN_MD = 'DESIGN.md';
 
@@ -102,13 +103,10 @@ export function useDesignMdState(projectId: string, refreshKey: number = 0): Des
         if (signal?.aborted) return;
         const provenance = parseProvenance(designText);
 
-        const convsResp = await fetch(`/api/projects/${projectIdEnc}/conversations`, {
-          signal,
-        });
-        let convsBody: ConversationsResponseShape = { conversations: [] };
-        if (convsResp.ok) {
-          convsBody = (await convsResp.json()) as ConversationsResponseShape;
-        }
+        // Shared single-flight conversations read (Batch A §4.3); the local
+        // abort only detaches this consumer.
+        const conversations = await listConversations(projectId);
+        const convsBody: ConversationsResponseShape = { conversations };
         if (signal?.aborted) return;
 
         const generatedMs =

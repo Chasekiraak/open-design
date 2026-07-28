@@ -1418,7 +1418,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(screen.getByText('Model discovery is not available for this protocol.')).toBeTruthy();
 
     fetchProviderModelsMock.mockClear();
-    fireEvent.click(screen.getByRole('tab', { name: '小米 MiMo' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Xiaomi MiMo' }));
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
     expect(fetchProviderModelsMock).not.toHaveBeenCalled();
@@ -1731,7 +1731,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
   });
 
   it('auto-tests a saved complete BYOK config when Settings opens', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = input.toString();
       if (url === '/api/workspace/context') {
         return new Response(JSON.stringify({ context: null }), {
@@ -1876,7 +1876,7 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       apiProviderBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: '智谱' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Zhipu AI' }));
 
     expect(await screen.findByText('✓ Loaded 8 models from your account.')).toBeTruthy();
     fireEvent.click(screen.getByRole('combobox', { name: 'Model' }));
@@ -5801,6 +5801,76 @@ describe('SettingsDialog about interactions', () => {
       expect(download).toHaveBeenCalledWith({ payload: { source: 'settings-about' } });
     });
     expect(screen.getByText('Version 1.2.3-beta.4 is ready to install.')).toBeTruthy();
+  });
+
+  it('clears the updater cache from the about page after inline confirmation', async () => {
+    const cleared = updateStatus({ state: 'idle' });
+    const clearCache = vi.fn(async () => cleared);
+    restoreOpenDesignHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          'clear-cache': clearCache,
+          status: vi.fn(async () => updateStatus()),
+        },
+      },
+    });
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        initialSection: 'about',
+        appVersionInfo: {
+          version: '1.2.3-beta.3',
+          channel: 'beta',
+          packaged: true,
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+      },
+    );
+
+    // Two-stage inline confirm: the first click only arms the action.
+    const trigger = await screen.findByTestId('settings-clear-updater-cache');
+    fireEvent.click(trigger);
+    expect(clearCache).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('settings-clear-updater-cache-confirm'));
+
+    await waitFor(() => {
+      expect(clearCache).toHaveBeenCalled();
+    });
+    expect(await screen.findByText(en['settings.clearUpdaterCacheSuccess'])).toBeTruthy();
+  });
+
+  it('hides updater cache recovery when packaged updates are unsupported', async () => {
+    restoreOpenDesignHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          status: vi.fn(async () => updateStatus({
+            platform: 'linux',
+            state: 'unsupported',
+            supported: false,
+          })),
+        },
+      },
+    });
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      {
+        initialSection: 'about',
+        appVersionInfo: {
+          version: '1.2.3-beta.3',
+          channel: 'beta',
+          packaged: true,
+          platform: 'linux',
+          arch: 'x64',
+        },
+      },
+    );
+
+    await screen.findByText(en['settings.updateStatusUnsupported']);
+    expect(screen.queryByTestId('settings-clear-updater-cache')).toBeNull();
   });
 
   it('installs a downloaded payload update from the about page', async () => {

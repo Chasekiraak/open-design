@@ -3516,7 +3516,7 @@ describe('FileViewer SVG artifacts', () => {
   });
 
   // recvq56lzckGtE: publishing a file from a real team workspace 403'd against
-  // the daemon's `canShareProjectsForRequest` gate (apps/daemon/src/routes/
+  // the daemon's `canShareProjectsForRequest` gate (daemon routes,
   // collab-sync.ts), which reads `x-od-workspace-can-share-projects` etc. and
   // falls back to a headerless context re-read (often false/denied) when those
   // headers are missing. `publishProjectFilePublic`/`fetchProjectFilePublicPublication`/
@@ -3671,37 +3671,21 @@ describe('FileViewer SVG artifacts', () => {
     expect(requested.some((url) => url.includes('publish-public'))).toBe(false);
   });
 
-  // recvq56vFjQKfT: viewer-only reused the SAME flag that blocks edit/export
-  // to also block a pure read action — browsing version history — even
-  // though `FileVersionManagerModal` already disables its own Restore button
-  // on `viewerOnly` internally. The outer mount gate re-blocking the whole
-  // panel is what actually broke; Present was never gated and needs no fix.
-  it('lets a viewer-only shared project browse version history, but not restore', async () => {
+  // The version-history entry carries the same disabled contract as the Share
+  // button beside it in the same toolbar: `viewerOnly`, with
+  // `fileViewer.readonlySharedNoExport` as the reason.
+  //
+  // This supersedes recvq56vFjQKfT, which had un-gated the entry on the
+  // reasoning that browsing history is a pure read action. That reasoning does
+  // not survive what the entry actually leads to: `.file-versions` is excluded
+  // from member mirrors, so a readonly member's panel can never hold the
+  // owner's history — measured live, the owner's 4 versions rendered as 1
+  // synthetic entry the member's own read had just created (飞书 recvqAMSX4RXPm,
+  // daemon side fixed in 5f34ae655). An entry that can only ever open an empty
+  // panel is not a read affordance worth keeping.
+  it('disables the version-history entry for a viewer-only shared project, like Share', async () => {
     const file = publicPublishFile(); // an .html file, so versioningAvailable is true
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/versions')) {
-        return new Response(JSON.stringify({
-          file: { name: file.name },
-          versions: [
-            {
-              id: 'v1',
-              fileName: file.name,
-              version: 1,
-              label: 'v1',
-              createdAt: 1,
-              source: 'ai',
-              prompt: null,
-              size: 10,
-              mime: 'text/html',
-              kind: 'html',
-              current: true,
-            },
-          ],
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ deployments: [] }), { status: 200 });
-    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ deployments: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     render(
@@ -3712,12 +3696,8 @@ describe('FileViewer SVG artifacts', () => {
     );
 
     const historyButton = await screen.findByRole('button', { name: 'Versions' });
-    expect(historyButton).not.toBeDisabled();
-    fireEvent.click(historyButton);
-
-    const panel = await screen.findByRole('dialog', { name: 'Versions' });
-    const restoreButton = within(panel).getByRole('button', { name: /switch to this version/i });
-    expect(restoreButton).toBeDisabled();
+    expect(historyButton).toBeDisabled();
+    expect(historyButton).toHaveAttribute('title', 'Shared project is read-only: you can comment, but cannot edit or export.');
   });
 
   it('keeps plain .slide pages on page-mode export routing', async () => {

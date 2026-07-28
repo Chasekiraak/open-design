@@ -117,7 +117,13 @@ import {
   type DesignDeliveryOutcome,
 } from '../runtime/design-delivery';
 import { RESUME_CONTINUE_PROMPT } from '../runtime/resume';
-import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
+import {
+  amrBalanceGateScopeForWorkspaceContext,
+  amrBalanceGateScopesMatch,
+  checkAmrBalanceGate,
+  isAmrBalanceGateScope,
+  type AmrBalanceGateScope,
+} from '../runtime/amr-balance-gate';
 import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
 import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
@@ -172,6 +178,7 @@ import {
   cacheTabsLocally,
   persistTabsToDaemonNow,
   listPlugins,
+  resolvedWorkspaceContextForWrite,
   type SaveMessageOptions,
   waitGeneratedPluginShareTask,
 } from '../state/projects';
@@ -223,6 +230,11 @@ import { DesignSystemPicker } from './DesignSystemPicker';
 import { PresenceBar } from '../collab/PresenceBar';
 import { useProjectCollab } from '../collab/useProjectCollab';
 import { useWorkspaceContext } from '../collab/useWorkspaceContext';
+import {
+  projectWorkspaceContext,
+  projectWorkspaceScopeAuthorizesAmr,
+  useProjectWorkspaceScope,
+} from '../collab/useProjectWorkspaceScope';
 import { CollabProvider, type CollabContextValue } from '../collab/collab-context';
 import { persistCommentAnchors } from '../collab/comment-anchor-client';
 import type { AnchorWriteBack } from '../comments';
@@ -416,6 +428,19 @@ function ensureConversationPresent(
 
 interface Props {
   project: Project;
+  /** Workspace/member authorization lifetime for async title reads. */
+  projectAuthorizationKey?: string;
+  /**
+   * The current title from the team catalog when this project is shared by
+   * another member. That catalog is the naming authority; the member's local
+   * mirror may carry an older real name with a newer local timestamp.
+   */
+  authoritativeProjectName?: string;
+  /** Re-read the catalog after a metadata invalidation before merging detail. */
+  resolveAuthoritativeProjectName?: (
+    projectId: string,
+    expectedAuthorizationKey: string,
+  ) => Promise<ProjectNameAuthorityResolution>;
   routeFileName: string | null;
   /**
    * Routed conversation id. When set (the URL is
@@ -448,7 +473,7 @@ interface Props {
   onAgentChange: (id: string) => void;
   onAgentModelChange: (
     id: string,
-    choice: { model?: string; reasoning?: string },
+    choice: { model?: string; reasoning?: string; serviceTier?: string },
   ) => void;
   onApiModelChange?: (model: string) => void;
   onRefreshAgents: () => void;
@@ -862,9 +887,12 @@ function autoSendContextKey(projectId: string): string {
   return `od:auto-send-context:${projectId}`;
 }
 
-/** Set by the home create flow when its submit already ran the Open Design
- * Cloud balance gate — the first auto-send must not re-prompt the user. */
-function autoSendAmrGateOkKey(projectId: string): string {
+/** Exact workspace/member authority checked by the Home AMR preflight. */
+function autoSendAmrGateWitnessKey(projectId: string): string {
+  return `od:auto-send-amr-gate-witness:${projectId}`;
+}
+
+function legacyAutoSendAmrGateOkKey(projectId: string): string {
   return `od:auto-send-amr-gate-ok:${projectId}`;
 }
 
@@ -897,13 +925,30 @@ function readAutoSendContext(projectId: string): RunContextSelection | null {
   }
 }
 
+function readAutoSendAmrGateWitness(
+  projectId: string,
+): AmrBalanceGateScope | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.sessionStorage.getItem(
+      autoSendAmrGateWitnessKey(projectId),
+    );
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    return isAmrBalanceGateScope(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function clearAutoSendSession(projectId: string): void {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.removeItem(autoSendFirstMessageKey(projectId));
     window.sessionStorage.removeItem(autoSendAttachmentsKey(projectId));
     window.sessionStorage.removeItem(autoSendContextKey(projectId));
-    window.sessionStorage.removeItem(autoSendAmrGateOkKey(projectId));
+    window.sessionStorage.removeItem(autoSendAmrGateWitnessKey(projectId));
+    window.sessionStorage.removeItem(legacyAutoSendAmrGateOkKey(projectId));
   } catch {
     /* ignore */
   }
@@ -1359,7 +1404,8 @@ function projectEventToAgentEvent(evt: ProjectEvent): LiveArtifactEventItem['eve
   if (
     evt.type === 'comment-changed' ||
     evt.type === 'presence-changed' ||
-    evt.type === 'project-metadata-changed'
+    evt.type === 'project-metadata-changed' ||
+    evt.type === 'project-content-transfer-state'
   ) {
     return null;
   }
@@ -1399,8 +1445,54 @@ function artifactWithHtml(
       };
 }
 
+const SHARED_PROJECT_PLACEHOLDER_NAME = '共享项目';
+
+export type ProjectNameAuthorityResolution =
+  | { kind: 'resolved'; name: string | null }
+  | { kind: 'stale' };
+
+/**
+ * Reconcile the route/list snapshot with the daemon detail response.
+ *
+ * A shared-project placeholder is created locally with `updatedAt = now`, so
+ * timestamp-only selection can make it look newer than the catalog row whose
+ * real title the user already saw. Detail still owns newer project fields, but
+ * it must never replace a meaningful catalog title with that transport
+ * placeholder. The project-id check also keeps a late response from a previous
+ * route out of the next project.
+ */
+export function reconcileProjectDetail(
+  project: Project,
+  detail: Project | null,
+  authoritativeProjectName?: string | null,
+): Project {
+  const authoritativeName = authoritativeProjectName?.trim() || null;
+  const routedProject = authoritativeName
+    ? { ...project, name: authoritativeName }
+    : project;
+  if (!detail || detail.id !== project.id || detail.updatedAt < project.updatedAt) {
+    return routedProject;
+  }
+  const projectName = routedProject.name.trim();
+  const detailName = detail.name.trim();
+  if (
+    detailName === SHARED_PROJECT_PLACEHOLDER_NAME
+    && projectName
+    && projectName !== SHARED_PROJECT_PLACEHOLDER_NAME
+  ) {
+    // The placeholder is an unmaterialized transport row, not a newer project
+    // authority. Reject the whole row so its null skill/design metadata cannot
+    // regress the catalog/local record along with its synthetic title.
+    return routedProject;
+  }
+  return authoritativeName ? { ...detail, name: authoritativeName } : detail;
+}
+
 export function ProjectView({
   project,
+  projectAuthorizationKey = project.id,
+  authoritativeProjectName,
+  resolveAuthoritativeProjectName,
   routeFileName,
   routeConversationId = null,
   config,
@@ -1436,8 +1528,27 @@ export function ProjectView({
   onDuplicateProject,
 }: Props) {
   const { locale, t } = useI18n();
+  const activeAuthorizationLifetimeRef = useRef<string | null>(projectAuthorizationKey);
+  useEffect(() => {
+    activeAuthorizationLifetimeRef.current = projectAuthorizationKey;
+    return () => {
+      if (activeAuthorizationLifetimeRef.current === projectAuthorizationKey) {
+        activeAuthorizationLifetimeRef.current = null;
+      }
+    };
+  }, [projectAuthorizationKey]);
   const analytics = useAnalytics();
-  const { context: workspaceContext } = useWorkspaceContext();
+  const workspaceContextState = useWorkspaceContext();
+  const { context: workspaceContext } = workspaceContextState;
+  const projectWorkspaceScopeState = useProjectWorkspaceScope(project.id);
+  const projectRunWorkspaceContext = projectWorkspaceContext(
+    projectWorkspaceScopeState.scope,
+  );
+  const projectRunRequiresWorkspaceScope =
+    config.mode === 'daemon' && config.agentId === 'amr';
+  const projectRunWorkspaceScopeReady =
+    !projectRunRequiresWorkspaceScope ||
+    projectWorkspaceScopeAuthorizesAmr(projectWorkspaceScopeState.scope);
   // Onboarding first-generation funnel (spec §11.1). Consume the pending entry
   // (set by the Home recommendation) exactly once on mount; the refs guard the
   // two lifecycle events so each fires only for the genuine first send / first
@@ -1513,8 +1624,11 @@ export function ProjectView({
       : null;
   const projectDetail = useProjectDetail(project.id);
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
-  const currentProject =
-    detailedProject && detailedProject.updatedAt >= project.updatedAt ? detailedProject : project;
+  const currentProject = reconcileProjectDetail(
+    project,
+    detailedProject,
+    authoritativeProjectName,
+  );
   const projectDesignSystemId = resolveProjectDesignSystemId(currentProject);
   const projectIsDesignSystemProject = isDesignSystemProject(currentProject);
   // Website-clone turns reproduce a whole multi-page site; auto-open should
@@ -2015,7 +2129,8 @@ export function ProjectView({
     currentConversationHasActiveRun
     && !currentConversationStreaming
     && !currentConversationHasProgrammaticBrandExtractionRun;
-  const currentConversationSendDisabled = currentConversationLoading
+  const currentConversationSendDisabled = !projectRunWorkspaceScopeReady
+    || currentConversationLoading
     || failedMessagesConversationId === activeConversationId
     || currentConversationAwaitingActiveRunAttach;
   const currentConversationActionDisabled = currentConversationBusy || currentConversationSendDisabled;
@@ -2825,20 +2940,47 @@ export function ProjectView({
         // rendered field actually changed — an unconditional apply would
         // re-render the whole App on every content-publish nudge.
         const capturedProjectId = project.id;
-        void getProject(capturedProjectId).then((fresh) => {
+        const capturedAuthorizationKey = projectAuthorizationKey;
+        void Promise.all([
+          getProject(capturedProjectId),
+          resolveAuthoritativeProjectName
+            ? resolveAuthoritativeProjectName(capturedProjectId, capturedAuthorizationKey)
+            : Promise.resolve<ProjectNameAuthorityResolution>({
+                kind: 'resolved',
+                name: authoritativeProjectName ?? null,
+              }),
+        ]).then(([fresh, authorityResolution]) => {
           if (!fresh) return;
+          if (authorityResolution.kind === 'stale') return;
+          if (activeAuthorizationLifetimeRef.current !== capturedAuthorizationKey) return;
           // User switched projects while the fetch was in flight.
           if (projectIdRef.current !== capturedProjectId) return;
           const current = projectRef.current;
+          const reconciled = reconcileProjectDetail(
+            current,
+            fresh,
+            authorityResolution.name,
+          );
           if (
-            fresh.name === current.name
-            && fresh.skillId === current.skillId
-            && fresh.designSystemId === current.designSystemId
+            reconciled.name === current.name
+            && reconciled.skillId === current.skillId
+            && reconciled.designSystemId === current.designSystemId
           ) {
             return;
           }
-          onProjectChange(fresh);
+          onProjectChange(reconciled);
         });
+      }
+      return;
+    }
+    if (evt.type === 'project-content-transfer-state') {
+      if (evt.projectId === project.id) {
+        // The daemon intentionally emits no transfer payload here. A project
+        // id can be reused across workspace/owner/resource bindings, so direct
+        // application could let scope A's idle hide scope B's download.
+        // Re-read the exact-scoped status; CollabClient's request/tombstone
+        // fences reject stale responses.
+        collabCheckStatusNow();
       }
       return;
     }
@@ -2887,7 +3029,19 @@ export function ProjectView({
     // Live artifact events come from chat-turn-emitted artifacts; they
     // also imply the conversation transcript changed.
     setDesignMdRefreshKey((n) => n + 1);
-  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectChange, onProjectsRefresh, refreshLiveArtifacts, project.id]);
+  }, [
+    authoritativeProjectName,
+    coalescedFileChangedRefresh,
+    collabCheckStatusNow,
+    collabRefreshPresence,
+    iframeKeepAlivePool,
+    onProjectChange,
+    onProjectsRefresh,
+    refreshLiveArtifacts,
+    resolveAuthoritativeProjectName,
+    project.id,
+    projectAuthorizationKey,
+  ]);
   useProjectFileEvents(project.id, daemonLive, handleProjectEvent, {
     onConnectedChange: setProjectEventsSseConnected,
   });
@@ -4615,6 +4769,8 @@ export function ProjectView({
               // null the same as an active retryable state and keep the row
               // eligible for future refresh/reattach. Only authoritative
               // terminal statuses seal completedReattachRunsRef.
+              let shouldRefreshConversationAfterCleanup = true;
+              let shouldRetryAfterControllerCleanup = false;
               if (genericDisconnect) {
                 const attempts = (genericDisconnectRetriesRef.current.get(runId) ?? 0) + 1;
                 if (attempts >= MAX_TRANSIENT_RETRIES) {
@@ -4631,15 +4787,18 @@ export function ProjectView({
                     cancelController,
                   );
                   const backoffTimer = scheduleProjectTimeout(() => {
-                    const currentBackoffUntil =
-                      genericDisconnectBackoffUntilRef.current.get(runId) ?? 0;
-                    if (currentBackoffUntil <= Date.now()) {
-                      genericDisconnectBackoffUntilRef.current.delete(runId);
-                    }
+                    genericDisconnectBackoffUntilRef.current.delete(runId);
+                    shouldRetryAfterControllerCleanup = true;
                     setRecoveryTick((t) => t + 1);
                   }, 3000);
                   const latestRunStatus = await fetchChatRunStatus(runId).catch(() => null);
                   if (!latestRunStatus || isActiveRunStatus(latestRunStatus.status)) {
+                    // If the backoff elapsed while this probe was still in
+                    // flight, its recovery tick already ran while the run was
+                    // still registered as reattaching. Re-run recovery after
+                    // controller cleanup so the retry is not stranded until an
+                    // unrelated state change.
+                    shouldRefreshConversationAfterCleanup = false;
                   } else if (latestRunStatus.status === 'succeeded') {
                     if (
                       shouldPublishRunFinishedEvent
@@ -4736,8 +4895,13 @@ export function ProjectView({
               reattachCancelControllersRef.current.delete(runId);
               clearCurrentRunStreamingMarker(reattachConversationId, controller, cancelController);
               if (!skipFinalPersistNow) persistNow({ telemetryFinalized: true });
+              if (shouldRetryAfterControllerCleanup && !shouldRefreshConversationAfterCleanup) {
+                setRecoveryTick((t) => t + 1);
+              }
               if (retryFullReplayAfterCleanup) setRecoveryTick((t) => t + 1);
-              scheduleConversationMessageRefresh(reattachConversationId);
+              if (shouldRefreshConversationAfterCleanup) {
+                scheduleConversationMessageRefresh(reattachConversationId);
+              }
             },
           },
           onRunStatus: (runStatus) => {
@@ -5130,6 +5294,11 @@ export function ProjectView({
         attachments.length === 0 &&
         commentAttachments.length === 0
       ) return false;
+      // AMR must resolve this project's persisted billing principal before a
+      // run can start. Local CLI and BYOK runtimes do not consume the Vela
+      // wallet, so old daemons without this endpoint and directory outages
+      // must not disable those runtimes.
+      if (!projectRunWorkspaceScopeReady) return false;
       const effectiveAttachments = mergeChatAttachments(
         attachments,
         ...commentAttachments.map((attachment) =>
@@ -5195,10 +5364,12 @@ export function ProjectView({
         amrGateInFlightConversationsRef.current.add(gateConversationId);
         try {
           const gate = await checkAmrBalanceGate(
-            workspaceContext
+            projectRunWorkspaceContext
               ? {
-                  workspaceType: workspaceContext.workspaceType,
-                  workspaceId: workspaceContext.workspaceId,
+                  workspaceType: projectRunWorkspaceContext.workspaceType,
+                  workspaceId: projectRunWorkspaceContext.workspaceId,
+                  workspaceMemberId:
+                    projectRunWorkspaceContext.workspaceMemberId,
                 }
               : undefined,
           );
@@ -5241,6 +5412,10 @@ export function ProjectView({
               snapshot: gate.snapshot,
               conversationId: gateConversationId,
             });
+            parkBlockedSend();
+            return false;
+          }
+          if (gate.kind === 'unavailable') {
             parkBlockedSend();
             return false;
           }
@@ -6024,11 +6199,7 @@ export function ProjectView({
                 genericDisconnectRetriesRef.current.set(runIdForGenericDisconnect, attempts);
                 genericDisconnectBackoffUntilRef.current.set(runIdForGenericDisconnect, backoffUntil);
                 const backoffTimer = scheduleProjectTimeout(() => {
-                  const currentBackoffUntil =
-                    genericDisconnectBackoffUntilRef.current.get(runIdForGenericDisconnect) ?? 0;
-                  if (currentBackoffUntil <= Date.now()) {
-                    genericDisconnectBackoffUntilRef.current.delete(runIdForGenericDisconnect);
-                  }
+                  genericDisconnectBackoffUntilRef.current.delete(runIdForGenericDisconnect);
                   setRecoveryTick((t) => t + 1);
                 }, 3000);
                 const latestRunStatus = await fetchChatRunStatus(runIdForGenericDisconnect).catch(() => null);
@@ -6231,7 +6402,7 @@ export function ProjectView({
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
           designSystemId: projectDesignSystemId ?? null,
-          workspaceContext,
+          workspaceContext: projectRunWorkspaceContext,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6241,6 +6412,7 @@ export function ProjectView({
           mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
           model: daemonByokOpenCode ? config.model : choice?.model ?? null,
           reasoning: daemonByokOpenCode ? null : choice?.reasoning ?? null,
+          serviceTier: daemonByokOpenCode ? null : choice?.serviceTier ?? null,
           ...(daemonByokOpenCode && byokOpenCodeProvider
             ? { byokProvider: byokOpenCodeProvider }
             : {}),
@@ -6392,7 +6564,7 @@ export function ProjectView({
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
           designSystemId: projectDesignSystemId ?? null,
-          workspaceContext,
+          workspaceContext: projectRunWorkspaceContext,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6402,6 +6574,7 @@ export function ProjectView({
           mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
           model: config.model,
           reasoning: null,
+          serviceTier: null,
           ...(byokOpenCodeProvider ? { byokProvider: byokOpenCodeProvider } : {}),
           byokMediaDefaults: byokMediaDefaultsForRun({
             imageModelOverride: byokImageModelOverride,
@@ -6502,6 +6675,8 @@ export function ProjectView({
       byokImageModelOptionsPV,
       byokVideoModelOptionsPV,
       byokSpeechModelOptionsPV,
+      projectRunWorkspaceContext,
+      projectRunWorkspaceScopeReady,
     ],
   );
 
@@ -8184,22 +8359,24 @@ export function ProjectView({
   const autoSendAttachmentsRef = useRef<ChatAttachment[] | null>(null);
   const autoSendContextRef = useRef<RunContextSelection | null>(null);
   const autoSendFirstMessageRef = useRef(false);
-  const autoSendAmrGateOkRef = useRef(false);
+  const autoSendAmrGateWitnessRef = useRef<AmrBalanceGateScope | undefined>(
+    undefined,
+  );
   if (autoSendSeedRef.current === null) {
     let isAutoSend = false;
-    let amrGateOk = false;
+    let amrGateWitness: AmrBalanceGateScope | undefined;
     try {
       isAutoSend = Boolean(
         window.sessionStorage.getItem(autoSendFirstMessageKey(project.id)),
       );
-      amrGateOk = Boolean(
-        window.sessionStorage.getItem(autoSendAmrGateOkKey(project.id)),
-      );
+      amrGateWitness = readAutoSendAmrGateWitness(project.id);
     } catch {
       /* sessionStorage may be unavailable; treat as manual flow. */
     }
     autoSendFirstMessageRef.current = isAutoSend;
-    autoSendAmrGateOkRef.current = isAutoSend && amrGateOk;
+    autoSendAmrGateWitnessRef.current = isAutoSend
+      ? amrGateWitness
+      : undefined;
     autoSendSeedRef.current = isAutoSend ? (project.pendingPrompt ?? '') : '';
     autoSendAttachmentsRef.current = isAutoSend ? readAutoSendAttachments(project.id) : [];
     autoSendContextRef.current = isAutoSend ? readAutoSendContext(project.id) : null;
@@ -8740,7 +8917,7 @@ export function ProjectView({
     try {
       const result = await duplicatePluginAsProject(record.id, {
         name: localizePluginTitle(locale, record),
-      });
+      }, resolvedWorkspaceContextForWrite(workspaceContextState));
       setContextPluginDetails(null);
       navigate({
         kind: 'project',
@@ -8756,7 +8933,7 @@ export function ProjectView({
         ttlMs: 3000,
       });
     }
-  }, [locale, t]);
+  }, [locale, t, workspaceContextState]);
   const handleOpenContextDesignSystemDetails = useCallback((system: DesignSystemSummary) => {
     setContextDesignSystemDetails(system);
   }, []);
@@ -8811,6 +8988,7 @@ export function ProjectView({
   useEffect(() => {
     if (autoSentRef.current) return;
     if (!activeConversationId) return;
+    if (!projectRunWorkspaceScopeReady) return;
     // Wait for the initial listMessages DB read to land. Without this gate
     // the auto-send fires before the in-flight DB response, which then
     // arrives with `setMessages([])` and wipes the freshly-pushed user +
@@ -8853,11 +9031,17 @@ export function ProjectView({
     }
     clearAutoSendSession(project.id);
     autoSendAttachmentsRef.current = [];
+    const autoSendGateStillMatches =
+      autoSendAmrGateWitnessRef.current !== undefined &&
+      amrBalanceGateScopesMatch(
+        autoSendAmrGateWitnessRef.current,
+        amrBalanceGateScopeForWorkspaceContext(projectRunWorkspaceContext),
+      );
     void handleSend(seed, attachments, [], {
       ...(context ? { context } : {}),
-      // The home submit already gated this exact task (and the user answered
-      // any soft warning there); asking again would double-prompt.
-      ...(autoSendAmrGateOkRef.current ? { amrGatePrechecked: true } : {}),
+      // Only reuse Home's decision for the exact persisted project scope.
+      // A workspace/member mismatch falls through to handleSend's normal gate.
+      ...(autoSendGateStillMatches ? { amrGatePrechecked: true } : {}),
     });
   }, [
     activeConversationId,
@@ -8869,6 +9053,7 @@ export function ProjectView({
     project.metadata,
     initialDraft,
     project.pendingPrompt,
+    projectRunWorkspaceScopeReady,
     handleSend,
   ]);
 
@@ -8937,6 +9122,7 @@ export function ProjectView({
         onOpenSettings={onOpenSettings}
         onRefreshAgents={onRefreshAgents}
         placement="up"
+        projectWorkspaceScope={projectWorkspaceScopeState}
       />
     </>
   );
@@ -9139,7 +9325,7 @@ export function ProjectView({
                   <span
                     className={`title${projectCollab.viewerOnly ? ' readonly' : ' editable'}`}
                     data-testid="project-title"
-                    title={projectCollab.viewerOnly ? t('workspace.readonlyNotice') : project.name}
+                    title={projectCollab.viewerOnly ? t('workspace.readonlyNotice') : currentProject.name}
                     tabIndex={projectCollab.viewerOnly ? -1 : 0}
                     role={projectCollab.viewerOnly ? undefined : 'textbox'}
                     suppressContentEditableWarning
@@ -9155,7 +9341,7 @@ export function ProjectView({
                       }
                     }}
                   >
-                    {project.name}
+                    {currentProject.name}
                   </span>
                   {projectTypeLabel ? (
                     <span className="meta" data-testid="project-meta">{projectTypeLabel}</span>
@@ -9200,7 +9386,7 @@ export function ProjectView({
         ) : null}
         <FileWorkspace
           projectId={project.id}
-          projectName={project.name}
+          projectName={currentProject.name}
           viewerOnly={projectCollab.viewerOnly}
           readonlyNotice={readonlyNoticeText}
           fileSyncBadge={fileSyncBadge}

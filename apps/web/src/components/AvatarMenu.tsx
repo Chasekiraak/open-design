@@ -10,9 +10,24 @@ import { RemixIcon } from './RemixIcon';
 import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
 import { orderModelOptionsByAvailability } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode, ProviderModelOption } from '../types';
-import { fetchVelaLoginStatus, type VelaLoginStatus } from '../providers/daemon';
-import { amrPlansUrlForProfile } from '../runtime/amr-guidance';
+import {
+  canUpgradeVelaPlan,
+  fetchVelaLoginStatus,
+  type VelaLoginStatus,
+} from '../providers/daemon';
+import { openExternalUrl } from '../providers/registry';
+import { amrPlansUrlForWorkspace } from '../runtime/amr-guidance';
 import { isMacPlatform } from '../utils/platform';
+import {
+  useWorkspaceBillingResponse,
+  useWorkspaceContext,
+  workspaceBillingSnapshotForContext,
+} from '../collab/useWorkspaceContext';
+import {
+  projectWorkspaceContext,
+  projectWorkspaceScopeReady,
+  type ProjectWorkspaceScopeState,
+} from '../collab/useProjectWorkspaceScope';
 
 interface Props {
   config: AppConfig;
@@ -32,8 +47,13 @@ interface Props {
   placement?: 'down' | 'up';
   /** Fired when the dropdown transitions from closed to open. */
   onOpen?: () => void;
+  /**
+   * Project detail supplies its daemon-authoritative persisted workspace
+   * scope. Other surfaces omit it and continue using the ambient navigation
+   * workspace.
+   */
+  projectWorkspaceScope?: ProjectWorkspaceScopeState;
 }
-
 
 /**
  * Compact runtime control. Click opens a dropdown with the Open Design account
@@ -51,9 +71,35 @@ export function AvatarMenu({
   onBack,
   placement = 'down',
   onOpen,
+  projectWorkspaceScope,
 }: Props) {
   const t = useT();
   const analytics = useAnalytics();
+  // recvqfYKutwWlQ: gate the AMR upgrade entry on billing permission below,
+  // not just plan tier — a team member without `canManageBilling` (owner-only)
+  // can't act on an upgrade even when the tier itself is upgradeable.
+  const {
+    context: ambientWorkspaceContext,
+    loading: ambientWorkspaceContextLoading,
+  } = useWorkspaceContext();
+  const workspaceContext = projectWorkspaceScope
+    ? projectWorkspaceContext(projectWorkspaceScope.scope)
+    : ambientWorkspaceContext;
+  const workspaceContextLoading = projectWorkspaceScope
+    ? projectWorkspaceScope.loading ||
+      !projectWorkspaceScopeReady(projectWorkspaceScope.scope)
+    : ambientWorkspaceContextLoading;
+  const workspaceBillingResponse = useWorkspaceBillingResponse(
+    projectWorkspaceScope
+      ? {
+          context: workspaceContext,
+          loading: workspaceContextLoading,
+          revision: `${projectWorkspaceScope.scope?.projectId ?? 'unknown'}:${
+            projectWorkspaceScope.scope?.workspaceId ?? 'unbound'
+          }`,
+        }
+      : undefined,
+  );
   const [open, setOpen] = useState(false);
   // Toggle that reports the closed→open transition (for analytics) without
   // firing on close.
@@ -167,7 +213,8 @@ export function AvatarMenu({
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE;
 
   // Fetch the live login status when the popover opens so plan-gated model
-  // rows route to the signed-in profile's plans page (see openAmrUpgrade).
+  // rows route to the signed-in profile's workspace-scoped plans page (see
+  // openAmrUpgrade).
   const [amrAccount, setAmrAccount] = useState<VelaLoginStatus | null>(null);
   useEffect(() => {
     if (!open || !amrAvailable) {
@@ -187,27 +234,59 @@ export function AvatarMenu({
       cancelled = true;
     };
   }, [open, amrAvailable]);
+  const exactWorkspaceSnapshot = workspaceBillingSnapshotForContext(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
+  const scopedPlanId =
+    workspaceContext?.workspaceType === 'team'
+      ? exactWorkspaceSnapshot?.billing.planId?.trim() || null
+      : workspaceContext?.workspaceType === 'personal'
+        ? workspaceBillingResponse?.summary?.membershipTier?.trim() || null
+        : null;
+  const amrPlanId = projectWorkspaceScope
+    ? scopedPlanId
+    : scopedPlanId ?? (amrAccount?.loggedIn
+      ? amrAccount.account?.plan?.trim() || null
+      : null);
   const amrResolvedProfile = amrAccount?.profile ?? amrProfile;
-  const amrPlansUrl = amrPlansUrlForProfile(amrResolvedProfile);
-  // Plan-gated models stay visible but are not selectable; clicking one routes
-  // to the plans page instead of silently choosing a model the run would reject.
-  const openAmrUpgrade = () => {
-    const attribution = recordAmrEntry(
-      analytics.track,
-      'avatar_amr_upgrade',
-      new Date(),
-      { metricsConsent: config.telemetry?.metrics === true },
-    );
+  const financialWorkspaceId =
+    !workspaceContextLoading && workspaceContext?.workspaceId.trim()
+      ? workspaceContext.workspaceId
+      : null;
+  const amrPlansUrl = amrPlansUrlForWorkspace(
+    amrResolvedProfile,
+    financialWorkspaceId,
+  );
+  // Personal workspaces always resolve `canManageBilling` true (the user is
+  // their own owner), so this does not affect the personal-workspace upgrade
+  // path.
+  const amrCanUpgrade =
+    !!amrAccount?.loggedIn &&
+    canUpgradeVelaPlan(amrPlanId?.replace(/^team[_-]/i, '')) &&
+    Boolean(workspaceContext?.permissions?.canManageBilling) &&
+    amrPlansUrl !== null;
+  const openAmrTarget = (
+    targetUrl: string | null,
+    source: 'avatar_amr_upgrade',
+  ) => {
+    if (!targetUrl) return;
+    const attribution = recordAmrEntry(analytics.track, source, new Date(), {
+      metricsConsent: config.telemetry?.metrics === true,
+    });
     const deviceId = amrHandoffDeviceId({
       metricsConsent: config.telemetry?.metrics === true,
       resolvedDeviceId: getResolvedDeviceId(),
       installationId: config.installationId,
     });
-    window.open(
-      attributedAmrUrl(amrPlansUrl, attribution, deviceId),
-      '_blank',
-      'noopener,noreferrer',
-    );
+    setOpen(false);
+    void openExternalUrl(attributedAmrUrl(targetUrl, attribution, deviceId));
+  };
+  // Plan-gated models stay visible but are not selectable; clicking one routes
+  // to the plans page instead of silently choosing a model the run would reject.
+  const openAmrUpgrade = () => {
+    if (!amrCanUpgrade) return;
+    openAmrTarget(amrPlansUrl, 'avatar_amr_upgrade');
   };
 
   // Resolve the user's model + reasoning pick for the active agent. Falls

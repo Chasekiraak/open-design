@@ -59,6 +59,30 @@ const PACKAGED_CHILD_ENV_ALLOWLIST = [
   "no_proxy",
 ] as const;
 
+// The daemon owns the historical-outer compatibility handoff. Preserve the
+// updater controls it needs to launch the replacement payload desktop with the
+// same feed/test policy as the outer process, without broadening the packaged
+// child environment allowlist.
+const PACKAGED_DESKTOP_HANDOFF_ENV_KEYS = [
+  "OD_UPDATE_ARCH",
+  "OD_UPDATE_AUTO_CHECK",
+  "OD_UPDATE_AUTO_DOWNLOAD",
+  "OD_UPDATE_AUTO_OPEN",
+  "OD_UPDATE_CHANNEL",
+  "OD_UPDATE_CHECK_BACKOFF_INITIAL_MS",
+  "OD_UPDATE_CHECK_BACKOFF_MAX_MS",
+  "OD_UPDATE_CHECK_INITIAL_DELAY_MS",
+  "OD_UPDATE_CHECK_INTERVAL_MS",
+  "OD_UPDATE_CURRENT_VERSION",
+  "OD_UPDATE_DOWNLOAD_ROOT",
+  "OD_UPDATE_ENABLED",
+  "OD_UPDATE_INSTALLED_VERSION",
+  "OD_UPDATE_METADATA_URL",
+  "OD_UPDATE_MODE",
+  "OD_UPDATE_OPEN_DRY_RUN",
+  "OD_UPDATE_PLATFORM",
+] as const;
+
 function shouldForwardPackagedChildEnv(key: string, includeProviderSecrets = false): boolean {
   return (
     PACKAGED_CHILD_ENV_ALLOWLIST.includes(
@@ -373,6 +397,55 @@ export function resolvePackagedChildBaseEnv(
     : mergeProxyAwareEnv(process.platform, forwardedEnv);
 }
 
+/**
+ * AMR profiles whose vela backend has the workspace-team feature deployed.
+ *
+ * A packaged build turns the vela-cli workspace transports on only when its
+ * baked AMR profile appears here. Every other profile — `prod` above all —
+ * leaves team projects / collab / resource sharing dormant, which is what keeps
+ * an unreleased feature out of production builds. Add a profile here only once
+ * its backend actually serves the workspace-team API.
+ */
+const WORKSPACE_TEAM_AMR_PROFILES: ReadonlySet<string> = new Set(["feature-test", "test"]);
+
+/**
+ * The workspace-team daemon env for this build, or nothing when the build must
+ * leave the feature dormant.
+ *
+ * Both halves of the gate are required: an allowlisted AMR profile AND a vela
+ * web origin that packaging actually injected. `prod` can never satisfy the
+ * first half, so a stable build stays dormant no matter what origin it is
+ * handed; a `feature-test` / `test` build whose CI secret was never configured
+ * fails the second half and also stays dormant rather than pointing the
+ * transports at an unknown backend.
+ *
+ * The origin is injected (tools/pack reads it from a per-profile CI secret and
+ * bakes it into open-design-config.json) rather than checked in, because the
+ * non-prod AMR environments are internal deployments and this repository is
+ * public.
+ *
+ * The vela API/Link endpoints themselves are NOT set here: the daemon resolves
+ * them from the AMR profile via the vela CLI. The web origin is the exception —
+ * the daemon derives the workspace-settings / members / dashboard console links
+ * (shown in the nav for owner/admin) from `OD_VELA_WEB_URL`, and without it
+ * those entries stay hidden even for the owner.
+ */
+function workspaceTeamTransportEnv(
+  amrProfile: string | null | undefined,
+  velaWebUrl: string | null | undefined,
+): Record<string, string> {
+  if (amrProfile == null || !WORKSPACE_TEAM_AMR_PROFILES.has(amrProfile)) return {};
+  const webOrigin = velaWebUrl?.trim().replace(/\/+$/, "") ?? "";
+  if (webOrigin.length === 0) return {};
+  return {
+    OD_WORKSPACE_CONTEXT_SOURCE: "vela",
+    OD_TEAM_PROJECTS_TRANSPORT: "vela-cli",
+    OD_COLLAB_TRANSPORT: "vela-cli",
+    OD_RESOURCE_TRANSPORT: "vela-cli",
+    OD_VELA_WEB_URL: webOrigin,
+  };
+}
+
 function createPackagedDaemonManagedPathEnv(
   paths: PackagedNamespacePaths,
 ): PackagedDaemonManagedPathEnv {
@@ -387,6 +460,7 @@ export type PackagedDaemonSpawnEnvOptions = {
   appVersion: string | null;
   amrProfile?: string | null;
   daemonCliEntry: string | null;
+  desktopHandoffEnv?: NodeJS.ProcessEnv;
   nodeCommand?: string | null;
   /**
    * PR #974 round-5 (lefarcen P2): only pin the daemon's import-folder
@@ -402,6 +476,11 @@ export type PackagedDaemonSpawnEnvOptions = {
   telemetryRelayUrl?: string | null;
   posthogKey?: string | null;
   posthogHost?: string | null;
+  /**
+   * Vela web console origin baked into the bundle at packaging time. Half of
+   * the workspace-team gate — see {@link workspaceTeamTransportEnv}.
+   */
+  velaWebUrl?: string | null;
 };
 
 /**
@@ -436,28 +515,9 @@ export function buildPackagedDaemonSpawnEnv(
     ...(options.amrProfile == null || options.amrProfile.length === 0
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
-    // Enable the vela-cli workspace-team transport for feature-test builds. That
-    // AMR profile targets the amr-feature backend where the team workspace
-    // feature is deployed, so the packaged app can drive team projects / collab /
-    // resource sharing there (the daemon otherwise leaves the transport off, and
-    // team features are dormant). Prod builds stay off until workspace-team ships
-    // to the prod backend; the vela endpoints themselves come from the AMR
-    // profile (feature-test => amr-feature) resolved in the daemon.
-    ...(options.amrProfile === "feature-test"
-      ? {
-          OD_WORKSPACE_CONTEXT_SOURCE: "vela",
-          OD_TEAM_PROJECTS_TRANSPORT: "vela-cli",
-          OD_COLLAB_TRANSPORT: "vela-cli",
-          OD_RESOURCE_TRANSPORT: "vela-cli",
-          // The daemon derives the workspace-settings / members / dashboard
-          // console links (shown in the nav for owner/admin) from OD_VELA_WEB_URL;
-          // without it those entries stay hidden even for the owner. This is the
-          // feature-test profile's web origin (mirrors the vela CLI's WebURL for
-          // feature-test).
-          OD_VELA_WEB_URL: "https://amr-feature.powerformer.net",
-        }
-      : {}),
+    ...workspaceTeamTransportEnv(options.amrProfile, options.velaWebUrl),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
+    ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
     ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
       ? {}
       : { OPEN_DESIGN_TELEMETRY_RELAY_URL: options.telemetryRelayUrl }),
@@ -482,6 +542,15 @@ export function buildPackagedDaemonSpawnEnv(
       ? {}
       : { POSTHOG_HOST: options.posthogHost }),
   };
+}
+
+function pickPackagedDesktopHandoffEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const selected: NodeJS.ProcessEnv = {};
+  for (const key of PACKAGED_DESKTOP_HANDOFF_ENV_KEYS) {
+    const value = env[key];
+    if (value != null && value.length > 0) selected[key] = value;
+  }
+  return selected;
 }
 
 async function spawnSidecarChild(options: {
@@ -532,12 +601,11 @@ async function spawnSidecarChild(options: {
   const child = spawn(
     command,
     [options.entryPath, ...createProcessStampArgs(stamp, OPEN_DESIGN_SIDECAR_CONTRACT)],
-    {
-      cwd: process.cwd(),
+    createPackagedSidecarSpawnOptions({
       env: childEnv,
-      stdio: ["ignore", logHandle.fd, logHandle.fd],
-      windowsHide: true,
-    },
+      logFd: logHandle.fd,
+      paths: options.paths,
+    }),
   );
 
   await new Promise<void>((resolveSpawn, rejectSpawn) => {
@@ -546,6 +614,24 @@ async function spawnSidecarChild(options: {
   });
 
   return { app: options.app, child, ipcPath, logHandle, logPath };
+}
+
+export function createPackagedSidecarSpawnOptions(input: {
+  env: NodeJS.ProcessEnv;
+  logFd: number;
+  paths: Pick<PackagedNamespacePaths, "runtimeRoot">;
+}): {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdio: ["ignore", number, number];
+  windowsHide: true;
+} {
+  return {
+    cwd: input.paths.runtimeRoot,
+    env: input.env,
+    stdio: ["ignore", input.logFd, input.logFd],
+    windowsHide: true,
+  };
 }
 
 async function closeManagedChild(child: ManagedSidecarChild): Promise<void> {
@@ -579,6 +665,7 @@ export async function startPackagedSidecars(
     telemetryRelayUrl: string | null;
     posthogKey: string | null;
     posthogHost: string | null;
+    velaWebUrl: string | null;
     /**
      * PR #974 round-5 (lefarcen P2): caller asserts whether a desktop
      * runtime is being started in this packaged process group. The
@@ -647,12 +734,14 @@ export async function startPackagedSidecars(
         appVersion: options.appVersion,
         amrProfile: options.amrProfile,
         daemonCliEntry: options.daemonCliEntry,
+        desktopHandoffEnv: process.env,
         legacyDataDir: process.env.OD_LEGACY_DATA_DIR ?? null,
         nodeCommand: options.nodeCommand,
         requireDesktopAuth: options.requireDesktopAuth,
         telemetryRelayUrl: options.telemetryRelayUrl,
         posthogKey: options.posthogKey,
         posthogHost: options.posthogHost,
+        velaWebUrl: options.velaWebUrl,
       }),
       electronNodeCommand: options.electronNodeCommand,
       nodeCommand: options.nodeCommand,

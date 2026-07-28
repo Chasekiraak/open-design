@@ -46,6 +46,42 @@ afterEach(() => {
 });
 
 describe('useProjectCollab member auto-pull retry', () => {
+  it('shows daemon-observed downloading even before the published cursor trails', async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      if (pathname.endsWith('/workspace/context')) {
+        return response({ context: MEMBER_CONTEXT });
+      }
+      if (pathname.endsWith('/collab/status')) {
+        return response({
+          publishedVersion: 8,
+          materializedVersion: 8,
+          contentTransferState: {
+            status: 'downloading',
+            version: 9,
+            startedAt: 100,
+            updatedAt: 100,
+          },
+          syncState: 'synced',
+          ownerMemberId: 'wm-owner',
+        });
+      }
+      if (pathname.endsWith('/presence/heartbeat')) {
+        return response({ present: [{ memberId: 'wm-member' }] });
+      }
+      return response({ ok: true });
+    }) as typeof fetch;
+
+    const { result } = renderHook(() =>
+      useProjectCollab('p1', { fetch: fetchImpl, statusPollMs: 30_000 }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.downloadPending).toBe(true);
+  });
+
   it('does not hide local files while the first status is still proving an equal durable cursor', async () => {
     const firstStatus = deferred<Response>();
     let pullCalls = 0;

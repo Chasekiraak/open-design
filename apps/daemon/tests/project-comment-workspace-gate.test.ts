@@ -58,10 +58,12 @@ afterEach(async () => {
 });
 
 const TEAM_PROJECT = 'p-team';
+const TEAM_MIRROR_PROJECT = 'p-team-mirror';
 const PERSONAL_PROJECT = 'p-personal';
 const UNBOUND_PROJECT = 'p-unbound';
 const WORKSPACE_ID = 'ws-comment-gate';
 const OWNER_MEMBER_ID = 'member-owner';
+const OTHER_MEMBER_ID = 'member-other';
 
 function sendApiError(res: any, status: number, code: string, message: string) {
   return res.status(status).json({ error: { code, message } });
@@ -91,6 +93,7 @@ async function startServer() {
   const now = Date.now();
   for (const [id, conv] of [
     [TEAM_PROJECT, 'conv-team'],
+    [TEAM_MIRROR_PROJECT, 'conv-team-mirror'],
     [PERSONAL_PROJECT, 'conv-personal'],
     [UNBOUND_PROJECT, 'conv-unbound'],
   ] as const) {
@@ -102,6 +105,17 @@ async function startServer() {
     workspaceId: WORKSPACE_ID,
     visibility: 'team',
     createdByWorkspaceMemberId: OWNER_MEMBER_ID,
+  });
+  // The exact row shape `materializePulledTeamMirror` writes on a MEMBER's own
+  // daemon for someone else's shared project: bound + team visibility, but
+  // UNATTRIBUTED (`createdByWorkspaceMemberId: null` — the adoption red line
+  // means lazy projection never assigns the reader as creator). This is the
+  // row the real member-comment flow gates against.
+  ensureWorkspaceProject(db, {
+    projectId: TEAM_MIRROR_PROJECT,
+    workspaceId: WORKSPACE_ID,
+    visibility: 'team',
+    createdByWorkspaceMemberId: null,
   });
   ensureWorkspaceProject(db, {
     projectId: PERSONAL_PROJECT,
@@ -230,6 +244,96 @@ describe('project comments — workspace mutation gate', () => {
       { method: 'DELETE' },
     );
     expect(del.status).toBe(200);
+  });
+
+  // The member-comment regression (2026-07-27 dogfood, beta 0.15.2-beta.137):
+  // the comment gate borrowed the project's `writeFiles` capability, whose
+  // `canMutate` requires `privileged || selfCreated` — so a PLAIN member could
+  // never comment on someone else's team-shared project even though the
+  // product's read-only banner explicitly promises "view and comment". A
+  // comment is not a file write; it needs its own capability that any active
+  // member of the sharing workspace passes.
+  it('allows a plain team member (not the creator) to comment on a team-shared project', async () => {
+    const baseUrl = await startServer();
+    const resp = await fetch(`${baseUrl}/api/projects/${TEAM_PROJECT}/conversations/conv-team/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+      body: JSON.stringify({ target: COMMENT_TARGET, note: '这啥?' }),
+    });
+    expect(resp.status).toBe(200);
+    const { comment } = (await resp.json()) as { comment: { id: string } };
+    expect(comment.id).toBeTruthy();
+  });
+
+  // Same as above but against the exact row shape the member's own daemon
+  // holds after `POST /api/projects/:id/collab/pull` — the unattributed
+  // (`createdByWorkspaceMemberId: null`) team mirror. This is the literal
+  // production shape of the dogfood failure (403
+  // WORKSPACE_PROJECT_PERMISSION_DENIED → “评论保存失败，请重试。”).
+  it('allows a member to comment on a pulled team mirror (unattributed binding)', async () => {
+    const baseUrl = await startServer();
+    const resp = await fetch(
+      `${baseUrl}/api/projects/${TEAM_MIRROR_PROJECT}/conversations/conv-team-mirror/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+        body: JSON.stringify({ target: COMMENT_TARGET, note: '这啥?' }),
+      },
+    );
+    expect(resp.status).toBe(200);
+  });
+
+  // Comment-capability follow-through: the same borrowed gate also fronts
+  // status change and delete, so a member must reach the per-comment author
+  // rules (`callerMayMutate`) instead of being 403'd at the workspace layer.
+  // (Author-based restrictions themselves are pinned by
+  // project-comment-permissions.test.ts; this fixture stores unauthored
+  // comments, which degrade open by design.)
+  it('lets a member reach the author rules for status/delete on a team-shared project', async () => {
+    const baseUrl = await startServer();
+    const create = await fetch(
+      `${baseUrl}/api/projects/${TEAM_MIRROR_PROJECT}/conversations/conv-team-mirror/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+        body: JSON.stringify({ target: COMMENT_TARGET, note: 'mine' }),
+      },
+    );
+    expect(create.status).toBe(200);
+    const { comment } = (await create.json()) as { comment: { id: string } };
+
+    const patch = await fetch(
+      `${baseUrl}/api/projects/${TEAM_MIRROR_PROJECT}/conversations/conv-team-mirror/comments/${comment.id}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+        body: JSON.stringify({ status: 'resolved' }),
+      },
+    );
+    expect(patch.status).toBe(200);
+
+    const del = await fetch(
+      `${baseUrl}/api/projects/${TEAM_MIRROR_PROJECT}/conversations/conv-team-mirror/comments/${comment.id}`,
+      { method: 'DELETE', headers: workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+    );
+    expect(del.status).toBe(200);
+  });
+
+  // Guard against overshoot: widening the comment gate must not open comments
+  // on a personal-visibility (unshared, merely claimed) project to other
+  // members — only the sharing act (`visibility: 'team'`) grants comment
+  // standing beyond creator/privileged.
+  it('still rejects a non-creator member commenting on a personal-visibility project', async () => {
+    const baseUrl = await startServer();
+    const resp = await fetch(
+      `${baseUrl}/api/projects/${PERSONAL_PROJECT}/conversations/conv-personal/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...workspaceHeaders(OTHER_MEMBER_ID, 'member') },
+        body: JSON.stringify({ target: COMMENT_TARGET, note: 'hi' }),
+      },
+    );
+    expect(resp.status).toBe(403);
   });
 
   it('allows a properly-authenticated team member to POST/PATCH/DELETE against the team-bound project', async () => {

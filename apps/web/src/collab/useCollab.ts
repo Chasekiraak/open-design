@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ProjectContentTransferState } from '@open-design/contracts';
 import {
   CollabClient,
   type CollabClientOptions,
@@ -37,6 +38,8 @@ export interface UseCollabResult {
   present: CollabPresenceMember[];
   publishedVersion: number | null;
   materializedVersion: number | null;
+  contentTransferState: ProjectContentTransferState | null;
+  awaitingFirstMaterialization: boolean;
   statusPollGeneration: number;
   syncState: CollabSnapshot['syncState'];
   ownerMemberId: CollabSnapshot['ownerMemberId'];
@@ -50,12 +53,16 @@ export interface UseCollabResult {
   refreshPresence: () => void;
   /** Run one status check now (hub push-channel consumer). */
   checkStatusNow: () => void;
+  /** Apply an inbound-transfer lifecycle update from the project SSE. */
+  applyContentTransferState: (state: ProjectContentTransferState) => void;
 }
 
 const EMPTY: CollabSnapshot = {
   present: [],
   publishedVersion: null,
   materializedVersion: null,
+  contentTransferState: null,
+  awaitingFirstMaterialization: false,
   statusPollGeneration: 0,
   syncState: null,
   ownerMemberId: null,
@@ -200,11 +207,19 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
   const checkStatusNow = useCallback(() => {
     void clientRef.current?.pollStatus();
   }, []);
+  const applyContentTransferState = useCallback(
+    (state: ProjectContentTransferState) => {
+      clientRef.current?.applyContentTransferState(state);
+    },
+    [],
+  );
 
   return {
     present: snapshot.present,
     publishedVersion: snapshot.publishedVersion,
     materializedVersion: snapshot.materializedVersion,
+    contentTransferState: snapshot.contentTransferState,
+    awaitingFirstMaterialization: snapshot.awaitingFirstMaterialization,
     statusPollGeneration: snapshot.statusPollGeneration,
     syncState: snapshot.syncState,
     ownerMemberId: snapshot.ownerMemberId,
@@ -215,5 +230,6 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
     pull,
     refreshPresence,
     checkStatusNow,
+    applyContentTransferState,
   };
 }

@@ -104,6 +104,14 @@ beforeEach(() => {
         headers: { 'content-type': 'application/json' },
       });
     }
+    // The card's full details modal (PluginDetailsModal) loads the plugin's
+    // real daemon-served page for html-preview plugins.
+    if (typeof url === 'string' && /^\/api\/plugins\/[^/]+\/preview$/.test(url)) {
+      return new Response('<!doctype html><html><body>plugin preview</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
     throw new Error(`unexpected fetch ${String(url)}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -189,18 +197,24 @@ describe('CommunityView catalogue source', () => {
 });
 
 describe('CommunityView previews', () => {
-  it('shows the plugin\'s own poster on the card and its live page in the modal', async () => {
+  it('shows the plugin\'s own poster on the card and its live page in the full details modal', async () => {
     await renderCommunity();
 
     // Card thumbnail: the daemon-baked poster for that plugin.
     const thumb = renderedCards()[0]!.querySelector('img.plugins-home__media-img');
     expect(thumb?.getAttribute('src')).toBe('https://assets.test/fundraising/poster.jpg');
 
-    // Detail modal: the plugin's real preview endpoint, not a synthesized page.
+    // Card body → the FULL plugin details modal (飞书 recvqxDuYM6Uxk): the
+    // Use split action + Share chrome, loading the plugin's real preview
+    // endpoint — not the lightweight footer-Remix preview, which now belongs
+    // to the creation page's template chip.
     fireEvent.click(renderedCards()[0]!);
-    const frame = document.querySelector('iframe.community-template-preview__frame');
-    expect(frame?.getAttribute('src')).toBe('/api/plugins/example-fundraising-deck/preview');
-    expect(frame?.getAttribute('srcdoc')).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByTestId('plugin-details-use-example-fundraising-deck')).not.toBeNull();
+    });
+    expect(document.querySelector('.template-share-trigger')).not.toBeNull();
+    expect(document.querySelector('.community-template-preview')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('/api/plugins/example-fundraising-deck/preview');
   });
 
   it('plays the daemon-baked clip on the card instead of freezing it into a poster', async () => {
@@ -246,15 +260,20 @@ describe('CommunityView previews', () => {
     expect(card.querySelector('.community-template-thumb__media')).toBeNull();
   });
 
-  it('carries a media template\'s poster into the modal frame', async () => {
+  it('carries a media template\'s poster into the full details modal stage', async () => {
     await renderCommunity();
 
     fireEvent.click(readFacets().find((facet) => facet.label === 'Image')!.tab);
     fireEvent.click(renderedCards()[0]!);
 
-    const frame = document.querySelector('iframe.community-template-preview__frame');
-    expect(frame?.getAttribute('src')).toBeNull();
-    expect(frame?.getAttribute('srcdoc')).toContain('https://assets.test/poster.jpg');
+    // Image templates dispatch to the media detail surface of the full
+    // modal, which stages the plugin's own poster.
+    await waitFor(() => {
+      expect(document.querySelector('img.plugin-media-stage__image')).not.toBeNull();
+    });
+    expect(document.querySelector('img.plugin-media-stage__image')?.getAttribute('src'))
+      .toBe('https://assets.test/poster.jpg');
+    expect(document.querySelector('.community-template-preview')).toBeNull();
   });
 });
 
@@ -310,23 +329,32 @@ describe('CommunityView remix', () => {
     expect(onRemix).toHaveBeenCalledTimes(1);
   });
 
-  it('drops repeat clicks on the preview modal\'s mirrored Use button under the same race', async () => {
-    // The modal's "Use" button shares handleTemplateAction with the grid
-    // card and must be gated by the same synchronous lock, not a second,
-    // independently-racy copy of the guard.
+  it('drops repeat clicks on the details modal\'s Remix menu item under the same race', async () => {
+    // The full modal's Remix menu item routes through handleTemplateAction —
+    // the same synchronous lock as the grid card — not a second,
+    // independently-racy copy of the guard. The 5 raw dispatches all land in
+    // one tick, before React commits the popover-close state update, so every
+    // handler invocation really runs (see the rapid-click note above).
     const onRemix = vi.fn();
     await renderCommunity({ onRemixTemplate: onRemix });
 
     fireEvent.click(renderedCards()[0]!);
-    const modalButton = document.querySelector('.community-template-preview__foot button') as HTMLButtonElement;
-    expect(modalButton).not.toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByTestId('plugin-details-use-example-fundraising-deck-menu')).not.toBeNull();
+    });
+    fireEvent.click(screen.getByTestId('plugin-details-use-example-fundraising-deck-menu'));
+    const remixItem = await screen.findByTestId('plugin-details-duplicate-example-fundraising-deck');
 
     for (let i = 0; i < 5; i += 1) {
-      modalButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      remixItem.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     }
 
     await waitFor(() => expect(onRemix).toHaveBeenCalled());
     expect(onRemix).toHaveBeenCalledTimes(1);
+    expect(onRemix.mock.calls[0]![0]).toEqual({
+      templateId: 'example-fundraising-deck',
+      prompt: 'A decision-grade seed round narrative.',
+    });
   });
 
   it('still fires on a single, ordinary click (the fix must not swallow real clicks)', async () => {

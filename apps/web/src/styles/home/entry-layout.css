@@ -1421,6 +1421,7 @@
    raised page surfaces (e.g. the home composer card at z-index 1700 when
    its agent picker is open) so the prompt paints on top. */
 .entry-main__topbar:has(.entry-settings-menu__popover),
+.entry-main__topbar:has(.inline-switcher__popover),
 .entry-main__topbar:has(.updater-popup) {
   z-index: 1900;
 }
@@ -7116,11 +7117,13 @@ button.entry-nav-rail__menu-credits-row:active:not(:disabled) {
   flex: none;
 }
 .entry-invite__role-menu {
-  position: absolute;
-  top: calc(100% + var(--spacing-6));
-  left: 0;
-  right: 0;
-  z-index: 5;
+  /* Portaled to <body> and anchored to its trigger with inline left/top/width
+     (InviteDialog.tsx): the invite rows list is an overflow-y:auto scroll
+     container, so a menu positioned inside it is clipped invisible. Fixed
+     positioning in the viewport layer escapes that clip; z-index must clear
+     the dialog itself (.entry-invite is z-index 200). */
+  position: fixed;
+  z-index: 210;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-2);

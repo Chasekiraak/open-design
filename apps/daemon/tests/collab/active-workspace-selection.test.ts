@@ -165,6 +165,24 @@ describe('observed active team workspace snapshot', () => {
 });
 
 describe('active workspace selection generation', () => {
+  it('notifies subscribers after persisted selection changes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'od-workspace-selection-'));
+    roots.push(root);
+    const store = createActiveWorkspaceSelectionStore(root);
+    const selections: Array<string | null> = [];
+    const unsubscribe = store.subscribe((workspaceId) => {
+      selections.push(workspaceId);
+    });
+
+    await store.set('workspace-1');
+    await store.set('workspace-2');
+    await store.clear();
+    unsubscribe();
+    await store.set('workspace-3');
+
+    expect(selections).toEqual(['workspace-1', 'workspace-2', null]);
+  });
+
   it('detects away-and-back changes even when the final workspace id matches', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'od-workspace-selection-'));
     roots.push(root);

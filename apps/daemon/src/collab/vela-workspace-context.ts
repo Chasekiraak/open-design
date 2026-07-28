@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   buildWorkspacePermissions,
   buildWorkspaceSeatSummary,
@@ -32,6 +33,7 @@ import {
 
 const WORKSPACE_CURRENT_PATH = '/api/v1/workspaces/current';
 const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_DIRECTORY_CACHE_TTL_MS = 5_000;
 // After a FAILED default-workspace bootstrap (empty directory, PUT rejected),
 // don't re-list on every poller tick — B is asked again after this window.
 const BOOTSTRAP_FAILURE_COOLDOWN_MS = 60_000;
@@ -328,7 +330,7 @@ export function createVelaWorkspaceContextProvider(
         entry.memberStatus === 'active' &&
         entry.lifecycleState !== 'deleted',
     );
-    if (item) return synthesizeContext(item);
+    if (item) return workspaceContextFromDirectoryItem(item);
     // Confirmed stale: the directory answered and this workspace no longer
     // has the caller as an active member. Purge the pin before anything else
     // reads it, then recover exactly like the fresh-account bootstrap.
@@ -336,7 +338,7 @@ export function createVelaWorkspaceContextProvider(
     const fallback = await pickDefaultWorkspace(session, result);
     if (!fallback) return null;
     await options.setLocalSelection?.(fallback.workspaceId);
-    return synthesizeContext(fallback);
+    return workspaceContextFromDirectoryItem(fallback);
   }
 
   return {
@@ -383,7 +385,7 @@ export function createVelaWorkspaceContextProvider(
           const picked = await pickDefaultWorkspace(session);
           if (!picked) return null;
           await options.setLocalSelection?.(picked.workspaceId);
-          return withDisplayName(synthesizeContext(picked), session);
+          return withDisplayName(workspaceContextFromDirectoryItem(picked), session);
         }
         return null;
       } catch {
@@ -411,7 +413,9 @@ async function responseIsMissingPrincipal(response: Response): Promise<boolean> 
  * billing-plane fields default conservatively (no plan, derived permissions)
  * until a per-workspace context endpoint exists on B.
  */
-function synthesizeContext(item: WorkspaceDirectoryItem): WorkspaceCollabContext {
+export function workspaceContextFromDirectoryItem(
+  item: WorkspaceDirectoryItem,
+): WorkspaceCollabContext {
   const context: WorkspaceCollabContext = {
     workspaceId: item.workspaceId,
     workspaceType: item.workspaceType,
@@ -467,6 +471,72 @@ function velaUserDisplayName(user: VelaUser | null): string {
 export interface WorkspaceDirectoryFetchResult {
   ok: boolean;
   items: WorkspaceDirectoryItem[];
+}
+
+/**
+ * Cheap, non-secret cache partition for the local Vela session. A credential
+ * rotation/account switch must never reuse the prior member directory, even
+ * within the short success TTL.
+ */
+export function velaWorkspaceDirectoryIdentity(
+  readSession: typeof readVelaControlApiContext = readVelaControlApiContext,
+): string {
+  const session = readSession();
+  if (!session?.controlKey || !session.apiUrl) return 'signed-out';
+  const credentialFingerprint = createHash('sha256')
+    .update(session.controlKey)
+    .digest('hex')
+    .slice(0, 16);
+  return [
+    session.profile ?? '',
+    session.apiUrl,
+    session.user?.id ?? '',
+    session.configMtimeMs ?? '',
+    credentialFingerprint,
+  ].join(':');
+}
+
+/**
+ * One daemon-owned directory read identity shared by project scope reads and
+ * final run authorization. Successful reads are briefly cached and concurrent
+ * callers coalesce onto one request; failures are never cached.
+ */
+export function createCachedWorkspaceDirectoryFetcher(options: {
+  fetchDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
+  identityKey?: () => string;
+  ttlMs?: number;
+  now?: () => number;
+} = {}): () => Promise<WorkspaceDirectoryFetchResult> {
+  const fetchDirectory =
+    options.fetchDirectory ?? (() => fetchVelaWorkspaceDirectory());
+  const identityKey = options.identityKey ?? velaWorkspaceDirectoryIdentity;
+  const ttlMs = Math.max(0, options.ttlMs ?? DEFAULT_DIRECTORY_CACHE_TTL_MS);
+  const now = options.now ?? Date.now;
+  const cached = new Map<
+    string,
+    { expiresAt: number; result: WorkspaceDirectoryFetchResult }
+  >();
+  const inFlight = new Map<string, Promise<WorkspaceDirectoryFetchResult>>();
+
+  return async () => {
+    const identity = identityKey();
+    const cachedEntry = cached.get(identity);
+    if (cachedEntry && now() < cachedEntry.expiresAt) return cachedEntry.result;
+    const pending = inFlight.get(identity);
+    if (pending) return pending;
+    const request = fetchDirectory()
+      .then((result) => {
+        if (result.ok) {
+          cached.set(identity, { expiresAt: now() + ttlMs, result });
+        }
+        return result;
+      })
+      .finally(() => {
+        if (inFlight.get(identity) === request) inFlight.delete(identity);
+      });
+    inFlight.set(identity, request);
+    return request;
+  };
 }
 
 export async function fetchVelaWorkspaceDirectory(

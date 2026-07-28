@@ -77,6 +77,7 @@ import {
   enforceWorkspaceResourceMutation,
   headerValue,
   isWorkspaceResourceLocked as isWorkspaceLocked,
+  requestCanMutateWorkspaceResource,
   workspaceResourceAccess,
   workspaceResourceContext as workspaceProjectContext,
   workspaceResourceContextFromRequest as workspaceProjectContextFromRequest,
@@ -86,6 +87,13 @@ import {
   type WorkspaceResourceMutationCapability,
 } from '../../collab/workspace-resource-mutation.js';
 import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
+import { resolveProjectWorkspaceScope } from '../../collab/project-workspace-scope.js';
+import {
+  authorizeCreatedProjectWorkspace,
+  bindCreatedProjectToWorkspace,
+  sendCreatedProjectWorkspaceError,
+} from '../../collab/created-project-workspace.js';
+import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
 import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'appConfig' | 'agents' | 'validation' | 'collabSync'> {
@@ -101,6 +109,18 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
    * like before this cross-check existed.
    */
   workspaceContext?: Pick<WorkspaceContextProvider, 'lastKnown'>;
+  /**
+   * Authoritative signed-in membership directory. Project detail uses it to
+   * resolve the project's persisted workspace independently from the daemon's
+   * ambient active workspace.
+   */
+  fetchWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
+  /**
+   * Production-only authority for project creation. Kept distinct from the
+   * read-side directory fetcher so local/dev and explicitly anonymous callers
+   * retain their existing behavior.
+   */
+  fetchProjectCreationWorkspaceDirectory?: () => Promise<WorkspaceDirectoryFetchResult>;
   /**
    * Collab-cloud comment seams, threaded to the nested preview-comment routes.
    * `resolveAuthorMemberId` stamps the server-authoritative author AND identifies
@@ -225,15 +245,50 @@ function projectAccess(
  * this instance rather than a bespoke copy so its semantics can never drift
  * from rename/delete/duplicate/writeFiles/comments.
  */
+/** The `withLastKnownMembership` cross-check seam, adapted from a workspace
+ *  context provider. Shared by the rejecting gate and the non-rejecting
+ *  write-authority check below so the two can never disagree about whose
+ *  membership opinion wins. */
+function lastKnownWorkspaceMembership(
+  workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
+): GetLastKnownWorkspaceMembership | undefined {
+  if (!workspaceContext) return undefined;
+  return () => {
+    const known = workspaceContext.lastKnown?.() ?? null;
+    return known ? { workspaceId: known.workspaceId, memberStatus: known.memberStatus } : null;
+  };
+}
+
+/**
+ * The non-rejecting counterpart of `createEnforceWorkspaceProjectMutation`,
+ * for a read route that would otherwise write as a side effect. See
+ * `requestCanMutateWorkspaceResource` for why a READ must answer this question
+ * without ever answering it with a 401/403.
+ */
+export function createWorkspaceProjectWriteAuthorityCheck(
+  workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
+) {
+  const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
+  return function requestCanWriteWorkspaceProject(
+    req: any,
+    getWorkspaceProject: (db: unknown, workspaceId: string, projectId: string) => WorkspaceProjectAccessInput | null | undefined,
+    db: unknown,
+    projectId: string,
+  ): boolean {
+    return requestCanMutateWorkspaceResource(
+      req,
+      getWorkspaceProject,
+      db,
+      projectId,
+      getLastKnownWorkspaceMembership,
+    );
+  };
+}
+
 export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
-  const getLastKnownWorkspaceMembership: GetLastKnownWorkspaceMembership | undefined = workspaceContext
-    ? () => {
-        const known = workspaceContext.lastKnown?.() ?? null;
-        return known ? { workspaceId: known.workspaceId, memberStatus: known.memberStatus } : null;
-      }
-    : undefined;
+  const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
   return function enforceWorkspaceProjectMutation(
     req: any,
     res: Response,
@@ -2535,6 +2590,20 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     });
   }
 
+  /**
+   * True when a team-share request was refused because the hub catalog
+   * already registers this project under a DIFFERENT member's ownership
+   * (vela's `team_project_owner_conflict`, re-thrown through the CLI
+   * transport). The literal is the hub API's stable error token, so matching
+   * it keeps this mapping independent of how the CLI frames its stderr text.
+   * The conflict is permanent until the registered owner unshares the
+   * project, so it must not collapse into the generic BAD_REQUEST bucket the
+   * web renders as "try again later".
+   */
+  function isTeamProjectOwnerConflictError(error: unknown): boolean {
+    return /team_project_owner_conflict/i.test(String(error));
+  }
+
   app.post('/api/workspaces/:workspaceId/projects/:projectId/move', async (req, res) => {
     try {
       const ctx = workspaceProjectContext(req, req.params.workspaceId);
@@ -2576,6 +2645,9 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       const updatedRow = listWorkspaceProjects(db, ctx.workspaceId).find((item: any) => item.id === project.id);
       res.json({ project: normalizeWorkspaceProjectRow(updatedRow, ctx) });
     } catch (err: any) {
+      if (isTeamProjectOwnerConflictError(err)) {
+        return sendApiError(res, 409, 'TEAM_PROJECT_OWNER_CONFLICT', String(err));
+      }
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }
   });
@@ -2625,6 +2697,9 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       const projects = projectIds.map((id: string) => normalizeWorkspaceProjectRow(updatedRows.find((row: any) => row.id === id), ctx));
       res.json({ ok: true, projects });
     } catch (err: any) {
+      if (isTeamProjectOwnerConflictError(err)) {
+        return sendApiError(res, 409, 'TEAM_PROJECT_OWNER_CONFLICT', String(err));
+      }
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }
   });
@@ -2717,6 +2792,13 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
 
   app.post('/api/projects', async (req, res) => {
     try {
+      const createWorkspace = await authorizeCreatedProjectWorkspace(
+        req,
+        ctx.fetchProjectCreationWorkspaceDirectory,
+      );
+      if (!createWorkspace.ok) {
+        return sendCreatedProjectWorkspaceError(res, createWorkspace);
+      }
       const { id, name, projectLocationId, skillId, designSystemId, pendingPrompt, metadata, customInstructions, skipDiscoveryBrief } =
         req.body || {};
       if (typeof id !== 'string' || !isSafeId(id)) {
@@ -2856,6 +2938,10 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
                 }
               : null;
       const now = Date.now();
+      const cid = randomId();
+      const initialSessionMode = normalizeChatSessionMode(
+        req.body?.conversationMode ?? req.body?.sessionMode,
+      );
       let project;
       try {
         if (externalProjectDir) {
@@ -2869,57 +2955,47 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
             designSystemId: normalizedDesignSystemId,
           });
         }
-        project = insertProject(db, {
-          id,
-          name: name.trim(),
-          skillId: normalizedSkillId,
-          designSystemId: normalizedDesignSystemId,
-          pendingPrompt: pendingPrompt || null,
-          metadata: projectMetadata,
-          customInstructions:
-            typeof customInstructions === 'string'
-              ? customInstructions
-              : null,
-          createdAt: now,
-          updatedAt: now,
-        });
+        project = db.transaction(() => {
+          const createdProject = insertProject(db, {
+            id,
+            name: name.trim(),
+            skillId: normalizedSkillId,
+            designSystemId: normalizedDesignSystemId,
+            pendingPrompt: pendingPrompt || null,
+            metadata: projectMetadata,
+            customInstructions:
+              typeof customInstructions === 'string'
+                ? customInstructions
+                : null,
+            createdAt: now,
+            updatedAt: now,
+          });
+          // Project, seed conversation, and workspace membership form one
+          // ownership record. A binding failure must leave none of them behind.
+          insertConversation(db, {
+            id: cid,
+            projectId: id,
+            title: null,
+            sessionMode: initialSessionMode,
+            createdAt: now,
+            updatedAt: now,
+          });
+          bindCreatedProjectToWorkspace(
+            (input) => ensureWorkspaceProject(db, input),
+            createWorkspace.context,
+            id,
+            now,
+          );
+          return createdProject;
+        })();
       } catch (err) {
+        // External directories cannot participate in SQLite's transaction.
+        // Treat their creation as a recoverable side effect and compensate on
+        // any manifest or database transaction failure.
         if (externalProjectDir) {
           await rm(externalProjectDir, { recursive: true, force: true }).catch(() => {});
         }
         throw err;
-      }
-      // Seed a default conversation so the UI always has somewhere to write.
-      const cid = randomId();
-      const initialSessionMode = normalizeChatSessionMode(
-        req.body?.conversationMode ?? req.body?.sessionMode,
-      );
-      insertConversation(db, {
-        id: cid,
-        projectId: id,
-        title: null,
-        sessionMode: initialSessionMode,
-        createdAt: now,
-        updatedAt: now,
-      });
-      const workspaceIdForCreate = headerValue(req, 'x-od-workspace-id');
-      const createWorkspaceContext = workspaceIdForCreate
-        ? workspaceProjectContext(req, workspaceIdForCreate)
-        : null;
-      if (createWorkspaceContext && createWorkspaceContext.memberStatus === 'active') {
-        ensureWorkspaceProject(db, {
-          projectId: id,
-          workspaceId: createWorkspaceContext.workspaceId,
-          visibility: 'personal',
-          resourceState: 'active',
-          createdByWorkspaceMemberId: createWorkspaceContext.workspaceMemberId,
-          updatedByWorkspaceMemberId: createWorkspaceContext.workspaceMemberId,
-          syncState: 'local_only',
-          resourceHubResourceId: null,
-          cloudTombstonedAt: null,
-          createdAt: now,
-          updatedAt: now,
-        });
       }
       const explicitPlugin =
         typeof req.body?.pluginId === 'string' && req.body.pluginId.trim().length > 0
@@ -3304,8 +3380,40 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       }
     }
     const resolvedDir = projectDetailResolvedDir(PROJECTS_DIR, project, resolveProjectDir);
+    const binding = getWorkspaceProjectByProjectId(db, project.id);
     /** @type {import('@open-design/contracts').ProjectResponse} */
-    const body = { project, resolvedDir };
+    const body = {
+      project: {
+        ...project,
+        workspaceId:
+          typeof binding?.workspaceId === 'string' && binding.workspaceId.trim()
+            ? binding.workspaceId.trim()
+            : null,
+      },
+      resolvedDir,
+    };
+    res.json(body);
+  });
+
+  app.get('/api/projects/:id/workspace-scope', async (req, res) => {
+    const project = getProject(db, req.params.id);
+    const locations = await configuredProjectLocations();
+    if (!project || !projectVisibleForLocations(project, locations)) {
+      return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
+    }
+    const binding = getWorkspaceProjectByProjectId(db, project.id);
+    const directory = ctx.fetchWorkspaceDirectory
+      ? await ctx.fetchWorkspaceDirectory().catch(
+          (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+        )
+      : { ok: false, items: [] };
+    const scope = resolveProjectWorkspaceScope({
+      projectId: project.id,
+      binding,
+      directory,
+    });
+    /** @type {import('@open-design/contracts').ProjectWorkspaceScopeResponse} */
+    const body = { scope };
     res.json(body);
   });
 
@@ -3812,6 +3920,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
   const { upload } = ctx.uploads;
   const { fs } = ctx.node;
   const enforceWorkspaceProjectMutation = createEnforceWorkspaceProjectMutation(ctx.workspaceContext);
+  const requestCanWriteWorkspaceProject = createWorkspaceProjectWriteAuthorityCheck(ctx.workspaceContext);
   const { getProject, getWorkspaceProject, getWorkspaceProjectByProjectId } = ctx.projectStore;
   const { listFiles, listProjectFolders, createProjectFolder, deleteProjectFolder, searchProjectFiles, readProjectFile, resolveProjectDir, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, sanitizePath, ensureProject } = ctx.projectFiles;
   const { buildDocumentPreview } = ctx.documents;
@@ -4852,7 +4961,16 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         if (err?.code !== 'ENOENT') throw err;
       }
       let versions = await listProjectFileVersions(PROJECTS_DIR, project.id, historyFileName, project.metadata);
-      if (workingFileContent !== null && versions.length === 0) {
+      // Bootstrapping a baseline version is a WRITE, so it belongs only to a
+      // caller with write authority over this project. A readonly member
+      // reading a mirror of someone else's shared project gets the truthful
+      // empty history instead — the owner's real history can never be here
+      // (`.file-versions` is excluded from member mirrors), so synthesizing
+      // one would only manufacture history that never existed, inside a
+      // project the member is told they cannot modify. The read itself is
+      // never refused: browsing history stays open (飞书 recvq56vFjQKfT).
+      if (workingFileContent !== null && versions.length === 0
+        && requestCanWriteWorkspaceProject(req, getWorkspaceProject, db, project.id)) {
         const initial = await ensureCurrentProjectFileVersion(
           PROJECTS_DIR,
           project.id,

@@ -6,6 +6,7 @@ import {
   createProject,
   createPluginShareProject,
   deleteProject,
+  duplicatePluginAsProject,
   duplicateProject,
   importClaudeDesignZip,
   importFolderProject,
@@ -13,9 +14,12 @@ import {
   listProjects,
   listWorkspaceProjectSummaries,
   listPlugins,
+  moveWorkspaceProject,
+  workspaceProjectMoveErrorCode,
   patchProject,
   pickLocalFolderPath,
   publishGeneratedPluginToGitHub,
+  resolvedWorkspaceContextForWrite,
 } from '../../src/state/projects';
 import {
   buildWorkspacePermissions,
@@ -258,6 +262,61 @@ describe('createProject', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+  });
+
+  it('attaches the resolved workspace and member identity to project creation', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'scoped-project' },
+        conversationId: 'scoped-conversation',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createProject({
+      name: 'Scoped project',
+      skillId: null,
+      designSystemId: null,
+      workspaceContext: teamWorkspaceContext(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-team',
+          'x-od-workspace-member-id': 'wm-1',
+          'x-od-workspace-type': 'team',
+        }),
+      }),
+    );
+  });
+
+  it('fails closed while modern workspace authority is unresolved or unavailable', () => {
+    expect(() => resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: true,
+    })).toThrow('Workspace context is unavailable');
+
+    expect(() => resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+      failure: 'unavailable',
+    })).toThrow('Workspace context is unavailable');
+  });
+
+  it('preserves explicit anonymous and old-daemon headerless compatibility', () => {
+    expect(resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+    })).toBeNull();
+    expect(resolvedWorkspaceContextForWrite({
+      context: null,
+      loading: false,
+      failure: 'unsupported',
+    })).toBeNull();
   });
 });
 
@@ -578,6 +637,38 @@ describe('importClaudeDesignZip', () => {
       }),
     );
   });
+
+  it('sends the exact workspace/member authority with the ZIP import', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'claude-project', name: 'Claude import' },
+        conversationId: 'claude-conversation',
+        entryFile: 'index.html',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const context = teamWorkspaceContext({
+      workspaceId: 'workspace-claude',
+      workspaceMemberId: 'member-claude',
+    });
+    await importClaudeDesignZip(
+      new File(['zip-bytes'], 'claude-design.zip', { type: 'application/zip' }),
+      context,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/import/claude-design',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'workspace-claude',
+          'x-od-workspace-member-id': 'member-claude',
+        }),
+      }),
+    );
+  });
 });
 
 describe('generated plugin share actions', () => {
@@ -717,6 +808,32 @@ describe('importFolderProject', () => {
     expect(result).toMatchObject({ project: { id: 'p-1' }, entryFile: 'index.html' });
   });
 
+  it('sends the exact workspace/member authority with a browser folder import', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        project: { id: 'p-workspace', name: 'Workspace folder' },
+        conversationId: 'conv-workspace',
+        entryFile: 'index.html',
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await importFolderProject(
+      { baseDir: '/home/user/project' },
+      teamWorkspaceContext({
+        workspaceId: 'workspace-folder',
+        workspaceMemberId: 'member-folder',
+      }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.headers).toMatchObject({
+      'x-od-workspace-id': 'workspace-folder',
+      'x-od-workspace-member-id': 'member-folder',
+    });
+  });
+
   it('throws with daemon error message for filesystem root', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(
       JSON.stringify({ error: { code: 'BAD_REQUEST', message: 'cannot import the filesystem root' } }),
@@ -758,6 +875,40 @@ describe('importFolderProject', () => {
   });
 });
 
+describe('duplicatePluginAsProject', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the exact workspace/member authority with Plugin Remix', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        ok: true,
+        projectId: 'plugin-project',
+        conversationId: 'plugin-conversation',
+        relPath: 'index.html',
+      }),
+      { status: 201, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await duplicatePluginAsProject(
+      'plugin-a',
+      { name: 'Plugin A' },
+      teamWorkspaceContext({
+        workspaceId: 'workspace-plugin',
+        workspaceMemberId: 'member-plugin',
+      }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.headers).toMatchObject({
+      'x-od-workspace-id': 'workspace-plugin',
+      'x-od-workspace-member-id': 'member-plugin',
+    });
+  });
+});
+
 describe('pickLocalFolderPath', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -792,5 +943,53 @@ describe('pickLocalFolderPath', () => {
     )));
 
     await expect(pickLocalFolderPath()).rejects.toThrow('cross-origin request rejected');
+  });
+});
+
+describe('moveWorkspaceProject error surfaces (recvqzjnshIlOe)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('carries the daemon contract error code so the UI can tell a permanent owner conflict from a transient failure', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({
+        error: {
+          code: 'TEAM_PROJECT_OWNER_CONFLICT',
+          message: 'Error: … 403: {"error":"team_project_owner_conflict"}',
+        },
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )));
+
+    const attempt = moveWorkspaceProject({
+      projectId: 'wsclone-visual-verify',
+      visibility: 'team',
+      workspaceContext: teamWorkspaceContext(),
+    });
+    const error = await attempt.then(
+      () => {
+        throw new Error('expected the move to reject');
+      },
+      (err: unknown) => err,
+    );
+    expect(workspaceProjectMoveErrorCode(error)).toBe('TEAM_PROJECT_OWNER_CONFLICT');
+    expect(String(error)).toMatch(/team_project_owner_conflict/);
+  });
+
+  it('classifies a body-less failure as code-less (generic handling)', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(null, { status: 502 })));
+
+    const error = await moveWorkspaceProject({
+      projectId: 'p1',
+      visibility: 'team',
+      workspaceContext: teamWorkspaceContext(),
+    }).then(
+      () => {
+        throw new Error('expected the move to reject');
+      },
+      (err: unknown) => err,
+    );
+    expect(workspaceProjectMoveErrorCode(error)).toBeNull();
   });
 });

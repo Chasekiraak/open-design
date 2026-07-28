@@ -24,6 +24,7 @@ async function gotoEntryHome(page: Page) {
   }
   const settingsButton = page
     .getByTestId('entry-settings-button')
+    .or(page.getByTestId('entry-nav-settings'))
     .or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL }))
     .first();
   await expect(settingsButton).toBeVisible();

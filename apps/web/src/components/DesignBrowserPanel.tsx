@@ -3701,8 +3701,11 @@ function animateImageIntoChat(
   dataUrl: string,
   source: { left: number; top: number; width: number; height: number },
 ): void {
+  // The chat slot is hidden with the `split-chat-slot-hidden` class, not the
+  // `hidden` attribute this used to test for — so `:not([hidden])` matched
+  // every slot and could land the animation on the hidden composer.
   const target = document.querySelector<HTMLElement>(
-    '.split-chat-slot:not([hidden]) [data-testid="chat-composer"] .composer-input-wrap',
+    '.split-chat-slot:not(.split-chat-slot-hidden) [data-testid="chat-composer"] .composer-input-wrap',
   ) ?? document.querySelector<HTMLElement>('[data-testid="chat-composer"]');
   if (!target) return;
   const destination = target.getBoundingClientRect();

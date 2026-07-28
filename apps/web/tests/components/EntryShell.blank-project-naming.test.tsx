@@ -204,6 +204,56 @@ afterEach(() => {
 });
 
 describe('EntryShell team project content readiness', () => {
+  it('hands the authoritative catalog card to App before opening a local placeholder', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input), 'http://d.local').pathname;
+      if (pathname.endsWith('/workspace/context')) {
+        return jsonResponse({ context: teamContext() });
+      }
+      if (pathname.endsWith('/workspace/projects/team')) {
+        return jsonResponse({
+          projects: [{
+            projectId: 'shared-ready',
+            ownerMemberId: 'wm-owner',
+            sharedAt: '2026-07-25T00:00:00.000Z',
+            name: 'Ready shared project',
+            updatedAt: 42,
+          }],
+        });
+      }
+      if (pathname.endsWith('/files')) return jsonResponse({ files: [] });
+      return jsonResponse({});
+    }) as typeof fetch;
+    const onOpenProject = vi.fn(async () => true);
+    renderAt('/all-projects', {
+      projects: [{
+        id: 'shared-ready',
+        name: '共享项目',
+        skillId: null,
+        designSystemId: null,
+        createdAt: 100,
+        updatedAt: 100,
+      }],
+      onOpenProject,
+    });
+
+    expect(await screen.findByText('Ready shared project')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('Ready shared project'));
+
+    await waitFor(() => {
+      expect(onOpenProject).toHaveBeenCalledWith(
+        'shared-ready',
+        undefined,
+        {
+          authoritative: true,
+          name: 'Ready shared project',
+          workspaceId: 'ws-1',
+          workspaceMemberId: 'wm-1',
+        },
+      );
+    });
+  });
+
   it('hydrates only a catalog-confirmed ready project and opens it without a second pull', async () => {
     vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
     const requests: Array<{ url: string; method: string }> = [];
@@ -269,7 +319,16 @@ describe('EntryShell team project content readiness', () => {
       finishHydration(true);
       await hydration;
     });
-    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(
+      'shared-ready',
+      undefined,
+      {
+        authoritative: true,
+        name: 'Ready shared project',
+        workspaceId: 'ws-1',
+        workspaceMemberId: 'wm-1',
+      },
+    ));
     expect(onProjectsRefresh).not.toHaveBeenCalled();
     expect(
       requests.some(({ url, method }) =>
@@ -332,7 +391,16 @@ describe('EntryShell team project content readiness', () => {
       finishHydration(false);
       await hydration;
     });
-    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(
+      'shared-ready',
+      undefined,
+      {
+        authoritative: true,
+        name: 'Ready shared project',
+        workspaceId: 'ws-1',
+        workspaceMemberId: 'wm-1',
+      },
+    ));
     expect(onProjectsRefresh).toHaveBeenCalledTimes(1);
     expect(
       requests.some(({ url, method }) =>
@@ -401,7 +469,16 @@ describe('EntryShell team project content readiness', () => {
     expect(await screen.findByText('Member B')).toBeTruthy();
 
     fireEvent.click(screen.getByTitle('Ready shared project'));
-    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith('shared-ready'));
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(
+      'shared-ready',
+      undefined,
+      {
+        authoritative: true,
+        name: 'Ready shared project',
+        workspaceId: 'ws-1',
+        workspaceMemberId: 'wm-2',
+      },
+    ));
     expect(onProjectsRefresh).toHaveBeenCalledTimes(1);
     expect(
       requests.some(({ url, method }) =>

@@ -22,15 +22,22 @@
 import { vi } from 'vitest';
 
 vi.mock('electron', () => ({
+  // `registerOdProtocol` resolves its proxy fetch through `net.fetch`
+  // (Chromium's network stack). Stubbed here so the registration tests can
+  // drive the real handler that `protocol.handle` receives.
+  net: {
+    fetch: vi.fn(),
+  },
   protocol: {
     registerSchemesAsPrivileged: vi.fn(),
     handle: vi.fn(),
   },
 }));
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { net, protocol } from 'electron';
 
-import { handleOdRequest } from '../src/protocol.js';
+import { handleOdRequest, registerOdProtocol } from '../src/protocol.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -344,5 +351,222 @@ describe('od:// protocol transient retry', () => {
     });
 
     expect(waits).toEqual([150, 300]);
+  });
+});
+
+/**
+ * Rapid tab switching (project page ⇄ Community) cancels the renderer's
+ * in-flight subresource requests by design. Those cancellations were reaching
+ * the retry loop as if they were transient socket faults: because
+ * `fetchOdTargetOnce` forwards the already-aborted incoming signal to the
+ * upstream, every one of the 3 attempts rejected instantly, and the handler
+ * then manufactured a 502 "gateway failure" for a request the client had
+ * simply walked away from.
+ *
+ * Evidence — packaged 0.16.2-beta.139 desktop log, 84 × `net::ERR_FAILED`
+ * clustered exactly inside navigation bursts, all for fonts/icons
+ * (AlbertSans, Assistant-*.woff2, brand-icon.svg, agent-icons/*.svg) plus a
+ * POST `presence/leave`, which is precisely the request a project page fires
+ * as it unmounts.
+ *
+ * A client-cancelled request must cost one attempt, no backoff, and must not
+ * be reported as an upstream failure.
+ */
+describe('od:// proxy client-cancellation is not an upstream failure', () => {
+  const abortError = (): Error => {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    return error;
+  };
+
+  const abortAwareFetch = (counter: { calls: number }): typeof fetch =>
+    (async (input: Request) => {
+      counter.calls += 1;
+      if (input.signal?.aborted === true) throw abortError();
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+  it('does not burn the retry budget on an already-cancelled request', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    controller.abort();
+    const waits: number[] = [];
+
+    await handleOdRequest(
+      new Request('od://app/fonts/AlbertSans-VariableFont_wght.ttf', {
+        signal: controller.signal,
+      }),
+      'http://127.0.0.1:17579/',
+      abortAwareFetch(counter),
+      {
+        delay: async (ms: number) => {
+          waits.push(ms);
+        },
+      },
+    );
+
+    expect(counter.calls).toBe(1);
+    expect(waits).toEqual([]);
+  });
+
+  it('reports a client cancellation as such, not as a synthetic 502 gateway failure', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    controller.abort();
+
+    const response = await handleOdRequest(
+      new Request('od://app/api/projects/p-1/presence/leave', {
+        method: 'POST',
+        signal: controller.signal,
+      }),
+      'http://127.0.0.1:17579/',
+      abortAwareFetch(counter),
+      { delay: async () => {} },
+    );
+
+    expect(response.status).not.toBe(502);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('OD_PROTOCOL_CLIENT_ABORTED');
+  });
+
+  it('stops retrying the moment the client aborts mid-flight', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    const fetchImpl: typeof fetch = (async (input: Request) => {
+      counter.calls += 1;
+      // First attempt fails transiently; the user navigates away during the
+      // backoff, so no further attempt should be made.
+      if (counter.calls === 1) {
+        controller.abort();
+        const error = new Error('setTypeOfService EINVAL') as NodeJS.ErrnoException;
+        error.code = 'EINVAL';
+        throw error;
+      }
+      if (input.signal?.aborted === true) throw abortError();
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const response = await handleOdRequest(
+      new Request('od://app/agent-icons/opencode.svg', { signal: controller.signal }),
+      'http://127.0.0.1:17579/',
+      fetchImpl,
+      { delay: async () => {} },
+    );
+
+    expect(counter.calls).toBe(1);
+    expect(response.status).not.toBe(502);
+  });
+});
+
+/**
+ * The od:// proxy target must be RESOLVED PER REQUEST, never captured as a
+ * constant at registration time.
+ *
+ * Two failure shapes motivated this:
+ *
+ * 1. The registration site used to hand `registerOdProtocol` a plain string
+ *    (`sidecars.web.url`), so the address the proxy forwards to was frozen at
+ *    boot. Nothing in today's packaged runtime re-spawns the web sidecar, so
+ *    that string cannot go stale on its own — but the coupling is invisible,
+ *    and the moment anything re-resolves the sidecar (supervision, reconnect,
+ *    a second bring-up) the protocol layer would keep hammering the dead port
+ *    while every renderer resource fails ERR_CONNECTION_REFUSED. Resolving
+ *    through a provider makes the protocol layer correct by construction
+ *    instead of correct by accident.
+ * 2. The registration site papered over a missing address with
+ *    `?? "http://127.0.0.1:0"`. Port 0 is "pick me an ephemeral port" for a
+ *    LISTENER; as a CONNECT target it is meaningless, so an unavailable web
+ *    runtime surfaced as a confusing connection error against a nonsense port
+ *    instead of an honest "the web runtime is not up".
+ */
+describe('od:// protocol target resolution', () => {
+  beforeEach(() => {
+    vi.mocked(protocol.handle).mockClear();
+    vi.mocked(net.fetch).mockReset();
+  });
+
+  const registeredHandler = (): ((request: Request) => Promise<Response>) => {
+    const calls = vi.mocked(protocol.handle).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    return calls.at(-1)![1] as (request: Request) => Promise<Response>;
+  };
+
+  it('follows the web sidecar address when it changes after registration', async () => {
+    const captured: string[] = [];
+    vi.mocked(net.fetch).mockImplementation((async (input: Request) => {
+      captured.push(input.url);
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof net.fetch);
+
+    // The address the provider reports is what the proxy must use — including
+    // after it changes. A registration that snapshots the first value keeps
+    // forwarding to the retired port forever.
+    let webRuntimeUrl: string | null = 'http://127.0.0.1:61424/';
+    registerOdProtocol(() => webRuntimeUrl);
+    const handler = registeredHandler();
+
+    const first = await handler(new Request('od://app/_next/static/chunk-a.js'));
+    expect(first.status).toBe(200);
+
+    webRuntimeUrl = 'http://127.0.0.1:52001/';
+
+    const second = await handler(new Request('od://app/_next/static/chunk-b.js'));
+    expect(second.status).toBe(200);
+
+    expect(captured).toEqual([
+      'http://127.0.0.1:61424/_next/static/chunk-a.js',
+      'http://127.0.0.1:52001/_next/static/chunk-b.js',
+    ]);
+  });
+
+  it('answers a missing web runtime address with a structured 503 instead of dialling a placeholder port', async () => {
+    let fetchCalls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      fetchCalls += 1;
+      return new Response('ok', { status: 200 });
+    };
+
+    const response = await handleOdRequest(
+      new Request('od://app/_next/static/chunk-a.js'),
+      null,
+      fetchImpl,
+      { delay: async () => {} },
+    );
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { error: string; target?: string };
+    expect(body.error).toBe('OD_PROTOCOL_TARGET_UNAVAILABLE');
+    // Nothing may be dialled: there is no address to dial, and 127.0.0.1:0 is
+    // not a real one.
+    expect(fetchCalls).toBe(0);
+    expect(JSON.stringify(body)).not.toContain('127.0.0.1:0');
+  });
+
+  it('surfaces the 503 through the registered handler when the provider reports no address', async () => {
+    vi.mocked(net.fetch).mockImplementation((async () => {
+      throw new Error('net.fetch must not be reached without a target');
+    }) as unknown as typeof net.fetch);
+
+    registerOdProtocol(() => null);
+    const handler = registeredHandler();
+
+    const response = await handler(new Request('od://app/'));
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('OD_PROTOCOL_TARGET_UNAVAILABLE');
+    expect(vi.mocked(net.fetch)).not.toHaveBeenCalled();
+  });
+
+  it('never rejects on a malformed target, so a bad address cannot reach the Electron uncaught handler', async () => {
+    // `toWebRuntimeUrl` used to run OUTSIDE the handler's try/catch, so a
+    // non-parseable address threw straight out of the protocol handler — the
+    // exact "JavaScript error in main process" dialog the #895 catch exists to
+    // prevent.
+    const fetchImpl: typeof fetch = async () => new Response('ok', { status: 200 });
+
+    await expect(
+      handleOdRequest(new Request('od://app/'), 'not-a-url', fetchImpl, { delay: async () => {} }),
+    ).resolves.toBeInstanceOf(Response);
   });
 });

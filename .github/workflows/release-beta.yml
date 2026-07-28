@@ -56,7 +56,7 @@ on:
         type: string
         default: ""
       amr_profile:
-        description: "Optional AMR profile baked into the build (e.g. feature-test to point the packaged app at the amr-feature backend and enable the workspace-team transport). Empty leaves the default (prod)."
+        description: "Optional AMR profile baked into the build (e.g. feature-test to point the packaged app at that profile's AMR backend and enable the workspace-team transport). Empty leaves the default (prod)."
         required: false
         type: string
         default: ""
@@ -316,6 +316,20 @@ env:
   POSTHOG_HOST: ${{ inputs.publish && vars.POSTHOG_HOST || '' }}
   POSTHOG_CLI_API_KEY: ${{ inputs.publish && secrets.POSTHOG_CLI_API_KEY || '' }}
   POSTHOG_CLI_PROJECT_ID: ${{ inputs.publish && vars.POSTHOG_CLI_PROJECT_ID || '' }}
+  # Vela web console origin for the AMR profile this build targets. Held in a
+  # per-profile repository secret instead of the source tree: the non-prod AMR
+  # environments are internal deployments and this repository is public, so
+  # neither the workflow nor the product code may name their hostnames.
+  #
+  # tools-pack bakes it into open-design-config.json and the packaged runtime
+  # forwards it to the daemon as OD_VELA_WEB_URL, which is the second half of the
+  # workspace-team gate (the first being the AMR profile allowlist). A profile
+  # whose secret is not configured therefore ships with workspace-team dormant
+  # rather than pointed at an unknown backend. `prod` never gets an origin — the
+  # packaged gate rejects it regardless.
+  #
+  # Secrets read here: VELA_WEB_URL_FEATURE_TEST, VELA_WEB_URL_TEST.
+  OD_VELA_WEB_URL: ${{ inputs.amr_profile == 'feature-test' && secrets.VELA_WEB_URL_FEATURE_TEST || inputs.amr_profile == 'test' && secrets.VELA_WEB_URL_TEST || '' }}
   RELEASE_BRANCH: ${{ github.ref_name }}
   RELEASE_REPOSITORY: ${{ github.repository }}
   RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -485,9 +499,11 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # Bake the AMR profile (tools-pack reads OPEN_DESIGN_AMR_PROFILE) so a
-          # feature-test dispatch produces a packaged app that targets the
-          # amr-feature backend and enables the workspace-team transport. Empty =
-          # default (prod) — the normal beta pipeline is unaffected.
+          # feature-test dispatch produces a packaged app that targets that
+          # profile's AMR backend and enables the workspace-team transport. The
+          # matching console origin arrives via the workflow-level
+          # OD_VELA_WEB_URL. Empty = default (prod) — the normal beta pipeline is
+          # unaffected.
           OPEN_DESIGN_AMR_PROFILE: ${{ inputs.amr_profile }}
         run: |
           set -euo pipefail
@@ -1107,9 +1123,9 @@ jobs:
           OD_PACKAGED_E2E_WIN_UPDATE_METADATA_URL: ${{ inputs.win_x64_update_metadata_url }}
           OD_PACKAGED_E2E_WIN_UPDATE_VERSION: ${{ inputs.win_x64_update_target_version }}
           # Bake the AMR profile (tools-pack reads OPEN_DESIGN_AMR_PROFILE) so a
-          # feature-test dispatch produces a packaged app that targets the
-          # amr-feature backend and enables the workspace-team transport. Empty =
-          # default (prod) — the normal beta pipeline is unaffected. Mirrors the
+          # feature-test dispatch produces a packaged app that targets that
+          # profile's AMR backend and enables the workspace-team transport. Empty
+          # = default (prod) — the normal beta pipeline is unaffected. Mirrors the
           # mac_arm64 build step above; this was missing here, so every win_x64
           # dogfood build silently fell back to prod and could not sign in to a
           # feature-test AMR environment.
@@ -1541,6 +1557,10 @@ jobs:
           MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
           RELEASE_ASSET_SUFFIX: ${{ needs.metadata.outputs.asset_version_suffix }}
           RELEASE_CHANNEL: beta
+          RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
+          RELEASE_LAUNCHER_VERSION_MIN_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE }}
+          RELEASE_LAUNCHER_VERSION_MIN_URL_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_BETA }}
+          RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE }}
           RELEASE_MANIFEST_DIR: ${{ runner.temp }}/release-platform-manifests
           RELEASE_METADATA_DIR: ${{ runner.temp }}/release-metadata
           RELEASE_NOTE_MANIFEST_PATH: ${{ runner.temp }}/release-metadata/release-note-publication.json
@@ -1576,6 +1596,10 @@ jobs:
           MAC_ARM64_RESULT: ${{ needs.build_mac_arm64.result }}
           MAC_X64_RESULT: ${{ needs.build_mac_x64.result }}
           RELEASE_CHANNEL: beta
+          RELEASE_LAUNCHER_VERSION_MIN_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_BETA }}
+          RELEASE_LAUNCHER_VERSION_MIN_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_STABLE }}
+          RELEASE_LAUNCHER_VERSION_MIN_URL_BETA: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_BETA }}
+          RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE: ${{ vars.RELEASE_LAUNCHER_VERSION_MIN_URL_STABLE }}
           RELEASE_METADATA_URL: ${{ steps.outputs.outputs.version_metadata_url }}
           RELEASE_NOTE_MANIFEST_PATH: ${{ runner.temp }}/release-metadata/release-note-publication.json
           RELEASE_VERSION: ${{ needs.metadata.outputs.beta_version }}

@@ -4,7 +4,8 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ProjectView } from '../../src/components/ProjectView';
+import { ProjectView, reconcileProjectDetail } from '../../src/components/ProjectView';
+import type { ProjectNameAuthorityResolution } from '../../src/components/ProjectView';
 import { useIframeKeepAlivePool } from '../../src/components/IframeKeepAlivePool';
 import { useProjectCollab, type ProjectCollab } from '../../src/collab/useProjectCollab';
 import { useProjectFileEvents, type ProjectEvent } from '../../src/providers/project-events';
@@ -121,7 +122,9 @@ vi.mock('../../src/components/AvatarMenu', () => ({
 
 vi.mock('../../src/components/FileWorkspace', () => ({
   DESIGN_SYSTEM_TAB: '__design_system__',
-  FileWorkspace: () => <div data-testid="file-workspace" />,
+  FileWorkspace: ({ projectName }: { projectName: string }) => (
+    <div data-project-name={projectName} data-testid="file-workspace" />
+  ),
 }));
 
 vi.mock('../../src/components/Loading', () => ({
@@ -197,10 +200,22 @@ function sharedMemberCollab(overrides?: Partial<ProjectCollab>): ProjectCollab {
   };
 }
 
-function renderProjectView() {
+function renderProjectView(
+  projectOverride: Project = project,
+  options: {
+    authoritativeProjectName?: string;
+    resolveAuthoritativeProjectName?: (
+      projectId: string,
+      expectedAuthorizationKey: string,
+    ) => Promise<ProjectNameAuthorityResolution>;
+  } = {},
+) {
   return render(
     <ProjectView
-      project={project}
+      project={projectOverride}
+      projectAuthorizationKey="ws-1:wm-1:project-1"
+      authoritativeProjectName={options.authoritativeProjectName}
+      resolveAuthoritativeProjectName={options.resolveAuthoritativeProjectName}
       routeFileName={null}
       config={config}
       agents={[] as AgentInfo[]}
@@ -305,5 +320,154 @@ describe('ProjectView shared-project title refresh on project-metadata-changed',
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(onProjectChangeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not propagate a newer placeholder over the catalog title after metadata invalidation', async () => {
+    const catalogProject = {
+      ...project,
+      name: 'Q3 Marketing Site',
+    };
+    mockedGetProject.mockResolvedValue({
+      ...project,
+      name: '共享项目',
+      updatedAt: 999,
+    });
+
+    renderProjectView(catalogProject, {
+      authoritativeProjectName: 'Q3 Marketing Site',
+      resolveAuthoritativeProjectName: vi.fn().mockResolvedValue({
+        kind: 'resolved',
+        name: 'Q3 Marketing Site',
+      }),
+    });
+    dispatchProjectEvent({ type: 'project-metadata-changed', projectId: project.id });
+
+    await waitFor(() => {
+      expect(mockedGetProject).toHaveBeenCalledWith(project.id);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(onProjectChangeMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a newer real detail calibrate a placeholder title', () => {
+    expect(reconcileProjectDetail(project, {
+      ...project,
+      name: 'Q3 Marketing Site',
+      updatedAt: 2,
+    }).name).toBe('Q3 Marketing Site');
+  });
+
+  it('does not let a newer local placeholder cover the catalog title', () => {
+    const catalogProject = {
+      ...project,
+      name: 'Q3 Marketing Site',
+      updatedAt: 1,
+    };
+    expect(reconcileProjectDetail(
+      catalogProject,
+      {
+        ...project,
+        name: '共享项目',
+        updatedAt: 999,
+      },
+      'Q3 Marketing Site',
+    ).name).toBe('Q3 Marketing Site');
+  });
+
+  it('keeps an other-owner catalog rename authoritative over a newer stale local real name', () => {
+    const catalogProject = {
+      ...project,
+      name: 'Owner renamed project',
+      updatedAt: 1,
+    };
+    expect(reconcileProjectDetail(
+      catalogProject,
+      {
+        ...project,
+        name: 'Old local real name',
+        skillId: 'new-skill',
+        updatedAt: 999,
+      },
+      'Owner renamed project',
+    )).toEqual(expect.objectContaining({
+      name: 'Owner renamed project',
+      skillId: 'new-skill',
+    }));
+  });
+
+  it('refreshes the other-owner catalog authority before applying a metadata event', async () => {
+    const catalogProject = {
+      ...project,
+      name: 'Catalog before rename',
+    };
+    const resolveAuthoritativeProjectName = vi.fn().mockResolvedValue({
+      kind: 'resolved',
+      name: 'Catalog after rename',
+    });
+    mockedGetProject.mockResolvedValue({
+      ...project,
+      name: 'Old local real name',
+      updatedAt: 999,
+    });
+
+    renderProjectView(catalogProject, {
+      authoritativeProjectName: 'Catalog before rename',
+      resolveAuthoritativeProjectName,
+    });
+    dispatchProjectEvent({ type: 'project-metadata-changed', projectId: project.id });
+
+    await waitFor(() => {
+      expect(resolveAuthoritativeProjectName).toHaveBeenCalledWith(
+        project.id,
+        'ws-1:wm-1:project-1',
+      );
+      expect(onProjectChangeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Catalog after rename' }),
+      );
+    });
+  });
+
+  it('drops a same-project-id metadata result after its authorization scope becomes stale', async () => {
+    mockedGetProject.mockResolvedValue({
+      ...project,
+      name: 'Workspace A stale title',
+      updatedAt: 999,
+    });
+    const resolveAuthoritativeProjectName = vi.fn().mockResolvedValue({
+      kind: 'stale',
+    });
+
+    renderProjectView({
+      ...project,
+      name: 'Workspace B title',
+    }, {
+      authoritativeProjectName: 'Workspace B title',
+      resolveAuthoritativeProjectName,
+    });
+    dispatchProjectEvent({ type: 'project-metadata-changed', projectId: project.id });
+
+    await waitFor(() => {
+      expect(resolveAuthoritativeProjectName).toHaveBeenCalledWith(
+        project.id,
+        'ws-1:wm-1:project-1',
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(onProjectChangeMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late detail response from the previous project', () => {
+    const nextProject = {
+      ...project,
+      id: 'project-2',
+      name: 'Next project',
+      updatedAt: 1,
+    };
+    expect(reconcileProjectDetail(nextProject, {
+      ...project,
+      id: 'project-1',
+      name: 'Stale project',
+      updatedAt: 999,
+    })).toBe(nextProject);
   });
 });

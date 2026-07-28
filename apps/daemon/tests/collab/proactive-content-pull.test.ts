@@ -372,6 +372,55 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     expect(deps.pullCalls).toEqual(['proj-1', 'proj-2']);
   });
 
+  it('settles only the exact covered intent when another lane durably materializes', async () => {
+    const retry = makeRetryScheduler();
+    const onPulled = vi.fn();
+    const deps = makeDeps({
+      scheduler: retry.scheduler,
+      onPulled,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        return { status: 'register_failed' };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+    const target: ProactiveContentPullTarget = {
+      projectId: 'proj-1',
+      workspaceId: 'ws-1',
+      resourceTeamId: 'team-1',
+      viewerMemberId: 'wm-member',
+      ownerMemberId: 'wm-owner',
+    };
+
+    await pull.handleContentChanged({ ...baseEvent, version: 5 });
+    expect(retry.tasks.size).toBe(1);
+
+    await pull.observeMaterialized(
+      { ...target, workspaceId: 'ws-other' },
+      5,
+    );
+    await pull.observeMaterialized(target, 4);
+    expect(retry.tasks.size).toBe(1);
+
+    await pull.observeMaterialized(target, 5);
+    expect(retry.tasks.size).toBe(0);
+
+    deps.pullSharedProject = async (nextTarget) => {
+      deps.pullCalls.push(nextTarget.projectId);
+      return { status: 'pulled', version: 6 };
+    };
+    await pull.handleContentChanged({ ...baseEvent, version: 6 });
+
+    expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
+    expect(onPulled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'proj-1',
+        workspaceId: 'ws-1',
+      }),
+      5,
+    );
+  });
+
   it('coalesces events that race an in-flight pull for the same head', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -460,6 +509,35 @@ describe('proactive content pull (hub project-content-changed consumer)', () => 
     fail = false;
     await retry.runNext();
     expect(deps.pullCalls).toEqual(['proj-1', 'proj-1']);
+  });
+
+  it('settles lifecycle observation only when no retry remains', async () => {
+    const retry = makeRetryScheduler();
+    const onEventSettled = vi.fn();
+    let fail = true;
+    const deps = makeDeps({
+      onEventSettled,
+      scheduler: retry.scheduler,
+      random: () => 1,
+      pullSharedProject: async (target) => {
+        deps.pullCalls.push(target.projectId);
+        if (fail) throw new Error('temporary transport failure');
+        return { status: 'pulled', version: 3 };
+      },
+    });
+    const pull = createProactiveContentPull(deps);
+
+    await pull.handleContentChanged(baseEvent);
+    expect(onEventSettled).not.toHaveBeenCalled();
+
+    fail = false;
+    await retry.runNext();
+    // Retry completion is observed through `onPulled`; the original-event
+    // terminal callback is intentionally only for its synchronous decision.
+    expect(onEventSettled).not.toHaveBeenCalled();
+
+    await pull.handleContentChanged(baseEvent);
+    expect(onEventSettled).toHaveBeenCalledWith(baseEvent);
   });
 
   it('lets a v2 catch-up retry after a failed v1 pull without advancing the cursor', async () => {

@@ -4,6 +4,34 @@ const OD_SCHEME = "od";
 const OD_ENTRY_URL = `${OD_SCHEME}://app/`;
 type OdProtocolFetch = (request: Request) => Promise<Response>;
 
+/**
+ * The web sidecar's HTTP origin, or `null` when there is no usable one.
+ *
+ * `WebStatusSnapshot.url` is nullable at the source, so the nullability is
+ * carried all the way into the proxy instead of being papered over at the
+ * registration site with a placeholder address.
+ */
+type OdProtocolTarget = string | null;
+
+/**
+ * Supplies the CURRENT web sidecar address, consulted once per proxied
+ * request.
+ *
+ * Deliberately a provider and not a plain string. Today the packaged runtime
+ * brings the web sidecar up exactly once — `startPackagedSidecars` is called a
+ * single time from the Electron entry, nothing re-spawns the child, and the
+ * sidecar binds its listener once for its whole process lifetime — so the
+ * address it reports is in practice immutable and a snapshot would be
+ * *accidentally* correct. It is the accident that is the problem: the previous
+ * signature made the protocol layer silently dependent on that invariant, so
+ * the day anything re-resolves the sidecar (supervision, reconnect, a second
+ * bring-up) the proxy would keep dialling the retired port and every renderer
+ * resource would fail ERR_CONNECTION_REFUSED with no clue pointing here.
+ * Resolving per request costs one property read and makes the layer correct by
+ * construction.
+ */
+type OdProtocolTargetResolver = () => OdProtocolTarget;
+
 protocol.registerSchemesAsPrivileged([
   {
     privileges: {
@@ -17,9 +45,26 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-function toWebRuntimeUrl(webRuntimeUrl: string, requestUrl: string): string {
+/**
+ * Rewrite an incoming `od://` request onto the web sidecar's current address,
+ * or report that there is nothing to rewrite onto.
+ *
+ * Returns `null` — rather than throwing — for both "no address" and "address
+ * is not a URL". Throwing here used to escape the handler entirely (the call
+ * sat outside its try/catch), which is precisely the unhandled-rejection shape
+ * that surfaces as Electron's "JavaScript error in main process" dialog and
+ * that the #895 catch exists to prevent. A `null` lets the caller answer with
+ * an honest status instead.
+ */
+function toWebRuntimeUrl(webRuntimeUrl: OdProtocolTarget, requestUrl: string): string | null {
+  if (webRuntimeUrl == null || webRuntimeUrl.length === 0) return null;
+  let target: URL;
+  try {
+    target = new URL(webRuntimeUrl);
+  } catch {
+    return null;
+  }
   const incoming = new URL(requestUrl);
-  const target = new URL(webRuntimeUrl);
   target.pathname = incoming.pathname;
   target.search = incoming.search;
   target.hash = incoming.hash;
@@ -152,6 +197,82 @@ async function fetchOdTargetOnce(
   });
 }
 
+/**
+ * Did the RENDERER walk away from this request?
+ *
+ * Rapid navigation (project page ⇄ Community) cancels the in-flight
+ * subresource requests of the page being left — that is Chromium working as
+ * designed, not a fault. It matters here because `fetchOdTargetOnce` forwards
+ * the incoming signal to the upstream, so a cancelled request rejects: without
+ * this check the retry loop treats it as a transient socket fault, re-issues a
+ * request whose signal is ALREADY aborted (so every remaining attempt fails
+ * instantly), and the handler then manufactures a 502 for a response nobody is
+ * going to read. Packaged 0.16.2-beta.139 logged 84 such "proxy fetch failed"
+ * warnings — all fonts, icons and a `presence/leave` POST, all clustered inside
+ * navigation bursts — which is pure noise masquerading as a gateway outage.
+ */
+function isClientCancelled(request: Request): boolean {
+  return request.signal?.aborted === true;
+}
+
+const OD_CLIENT_CANCELLED_STATUS = 499; // nginx's "Client Closed Request"
+
+/**
+ * A cancelled request still needs SOME response — rejecting would bubble to
+ * Electron's uncaught handler (the #895 dialog). Answer with a status that is
+ * honestly distinguishable from an upstream failure so logs and any consumer
+ * that does read it can tell "you cancelled this" from "the sidecar is down".
+ */
+function buildClientCancelledResponse(target: string): Response {
+  return new Response(
+    JSON.stringify({ error: "OD_PROTOCOL_CLIENT_ABORTED", target }),
+    {
+      status: OD_CLIENT_CANCELLED_STATUS,
+      headers: {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+      },
+    },
+  );
+}
+
+const OD_TARGET_UNAVAILABLE_STATUS = 503; // Service Unavailable
+
+/**
+ * Answer for a request that has nowhere to go: the web sidecar reported no
+ * address, or reported one that will not parse.
+ *
+ * The registration site used to substitute `http://127.0.0.1:0` whenever the
+ * address was missing. Port 0 means "kernel, pick me a free port" to a
+ * *listener*; as a *connect* target it is meaningless, so that fallback turned
+ * "the web runtime is not up" into a connection error against a nonsense port
+ * — a misleading symptom that costs real time to chase. 503 says the true
+ * thing, and is distinguishable from both the 502 upstream-failure document
+ * and the 499 client-cancellation document.
+ */
+function buildTargetUnavailableResponse(request: Request, address: OdProtocolTarget): Response {
+  return new Response(
+    JSON.stringify({
+      error: "OD_PROTOCOL_TARGET_UNAVAILABLE",
+      message:
+        address == null || address.length === 0
+          ? "web sidecar reported no address"
+          : "web sidecar address is not a valid URL",
+      ...(address == null || address.length === 0 ? {} : { address }),
+      requested: request.url,
+    }),
+    {
+      status: OD_TARGET_UNAVAILABLE_STATUS,
+      headers: {
+        "content-type": "application/json",
+        // Same rationale as the 502 path: keep the failure readable from
+        // CORS-mode consumers instead of masking it as an opaque network error.
+        "access-control-allow-origin": "*",
+      },
+    },
+  );
+}
+
 async function fetchOdTargetWithTransientRetry(
   request: Request,
   target: string,
@@ -169,6 +290,9 @@ async function fetchOdTargetWithTransientRetry(
       return await fetchOdTargetOnce(request, target, fetchImpl);
     } catch (error) {
       lastError = error;
+      // Retrying a request the client abandoned can only fail again, and each
+      // extra attempt is a misleading "proxy fetch failed" line in the log.
+      if (isClientCancelled(request)) break;
       if (attempt === attempts) break;
       const waitMs = backoffMs * attempt;
       // Main-process console output lands in the packaged desktop logs, so
@@ -236,14 +360,20 @@ function buildProxyErrorResponse(error: unknown, target: string): Response {
  */
 export async function handleOdRequest(
   request: Request,
-  webRuntimeUrl: string,
+  webRuntimeUrl: OdProtocolTarget,
   fetchImpl: OdProtocolFetch = fetch,
   retryOptions: OdProxyRetryOptions = {},
 ): Promise<Response> {
   const target = toWebRuntimeUrl(webRuntimeUrl, request.url);
+  // No address to proxy to. Say so plainly rather than dialling a placeholder.
+  if (target == null) return buildTargetUnavailableResponse(request, webRuntimeUrl);
   try {
     return await fetchOdTargetWithTransientRetry(request, target, fetchImpl, retryOptions);
   } catch (error) {
+    // A request the renderer cancelled is not a gateway failure — reporting it
+    // as 502 both lies in the logs and hands error-shaped JSON to any consumer
+    // that fails to check `res.ok`.
+    if (isClientCancelled(request)) return buildClientCancelledResponse(target);
     return buildProxyErrorResponse(error, target);
   }
 }
@@ -267,9 +397,16 @@ function resolveOdProxyFetch(): OdProtocolFetch {
   return (request) => net.fetch(request);
 }
 
-export function registerOdProtocol(webRuntimeUrl: string): void {
+/**
+ * Install the `od://` handler, resolving the proxy target through
+ * `resolveWebRuntimeUrl` on EVERY request.
+ *
+ * See `OdProtocolTargetResolver` for why this takes a provider rather than the
+ * address itself.
+ */
+export function registerOdProtocol(resolveWebRuntimeUrl: OdProtocolTargetResolver): void {
   const fetchImpl = resolveOdProxyFetch();
   protocol.handle(OD_SCHEME, async (request) => {
-    return await handleOdRequest(request, webRuntimeUrl, fetchImpl);
+    return await handleOdRequest(request, resolveWebRuntimeUrl(), fetchImpl);
   });
 }

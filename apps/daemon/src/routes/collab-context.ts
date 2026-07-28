@@ -6,6 +6,8 @@ import type {
   WorkspaceBillingCatalog,
   WorkspaceBillingCatalogResponse,
   WorkspaceBillingCheckoutResponse,
+  WorkspaceBillingInterestRequest,
+  WorkspaceBillingInterestResponse,
   WorkspaceBillingSnapshot,
   WorkspaceTeamBillingPlanId,
   WorkspaceBillingResponse,
@@ -382,14 +384,103 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
   // membership lookup — never daemon-global active/current state — so two
   // clients can address different workspaces without switching each other.
   // Account metadata and workspace money remain independently nullable.
+  app.put('/api/workspace/billing/interests/:clientId', async (req, res) => {
+    const clientId = req.params.clientId?.trim() ?? '';
+    const body = (req.body ?? {}) as Partial<WorkspaceBillingInterestRequest>;
+    const generation = typeof body.generation === 'string' ? body.generation.trim() : '';
+    if (
+      !clientId ||
+      clientId.length > 160 ||
+      !/^(?:0|[1-9]\d*)$/.test(generation) ||
+      !Array.isArray(body.interests)
+    ) {
+      return res.status(400).json({ error: 'invalid_billing_interest' });
+    }
+    const interests = body.interests.map((interest) => ({
+      workspaceId:
+        typeof interest?.workspaceId === 'string' ? interest.workspaceId.trim() : '',
+      workspaceMemberId:
+        typeof interest?.workspaceMemberId === 'string'
+          ? interest.workspaceMemberId.trim()
+          : '',
+    }));
+    if (interests.some((interest) => !interest.workspaceId || !interest.workspaceMemberId)) {
+      return res.status(400).json({ error: 'invalid_billing_interest' });
+    }
+
+    if (interests.length > 0) {
+      const directoryResult = await fetchWorkspaceDirectory().catch(
+        (): WorkspaceDirectoryFetchResult => ({ ok: false, items: [] }),
+      );
+      if (!directoryResult.ok) {
+        return res.status(503).json({ error: 'workspace_directory_unavailable' });
+      }
+      const unauthorized = interests.filter(
+        (interest) =>
+          !directoryResult.items.some(
+            (item) =>
+              item.workspaceId === interest.workspaceId &&
+              item.workspaceMemberId === interest.workspaceMemberId &&
+              item.workspaceType === 'team' &&
+              item.memberStatus === 'active' &&
+              item.lifecycleState === 'active',
+          ),
+      );
+      if (unauthorized.length > 0) {
+        // A stale renderer may still declare an old membership epoch for a
+        // workspace another renderer is legitimately using. Reject this
+        // declaration without mutating process-wide workspace state.
+        return res.status(403).json({ error: 'workspace_not_authorized' });
+      }
+    }
+
+    try {
+      const lease: WorkspaceBillingInterestResponse =
+        billingRuntime.setClientInterests({
+          clientId,
+          clientGeneration: generation,
+          interests,
+        });
+      return res.json(lease);
+    } catch (error) {
+      if (!(error instanceof WorkspaceBillingInterestError)) throw error;
+      return res
+        .status(error.code === 'interest_capacity_exceeded' ? 429 : 409)
+        .json({
+          error: error.code,
+          ...(error.acceptedGeneration
+            ? { acceptedGeneration: error.acceptedGeneration }
+            : {}),
+        });
+    }
+  });
+
+  app.delete('/api/workspace/billing/interests/:clientId', (req, res) => {
+    const clientId = req.params.clientId?.trim() ?? '';
+    const generation =
+      typeof req.query.generation === 'string' ? req.query.generation.trim() : undefined;
+    if (!clientId) return res.status(400).json({ error: 'invalid_billing_interest' });
+    try {
+      const released = billingRuntime.releaseClientInterests(clientId, generation);
+      return res.json({ ok: true, released });
+    } catch (error) {
+      if (!(error instanceof WorkspaceBillingInterestError)) throw error;
+      return res.status(400).json({ error: error.code });
+    }
+  });
+
   app.get('/api/workspace/billing', async (req, res) => {
     const scope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
     const requestedWorkspaceId =
       typeof req.query.workspaceId === 'string' ? req.query.workspaceId.trim() : '';
+    const freshness =
+      typeof req.query.freshness === 'string' ? req.query.freshness.trim() : '';
     if (
       (scope !== 'account' && scope !== 'workspace') ||
       (scope === 'account' && requestedWorkspaceId) ||
-      (scope === 'workspace' && !requestedWorkspaceId)
+      (scope === 'workspace' && !requestedWorkspaceId) ||
+      (freshness !== '' && freshness !== 'authoritative') ||
+      (scope !== 'workspace' && freshness !== '')
     ) {
       return res.status(400).json({ error: 'invalid_billing_scope' });
     }
@@ -410,18 +501,6 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
         requestedWorkspaceId,
         'workspace_directory_unavailable',
       );
-      const unavailable = clientId
-        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
-        : null;
-      if (unavailable?.state.status === 'error') {
-        const body: WorkspaceBillingResponse = {
-          summary: null,
-          workspaceBalance: null,
-          workspaceSnapshot: null,
-          workspaceRuntime: unavailable.state,
-        };
-        return res.json(body);
-      }
       return res.status(503).json({ error: 'workspace_directory_unavailable' });
     }
     const directory = directoryResult.items;
@@ -434,19 +513,7 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     );
     if (!membership) {
       billingRuntime.revokeWorkspace(requestedWorkspaceId);
-      const revoked = clientId
-        ? billingRuntime.peekForClient(clientId, requestedWorkspaceId)
-        : null;
-      if (revoked?.state.status === 'access-revoked') {
-        const body: WorkspaceBillingResponse = {
-          summary: null,
-          workspaceBalance: null,
-          workspaceSnapshot: null,
-          workspaceRuntime: revoked.state,
-        };
-        return res.json(body);
-      }
-      return res.status(409).json({ error: 'workspace_not_authorized' });
+      return res.status(403).json({ error: 'workspace_not_authorized' });
     }
     billingRuntime.retainWorkspaceMember(
       requestedWorkspaceId,
@@ -467,7 +534,11 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
             workspaceMemberId: membership.workspaceMemberId,
           },
           {
-            reason: 'explicit-billing-read',
+            reason:
+              freshness === 'authoritative'
+                ? 'authoritative-action-read'
+                : 'explicit-billing-read',
+            ...(freshness === 'authoritative' ? { requireFresh: true } : {}),
             ...(clientId ? { clientId } : {}),
             ...(clientGeneration ? { clientGeneration } : {}),
           },
@@ -481,6 +552,13 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
             ? { acceptedGeneration: error.acceptedGeneration }
             : {}),
         });
+      }
+      if (freshness === 'authoritative') {
+        const code =
+          typeof (error as { code?: unknown })?.code === 'string'
+            ? (error as { code: string }).code
+            : 'workspace_billing_authoritative_unavailable';
+        return res.status(503).json({ error: code });
       }
       throw error;
     }
@@ -497,6 +575,16 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       snapshot.workspaceMemberId === membership.workspaceMemberId
         ? snapshot
         : null;
+    const authoritativeObservedAt =
+      freshness === 'authoritative' &&
+      runtimeResult.state.status === 'fresh'
+        ? runtimeResult.state.observedAt
+        : null;
+    if (freshness === 'authoritative' && !authoritativeObservedAt) {
+      return res.status(503).json({
+        error: 'workspace_billing_authoritative_unavailable',
+      });
+    }
     const body: WorkspaceBillingResponse = {
       summary: accountSummary,
       workspaceBalance: authorizedWorkspaceBalance,
@@ -504,6 +592,15 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
         ? { workspaceSnapshot: authorizedWorkspaceSnapshot }
         : {}),
       workspaceRuntime: runtimeResult.state,
+      ...(authoritativeObservedAt
+        ? {
+            authoritativeWorkspaceRead: {
+              workspaceId: requestedWorkspaceId,
+              workspaceMemberId: membership.workspaceMemberId,
+              observedAt: authoritativeObservedAt,
+            },
+          }
+        : {}),
     };
     return res.json(body);
   });

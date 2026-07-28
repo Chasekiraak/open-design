@@ -97,7 +97,7 @@ interface Props {
   onAgentChange: (id: string) => void;
   onAgentModelChange: (
     id: string,
-    choice: { model?: string; reasoning?: string },
+    choice: { model?: string; reasoning?: string; serviceTier?: string },
   ) => void;
   onApiProtocolChange: (protocol: ApiProtocol) => void;
   onApiModelChange: (model: string) => void;
@@ -437,13 +437,16 @@ export function InlineModelSwitcher({
     let frame = 0;
     const updateAnchorVisibility = () => {
       frame = 0;
-      const triggerRect = chipRef.current?.getBoundingClientRect();
+      const trigger = chipRef.current;
+      const triggerRect = trigger?.getBoundingClientRect();
       if (!triggerRect) return;
       const scrollRect = scrollContainer.getBoundingClientRect();
-      const topbarBottom = scrollContainer
-        .querySelector<HTMLElement>('.entry-main__topbar')
-        ?.getBoundingClientRect().bottom;
-      const safeTop = Math.max(scrollRect.top, topbarBottom ?? scrollRect.top);
+      const topbar = scrollContainer.querySelector<HTMLElement>('.entry-main__topbar');
+      const anchorInTopbar = trigger ? topbar?.contains(trigger) === true : false;
+      const topbarBottom = topbar?.getBoundingClientRect().bottom;
+      const safeTop = anchorInTopbar
+        ? scrollRect.top
+        : Math.max(scrollRect.top, topbarBottom ?? scrollRect.top);
       const safeBottom = Math.min(window.innerHeight, scrollRect.bottom);
       const safeLeft = Math.max(0, scrollRect.left);
       const safeRight = Math.min(window.innerWidth, scrollRect.right);
@@ -531,6 +534,7 @@ export function InlineModelSwitcher({
   const currentAgentId = currentAgent?.id ?? null;
   const normalizedCurrentModelId = normalizedCurrentChoice?.model ?? null;
   const normalizedCurrentReasoning = normalizedCurrentChoice?.reasoning;
+  const normalizedCurrentServiceTier = normalizedCurrentChoice?.serviceTier;
   const currentAgentModelIds = currentAgent?.models?.map((m) => m.id) ?? [];
   const configuredModelId =
     typeof effectiveCurrentChoice.model === 'string' && effectiveCurrentChoice.model
@@ -543,22 +547,33 @@ export function InlineModelSwitcher({
     !currentAgentModelIds.includes(configuredModelId)
       ? defaultAgentModelId(currentAgent)
       : configuredModelId ?? defaultAgentModelId(currentAgent);
+  const currentModelOption =
+    currentAgent?.models?.find((m) => m.id === currentModelId) ?? null;
 
   useEffect(() => {
     if (!currentAgentId || !normalizedCurrentModelId) return;
-    onAgentModelChange(currentAgentId, {
+    const nextChoice: {
+      model: string;
+      reasoning?: string;
+      serviceTier?: string;
+    } = {
       model: normalizedCurrentModelId,
       reasoning: normalizedCurrentReasoning,
-    });
+    };
+    if (normalizedCurrentServiceTier !== undefined) {
+      nextChoice.serviceTier = normalizedCurrentServiceTier;
+    }
+    onAgentModelChange(currentAgentId, nextChoice);
   }, [
     currentAgentId,
     normalizedCurrentModelId,
     normalizedCurrentReasoning,
+    normalizedCurrentServiceTier,
     onAgentModelChange,
   ]);
 
   const currentModelLabel =
-    currentAgent?.models?.find((m) => m.id === currentModelId)?.label ?? null;
+    currentModelOption?.label ?? null;
   const inlineAgentModelOptions = useMemo(() => {
     const models = currentAgent?.models ?? [];
     if (currentAgent?.id !== 'amr') return models;
@@ -1249,6 +1264,7 @@ export function InlineModelSwitcher({
                       });
                       onAgentModelChange?.(currentAgent.id, {
                         model: nextValue,
+                        serviceTier: undefined,
                       });
                     }}
                     additionalOptions={

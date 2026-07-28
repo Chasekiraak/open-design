@@ -283,10 +283,16 @@ export function createDesignSystemServerServices({
     return { ok: true, id: resolved.id };
   }
 
-  function userDesignSystemWorkspaceProjectId(id: string) {
+  function userDesignSystemDirectoryId(id: string) {
     if (typeof id !== 'string' || !id.startsWith('user:')) return null;
     const dirId = id.slice('user:'.length);
     if (!/^[A-Za-z0-9._-]{1,120}$/.test(dirId)) return null;
+    return dirId;
+  }
+
+  function userDesignSystemWorkspaceProjectId(id: string) {
+    const dirId = userDesignSystemDirectoryId(id);
+    if (!dirId) return null;
     return `ds-${dirId}`.slice(0, 128);
   }
 
@@ -486,6 +492,27 @@ export function createDesignSystemServerServices({
     return { ok: true, synced: result.synced };
   }
 
+  /**
+   * Resolves the directory that a team-share publish may archive. Unlike the
+   * read-only canonical path resolver, this first snapshots the workspace
+   * project's latest assets back into canonical. A missing source fails
+   * closed so a repeat "Sync to team" can never publish stale bytes.
+   */
+  async function resolveUserDesignSystemShareDirectory(
+    dbHandle: Database.Database,
+    id: string,
+  ): Promise<string> {
+    const outcome = await syncUserDesignSystemAssetsFromWorkspace(dbHandle, id);
+    if (!outcome.ok) {
+      throw new Error(`design_system_share_asset_sync_failed:${outcome.reason}`);
+    }
+    const dirId = userDesignSystemDirectoryId(id);
+    if (!dirId) {
+      throw new Error('design_system_share_asset_sync_failed:not-found');
+    }
+    return path.join(paths.USER_DESIGN_SYSTEMS_DIR, dirId);
+  }
+
   return {
     ensureUserDesignSystemWorkspaceProject,
     isProjectUsableDesignSystem,
@@ -497,6 +524,7 @@ export function createDesignSystemServerServices({
     readAvailableDesignSystemPackageInfo,
     readAvailableDesignSystemStaticFile,
     readDesignSystemWorkspaceTextFile,
+    resolveUserDesignSystemShareDirectory,
     syncUserDesignSystemAssetsFromWorkspace,
     validateProjectDesignSystemId,
     validateProjectSkillId,

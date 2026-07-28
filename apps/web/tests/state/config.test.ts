@@ -157,8 +157,12 @@ describe('syncConfigToDaemon', () => {
     expect(url).toBe('/api/app-config');
     expect(init.method).toBe('PUT');
     expect(init.headers).toEqual({ 'content-type': 'application/json' });
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      onboardingCompleted: DEFAULT_CONFIG.onboardingCompleted,
+    const body = JSON.parse(String(init.body));
+    // A false `onboardingCompleted` is omitted rather than sent: the sync only
+    // ratchets it upward, so a stale local `false` can never re-arm first-run
+    // onboarding on the daemon. Resetting is opt-in via `allowOnboardingReset`.
+    expect(body).not.toHaveProperty('onboardingCompleted');
+    expect(body).toMatchObject({
       agentId: DEFAULT_CONFIG.agentId,
       agentModels: DEFAULT_CONFIG.agentModels,
       skillId: DEFAULT_CONFIG.skillId,

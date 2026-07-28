@@ -110,7 +110,12 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
       getWorkspaceProjectByProjectId,
       db,
       projectId,
-      'writeFiles',
+      // NOT `writeFiles`: a comment is not an artifact edit. Sharing a
+      // project into the team grants every active member comment standing
+      // (the read-only banner promises "view and comment"), so this gate
+      // checks the wider `comment` capability; author-level rules
+      // (`callerMayMutate` below) still restrict status/delete per comment.
+      'comment',
     );
   }
 

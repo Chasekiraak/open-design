@@ -7,6 +7,7 @@ import type {
 } from './context.js';
 import type { ProjectSyncIntent, ProjectSyncIntentEvent, ProjectSyncState } from './project-sync.js';
 import type { TeamResourceState } from './team-resources.js';
+import type { WorkspaceCollabContext } from './collab.js';
 
 export type ProjectKind =
   | 'prototype'
@@ -213,6 +214,14 @@ export interface ProjectMetadata {
   // cohorts' retention/usage (tracking spec C15 / §6).
   enrichmentStatus?: 'programmatic' | 'ai_refined';
   enrichmentCompletedAt?: number;
+  // Stamped by the daemon when it registers a local placeholder record for a
+  // hub-shared project whose content has NOT been materialized locally yet
+  // (fresh data root / opened-before-pulled). While set, the daemon refuses
+  // to publish the project's local directory to the resource hub — the
+  // recvqzaDvUU6B3 fresh-install wipe guard. Cleared by the pull flow once
+  // real hub content lands on disk. See the daemon's
+  // collab/shared-project-placeholder.ts for the invariant.
+  sharedProjectPlaceholderAt?: number;
 }
 
 export interface Project {
@@ -376,6 +385,49 @@ export interface ProjectDetailResponse extends ProjectResponse {
 }
 
 export type ProjectVisibility = 'personal' | 'team';
+
+/**
+ * Daemon-authoritative workspace and billing scope for one persisted project.
+ *
+ * `visibility` answers whether the project itself is a private draft or shared
+ * with the team. It is deliberately independent from `kind`: a private draft
+ * may still belong to a team workspace and therefore use that workspace's
+ * wallet. The tagged union prevents clients from treating every non-null
+ * workspace id as a team-billing scope.
+ */
+export type ProjectWorkspaceScope =
+  | {
+      kind: 'unbound';
+      projectId: string;
+      workspaceId: null;
+      context: null;
+    }
+  | {
+      kind: 'unavailable';
+      projectId: string;
+      workspaceId: string;
+      visibility: ProjectVisibility;
+      context: null;
+    }
+  | {
+      kind: 'personal';
+      projectId: string;
+      workspaceId: string;
+      visibility: ProjectVisibility;
+      context: WorkspaceCollabContext & { workspaceType: 'personal' };
+    }
+  | {
+      kind: 'team';
+      projectId: string;
+      workspaceId: string;
+      visibility: ProjectVisibility;
+      context: WorkspaceCollabContext & { workspaceType: 'team' };
+    };
+
+/** GET /api/projects/:id/workspace-scope. */
+export interface ProjectWorkspaceScopeResponse {
+  scope: ProjectWorkspaceScope;
+}
 
 // Local D-lane placeholder until the B-owned CurrentWorkspaceContext is
 // imported into open-design. The route adapter keeps this replaceable.

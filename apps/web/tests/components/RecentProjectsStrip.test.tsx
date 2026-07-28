@@ -540,7 +540,16 @@ describe('RecentProjectsStrip', () => {
     expect(fetchProjectFiles).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps the StrictMode replay request abortable after the first request settles late', async () => {
+  it('keeps the force-refresh replacement request abortable after the stale request settles late', async () => {
+    // Cover probes are viewport-gated and deduped per card, so StrictMode's
+    // synthetic remount no longer produces an aborted twin request — a card
+    // issues exactly ONE live scan. The overlap this case guards (a stale
+    // request settling late must not orphan the live replacement's abort
+    // controller) is still reachable in production through the
+    // team-project-content-ready force refresh, so that path drives it now.
+    MockWorkspaceEventSource.instances = [];
+    vi.stubGlobal('EventSource', MockWorkspaceEventSource as unknown as typeof EventSource);
+    stubCoverProbe();
     const requests: Array<{
       resolve: (files: Awaited<ReturnType<typeof fetchProjectFiles>>) => void;
       signal: AbortSignal;
@@ -561,6 +570,30 @@ describe('RecentProjectsStrip', () => {
         />
       </StrictMode>,
     );
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.signal.aborted).toBe(false);
+
+    // Let the workspace context resolve so the content-ready handler accepts
+    // the event's workspace id.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(MockWorkspaceEventSource.instances.length).toBeGreaterThan(0);
+    // StrictMode's synthetic remount can leave an earlier, closed EventSource
+    // behind; the live subscription is the most recent instance.
+    const liveSource =
+      MockWorkspaceEventSource.instances[MockWorkspaceEventSource.instances.length - 1]!;
+    act(() => {
+      liveSource.dispatch('team-project-content-ready', {
+        type: 'team-project-content-ready',
+        projectId: 'project-replay',
+        workspaceId: 'ws-1',
+      });
+    });
+
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[0]?.signal.aborted).toBe(true);
     expect(requests[1]?.signal.aborted).toBe(false);

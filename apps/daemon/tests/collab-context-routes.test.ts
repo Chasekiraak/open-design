@@ -10,6 +10,7 @@ import {
   createDevWorkspaceContextProvider,
   parseWorkspaceCollabContext,
 } from '../src/collab/workspace-context.js';
+import { createWorkspaceBillingRuntimeCoordinator } from '../src/collab/workspace-billing-runtime.js';
 
 let server: http.Server | null = null;
 
@@ -139,6 +140,114 @@ describe('workspace billing routes', () => {
     memberStatus: 'active' as const,
     lifecycleState: 'active' as const,
   }];
+
+  it('authorizes and atomically replaces a renderer full billing interest set', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => [
+        ...teamDirectory('wm-1'),
+        {
+          ...teamDirectory('wm-2')[0]!,
+          workspaceMemberId: 'member-2',
+        },
+      ],
+    });
+    const declared = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '1',
+          interests: [
+            { workspaceId: 'wm-1', workspaceMemberId: 'member-1' },
+            { workspaceId: 'wm-2', workspaceMemberId: 'member-2' },
+          ],
+        },
+      },
+    );
+    expect(declared.status).toBe(200);
+    expect(declared.body).toMatchObject({
+      clientId: 'renderer-1',
+      acceptedGeneration: '1',
+    });
+
+    const replaced = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '2',
+          interests: [{ workspaceId: 'wm-2', workspaceMemberId: 'member-2' }],
+        },
+      },
+    );
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.acceptedGeneration).toBe('2');
+
+    const released = await api.req(
+      '/api/workspace/billing/interests/renderer-1?generation=2',
+      { method: 'DELETE' },
+    );
+    expect(released.body).toEqual({ ok: true, released: true });
+  });
+
+  it('rejects an interest whose exact workspace/member pair is not authorized', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+    });
+    const response = await api.req(
+      '/api/workspace/billing/interests/renderer-1',
+      {
+        method: 'PUT',
+        body: {
+          generation: '1',
+          interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-other' }],
+        },
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: 'workspace_not_authorized' });
+  });
+
+  it('does not revoke another client when a stale member declares the same workspace', async () => {
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async ({ workspaceId, workspaceMemberId }) => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId,
+          workspaceMemberId,
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      billingRuntime: runtime,
+    });
+    const valid = await api.req('/api/workspace/billing/interests/valid-renderer', {
+      method: 'PUT',
+      body: {
+        generation: '1',
+        interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-1' }],
+      },
+    });
+    expect(valid.status).toBe(200);
+
+    const stale = await api.req('/api/workspace/billing/interests/stale-renderer', {
+      method: 'PUT',
+      body: {
+        generation: '1',
+        interests: [{ workspaceId: 'wm-1', workspaceMemberId: 'member-old' }],
+      },
+    });
+    expect(stale.status).toBe(403);
+    expect(runtime.interestedKeys()).toEqual([
+      { workspaceId: 'wm-1', workspaceMemberId: 'member-1' },
+    ]);
+    runtime.dispose();
+  });
 
   // recvqgaMLxEdZX: the URL workspace id is the selection source. Membership
   // authorization comes from the independently fetched directory, not from
@@ -302,7 +411,7 @@ describe('workspace billing routes', () => {
     expect(secondResponse.body.workspaceRuntime).toEqual(firstResponse.body.workspaceRuntime);
   });
 
-  it('clears a known client billing snapshot when membership disappears', async () => {
+  it('clears daemon state and returns 403 when membership disappears', async () => {
     let authorized = true;
     const api = await startContextServer({
       listWorkspaceDirectory: async () => authorized ? teamDirectory('wm-1') : [],
@@ -335,18 +444,8 @@ describe('workspace billing routes', () => {
       '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
       { headers },
     );
-    expect(revoked.status).toBe(200);
-    expect(revoked.body).toMatchObject({
-      summary: null,
-      workspaceBalance: null,
-      workspaceSnapshot: null,
-      workspaceRuntime: {
-        workspaceId: 'wm-1',
-        workspaceMemberId: 'member-1',
-        status: 'access-revoked',
-        errorCode: 'workspace_not_authorized',
-      },
-    });
+    expect(revoked.status).toBe(403);
+    expect(revoked.body).toEqual({ error: 'workspace_not_authorized' });
   });
 
   it('retains internal last-good state across a transient directory outage', async () => {
@@ -381,14 +480,8 @@ describe('workspace billing routes', () => {
     expect((await request('1')).body.workspaceBalance.balanceUsd).toBe('7.89');
     directoryAvailable = false;
     const unavailable = await request('1');
-    expect(unavailable.status).toBe(200);
-    expect(unavailable.body).toMatchObject({
-      workspaceBalance: null,
-      workspaceRuntime: {
-        status: 'error',
-        errorCode: 'workspace_directory_unavailable',
-      },
-    });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toEqual({ error: 'workspace_directory_unavailable' });
 
     directoryAvailable = true;
     balance = '8.99';
@@ -396,6 +489,74 @@ describe('workspace billing routes', () => {
     expect(recovered.body).toMatchObject({
       workspaceBalance: { balanceUsd: '8.99' },
       workspaceRuntime: { status: 'fresh' },
+    });
+  });
+
+  it('returns 503 instead of last-good money when an authoritative action catch-up fails', async () => {
+    let calls = 0;
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            snapshot: null,
+            workspaceBalance: {
+              workspaceId: 'wm-1',
+              workspaceMemberId: 'member-1',
+              balanceUsd: '7.89',
+              billingScopeVersion: 2,
+              expiresAt: null,
+              updatedAt: '2026-07-27T00:00:00Z',
+            },
+          };
+        }
+        throw Object.assign(new Error('upstream unavailable'), { code: 'temporary' });
+      },
+    });
+
+    expect((await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1',
+    )).status).toBe(200);
+    const action = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1&freshness=authoritative',
+    );
+    expect(action.status).toBe(503);
+    expect(action.body).toEqual({ error: 'temporary' });
+    expect(calls).toBe(2);
+  });
+
+  it('marks a successful action read with exact authoritative workspace proof', async () => {
+    const api = await startContextServer({
+      listWorkspaceDirectory: async () => teamDirectory('wm-1'),
+      fetchBilling: async () => null,
+      fetchWorkspaceBillingProjection: async () => ({
+        snapshot: null,
+        workspaceBalance: {
+          workspaceId: 'wm-1',
+          workspaceMemberId: 'member-1',
+          balanceUsd: '7.89',
+          billingScopeVersion: 2,
+          expiresAt: null,
+          updatedAt: '2026-07-27T00:00:00Z',
+        },
+      }),
+    });
+
+    const action = await api.req(
+      '/api/workspace/billing?scope=workspace&workspaceId=wm-1&freshness=authoritative',
+    );
+    expect(action.status).toBe(200);
+    expect(action.body.workspaceRuntime).toMatchObject({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      status: 'fresh',
+    });
+    expect(action.body.authoritativeWorkspaceRead).toEqual({
+      workspaceId: 'wm-1',
+      workspaceMemberId: 'member-1',
+      observedAt: action.body.workspaceRuntime.observedAt,
     });
   });
 
@@ -449,7 +610,7 @@ describe('workspace billing routes', () => {
 
     const res = await api.req('/api/workspace/billing?scope=workspace&workspaceId=other');
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(403);
     expect(res.body).toEqual({ error: 'workspace_not_authorized' });
     expect(calls).toEqual([]);
   });

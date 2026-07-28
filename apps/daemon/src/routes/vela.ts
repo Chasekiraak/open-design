@@ -23,9 +23,11 @@ import {
   clearAllVelaLiveAccounts,
   parseVelaLoginAttribution,
   peekVelaLiveAccount,
+  readVelaApiContext,
   readVelaCredentialRevision,
   readVelaControlApiContext,
   readVelaLoginStatus,
+  resolveVelaConsoleOrigin,
   setVelaLiveAccount,
   shouldRefreshVelaLiveAccount,
   velaLiveAccountCacheKey,
@@ -46,6 +48,7 @@ import {
 
 const AMR_API_PROXY_PREFIX = '/api/integrations/vela/api-proxy';
 const VELA_MESSAGE_CENTER_PREFIX = '/api/integrations/vela/message-center';
+const VELA_PUBLIC_MESSAGE_CENTER_PREFIX = '/api/integrations/vela/message-center-public';
 const AMR_API_UPSTREAM_ORIGIN = 'https://amr-api.open-design.ai';
 
 /**
@@ -238,9 +241,10 @@ function isAllowedMessageCenterRequest(method: string, pathname: string): boolea
 function proxyVelaMessageCenterRequest(
   req: Request,
   res: Response,
-  context: { apiUrl: string; controlKey: string },
+  context: { apiUrl: string; controlKey?: string },
+  proxyPrefix = VELA_MESSAGE_CENTER_PREFIX,
 ): void {
-  const suffix = req.originalUrl.slice(VELA_MESSAGE_CENTER_PREFIX.length);
+  const suffix = req.originalUrl.slice(proxyPrefix.length);
   const parsedSuffix = new URL(suffix, 'http://message-center.local');
   if (!isAllowedMessageCenterRequest(req.method, parsedSuffix.pathname)) {
     res.status(404).json({ error: 'unknown_message_center_path' });
@@ -257,8 +261,8 @@ function proxyVelaMessageCenterRequest(
   const body = velaProxyRequestBody(req);
   const headers: Record<string, string> = {
     accept: typeof req.headers.accept === 'string' ? req.headers.accept : 'application/json',
-    authorization: `Bearer ${context.controlKey}`,
   };
+  if (context.controlKey) headers.authorization = `Bearer ${context.controlKey}`;
   if (typeof req.headers['content-type'] === 'string') {
     headers['content-type'] = req.headers['content-type'];
   }
@@ -405,6 +409,12 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
       const configuredEnv = agentCliEnvForAgent(appConfig.agentCliEnv, 'amr');
       const refresh = _req.query.refresh === '1' || _req.query.refresh === 'true';
       const status = readVelaLoginStatus(mergeVelaEnv(env, configuredEnv));
+      // Reported on every response, signed in or not: the client builds console
+      // links (wallet, plans, upgrade) from it and must not have to carry a
+      // hostname table for internal AMR environments. Absent for prod/fork
+      // builds, where the client keeps using the public product console.
+      const consoleOrigin = resolveVelaConsoleOrigin(env);
+      if (consoleOrigin) status.consoleOrigin = consoleOrigin;
       if (status.loggedIn) {
         // Key the live-account cache by the full credential revision (not just
         // profile) so a logout / account switch can never surface the previous
@@ -490,6 +500,17 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
   });
 
   app.all('/api/integrations/vela/api-proxy/*splat', proxyAmrApiRequest);
+
+  app.get('/api/integrations/vela/message-center-public/messages', async (req, res) => {
+    try {
+      const appConfig = await readAppConfig(RUNTIME_DATA_DIR);
+      const configuredEnv = agentCliEnvForAgent(appConfig.agentCliEnv, 'amr');
+      const context = readVelaApiContext(env, configuredEnv);
+      proxyVelaMessageCenterRequest(req, res, context, VELA_PUBLIC_MESSAGE_CENTER_PREFIX);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
 
   app.all('/api/integrations/vela/message-center/*splat', async (req, res) => {
     try {

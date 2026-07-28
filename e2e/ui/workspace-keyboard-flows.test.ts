@@ -337,13 +337,11 @@ test('[P1] quick switcher leaves the Design Files panel and opens the selected f
   await openAllProjectFiles(page);
   await expectAllProjectFilesActive(page);
 
-  const betaRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'design-files-beta.png',
-  });
-  await expect(betaRow).toBeVisible();
-  await betaRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
-  await expect(page.getByTestId('design-file-preview').getByText(/design-files-beta\.png/i)).toBeVisible();
+  // #5517 deleted the preview pane, so "parked on the Design Files panel" is
+  // now expressed by the panel being the active surface with its rows on
+  // screen. Clicking a row would open that file and leave the panel, which is
+  // exactly the transition this test wants the quick switcher to perform.
+  await expect(rowBySuffix(page, 'design-files-beta.png')).toBeVisible();
 
   await openQuickSwitcher(page);
   const quickSwitcher = page.locator('.qs-overlay');
@@ -575,6 +573,13 @@ async function sendPrompt(page: Page, prompt: string) {
 
 function tabBySuffix(page: Page, name: string): Locator {
   return page.getByTestId('file-workspace').getByRole('tab', { name: new RegExp(escapeRegExp(name), 'i') });
+}
+
+// Uploaded files can land under a deduplicated name, and #5517 image cards
+// carry no visible filename text, so match the row by its `data-testid`
+// suffix instead of by rendered text.
+function rowBySuffix(page: Page, name: string): Locator {
+  return page.locator(`[data-testid^="design-file-row-"][data-testid$="${name}"]`).first();
 }
 
 function currentProjectId(page: Page): string {

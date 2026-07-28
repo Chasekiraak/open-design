@@ -1633,7 +1633,13 @@
 .community-template-preview {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  /* Modal-layer z, matching .ds-modal-backdrop (composio.css): the scrim must
+     paint above ALL shell chrome, including the workspace tabs bar
+     (.workspace-tabs-chrome, z-index 120). At the previous 70 the tab strip
+     stayed bright above the backdrop. The overlay is portalled to <body>
+     (CommunityTemplatePreview.tsx), so this z resolves in the root stacking
+     context. */
+  z-index: 1700;
   display: grid;
   place-items: center;
   padding: 28px;

@@ -76,7 +76,11 @@ async function gotoEntryHome(page: Page) {
     await privacyDialog.getByRole('button', { name: /I get it|not now|got it|don't share/i }).click();
   }
   await expect(
-    page.getByTestId('entry-settings-button').or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL })).first(),
+    page
+      .getByTestId('entry-settings-button')
+      .or(page.getByTestId('entry-nav-settings'))
+      .or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL }))
+      .first(),
   ).toBeVisible();
 }
 

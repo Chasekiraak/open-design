@@ -35,7 +35,12 @@ export type WorkspaceResourceContext = {
   canWriteSyncedFiles: boolean;
 };
 
-export type WorkspaceResourceMutationCapability = 'rename' | 'delete' | 'duplicate' | 'writeFiles';
+export type WorkspaceResourceMutationCapability =
+  | 'rename'
+  | 'delete'
+  | 'duplicate'
+  | 'writeFiles'
+  | 'comment';
 
 /**
  * The one fact a mutation gate needs from the daemon's own verified workspace
@@ -200,16 +205,39 @@ export function workspaceResourceAccess(
 function workspaceResourceMutationAllowed(
   row: WorkspaceResourceAccessInput | null | undefined,
   ctx: WorkspaceResourceContext,
-  _capability: WorkspaceResourceMutationCapability,
+  capability: WorkspaceResourceMutationCapability,
 ): boolean {
   if (!row) return false;
-  // Every mutation capability collapses to the same `canMutate` bit today —
+  const access = workspaceResourceAccess(row, ctx);
+  // `comment` is the one capability the product grants MORE WIDELY than
+  // resource ownership: sharing a resource into the team explicitly invites
+  // every active member to comment (the member-facing read-only banner
+  // promises "view and comment"), while rename/delete/duplicate/writeFiles
+  // stay creator/privileged-only. Gating comments on the strict `canMutate`
+  // bit 403'd every plain member's comment on someone else's shared project
+  // at the workspace layer (2026-07-28 dogfood: “评论保存失败，请重试。”),
+  // before the per-comment author rules in routes/project/comments.ts ever
+  // ran. Same base preconditions as `canMutate` (not frozen, writable
+  // lifecycle, active membership); only the standing test widens — the
+  // sharing act (`visibility: 'team'`) is what grants comment standing
+  // beyond creator/privileged, so an unshared personal binding stays closed
+  // to other members.
+  if (capability === 'comment') {
+    return (
+      access.canMutate ||
+      (!access.frozen &&
+        ctx.canWriteSyncedFiles &&
+        ctx.memberStatus === 'active' &&
+        row.visibility === 'team')
+    );
+  }
+  // Every other mutation capability collapses to the same `canMutate` bit —
   // project's original per-capability branch (`canRename`/`canDelete`/
   // `canDuplicate`/`canRestoreVersion`) all read the identical computed
-  // value. `capability` stays a parameter so a future resource type that DOES
-  // need one capability to diverge (e.g. staying allowed while frozen) has a
-  // seam to hang that on without another signature change at every call site.
-  return workspaceResourceAccess(row, ctx).canMutate;
+  // value. `capability` stays a parameter so the next capability that needs
+  // to diverge (as `comment` above did) has a seam to hang that on without
+  // another signature change at every call site.
+  return access.canMutate;
 }
 
 /**
@@ -253,6 +281,50 @@ export type BoundWorkspaceResourceMutationGate = (
   resourceId: string,
   capability: WorkspaceResourceMutationCapability,
 ) => boolean;
+
+/**
+ * Whether `req` proves write authority over `resourceId` — the same decision
+ * `enforceWorkspaceResourceMutation` makes, without turning the answer into an
+ * HTTP error.
+ *
+ * For a READ route that writes as a side effect. The version-history GET
+ * bootstraps a baseline version whenever a file has no manifest yet
+ * (`ensureCurrentProjectFileVersion`), and on a member's mirror of someone
+ * else's shared project that write is doubly wrong: it writes into a project
+ * whose own banner says the member cannot modify it, and the version it
+ * creates then presents itself as the owner's history even though the owner's
+ * real history can never be there — `.file-versions` is in
+ * `MEMBER_MIRROR_EXCLUDED_ENTRIES`, so a mirror never receives it. Measured
+ * live (2026-07-27): owner 4 versions, member's panel 1, timestamped at the
+ * moment the member opened the panel.
+ *
+ * The read itself stays open. Browsing history is a read action and the entry
+ * point is deliberately un-gated (飞书 recvq56vFjQKfT); this answers only
+ * "may this read leave a write behind?", never "may this caller read?".
+ *
+ * Fail-open on absent or unrecognized identity, which is where it deliberately
+ * DIVERGES from `enforceWorkspaceResourceMutation`: that gate 401s a headerless
+ * caller on a bound resource, because a mutation must prove membership. Here
+ * the same absence must NOT suppress the bootstrap, or every legacy client,
+ * `od` CLI invocation, and signed-out read would silently lose version history
+ * for no security gain — the suppressed write is local-only either way
+ * (`.file-versions` never publishes). Only an authenticated "this member
+ * cannot write here" suppresses it.
+ */
+export function requestCanMutateWorkspaceResource(
+  req: any,
+  getWorkspaceResource: (db: unknown, workspaceId: string, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  db: unknown,
+  resourceId: string,
+  getLastKnownMembership?: GetLastKnownWorkspaceMembership,
+): boolean {
+  const requestCtx = workspaceResourceContextFromRequest(req);
+  if (requestCtx === null || requestCtx === 'missing') return true;
+  const ctx = withLastKnownMembership(requestCtx, getLastKnownMembership);
+  const row = getWorkspaceResource(db, ctx.workspaceId, resourceId);
+  if (!row) return true;
+  return workspaceResourceAccess(row, ctx).canMutate;
+}
 
 export function enforceWorkspaceResourceMutation(
   resourceType: string,

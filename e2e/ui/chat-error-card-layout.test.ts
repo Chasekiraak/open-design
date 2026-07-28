@@ -116,6 +116,7 @@ async function expectActionsContained(
   card: Locator,
   primaryAction: Locator,
   retryAction: Locator,
+  options: { sameRow?: boolean } = {},
 ) {
   await expect(primaryAction).toBeVisible();
   await expect(retryAction).toBeVisible();
@@ -144,6 +145,7 @@ async function expectActionsContained(
         return {
           left: rect.left,
           right: rect.right,
+          top: rect.top,
           width: rect.width,
           height: rect.height,
         };
@@ -165,15 +167,18 @@ async function expectActionsContained(
     expect(button.left).toBeGreaterThanOrEqual(layout.cardLeft);
     expect(button.right).toBeLessThanOrEqual(layout.cardRight);
   }
+  if (options.sameRow) {
+    expect(layout.buttons[0]?.top).toBe(layout.buttons[1]?.top);
+  }
 }
 
 test('[P1] zh-CN balance recovery actions stay inside a narrow ChatPane', async ({ page }) => {
   await seedBalanceFailure(page, 'zh-CN');
 
   const card = runErrorCard(page);
-  const recharge = card.getByRole('button', { name: '为 Open Design Cloud 充值' });
+  const recharge = card.getByRole('button', { name: '充值' });
   const retry = card.getByRole('button', { name: '重试' });
-  await expectActionsContained(card, recharge, retry);
+  await expectActionsContained(card, recharge, retry, { sameRow: true });
 });
 
 test('[P1] expanded English balance actions stay inside a narrow ChatPane', async ({ page }) => {

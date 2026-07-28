@@ -25,10 +25,28 @@ export {
 const deeplinkDispatcher = createInviteDeeplinkDispatcher();
 let secondInstanceHandlerRegistered = false;
 
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  deeplinkDispatcher.dispatch(url);
-});
+/**
+ * Attach the macOS `open-url` handler at import time rather than inside
+ * {@link registerInviteDeeplink}: registration only happens late in bootstrap
+ * (after `app.whenReady()`), while a cold start through the deeplink delivers
+ * `open-url` well before that. The dispatcher queues until deps arrive, so
+ * listening this early is what makes the cold-start hand-off work at all.
+ *
+ * Importing this module must nevertheless stay side-effect-safe outside
+ * Electron: `apps/desktop/src/main/index.ts` re-exports pure helpers that unit
+ * tests import directly, and in a plain Node process the `electron` entry
+ * resolves to the binary-path shim that has no `app`. Attaching unconditionally
+ * would turn every such import into a TypeError at module load.
+ */
+function attachOpenUrlListenerWhenHosted(): void {
+  if (typeof app?.on !== "function") return;
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    deeplinkDispatcher.dispatch(url);
+  });
+}
+
+attachOpenUrlListenerWhenHosted();
 
 /**
  * Register the `opendesign://` scheme and wire the OS deeplink events to

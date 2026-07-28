@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectView, mergeSavedPreviewComment } from '../../src/components/ProjectView';
 import type { SettingsSection } from '../../src/components/SettingsDialog';
+import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
 import type {
   AgentInfo,
   AppConfig,
@@ -43,6 +45,23 @@ const saveTabs = vi.fn();
 const playSound = vi.fn();
 const showCompletionNotification = vi.fn();
 const analyticsTrackMock = vi.fn();
+const workspaceScopeMocks = vi.hoisted(() => ({
+  ambientContext: null as WorkspaceCollabContext | null,
+  projectScope: {
+    loading: false,
+    scope: {
+      kind: 'personal' as const,
+      projectId: 'project-1',
+      workspaceId: 'workspace-personal',
+      visibility: 'personal' as const,
+      context: {
+        workspaceId: 'workspace-personal',
+        workspaceMemberId: 'member-personal',
+        workspaceType: 'personal',
+      } as WorkspaceCollabContext & { workspaceType: 'personal' },
+    },
+  } as ProjectWorkspaceScopeState,
+}));
 
 vi.mock('../../src/analytics/provider', () => ({
   useAnalytics: () => ({
@@ -61,6 +80,27 @@ vi.mock('../../src/i18n', () => ({
 
 vi.mock('../../src/providers/anthropic', () => ({
   streamMessage: (...args: unknown[]) => streamMessage(...args),
+}));
+
+vi.mock('../../src/collab/useWorkspaceContext', () => ({
+  useWorkspaceContext: () => ({
+    context: workspaceScopeMocks.ambientContext,
+    loading: false,
+  }),
+  useWorkspaceBilling: () => null,
+}));
+
+vi.mock('../../src/collab/useProjectWorkspaceScope', () => ({
+  useProjectWorkspaceScope: () => workspaceScopeMocks.projectScope,
+  projectWorkspaceContext: (scope: ProjectWorkspaceScopeState['scope']) =>
+    scope?.kind === 'personal' || scope?.kind === 'team'
+      ? scope.context
+      : null,
+  projectWorkspaceScopeReady: (scope: ProjectWorkspaceScopeState['scope']) =>
+    scope?.kind === 'unbound' || scope?.kind === 'personal' || scope?.kind === 'team',
+  projectWorkspaceScopeAuthorizesAmr: (
+    scope: ProjectWorkspaceScopeState['scope'],
+  ) => scope?.kind === 'personal' || scope?.kind === 'team',
 }));
 
 vi.mock('../../src/providers/daemon', () => ({
@@ -505,6 +545,46 @@ const createdConversation: Conversation = {
   updatedAt: 2,
 };
 
+type TeamProjectWorkspaceContext = Extract<
+  NonNullable<ProjectWorkspaceScopeState['scope']>,
+  { kind: 'team' }
+>['context'];
+
+function teamWorkspaceContext(
+  workspaceId: string,
+  workspaceMemberId: string,
+): TeamProjectWorkspaceContext {
+  return {
+    workspaceId,
+    workspaceType: 'team',
+    workspaceMemberId,
+    role: 'member',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: 'team_pro',
+    providerMode: 'platform_credits',
+    seatSummary: {
+      seatLimit: 5,
+      usedSeats: 2,
+      availableSeats: 3,
+      isSeatFull: false,
+    },
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    teamId: workspaceId,
+    teamName: workspaceId,
+  };
+}
+
 const runningAssistant: ChatMessage = {
   id: 'assistant-a',
   role: 'assistant',
@@ -570,6 +650,21 @@ describe('ProjectView conversation run isolation', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    workspaceScopeMocks.ambientContext = null;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'personal',
+        projectId: project.id,
+        workspaceId: 'workspace-personal',
+        visibility: 'personal',
+        context: {
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
+          workspaceType: 'personal',
+        } as WorkspaceCollabContext & { workspaceType: 'personal' },
+      },
+    };
     resolveConversationBMessages = null;
     conversationAMessages = [runningAssistant];
     listConversations.mockResolvedValue(conversations);
@@ -656,6 +751,211 @@ describe('ProjectView conversation run isolation', () => {
         conversationId: 'conv-b',
         locale: 'zh-CN',
       }),
+    );
+  });
+
+  it.each([
+    ['an old daemon', 'unsupported' as const],
+    ['a revoked scope response', 'forbidden' as const],
+    ['a workspace-directory outage', 'unavailable' as const],
+  ])('keeps non-AMR runs available with %s', async (_label, failure) => {
+    conversationAMessages = [];
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: null,
+      failure,
+    };
+
+    renderProjectView();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('send-message')).toHaveProperty(
+        'disabled',
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('send-message'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    [
+      'an unbound project',
+      {
+        loading: false,
+        scope: {
+          kind: 'unbound' as const,
+          projectId: project.id,
+          workspaceId: null,
+          context: null,
+        },
+      },
+    ],
+    [
+      'an old daemon',
+      { loading: false, scope: null, failure: 'unsupported' as const },
+    ],
+    [
+      'a workspace-directory outage',
+      { loading: false, scope: null, failure: 'unavailable' as const },
+    ],
+  ])('fails closed for AMR with %s', async (_label, projectScope) => {
+    conversationAMessages = [];
+    workspaceScopeMocks.projectScope = projectScope;
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      project,
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    expect(screen.getByTestId('send-message')).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByTestId('send-message'));
+    expect(streamViaDaemon).not.toHaveBeenCalled();
+  });
+
+  it('uses the project-bound workspace instead of the ambient workspace for run authorization', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+
+    renderProjectView(config, { ...project, workspaceId: workspaceA.workspaceId });
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        workspaceContext: workspaceA,
+      }),
+    );
+  });
+
+  it('checks the project-bound team wallet instead of the ambient workspace wallet', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+    // A team-scoped preflight only accepts a wallet whose epoch is proven for
+    // the exact workspace/member it asked about: the daemon must echo a fresh
+    // `workspaceRuntime` plus the `authoritativeWorkspaceRead` that proves this
+    // very response completed the requested refresh (e65b168c3). Anything less
+    // fails closed, so the fixture has to speak that shape.
+    const observedAt = '2026-07-26T00:00:00.000Z';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/workspace/billing')) {
+        const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+        const workspaceMemberId = workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b';
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            workspaceId,
+            workspaceMemberId,
+            balanceUsd: '10.00',
+            billingScopeVersion: 2,
+            expiresAt: null,
+            updatedAt: observedAt,
+          },
+          workspaceRuntime: {
+            workspaceId,
+            workspaceMemberId,
+            status: 'fresh',
+            revision: '4',
+            observedAt,
+            softExpiresAt: '2099-07-26T00:00:30.000Z',
+            hardExpiresAt: '2099-07-26T00:02:00.000Z',
+            retryAt: null,
+            errorCode: null,
+            reason: 'authoritative-action-read',
+            sourceGapDetected: false,
+          },
+          authoritativeWorkspaceRead: {
+            workspaceId,
+            workspaceMemberId,
+            observedAt,
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      { ...project, workspaceId: workspaceA.workspaceId },
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`workspaceId=${encodeURIComponent(workspaceA.workspaceId)}`),
+      { cache: 'no-store' },
+    );
+    // The ambient workspace must never be consulted for a project bound to
+    // another one, and the run has to spawn under the same workspace the
+    // wallet was checked against.
+    const billingUrls = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes('/api/workspace/billing'));
+    expect(billingUrls.length).toBeGreaterThan(0);
+    expect(
+      billingUrls.filter((url) =>
+        url.includes(`workspaceId=${encodeURIComponent(workspaceB.workspaceId)}`),
+      ),
+    ).toHaveLength(0);
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceContext: workspaceA }),
     );
   });
 
@@ -1089,14 +1389,24 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
 
     fireEvent.click(screen.getByTestId('workspace-focus-mode'));
-    await waitFor(() =>
-      expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(true),
-    );
+    // Focus mode hides the collapsed chat visually only: the native `hidden`
+    // attribute would drop the first grid item and shift FileWorkspace into
+    // the handle track, so the slot keeps its box and is marked `aria-hidden`
+    // once the collapse settles (3284f36c0).
+    await waitFor(() => {
+      const chatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+      expect(chatSlot?.getAttribute('aria-hidden')).toBe('true');
+      expect(chatSlot?.classList.contains('split-chat-slot-hidden')).toBe(true);
+      expect(chatSlot?.hasAttribute('hidden')).toBe(false);
+    });
     fireEvent.click(screen.getByTestId('workspace-open-comments'));
     fireEvent.click(screen.getByTestId('workspace-send-comment'));
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
-    expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(false);
+    const restoredChatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+    expect(restoredChatSlot?.hasAttribute('aria-hidden')).toBe(false);
+    expect(restoredChatSlot?.classList.contains('split-chat-slot-hidden')).toBe(false);
+    expect(restoredChatSlot?.hasAttribute('hidden')).toBe(false);
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 'conv-b',
       projectId: 'project-1',

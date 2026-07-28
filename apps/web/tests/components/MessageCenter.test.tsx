@@ -31,9 +31,9 @@ function mockFetch(
   }));
 }
 
-function renderMessageCenter() {
+function renderMessageCenter(locale: 'en' | 'zh-CN' = 'en') {
   const onOpenNotificationSettings = vi.fn();
-  const result = render(<I18nProvider initial="en"><MessageCenter onOpenNotificationSettings={onOpenNotificationSettings}/></I18nProvider>);
+  const result = render(<I18nProvider initial={locale}><MessageCenter onOpenNotificationSettings={onOpenNotificationSettings}/></I18nProvider>);
   return { ...result, onOpenNotificationSettings };
 }
 
@@ -64,6 +64,20 @@ afterEach(() => {
 });
 
 describe('MessageCenter', () => {
+  it('formats published dates using the selected locale', async () => {
+    const publishedAt = new Date(defaultMessages[0]!.publishedAt);
+    const zhDate = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(publishedAt);
+    const enDate = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(publishedAt);
+    renderMessageCenter('zh-CN');
+    fireEvent.click(screen.getByTestId('message-center-trigger'));
+
+    await waitFor(() => {
+      expect(screen.getByText(zhDate)).toBeTruthy();
+    });
+    expect(zhDate).not.toBe(enDate);
+    expect(screen.queryByText(enDate)).toBeNull();
+  });
+
   it('renders API messages for anonymous clients without a local window', async () => {
     renderMessageCenter();
     const dialog = await openCenter();
@@ -298,6 +312,34 @@ describe('MessageCenter', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByText('No messages yet')).toBeTruthy());
     expect(messageRequests).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders cached messages when a published date is invalid', async () => {
+    const cachedMessages = [
+      {
+        ...defaultMessages[0]!,
+        id: 'invalid-date',
+        title: 'Cached update',
+        body: 'Cached body remains visible.',
+        publishedAt: 'not-a-date',
+        readAt: null,
+        ctaLabel: null,
+        ctaUrl: null,
+      },
+    ] satisfies MessageCenterMessage[];
+    localStorage.setItem('open-design.message-center.anonymous-started-at.v1', '2026-07-16T00:00:00.000Z');
+    localStorage.setItem('open-design.message-center.anonymous-messages.v1', JSON.stringify(cachedMessages));
+    localStorage.setItem('open-design.message-center.anonymous-read-ids.v1', JSON.stringify([]));
+    mockFetch({
+      onMessages: async () => new Response(null, { status: 500 }),
+    });
+
+    renderMessageCenter();
+    const dialog = await openCenter(1);
+
+    expect(within(dialog).getByText('Cached update')).toBeTruthy();
+    expect(within(dialog).getByText('Cached body remains visible.')).toBeTruthy();
+    expect(dialog.querySelector('time')).toBeNull();
   });
 
   it('hydrates cached anonymous state through the ref-backed source of truth', async () => {

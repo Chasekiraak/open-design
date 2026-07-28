@@ -39,10 +39,42 @@ export type OpenDesignHostActionResult =
   | { ok: true }
   | OpenDesignHostFailure;
 
+/**
+ * The workspace attribution the renderer gives the host so a folder import
+ * lands in the caller's current workspace instead of the host's ambient one.
+ *
+ * This is a deliberate structural subset of the daemon/web
+ * `WorkspaceCollabContext`, redeclared here rather than imported: this package
+ * is the renderer host-bridge wire contract and must stay independent of the
+ * daemon/web contracts package (enforced by the "stays independent from
+ * daemon/web contracts" test). A full `WorkspaceCollabContext` is structurally
+ * assignable to this type, so callers pass theirs unchanged.
+ *
+ * Only the fields the host actually forwards are modelled, and the enum-like
+ * fields stay `string` because the host treats them as opaque pass-through
+ * values — the daemon remains the authority that parses and validates them.
+ * Deliberately no index signature: an interface never satisfies one, so adding
+ * it would reject the very `WorkspaceCollabContext` callers pass. Callers hand
+ * over a variable, not a fresh literal, so the extra fields ride along fine.
+ */
+export type OpenDesignHostWorkspaceContext = {
+  lifecycleState: string;
+  memberStatus: string;
+  permissions: {
+    canShareProjects: boolean;
+    canWriteSyncedFiles: boolean;
+  };
+  role: string;
+  workspaceId: string;
+  workspaceMemberId: string;
+  workspaceType: string;
+};
+
 export type OpenDesignHostProjectImportInit = {
   designSystemId?: string | null;
   name?: string;
   skillId?: string | null;
+  workspaceContext?: OpenDesignHostWorkspaceContext | null;
 };
 
 export type OpenDesignHostProjectImportSuccess = {
@@ -124,6 +156,7 @@ export type OpenDesignHostAppearanceTheme =
 
 export const OPEN_DESIGN_HOST_UPDATER_ACTIONS = Object.freeze({
   CHECK: "check",
+  CLEAR_CACHE: "clear-cache",
   DOWNLOAD: "download",
   INSTALL: "install",
   QUIT: "quit",
@@ -233,7 +266,7 @@ export type OpenDesignHostUpdaterIncomingSnapshot = {
   version: string;
 };
 
-export type OpenDesignHostUpdaterCacheLifecycleTrigger = "cold-start" | "next-version-ready";
+export type OpenDesignHostUpdaterCacheLifecycleTrigger = "cold-start" | "manual" | "next-version-ready";
 
 export type OpenDesignHostUpdaterReleaseLifecycleState =
   | "cleanup-deferred"
@@ -261,6 +294,24 @@ export type OpenDesignHostUpdaterCacheSnapshot = {
   lifecycle?: OpenDesignHostUpdaterCacheLifecycleSummary;
 };
 
+export type OpenDesignHostUpdaterReinstallReason =
+  | "launcher-schema"
+  | "outer-below-min"
+  | "outer-version-unreadable";
+
+/**
+ * Present when the release feed requires a full installer reinstall instead of
+ * an in-place payload update. `installedVersion` is the physically installed
+ * outer package version; `url` is an optional operator-supplied explanation
+ * link.
+ */
+export type OpenDesignHostUpdaterReinstallSnapshot = {
+  installedVersion?: string;
+  minVersion?: string;
+  reason: OpenDesignHostUpdaterReinstallReason;
+  url?: string;
+};
+
 export type OpenDesignHostUpdaterStatusSnapshot = {
   active?: OpenDesignHostUpdaterReleaseSnapshot;
   arch: string;
@@ -283,6 +334,7 @@ export type OpenDesignHostUpdaterStatusSnapshot = {
   paths?: OpenDesignHostUpdaterPathSnapshot;
   platform: string;
   progress?: OpenDesignHostUpdaterProgressSnapshot;
+  reinstall?: OpenDesignHostUpdaterReinstallSnapshot;
   state: OpenDesignHostUpdaterState;
   supported: boolean;
 };
@@ -340,6 +392,7 @@ export type OpenDesignHostBridge = {
   };
   updater: {
     check(options?: OpenDesignHostUpdaterActionOptions): Promise<OpenDesignHostUpdaterStatusSnapshot>;
+    "clear-cache"(options?: OpenDesignHostUpdaterActionOptions): Promise<OpenDesignHostUpdaterStatusSnapshot>;
     download(options?: OpenDesignHostUpdaterActionOptions): Promise<OpenDesignHostUpdaterStatusSnapshot>;
     install(options?: OpenDesignHostUpdaterActionOptions): Promise<OpenDesignHostUpdaterStatusSnapshot>;
     quit(options?: OpenDesignHostUpdaterActionOptions): Promise<OpenDesignHostActionResult>;

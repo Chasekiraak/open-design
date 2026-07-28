@@ -123,4 +123,22 @@ describe('useWorkspaceContext sign-in refresh', () => {
 
     await settleAll(SIGNED_IN);
   });
+
+  it.each([
+    [404, 'unsupported'],
+    [503, 'unavailable'],
+  ] as const)(
+    'distinguishes an old daemon (%s) from an unavailable workspace service',
+    async (status, failure) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async () => new Response(null, { status })),
+      );
+      const { result } = renderHook(() => useWorkspaceContext());
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.context).toBeNull();
+      expect(result.current.failure).toBe(failure);
+    },
+  );
 });

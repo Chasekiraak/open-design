@@ -126,6 +126,37 @@ describe('i18n locales', () => {
     }
   });
 
+  it('keeps the recharge recovery action concise enough to sit beside retry', async () => {
+    const expected: Record<Locale, string> = {
+      ar: 'شحن',
+      de: 'Aufladen',
+      en: 'Top up',
+      'es-ES': 'Recargar',
+      fa: 'شارژ',
+      fr: 'Recharger',
+      hu: 'Feltöltés',
+      id: 'Isi ulang',
+      it: 'Ricarica',
+      ja: 'チャージ',
+      ko: '충전',
+      pl: 'Doładuj',
+      'pt-BR': 'Recarregar',
+      ru: 'Пополнить',
+      th: 'เติมเงิน',
+      tr: 'Bakiye yükle',
+      uk: 'Поповнити',
+      'zh-CN': '充值',
+      'zh-TW': '儲值',
+    };
+
+    for (const locale of LOCALES) {
+      const dict = await loadDict(locale);
+      expect(dict['chat.amrError.rechargeCta'], `${locale}.chat.amrError.rechargeCta`).toBe(
+        expected[locale],
+      );
+    }
+  });
+
   it('keeps Indonesian connector settings copy translated instead of falling back to English', () => {
     const translatedKeys: Array<keyof Dict> = [
       'settings.connectorsNavHint',
