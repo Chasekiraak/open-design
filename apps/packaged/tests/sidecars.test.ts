@@ -510,8 +510,24 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect(env.OD_VELA_WEB_URL).toBe('https://amr-feature.powerformer.net');
   });
 
-  it('leaves the workspace-team transport off for non-feature-test builds', () => {
-    for (const amrProfile of ['prod', 'test', null] as const) {
+  it('enables the vela-cli workspace-team transport for a test build', () => {
+    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+      appVersion: null,
+      amrProfile: 'test',
+      daemonCliEntry: null,
+      legacyDataDir: null,
+      requireDesktopAuth: true,
+    });
+    expect(env.OPEN_DESIGN_AMR_PROFILE).toBe('test');
+    expect(env.OD_WORKSPACE_CONTEXT_SOURCE).toBe('vela');
+    expect(env.OD_TEAM_PROJECTS_TRANSPORT).toBe('vela-cli');
+    expect(env.OD_COLLAB_TRANSPORT).toBe('vela-cli');
+    expect(env.OD_RESOURCE_TRANSPORT).toBe('vela-cli');
+    expect(env.OD_VELA_WEB_URL).toBe('https://vela.powerformer.net');
+  });
+
+  it('leaves the workspace-team transport off for builds without a workspace-team backend', () => {
+    for (const amrProfile of ['prod', 'local', null] as const) {
       const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
         appVersion: null,
         amrProfile,

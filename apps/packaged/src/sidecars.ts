@@ -397,6 +397,44 @@ export function resolvePackagedChildBaseEnv(
     : mergeProxyAwareEnv(process.platform, forwardedEnv);
 }
 
+/**
+ * AMR profiles whose vela backend has the workspace-team feature deployed,
+ * mapped to that profile's vela web origin.
+ *
+ * A packaged build turns the vela-cli workspace transports on only when its
+ * baked AMR profile appears here. Every other profile — `prod` above all —
+ * leaves team projects / collab / resource sharing dormant, which is what keeps
+ * an unreleased feature out of production builds. Add a profile here only once
+ * its backend actually serves the workspace-team API.
+ *
+ * The vela API/Link endpoints themselves are NOT set here: the daemon resolves
+ * them from the AMR profile via the vela CLI. The web origin is the exception —
+ * the daemon derives the workspace-settings / members / dashboard console links
+ * (shown in the nav for owner/admin) from `OD_VELA_WEB_URL`, and without it
+ * those entries stay hidden even for the owner.
+ */
+const WORKSPACE_TEAM_VELA_WEB_ORIGIN_BY_AMR_PROFILE = new Map<string, string>([
+  ["feature-test", "https://amr-feature.powerformer.net"],
+  ["test", "https://vela.powerformer.net"],
+]);
+
+function workspaceTeamTransportEnv(
+  amrProfile: string | null | undefined,
+): Record<string, string> {
+  const webOrigin =
+    amrProfile == null
+      ? undefined
+      : WORKSPACE_TEAM_VELA_WEB_ORIGIN_BY_AMR_PROFILE.get(amrProfile);
+  if (webOrigin == null) return {};
+  return {
+    OD_WORKSPACE_CONTEXT_SOURCE: "vela",
+    OD_TEAM_PROJECTS_TRANSPORT: "vela-cli",
+    OD_COLLAB_TRANSPORT: "vela-cli",
+    OD_RESOURCE_TRANSPORT: "vela-cli",
+    OD_VELA_WEB_URL: webOrigin,
+  };
+}
+
 function createPackagedDaemonManagedPathEnv(
   paths: PackagedNamespacePaths,
 ): PackagedDaemonManagedPathEnv {
@@ -461,27 +499,7 @@ export function buildPackagedDaemonSpawnEnv(
     ...(options.amrProfile == null || options.amrProfile.length === 0
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
-    // Enable the vela-cli workspace-team transport for feature-test builds. That
-    // AMR profile targets the amr-feature backend where the team workspace
-    // feature is deployed, so the packaged app can drive team projects / collab /
-    // resource sharing there (the daemon otherwise leaves the transport off, and
-    // team features are dormant). Prod builds stay off until workspace-team ships
-    // to the prod backend; the vela endpoints themselves come from the AMR
-    // profile (feature-test => amr-feature) resolved in the daemon.
-    ...(options.amrProfile === "feature-test"
-      ? {
-          OD_WORKSPACE_CONTEXT_SOURCE: "vela",
-          OD_TEAM_PROJECTS_TRANSPORT: "vela-cli",
-          OD_COLLAB_TRANSPORT: "vela-cli",
-          OD_RESOURCE_TRANSPORT: "vela-cli",
-          // The daemon derives the workspace-settings / members / dashboard
-          // console links (shown in the nav for owner/admin) from OD_VELA_WEB_URL;
-          // without it those entries stay hidden even for the owner. This is the
-          // feature-test profile's web origin (mirrors the vela CLI's WebURL for
-          // feature-test).
-          OD_VELA_WEB_URL: "https://amr-feature.powerformer.net",
-        }
-      : {}),
+    ...workspaceTeamTransportEnv(options.amrProfile),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
     ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
     ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
