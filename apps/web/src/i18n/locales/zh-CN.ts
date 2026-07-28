@@ -4340,7 +4340,7 @@ export const zhCN: Dict = {
   "updater.restartAnyway": "仍然重启",
 
   "whatsNew.updatedTitle": "Open Design {version} 已更新",
-  "whatsNew.cta": "看看有什么新功能",
+  "whatsNew.cta": "查看更新说明",
 
   'designBrowser.copyScreenshot': '复制截图',
   'designBrowser.hardReload': '强制刷新',

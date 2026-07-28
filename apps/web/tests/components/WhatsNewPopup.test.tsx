@@ -227,7 +227,7 @@ describe('WhatsNewPopup actions', () => {
 
     await screen.findByTestId('whats-new-popup');
     expect(screen.getByTestId('whats-new-dismiss').textContent).toBe('Close');
-    expect(screen.getByTestId('whats-new-cta').textContent).toBe("See what's new");
+    expect(screen.getByTestId('whats-new-cta').textContent).toBe('View the release notes');
     // The fake surface's "Update now" CTA is gone: applying an update is the
     // real updater's job (UpdaterPopup), not this post-update card's.
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();

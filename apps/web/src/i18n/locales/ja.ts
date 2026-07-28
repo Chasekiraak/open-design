@@ -4092,7 +4092,7 @@ export const ja: Dict = {
   'updater.viewVersionFeatures': '新バージョンの機能を見る',
   'updater.manualDownload': '手動でダウンロード',
   'whatsNew.updatedTitle': 'Open Design {version} に更新しました',
-  'whatsNew.cta': '新機能を見る',
+  'whatsNew.cta': 'リリースノートを見る',
   'newsletter.label': 'ニュースレター（任意）',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

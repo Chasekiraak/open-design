@@ -4020,7 +4020,7 @@ export const uk: Dict = {
   'updater.viewVersionFeatures': 'Переглянути нові функції',
   'updater.manualDownload': 'Завантажити вручну',
   'whatsNew.updatedTitle': 'Open Design {version} уже тут',
-  'whatsNew.cta': 'Подивитися, що нового',
+  'whatsNew.cta': 'Переглянути примітки до випуску',
   'newsletter.label': 'Розсилка (необов’язково)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

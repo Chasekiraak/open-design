@@ -4154,7 +4154,7 @@ export const fr: Dict = {
   'updater.viewVersionFeatures': 'Découvrir les nouveautés',
   'updater.manualDownload': 'Télécharger manuellement',
   'whatsNew.updatedTitle': 'Open Design {version} est arrivé',
-  'whatsNew.cta': 'Voir les nouveautés',
+  'whatsNew.cta': 'Voir les notes de version',
   'newsletter.label': 'Newsletter (facultatif)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Modèle de mémoire',

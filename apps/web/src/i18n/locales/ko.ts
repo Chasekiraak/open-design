@@ -4092,7 +4092,7 @@ export const ko: Dict = {
   'updater.viewVersionFeatures': '새 버전 기능 보기',
   'updater.manualDownload': '직접 다운로드',
   'whatsNew.updatedTitle': 'Open Design {version}으로 업데이트되었습니다',
-  'whatsNew.cta': '새로운 기능 보기',
+  'whatsNew.cta': '릴리스 노트 보기',
   'newsletter.label': '뉴스레터(선택)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

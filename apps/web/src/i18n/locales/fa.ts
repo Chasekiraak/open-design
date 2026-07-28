@@ -4020,7 +4020,7 @@ export const fa: Dict = {
   'updater.viewVersionFeatures': 'مشاهده قابلیت‌های نسخه جدید',
   'updater.manualDownload': 'دانلود دستی',
   'whatsNew.updatedTitle': 'Open Design {version} آمد',
-  'whatsNew.cta': 'تازه‌ها را ببینید',
+  'whatsNew.cta': 'مشاهده یادداشت‌های انتشار',
   'newsletter.label': 'Newsletter (optional)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

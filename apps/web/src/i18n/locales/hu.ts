@@ -4092,7 +4092,7 @@ export const hu: Dict = {
   'updater.viewVersionFeatures': 'Új funkciók felfedezése',
   'updater.manualDownload': 'Kézi letöltés',
   'whatsNew.updatedTitle': 'Megjött az Open Design {version}',
-  'whatsNew.cta': 'Újdonságok megtekintése',
+  'whatsNew.cta': 'Kiadási megjegyzések megtekintése',
   'newsletter.label': 'Newsletter (optional)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

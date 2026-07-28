@@ -4092,7 +4092,7 @@ export const pl: Dict = {
   'updater.viewVersionFeatures': 'Poznaj nowe funkcje',
   'updater.manualDownload': 'Pobierz ręcznie',
   'whatsNew.updatedTitle': 'Open Design {version} jest już dostępny',
-  'whatsNew.cta': 'Zobacz nowości',
+  'whatsNew.cta': 'Zobacz informacje o wydaniu',
   'newsletter.label': 'Newsletter (opcjonalnie)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

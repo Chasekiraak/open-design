@@ -4154,7 +4154,7 @@ export const th: Dict = {
   'updater.viewVersionFeatures': 'ดูฟีเจอร์ใหม่',
   'updater.manualDownload': 'ดาวน์โหลดด้วยตนเอง',
   'whatsNew.updatedTitle': 'Open Design {version} มาแล้ว',
-  'whatsNew.cta': 'ดูว่ามีอะไรใหม่',
+  'whatsNew.cta': 'ดูบันทึกการอัปเดต',
   'newsletter.label': 'Newsletter (optional)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'โมเดลหน่วยความจำ',

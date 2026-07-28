@@ -4154,7 +4154,7 @@ export const id: Dict = {
   'updater.viewVersionFeatures': 'Lihat fitur versi baru',
   'updater.manualDownload': 'Unduh manual',
   'whatsNew.updatedTitle': 'Open Design {version} sudah hadir',
-  'whatsNew.cta': 'Lihat yang baru',
+  'whatsNew.cta': 'Lihat catatan rilis',
   'newsletter.label': 'Newsletter (optional)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

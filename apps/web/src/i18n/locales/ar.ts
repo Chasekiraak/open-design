@@ -4092,7 +4092,7 @@ export const ar: Dict = {
   'updater.viewVersionFeatures': 'استكشف ميزات الإصدار الجديد',
   'updater.manualDownload': 'تنزيل يدوي',
   'whatsNew.updatedTitle': 'وصل Open Design {version}',
-  'whatsNew.cta': 'شاهد الجديد',
+  'whatsNew.cta': 'عرض ملاحظات الإصدار',
   'newsletter.label': 'النشرة (اختياري)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',

@@ -4092,7 +4092,7 @@ export const ptBR: Dict = {
   'updater.viewVersionFeatures': 'Conhecer os novos recursos',
   'updater.manualDownload': 'Baixar manualmente',
   'whatsNew.updatedTitle': 'O Open Design {version} chegou',
-  'whatsNew.cta': 'Ver as novidades',
+  'whatsNew.cta': 'Ver as notas da versão',
   'newsletter.label': 'Newsletter (opcional)',
   'newsletter.placeholder': 'you@studio.com',
   'settings.memoryModelInlineLabel': 'Memory model',
