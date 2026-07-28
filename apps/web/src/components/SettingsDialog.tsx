@@ -4327,6 +4327,12 @@ export function SettingsDialog({
           <div className="settings-content" ref={settingsContentRef}>
           {activeSection === 'execution' ? (
             <>
+              {/* Sticky shell: the 本机 CLI / API 提供商 switch stays pinned
+                  while the agent list scrolls. The wrapper (not .seg-control
+                  itself) is sticky so it can paint an opaque full-width strip
+                  behind the pill — otherwise cards would show through around
+                  the pill's rounded corners mid-scroll. */}
+              <div className="settings-execution-sticky">
               <div
                 className="seg-control"
                 role="tablist"
@@ -4370,6 +4376,7 @@ export function SettingsDialog({
                   <span className="seg-meta">{t('settings.modeApi')}</span>
                 </button>
               </div>
+              </div>
               {cfg.mode === 'daemon' && amrCardStatus?.loggedIn !== true ? (
                 // Only prompt to sign into Open Design Cloud when NOT already
                 // signed in — the AMR/vela session IS the cloud identity (one
@@ -4392,6 +4399,7 @@ export function SettingsDialog({
                     initialStatus={amrCardStatus}
                     skipInitialRefresh
                     signInLabel={t('settings.cloudCalloutButton')}
+                    signInIcon="log-in"
                     amrEntrySourceDetail="settings_cloud_callout"
                     metricsConsent={cfg.telemetry?.metrics === true}
                     installationId={cfg.installationId}
@@ -4902,13 +4910,19 @@ export function SettingsDialog({
                                   </button>
                                 ) : null}
                               </div>
-                              {(a.diagnostics ?? []).map((diagnostic, i) => (
-                                <AgentDiagnosticRow
-                                  key={`${diagnostic.reason}-${i}`}
-                                  diagnostic={diagnostic}
-                                  handlers={diagnosticHandlers}
-                                />
-                              ))}
+                              {/* Diagnostics belong to the expanded card only:
+                                  collapsed cards all present the same compact
+                                  summary regardless of agent health. */}
+                              {active
+                                ? (a.diagnostics ?? []).map((diagnostic, i) => (
+                                    <AgentDiagnosticRow
+                                      key={`${diagnostic.reason}-${i}`}
+                                      diagnostic={diagnostic}
+                                      handlers={diagnosticHandlers}
+                                      className="agent-card-diagnostic"
+                                    />
+                                  ))
+                                : null}
                               {active ? renderAgentModelConfig(a) : null}
                             </div>
                           );
@@ -5773,10 +5787,6 @@ export function SettingsDialog({
                     </select>
                     <Icon name="chevron-down" size={14} />
                   </label>
-                </div>
-                <div className="settings-general-field">
-                  <span className="settings-general-label">{t('settings.appearance')}</span>
-                  <AppearanceSection cfg={cfg} setCfg={setCfg} />
                 </div>
               </div>
 

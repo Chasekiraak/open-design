@@ -74,7 +74,6 @@ function renderRail(context: WorkspaceCollabContext) {
         onViewChange={() => {}}
         onNewProject={() => {}}
         open
-        onClose={() => {}}
         context={context}
         billing={null}
       />

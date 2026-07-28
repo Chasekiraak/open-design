@@ -4346,6 +4346,9 @@ export const zhTW: Dict = {
 
   "whatsNew.cta": "看看有什麼新功能",
   "whatsNew.dismissAria": "關閉更新亮點",
+  "updateReminder.title": "Open Design {version} 已發布",
+  "updateReminder.notesLabel": "本次更新內容：",
+  "updateReminder.confirm": "立即更新",
 
   'designBrowser.copyScreenshot': '複製截圖',
   'designBrowser.hardReload': '強制重新整理',

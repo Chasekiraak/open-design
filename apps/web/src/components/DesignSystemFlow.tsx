@@ -1074,9 +1074,6 @@ export function DesignSystemCreationFlow({
               {t('dsCreate.back')}
             </Button>
           </div>
-          <span className="ds-setup-mark">
-            <Icon name="blocks" />
-          </span>
           <Button
             variant="primary"
             disabled={!hasCreationSource(state)}

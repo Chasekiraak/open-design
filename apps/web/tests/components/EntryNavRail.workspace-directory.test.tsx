@@ -74,7 +74,6 @@ function renderRail() {
         onViewChange={() => {}}
         onNewProject={() => {}}
         open
-        onClose={() => {}}
         context={teamContext()}
       />
     </I18nProvider>,

@@ -130,6 +130,13 @@ import { Icon } from './Icon';
 import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
 import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
+import { UpdateReminderDialog, UpdateReminderStrip } from './UpdateReminderDialog';
+import {
+  markUpdateReminderSeen,
+  markUpdateReminderUpdated,
+  readSeenUpdateReminderVersion,
+  readUpdatedUpdateReminderVersion,
+} from '../lib/update-reminder';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
   notifyTeamProjectsChanged,
@@ -519,6 +526,21 @@ function inactiveViewProps(active: boolean) {
   };
 }
 
+// Placeholder release payload for the update reminder. Real wiring should
+// derive version/notes from the updater release feed (see ../lib/updater);
+// until then this drives the dialog on the Community view and the collapsed
+// strip above the nav rail's account row.
+const UPDATE_REMINDER_DEMO = {
+  version: '1.4.6',
+  coverSrc: '/update-reminder-cover.jpg',
+  notes: [
+    'Faster canvas rendering with smoother pan and zoom',
+    'New community template filters and search',
+    'Fixes for project import and dark mode contrast',
+  ],
+};
+
+
 export function EntryShell({
   skills,
   designTemplates,
@@ -897,6 +919,50 @@ export function EntryShell({
   // route) and a reload, instead of snapping back to collapsed.
   const [railOpen, setRailOpen] = useState<boolean>(readStoredRailOpen);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+
+  // Update reminder lifecycle: 'dialog' (unseen version, shown on the
+  // Community view) → 'strip' (dismissed; collapses to the icon button above
+  // the nav rail's account row) → 'updating' (progress shown above the
+  // button) → 'hidden' (update finished). Transitions are persisted per
+  // version (see ../lib/update-reminder).
+  const [updateReminderStage, setUpdateReminderStage] =
+    useState<'hidden' | 'dialog' | 'strip' | 'updating'>('hidden');
+  const [updateReminderProgress, setUpdateReminderProgress] = useState(0);
+  useEffect(() => {
+    if (readUpdatedUpdateReminderVersion() === UPDATE_REMINDER_DEMO.version) return;
+    setUpdateReminderStage(
+      readSeenUpdateReminderVersion() === UPDATE_REMINDER_DEMO.version ? 'strip' : 'dialog',
+    );
+  }, []);
+  const collapseUpdateReminder = useCallback(() => {
+    markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
+    setUpdateReminderStage('strip');
+  }, []);
+  const confirmUpdateReminder = useCallback(() => {
+    markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
+    setUpdateReminderProgress(0);
+    setUpdateReminderStage('updating');
+  }, []);
+  // Simulated download progress until the reminder is wired to the real
+  // updater feed (see ../lib/updater): ease toward 100% in uneven steps so the
+  // bar reads like a live download rather than a linear animation.
+  useEffect(() => {
+    if (updateReminderStage !== 'updating') return;
+    const timer = window.setInterval(() => {
+      setUpdateReminderProgress((prev) =>
+        prev >= 100 ? 100 : Math.min(100, prev + Math.max(1, Math.round((100 - prev) * 0.14))),
+      );
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [updateReminderStage]);
+  useEffect(() => {
+    if (updateReminderStage !== 'updating' || updateReminderProgress < 100) return;
+    const done = window.setTimeout(() => {
+      markUpdateReminderUpdated(UPDATE_REMINDER_DEMO.version);
+      setUpdateReminderStage('hidden');
+    }, 600);
+    return () => window.clearTimeout(done);
+  }, [updateReminderStage, updateReminderProgress]);
 
   // ⌘K / Ctrl+K opens the project search palette — same as clicking the rail
   // search box.
@@ -1387,7 +1453,6 @@ export function EntryShell({
           }}
           onOpenSearch={() => setProjectSearchOpen(true)}
           open={railOpen}
-          onClose={() => setRailOpen(false)}
           context={workspaceContext}
           billing={workspaceBilling}
           balanceUsd={workspaceBalanceUsd}
@@ -1408,7 +1473,23 @@ export function EntryShell({
               workspaceLoading ? <RailAccountSyncTip /> : <CloudSignInTip />
             ) : null
           }
+          accountNotice={
+            updateReminderStage === 'strip' || updateReminderStage === 'updating' ? (
+              <UpdateReminderStrip
+                onConfirm={confirmUpdateReminder}
+                updating={updateReminderStage === 'updating'}
+                progress={updateReminderProgress}
+              />
+            ) : null
+          }
         />
+        {updateReminderStage === 'dialog' && view === 'community' ? (
+          <UpdateReminderDialog
+            content={UPDATE_REMINDER_DEMO}
+            onCancel={collapseUpdateReminder}
+            onConfirm={confirmUpdateReminder}
+          />
+        ) : null}
         {projectSearchOpen ? (
           <ProjectSearchModal
             // The same merged catalog as the All Projects grid (own + team-

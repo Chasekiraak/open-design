@@ -1,34 +1,26 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import type { AmrWalletSnapshot } from '@open-design/contracts';
 import { getResolvedDeviceId } from '../analytics/client';
 import { amrHandoffDeviceId, attributedAmrUrl, recordAmrEntry } from '../analytics/amr-attribution';
 import { useAnalytics } from '../analytics/provider';
 import { useT } from '../i18n';
 import { AgentIcon } from './AgentIcon';
 import { modelProviderIconSrc } from './modelProviderIcon';
-import { PlanBadge } from './PlanBadge';
 import { RemixIcon } from './RemixIcon';
 import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
 import { orderModelOptionsByAvailability } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode, ProviderModelOption } from '../types';
 import {
   canUpgradeVelaPlan,
-  fetchAmrWalletSnapshot,
   fetchVelaLoginStatus,
-  formatVelaBalanceUsd,
   type VelaLoginStatus,
 } from '../providers/daemon';
 import { openExternalUrl } from '../providers/registry';
-import {
-  amrPlansUrlForWorkspace,
-  amrWalletUrlForWorkspace,
-} from '../runtime/amr-guidance';
+import { amrPlansUrlForWorkspace } from '../runtime/amr-guidance';
 import { isMacPlatform } from '../utils/platform';
 import {
   useWorkspaceBillingResponse,
   useWorkspaceContext,
-  workspaceBillingBalanceUsd,
   workspaceBillingSnapshotForContext,
 } from '../collab/useWorkspaceContext';
 import {
@@ -61,17 +53,6 @@ interface Props {
    * workspace.
    */
   projectWorkspaceScope?: ProjectWorkspaceScopeState;
-}
-
-function displayAgentName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
-  return agent.id === 'amr' ? 'Open Design' : agent.name;
-}
-
-function displayAmrPlan(plan: string | null | undefined): string | null {
-  const normalized = plan?.trim().replace(/^team[_-]/i, '') ?? '';
-  return normalized
-    ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
-    : null;
 }
 
 /**
@@ -229,53 +210,30 @@ export function AvatarMenu({
     [agents],
   );
   const amrAvailable = amrAgent !== null;
-  // Only when Open Design IS the active agent. It used to show whenever AMR was
-  // merely installed, which was fine while the popover listed every agent — the
-  // row was one entry among many. Once #5517's shape dropped that list it became
-  // a lone header card, so selecting Codex still showed AMR's plan and balance.
-  const showAmrAccountRow =
-    config.mode === 'daemon' && amrAvailable && config.agentId === 'amr';
   const amrProfile = config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE;
 
-  // Fetch the live account (plan tier + wallet balance) when the popover opens,
-  // whenever the Open Design runtime is installed — so the Open Design account
-  // row can show the real plan/balance even when another agent is currently
-  // active.
+  // Fetch the live login status when the popover opens so plan-gated model
+  // rows route to the signed-in profile's workspace-scoped plans page (see
+  // openAmrUpgrade).
   const [amrAccount, setAmrAccount] = useState<VelaLoginStatus | null>(null);
-  const [amrWalletSnapshot, setAmrWalletSnapshot] =
-    useState<AmrWalletSnapshot | null>(null);
   useEffect(() => {
     if (!open || !amrAvailable) {
       setAmrAccount(null);
-      setAmrWalletSnapshot(null);
       return;
     }
     let cancelled = false;
     setAmrAccount(null);
-    setAmrWalletSnapshot(null);
     void fetchVelaLoginStatus()
-      .then(async (status) => {
-        if (cancelled) return;
-        setAmrAccount(status);
-        if (
-          status?.loggedIn &&
-          workspaceContext?.workspaceType !== 'team' &&
-          !formatVelaBalanceUsd(status.account?.balanceUsd)
-        ) {
-          const wallet = await fetchAmrWalletSnapshot();
-          if (!cancelled) setAmrWalletSnapshot(wallet);
-        }
+      .then((status) => {
+        if (!cancelled) setAmrAccount(status);
       })
       .catch(() => {
-        if (!cancelled) {
-          setAmrAccount(null);
-          setAmrWalletSnapshot(null);
-        }
+        if (!cancelled) setAmrAccount(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, amrAvailable, workspaceContext?.workspaceType]);
+  }, [open, amrAvailable]);
   const exactWorkspaceSnapshot = workspaceBillingSnapshotForContext(
     workspaceBillingResponse,
     workspaceContext,
@@ -291,35 +249,11 @@ export function AvatarMenu({
     : scopedPlanId ?? (amrAccount?.loggedIn
       ? amrAccount.account?.plan?.trim() || null
       : null);
-  const amrPlanDisplay = displayAmrPlan(amrPlanId);
-  const scopedWorkspaceBalance = formatVelaBalanceUsd(
-    workspaceBillingBalanceUsd(workspaceBillingResponse, workspaceContext),
-  );
-  const financialScopeResolved =
-    !projectWorkspaceScope || workspaceContext !== null;
-  const amrBalanceLabel =
-    amrAccount?.loggedIn &&
-    !workspaceContextLoading &&
-    financialScopeResolved
-    ? workspaceContext?.workspaceType === 'team'
-      ? scopedWorkspaceBalance
-      : projectWorkspaceScope
-        ? scopedWorkspaceBalance
-        : scopedWorkspaceBalance ??
-          formatVelaBalanceUsd(amrAccount.account?.balanceUsd) ??
-          (amrWalletSnapshot?.status === 'available'
-            ? formatVelaBalanceUsd(amrWalletSnapshot.balanceUsd)
-            : null)
-    : null;
   const amrResolvedProfile = amrAccount?.profile ?? amrProfile;
   const financialWorkspaceId =
     !workspaceContextLoading && workspaceContext?.workspaceId.trim()
       ? workspaceContext.workspaceId
       : null;
-  const amrWalletUrl = amrWalletUrlForWorkspace(
-    amrResolvedProfile,
-    financialWorkspaceId,
-  );
   const amrPlansUrl = amrPlansUrlForWorkspace(
     amrResolvedProfile,
     financialWorkspaceId,
@@ -334,7 +268,7 @@ export function AvatarMenu({
     amrPlansUrl !== null;
   const openAmrTarget = (
     targetUrl: string | null,
-    source: 'avatar_amr_console' | 'avatar_amr_upgrade',
+    source: 'avatar_amr_upgrade',
   ) => {
     if (!targetUrl) return;
     const attribution = recordAmrEntry(analytics.track, source, new Date(), {
@@ -347,11 +281,6 @@ export function AvatarMenu({
     });
     setOpen(false);
     void openExternalUrl(attributedAmrUrl(targetUrl, attribution, deviceId));
-  };
-  const handleAmrUpgradeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    event.preventDefault();
-    if (!amrCanUpgrade) return;
-    openAmrTarget(amrPlansUrl, 'avatar_amr_upgrade');
   };
   // Plan-gated models stay visible but are not selectable; clicking one routes
   // to the plans page instead of silently choosing a model the run would reject.
@@ -448,87 +377,6 @@ export function AvatarMenu({
           aria-label={t('avatar.title')}
           style={popoverStyle}
         >
-          {showAmrAccountRow && amrAgent ? (
-            <div
-              className={`avatar-item avatar-amr-row${
-                config.agentId === 'amr' ? ' active' : ''
-              }`}
-              data-testid="avatar-agent-option-amr"
-            >
-              <button
-                type="button"
-                className="avatar-amr-row__select"
-                aria-current={config.agentId === 'amr' ? 'true' : undefined}
-                onClick={() => {
-                  recordAmrEntry(
-                    analytics.track,
-                    'avatar_amr_agent_card',
-                    new Date(),
-                    { metricsConsent: config.telemetry?.metrics === true },
-                  );
-                  onAgentChange('amr');
-                }}
-              >
-                <AgentIcon id="amr" size={24} />
-                <span className="avatar-amr-row__text">
-                  <span className="avatar-amr-row__name-row">
-                    <span className="avatar-amr-row__name">
-                      {displayAgentName(amrAgent)}
-                    </span>
-                    <PlanBadge plan={amrPlanDisplay} size="md" />
-                  </span>
-                </span>
-              </button>
-              {amrBalanceLabel ? (
-                amrWalletUrl ? (
-                  <button
-                    type="button"
-                    className="avatar-amr-row__wallet"
-                    aria-label={`${t('settings.amrBalance')} ${amrBalanceLabel}`}
-                    onClick={() =>
-                      openAmrTarget(amrWalletUrl, 'avatar_amr_console')
-                    }
-                  >
-                    <span className="avatar-amr-row__subtitle" aria-hidden="true">
-                      <span className="avatar-amr-row__stat">
-                        <span className="avatar-amr-row__stat-label">
-                          {t('settings.amrBalance')}
-                        </span>
-                        <span className="avatar-amr-row__stat-value">
-                          {amrBalanceLabel}
-                        </span>
-                      </span>
-                    </span>
-                  </button>
-                ) : (
-                  <span className="avatar-amr-row__wallet avatar-amr-row__wallet--static">
-                    <span className="avatar-amr-row__subtitle">
-                      <span className="avatar-amr-row__stat">
-                        <span className="avatar-amr-row__stat-label">
-                          {t('settings.amrBalance')}
-                        </span>
-                        <span className="avatar-amr-row__stat-value">
-                          {amrBalanceLabel}
-                        </span>
-                      </span>
-                    </span>
-                  </span>
-                )
-              ) : null}
-              {amrCanUpgrade ? (
-                <a
-                  className="avatar-amr-row__upgrade"
-                  href={amrPlansUrl ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={handleAmrUpgradeClick}
-                >
-                  {t('settings.amrUpgrade')}
-                </a>
-              ) : null}
-            </div>
-          ) : null}
-
           {config.mode === 'daemon' ? (
             <>
               {hasSelectableModels && currentAgent ? (

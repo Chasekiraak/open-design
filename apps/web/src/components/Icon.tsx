@@ -55,6 +55,7 @@ export type IconName =
   | 'link'
   | 'lock'
   | 'mail'
+  | 'log-in'
   | 'log-out'
   | 'integrations-filled'
   | 'maximize'
@@ -166,6 +167,7 @@ const REMIX_ICON: Partial<Record<IconName, string>> = {
   lightbulb: 'lightbulb-line',
   link: 'link',
   lock: 'lock-line',
+  'log-in': 'login-circle-line',
   'log-out': 'logout-box-r-line',
   mail: 'mail-line',
   maximize: 'fullscreen-line',

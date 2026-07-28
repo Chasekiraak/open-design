@@ -227,11 +227,12 @@
    content area (recvqaZAbIdfz1). `.entry-main--scroll` (entry-layout.css) is
    already `position: relative` and is the tab's scroll pane, so anchoring
    there — same shape as `.workspace-toast-anchor` above — centers the toast
-   on that column and keeps it pinned near its bottom regardless of the
-   pane's own scroll position. */
+   on that column regardless of the pane's own scroll position. */
 .design-systems-toast-anchor {
   position: absolute;
-  inset: auto 24px 24px;
+  /* Pinned near the pane's TOP edge (product ask): feedback shows where the
+     eye already is after clicking a card action, clear of the footer. */
+  inset: 24px 24px auto;
   display: flex;
   justify-content: center;
   z-index: 60;
@@ -243,6 +244,7 @@
   transform: none;
   animation: none;
   pointer-events: auto;
+  border-radius: var(--radius-pill, 999px);
 }
 .design-systems-toast-anchor .od-toast.leaving {
   animation: none;

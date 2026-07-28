@@ -1762,7 +1762,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 })
               }
               onSubmenuOpen={(submenu) => {
-                if (submenu === 'toolbox') return;
+                // Home never passes the working-dir submenu (it keeps its own
+                // footer picker), so only the resource submenus reach here.
+                if (submenu === 'toolbox' || submenu === 'workingDir') return;
                 trackHomeChatComposerClick(analytics.track, {
                   page_name: 'home',
                   area: 'chat_composer',

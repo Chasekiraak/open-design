@@ -7252,9 +7252,6 @@ function PageCreatorDialog({
     ? (subcategoryCatalog[activeFacetSlug] ?? []).filter((option) => option.count > 0)
     : [];
   const showSubcategoryRow = !normalizedQuery && subcategoryOptions.length > 0;
-  const activeCategoryAllCount = displayablePresets.filter(
-    (preset) => pagePresetMatchesCategory(preset, category) && preset.source !== 'blank',
-  ).length;
   // Resolve the type chip shown on a card. Prefer the commercial category
   // ("品类") so the Create page cards read like the Community gallery and Home
   // example row (Genspark / Skywork reference), then fall back to the plugin's
@@ -7403,7 +7400,6 @@ function PageCreatorDialog({
                       label: pageCategoryLabel(category as ProjectPageKind, t),
                     })}
                   </span>
-                  <span className="page-creator-subcat-count">{activeCategoryAllCount}</span>
                 </button>
                 {subcategoryOptions.map((option) => (
                   <button
@@ -7415,7 +7411,6 @@ function PageCreatorDialog({
                     onClick={() => setSubcategory(option.slug)}
                   >
                     <span>{pluginSubfacetLabel(option.slug, option.label, t)}</span>
-                    <span className="page-creator-subcat-count">{option.count}</span>
                   </button>
                 ))}
               </div>

@@ -20,7 +20,6 @@ test('[P0] @critical home loads with the primary entry controls', async ({ page 
   await expect(page.getByTestId('workspace-home-rail-toggle')).toBeVisible();
   await expect(page.getByTestId('home-hero-input')).toBeVisible();
   await ensureRailOpen(page);
-  await expect(page.getByTestId('entry-nav-logo')).toBeVisible();
   await expect(page.getByTestId('entry-nav-home')).toHaveAttribute('aria-current', 'page');
   // #5517's rail has no "+ New project" button; project creation starts from
   // the composer, or from the Projects view's own CTA (see the modal spec below).

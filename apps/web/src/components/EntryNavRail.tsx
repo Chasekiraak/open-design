@@ -8,8 +8,9 @@
 //   • Account section (top) — real `context.displayName` + an account menu
 //     (settings / GitHub help / feature request / socials / sign out — theme and
 //     language live in 设置·通用 only, matching #5517).
-//     Falls back to the brand logo when there is no cloud identity
-//     (context === null).
+//     No header block when there is no cloud identity (context === null) —
+//     the rail starts at the search box; expand/collapse lives in the
+//     workspace tabs bar's pinned Home toggle.
 //   • Billing chip — real plan tier + explicitly scoped USD balance when Vela
 //     billing is available, with upgrade linking out to Vela Web.
 //   • Search box (opens the ⌘K project search palette via `onOpenSearch`).
@@ -94,8 +95,6 @@ interface Props {
   newProjectDisabled?: boolean;
   /** When false the rail is collapsed (hidden off-canvas) on the entry view. */
   open: boolean;
-  /** Collapse the rail — called when the user dismisses it (topbar toggle). */
-  onClose: () => void;
   /** The one shared workspace context; null → local (no cloud identity) state. */
   context: WorkspaceCollabContext | null;
   /** Account billing metadata (via the vela CLI 收口). Null → the billing
@@ -114,19 +113,26 @@ interface Props {
   footerExtra?: ReactNode;
   /** Optional notice shown above the footer controls. */
   footerNotice?: ReactNode;
+  /** Optional compact notice pinned directly above the account row (e.g. the
+   *  collapsed update-reminder strip). */
+  accountNotice?: ReactNode;
 }
 
 interface NavButtonProps {
   active?: boolean;
   ariaLabel: string;
-  tooltip: string;
+  label: string;
   onClick: () => void;
   disabled?: boolean;
   testId?: string;
   children: ReactNode;
 }
 
-function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, children }: NavButtonProps) {
+// No `data-tooltip` here: every nav item renders its label inline, so the
+// rail's hover bubble (entry-layout.css) would only duplicate visible text.
+// That bubble stays reserved for the rail's icon-only controls (updater,
+// avatar, icon-only sign-out).
+function NavButton({ active, ariaLabel, label, onClick, disabled, testId, children }: NavButtonProps) {
   return (
     <button
       type="button"
@@ -135,11 +141,10 @@ function NavButton({ active, ariaLabel, tooltip, onClick, disabled, testId, chil
       disabled={disabled}
       aria-label={ariaLabel}
       aria-current={active ? 'page' : undefined}
-      data-tooltip={tooltip}
       {...(testId ? { 'data-testid': testId } : {})}
     >
       <span className="entry-nav-rail__btn-icon" aria-hidden>{children}</span>
-      <span className="entry-nav-rail__btn-label">{tooltip}</span>
+      <span className="entry-nav-rail__btn-label">{label}</span>
     </button>
   );
 }
@@ -429,13 +434,13 @@ export function EntryNavRail({
   onOpenSearch,
   newProjectDisabled,
   open,
-  onClose,
   context,
   billing,
   balanceUsd,
   onOpenSettings,
   footerExtra,
   footerNotice,
+  accountNotice,
 }: Props) {
   const { t } = useI18n();
   const brandLabel = t('app.brand');
@@ -700,6 +705,7 @@ export function EntryNavRail({
             onMouseEnter={cancelAccountClose}
             onMouseLeave={scheduleAccountClose}
           >
+            {accountNotice}
             <button
               type="button"
               className="entry-nav-rail__account-trigger"
@@ -901,32 +907,7 @@ export function EntryNavRail({
               />
             ) : null}
           </div>
-        ) : (
-          <div className="entry-nav-rail__brand">
-            <button
-              type="button"
-              className="entry-nav-rail__local-logo"
-            onClick={() => selectView('home')}
-            aria-label={brandLabel}
-            data-testid="entry-nav-logo"
-          >
-            <span
-              className="entry-nav-rail__logo-img od-brand-glyph"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            className="entry-nav-rail__collapse"
-            onClick={onClose}
-            aria-label={t('entry.navCollapse')}
-            title={t('entry.navCollapse')}
-            data-testid="entry-nav-collapse"
-          >
-            <Icon name="panel-left" size={20} />
-          </button>
-          </div>
-        )}
+        ) : null}
 
         <button
           type="button"
@@ -943,7 +924,7 @@ export function EntryNavRail({
         <NavButton
           active={isHome}
           ariaLabel={homeLabel}
-          tooltip={homeLabel}
+          label={homeLabel}
           onClick={() => selectView('home')}
           testId="entry-nav-home"
         >
@@ -952,7 +933,7 @@ export function EntryNavRail({
         <NavButton
           active={view === 'community'}
           ariaLabel={communityLabel}
-          tooltip="Community"
+          label={communityLabel}
           onClick={() => selectView('community')}
           testId="entry-nav-community"
         >
@@ -1066,7 +1047,7 @@ export function EntryNavRail({
             <NavButton
               active={view === 'drafts'}
               ariaLabel={t('entry.navDrafts')}
-              tooltip={t('workspaceSwitcher.draftsTooltip')}
+              label={t('workspaceSwitcher.draftsTooltip')}
               onClick={() => selectView('drafts')}
               testId="entry-nav-drafts"
             >
@@ -1082,7 +1063,7 @@ export function EntryNavRail({
               <NavButton
                 active={view === 'all-projects'}
                 ariaLabel={t('entry.navAllProjects')}
-                tooltip={t('workspaceSwitcher.allProjectsTooltip')}
+                label={t('workspaceSwitcher.allProjectsTooltip')}
                 onClick={() => selectView('all-projects')}
                 testId="entry-nav-all-projects"
               >
@@ -1092,7 +1073,7 @@ export function EntryNavRail({
             <NavButton
               active={view === 'design-systems'}
               ariaLabel={t('entry.navDesignSystems')}
-              tooltip={t('entry.navDesignSystems')}
+              label={t('entry.navDesignSystems')}
               onClick={() => selectView('design-systems')}
               testId="entry-nav-design-systems"
             >
@@ -1101,7 +1082,7 @@ export function EntryNavRail({
             <NavButton
               active={view === 'plugins'}
               ariaLabel={t('entry.navPlugins')}
-              tooltip={t('entry.navPlugins')}
+              label={t('entry.navPlugins')}
               onClick={() => selectView('plugins')}
               testId="entry-nav-plugins"
             >
@@ -1119,7 +1100,6 @@ export function EntryNavRail({
                 href={workspaceSettingsUrl}
                 {...externalLinkProps}
                 aria-label={t('entry.navWorkspaceSettings')}
-                data-tooltip={t('entry.navWorkspaceSettings')}
                 data-testid="entry-nav-workspace-settings"
               >
                 <span className="entry-nav-rail__btn-icon" aria-hidden>
@@ -1134,7 +1114,7 @@ export function EntryNavRail({
             <NavButton
               active={view === 'design-systems'}
               ariaLabel={t('entry.navDesignSystems')}
-              tooltip={t('entry.navDesignSystems')}
+              label={t('entry.navDesignSystems')}
               onClick={() => selectView('design-systems')}
               testId="entry-nav-design-systems"
             >
@@ -1143,21 +1123,25 @@ export function EntryNavRail({
             <NavButton
               active={view === 'plugins'}
               ariaLabel={t('entry.navPlugins')}
-              tooltip={t('entry.navPlugins')}
+              label={t('entry.navPlugins')}
               onClick={() => selectView('plugins')}
               testId="entry-nav-plugins"
             >
               <Icon name="puzzle" size={16} />
             </NavButton>
-            {/* Signed-in workspace users keep Settings in the account menu.
-                Signed-out/local users have no account menu, so retain one
-                direct rail entry for local CLI and BYOK configuration. */}
+            {/* recvq4hGF7BJkI removed this entry while the rail footer still
+                carried EntryShell's `entry-settings-chip` for the signed-out
+                case. #5517 then dropped that chip (the footer only hosts the
+                updater popup now), and a signed-out rail has no account menu
+                either — leaving no settings entry at all. This item is the
+                ONLY signed-out settings entry (testId `entry-settings-button`
+                is the e2e contract); signed-in keeps settings in the account
+                menu, so it must not render on that branch. */}
             <NavButton
-              active={false}
-              ariaLabel={t('entry.openSettingsAria')}
-              tooltip={t('entry.openSettingsTitle')}
+              ariaLabel={t('entry.accountSettings')}
+              label={t('entry.accountSettings')}
               onClick={() => onOpenSettings?.()}
-              testId="entry-nav-settings"
+              testId="entry-settings-button"
             >
               <Icon name="settings" size={16} />
             </NavButton>

@@ -2040,32 +2040,19 @@
   background: var(--bg-subtle);
   color: var(--text);
 }
-/* Active filter uses the same tinted-fill + accent-text treatment as the
-   sidebar (`.page-creator-sidebar button.active`) and the home-hero subtype
-   chips. Avoid a solid-accent fill with white knockout text here: `--accent`
-   is app-chrome only and can be a light tone, which made the selected pill
-   read as blank white ("反白"). Accent text on a soft accent tint stays legible
-   regardless of the accent's lightness. */
+/* Active filter mirrors the Community selected-tab treatment: solid strong
+   fill under brand-green ink. Both tokens are theme-aware, and unlike a
+   solid-accent fill this can never read as blank white ("反白") — the strong
+   fill is always a deep tone. */
 .page-creator-subcat.active {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
-  color: var(--accent);
+  border-color: var(--text-strong);
+  background: var(--text-strong);
+  color: var(--brand, #87ea5c);
 }
 .page-creator-subcat.active:hover {
-  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-panel));
-  color: var(--accent);
-}
-.page-creator-subcat-count {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--text-faint);
-}
-.page-creator-subcat:hover .page-creator-subcat-count {
-  color: var(--text-muted);
-}
-.page-creator-subcat.active .page-creator-subcat-count {
-  color: color-mix(in srgb, var(--accent) 72%, transparent);
+  border-color: var(--text-strong);
+  background: color-mix(in srgb, var(--text-strong) 88%, var(--brand, #87ea5c));
+  color: var(--brand, #87ea5c);
 }
 .page-creator-grid {
   flex: 1 1 auto;
@@ -2372,10 +2359,12 @@
   background: var(--accent);
   color: var(--accent-contrast, #fff);
 }
+/* Hover keeps the solid fill but flips the label to brand-green ink — the
+   same black-fill/green-ink pairing as the Community selected tab. */
 .page-creator-use:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
-  color: var(--accent-contrast, #fff);
+  color: var(--brand, #87ea5c);
   box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--accent) 72%, transparent);
 }
 .page-creator-use:active:not(:disabled),

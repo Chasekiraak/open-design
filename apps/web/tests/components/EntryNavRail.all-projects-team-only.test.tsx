@@ -34,7 +34,6 @@ function renderRail(workspaceType: 'team' | 'personal') {
         onViewChange={() => {}}
         onNewProject={() => {}}
         open
-        onClose={() => {}}
         context={contextFor(workspaceType)}
       />
     </I18nProvider>,

@@ -1135,7 +1135,7 @@ export const zhCN: Dict = {
   "recentProjects.shareFailed": "转入团队空间失败，请稍后重试。",
   "recentProjects.shareOwnerConflict": "转入团队空间失败：该项目已由其他成员共享至团队空间。",
   "recentProjects.clearFilters": "清除筛选",
-  "pluginsHome.title": "Community",
+  "pluginsHome.title": "社区",
   "pluginsHome.subtitle":
     "当前运行环境内置的 Open Design 工作流。选择一个加载 starter prompt，或浏览插件市场查看更多。",
   "pluginsHome.browseRegistry": "浏览插件市场",
@@ -4341,6 +4341,9 @@ export const zhCN: Dict = {
 
   "whatsNew.cta": "看看有什么新功能",
   "whatsNew.dismissAria": "关闭更新亮点",
+  "updateReminder.title": "Open Design {version} 已发布",
+  "updateReminder.notesLabel": "本次更新内容：",
+  "updateReminder.confirm": "立即更新",
 
   'designBrowser.copyScreenshot': '复制截图',
   'designBrowser.hardReload': '强制刷新',

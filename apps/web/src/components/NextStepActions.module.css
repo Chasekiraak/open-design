@@ -79,6 +79,35 @@
 /* Featured design-toolbox follow-up rows — the toolbox's primary entry point
    now that it left the "+" menu. Each row reads as a suggested next step;
    hovering reveals a detail card, clicking seeds the composer. */
+/* Quick-access pills pinned above the action list: jump straight to the
+   composer "+" menu's 扩展 / 设计百宝箱 flyouts. */
+.quickPills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quickPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text-default);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    border-color 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.quickPill:hover {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+
 .toolboxList {
   display: flex;
   flex-direction: column;
