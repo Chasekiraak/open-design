@@ -152,6 +152,45 @@ async function fetchOdTargetOnce(
   });
 }
 
+/**
+ * Did the RENDERER walk away from this request?
+ *
+ * Rapid navigation (project page ⇄ Community) cancels the in-flight
+ * subresource requests of the page being left — that is Chromium working as
+ * designed, not a fault. It matters here because `fetchOdTargetOnce` forwards
+ * the incoming signal to the upstream, so a cancelled request rejects: without
+ * this check the retry loop treats it as a transient socket fault, re-issues a
+ * request whose signal is ALREADY aborted (so every remaining attempt fails
+ * instantly), and the handler then manufactures a 502 for a response nobody is
+ * going to read. Packaged 0.16.2-beta.139 logged 84 such "proxy fetch failed"
+ * warnings — all fonts, icons and a `presence/leave` POST, all clustered inside
+ * navigation bursts — which is pure noise masquerading as a gateway outage.
+ */
+function isClientCancelled(request: Request): boolean {
+  return request.signal?.aborted === true;
+}
+
+const OD_CLIENT_CANCELLED_STATUS = 499; // nginx's "Client Closed Request"
+
+/**
+ * A cancelled request still needs SOME response — rejecting would bubble to
+ * Electron's uncaught handler (the #895 dialog). Answer with a status that is
+ * honestly distinguishable from an upstream failure so logs and any consumer
+ * that does read it can tell "you cancelled this" from "the sidecar is down".
+ */
+function buildClientCancelledResponse(target: string): Response {
+  return new Response(
+    JSON.stringify({ error: "OD_PROTOCOL_CLIENT_ABORTED", target }),
+    {
+      status: OD_CLIENT_CANCELLED_STATUS,
+      headers: {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+      },
+    },
+  );
+}
+
 async function fetchOdTargetWithTransientRetry(
   request: Request,
   target: string,
@@ -169,6 +208,9 @@ async function fetchOdTargetWithTransientRetry(
       return await fetchOdTargetOnce(request, target, fetchImpl);
     } catch (error) {
       lastError = error;
+      // Retrying a request the client abandoned can only fail again, and each
+      // extra attempt is a misleading "proxy fetch failed" line in the log.
+      if (isClientCancelled(request)) break;
       if (attempt === attempts) break;
       const waitMs = backoffMs * attempt;
       // Main-process console output lands in the packaged desktop logs, so
@@ -244,6 +286,10 @@ export async function handleOdRequest(
   try {
     return await fetchOdTargetWithTransientRetry(request, target, fetchImpl, retryOptions);
   } catch (error) {
+    // A request the renderer cancelled is not a gateway failure — reporting it
+    // as 502 both lies in the logs and hands error-shaped JSON to any consumer
+    // that fails to check `res.ok`.
+    if (isClientCancelled(request)) return buildClientCancelledResponse(target);
     return buildProxyErrorResponse(error, target);
   }
 }

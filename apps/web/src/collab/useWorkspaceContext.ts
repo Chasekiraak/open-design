@@ -8,9 +8,9 @@ import type {
   WorkspaceCollabContext,
   WorkspaceContextResponse,
   WorkspaceInvalidationSsePayload,
-  WorkspaceTeamProjectsResponse,
 } from '@open-design/contracts';
 import { coalescedGet, forceCoalescedGet } from '../lib/coalesced-get';
+import { fetchTeamProjectsCatalog } from './team-projects-catalog';
 import { useWorkspaceInvalidation } from './workspace-events';
 import {
   createWorkspaceBillingInterestOwnerId,
@@ -914,15 +914,10 @@ export function useTeamProjects(): TeamProjectsState {
   // to that same change in one synchronous burst into a single fetch.
   const loadFull = useCallback(async (force = false) => {
     try {
-      const fetchProjects = async () => {
-        const res = await fetch('/api/workspace/projects/team');
-        if (!res.ok) throw new Error(`team-projects ${res.status}`);
-        const body = (await res.json()) as WorkspaceTeamProjectsResponse;
-        return body.projects ?? [];
-      };
-      const projects = force
-        ? await forceCoalescedGet('workspace-team-projects', fetchProjects)
-        : await coalescedGet('workspace-team-projects', fetchProjects);
+      // `fetchTeamProjectsCatalog` owns the endpoint, the coalescing key, and
+      // the array guarantee — see team-projects-catalog.ts for why those three
+      // must not be split across call sites again.
+      const projects = await fetchTeamProjectsCatalog({ force });
       cachedTeamProjects = projects;
       if (mountedRef.current) {
         setProjects(projects);

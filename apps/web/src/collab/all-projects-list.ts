@@ -1,5 +1,6 @@
 import type { TeamProject, WorkspaceCollabContext } from '@open-design/contracts';
 import type { Project } from '../types';
+import { asTeamProjectRows } from './team-projects-catalog';
 
 /** Answers "is this project shared to the workspace?" for one project id. */
 export type SharedProjectPredicate = (projectId: string) => boolean;
@@ -29,7 +30,13 @@ export function createSharedProjectPredicate(input: {
   unsharedThisSession?: ReadonlySet<string>;
 }): SharedProjectPredicate {
   const { sharedThisSession, unsharedThisSession } = input;
-  const hubShared = new Set(input.teamProjects.map((teamProject) => teamProject.projectId));
+  // This runs inside a render-phase `useMemo` in the entry shell, so a throw
+  // here unmounts the whole app rather than degrading one grid. A catalog that
+  // is not a row array means "we know of nothing shared" — never a white
+  // screen. See team-projects-catalog.ts for how a non-array used to get here.
+  const hubShared = new Set(
+    asTeamProjectRows(input.teamProjects).map((teamProject) => teamProject.projectId),
+  );
   return (projectId: string) => {
     if (unsharedThisSession?.has(projectId) === true) return false;
     return hubShared.has(projectId) || sharedThisSession?.has(projectId) === true;
@@ -107,7 +114,8 @@ export function buildAllProjectsList(input: {
    */
   isShared?: SharedProjectPredicate;
 }): Project[] {
-  const { projects, teamProjects, workspaceContext, sharedFallbackName } = input;
+  const { projects, workspaceContext, sharedFallbackName } = input;
+  const teamProjects = asTeamProjectRows(input.teamProjects);
   const now = input.now ?? Date.now;
 
   // No workspace context at all (signed out, or a purely local client): there is
@@ -186,7 +194,8 @@ export function buildDraftsList(input: {
   /** See {@link buildAllProjectsList}'s `isShared`; pass the same predicate. */
   isShared?: SharedProjectPredicate;
 }): Project[] {
-  const { projects, teamProjects, workspaceContext } = input;
+  const { projects, workspaceContext } = input;
+  const teamProjects = asTeamProjectRows(input.teamProjects);
   // No workspace context: nothing can be shared, so every project is a draft.
   // Stated as an early return to mirror 全部项目's fallback — the general path
   // below computes the same list once `teamProjects` is empty.

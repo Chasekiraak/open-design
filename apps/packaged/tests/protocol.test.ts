@@ -346,3 +346,107 @@ describe('od:// protocol transient retry', () => {
     expect(waits).toEqual([150, 300]);
   });
 });
+
+/**
+ * Rapid tab switching (project page ⇄ Community) cancels the renderer's
+ * in-flight subresource requests by design. Those cancellations were reaching
+ * the retry loop as if they were transient socket faults: because
+ * `fetchOdTargetOnce` forwards the already-aborted incoming signal to the
+ * upstream, every one of the 3 attempts rejected instantly, and the handler
+ * then manufactured a 502 "gateway failure" for a request the client had
+ * simply walked away from.
+ *
+ * Evidence — packaged 0.16.2-beta.139 desktop log, 84 × `net::ERR_FAILED`
+ * clustered exactly inside navigation bursts, all for fonts/icons
+ * (AlbertSans, Assistant-*.woff2, brand-icon.svg, agent-icons/*.svg) plus a
+ * POST `presence/leave`, which is precisely the request a project page fires
+ * as it unmounts.
+ *
+ * A client-cancelled request must cost one attempt, no backoff, and must not
+ * be reported as an upstream failure.
+ */
+describe('od:// proxy client-cancellation is not an upstream failure', () => {
+  const abortError = (): Error => {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    return error;
+  };
+
+  const abortAwareFetch = (counter: { calls: number }): typeof fetch =>
+    (async (input: Request) => {
+      counter.calls += 1;
+      if (input.signal?.aborted === true) throw abortError();
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+  it('does not burn the retry budget on an already-cancelled request', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    controller.abort();
+    const waits: number[] = [];
+
+    await handleOdRequest(
+      new Request('od://app/fonts/AlbertSans-VariableFont_wght.ttf', {
+        signal: controller.signal,
+      }),
+      'http://127.0.0.1:17579/',
+      abortAwareFetch(counter),
+      {
+        delay: async (ms: number) => {
+          waits.push(ms);
+        },
+      },
+    );
+
+    expect(counter.calls).toBe(1);
+    expect(waits).toEqual([]);
+  });
+
+  it('reports a client cancellation as such, not as a synthetic 502 gateway failure', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    controller.abort();
+
+    const response = await handleOdRequest(
+      new Request('od://app/api/projects/p-1/presence/leave', {
+        method: 'POST',
+        signal: controller.signal,
+      }),
+      'http://127.0.0.1:17579/',
+      abortAwareFetch(counter),
+      { delay: async () => {} },
+    );
+
+    expect(response.status).not.toBe(502);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('OD_PROTOCOL_CLIENT_ABORTED');
+  });
+
+  it('stops retrying the moment the client aborts mid-flight', async () => {
+    const counter = { calls: 0 };
+    const controller = new AbortController();
+    const fetchImpl: typeof fetch = (async (input: Request) => {
+      counter.calls += 1;
+      // First attempt fails transiently; the user navigates away during the
+      // backoff, so no further attempt should be made.
+      if (counter.calls === 1) {
+        controller.abort();
+        const error = new Error('setTypeOfService EINVAL') as NodeJS.ErrnoException;
+        error.code = 'EINVAL';
+        throw error;
+      }
+      if (input.signal?.aborted === true) throw abortError();
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const response = await handleOdRequest(
+      new Request('od://app/agent-icons/opencode.svg', { signal: controller.signal }),
+      'http://127.0.0.1:17579/',
+      fetchImpl,
+      { delay: async () => {} },
+    );
+
+    expect(counter.calls).toBe(1);
+    expect(response.status).not.toBe(502);
+  });
+});

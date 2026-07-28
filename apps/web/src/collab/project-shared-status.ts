@@ -7,9 +7,8 @@
 // evidence/electron-project-waterfall-20260727. Both copies now live here,
 // on top of the single-flight status read every other consumer shares.
 
-import type { WorkspaceTeamProjectsResponse } from '@open-design/contracts';
-import { coalescedGet } from '../lib/coalesced-get';
 import { fetchProjectCollabStatus } from './collab-client';
+import { fetchTeamProjectsCatalog } from './team-projects-catalog';
 
 export async function projectIsSharedWithWorkspace(projectId: string): Promise<boolean> {
   try {
@@ -22,14 +21,8 @@ export async function projectIsSharedWithWorkspace(projectId: string): Promise<b
     // Fall through to the team-project directory below.
   }
   try {
-    const body = await coalescedGet('workspace-team-projects', async () => {
-      const response = await fetch('/api/workspace/projects/team');
-      if (!response.ok) {
-        throw new Error(`workspace team projects failed: ${response.status}`);
-      }
-      return (await response.json()) as WorkspaceTeamProjectsResponse;
-    });
-    return body.projects.some((project) => project.projectId === projectId);
+    const projects = await fetchTeamProjectsCatalog();
+    return projects.some((project) => project.projectId === projectId);
   } catch {
     return false;
   }
