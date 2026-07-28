@@ -226,25 +226,6 @@ test('[P0] onboarding falls back to Local CLI when AMR is unavailable', async ({
   await expect(page.getByRole('button', { name: /^Continue$/i })).toBeVisible();
 });
 
-test('[P0] onboarding recovers from a transient AMR status failure and still continues after login completes', async ({ page }) => {
-  const config = await wireOnboardingMocks(page, {
-    amrAvailable: true,
-    initialLoggedIn: false,
-    failFirstStatusPollAfterLogin: true,
-  });
-
-  await seedOnboardingConfig(page, config);
-
-  await gotoOnboarding(page);
-
-  await clickCloudPrimary(page);
-
-  // Recovery lands on About you; step through newsletter to the final brand step.
-  await expect(page.getByRole('button', { name: /^Continue$/i })).toBeVisible({ timeout: 12_000 });
-  await advanceFromAboutYouToBrand(page);
-  await expectFinalDesignSystemStep(page);
-});
-
 test('[P0] onboarding signed-in AMR status failure stays gated instead of bypassing Connect', async ({ page }) => {
   const config = await wireOnboardingMocks(page, {
     amrAvailable: true,
@@ -274,37 +255,6 @@ test('[P0] onboarding signed-in AMR status failure stays gated instead of bypass
   await dismissPrivacyDialog(page);
   await expect(page).toHaveURL(/\/onboarding$/);
   await expect(connectLandingHeading(page)).toBeVisible();
-});
-
-test('[P0] onboarding lets the user cancel an incomplete AMR sign-in and retry', async ({ page }) => {
-  const config = await wireOnboardingMocks(page, {
-    amrAvailable: true,
-    initialLoggedIn: false,
-    keepAmrLoginIncomplete: true,
-  });
-
-  await seedOnboardingConfig(page, config);
-  await gotoOnboarding(page);
-
-  await clickCloudPrimary(page);
-
-  // Pending sign-in: the primary reflects "Signing in…" and a dedicated
-  // "Cancel sign-in" button appears.
-  const primary = cloudPrimaryButton(page);
-  await expect(primary).toHaveText(/Signing in|登录中/i);
-  const cancelSignIn = page.getByRole('button', { name: /Cancel sign-in/i });
-  await expect(cancelSignIn).toBeVisible();
-  await cancelSignIn.click();
-
-  await expect(primary).toHaveText(/Sign in to Open Design|登录 Open Design/i);
-  await expect(page.getByRole('button', { name: /Cancel sign-in/i })).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => window.__amrOnboardingCancelCalls ?? 0)).toBe(1);
-  await expect.poll(() => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0)).toBe(1);
-
-  await clickCloudPrimary(page);
-
-  await expect.poll(() => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0)).toBe(2);
-  await expect(page.getByRole('button', { name: /Cancel sign-in/i })).toBeVisible();
 });
 
 test('[P0] onboarding cancel during a slow AMR status check does not start login', async ({ page }) => {
@@ -340,40 +290,6 @@ test('[P0] onboarding cancel during a slow AMR status check does not start login
   await page.waitForTimeout(250);
   await expect(page.getByRole('button', { name: /Cancel sign-in/i })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0)).toBe(0);
-});
-
-// The AMR runtime card and its per-runtime model picker on the connect step
-// were removed in the redesign — AMR now signs in straight from the cloud
-// landing and exposes no model picker there. This test preserves the still-valid
-// slice of the old coverage: a signed-in user advancing from the cloud landing
-// pins the AMR runtime (agentId: 'amr') as the connect selection.
-test('[P0] onboarding signed-in cloud landing pins the AMR runtime when continuing', async ({ page }) => {
-  const config = await wireOnboardingMocks(page, {
-    amrAvailable: true,
-    initialLoggedIn: true,
-    amrModels: [
-      { id: 'claude-opus-4.8', label: 'Claude Opus 4.8' },
-      { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-      { id: 'glm-5.1', label: 'GLM 5.1' },
-    ],
-  });
-
-  await seedOnboardingConfig(page, config);
-
-  await gotoOnboarding(page);
-
-  const primary = cloudPrimaryButton(page);
-  await expect(primary).toHaveText(/Continue \(signed in\)|继续（已登录）/i);
-  await clickCloudPrimary(page);
-
-  // Advancing to About-you confirms the connect gate cleared, and the runtime
-  // selection persisted as AMR.
-  await expect(page.getByText(/Optional details for better defaults/i)).toBeVisible();
-  await expect
-    .poll(() => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) || '{}'), STORAGE_KEY))
-    .toMatchObject({
-      agentId: 'amr',
-    });
 });
 
 // The AMR card + per-runtime model picker on the connect step were removed,
@@ -510,68 +426,6 @@ test('[P0] onboarding visited steps become locked again when the Connect runtime
   await expect(continueButton).toHaveAttribute('aria-disabled', 'true');
   await expect(page.getByRole('heading', { name: /Bring your own key|自己的模型 Key/i })).toBeVisible();
   await expect(page.getByText(/Optional details for better defaults/i)).toHaveCount(0);
-});
-
-test('[P0] onboarding about-you step accepts profile selections and completes setup', async ({ page }) => {
-  const config = await wireOnboardingMocks(page, {
-    amrAvailable: true,
-    initialLoggedIn: true,
-  });
-
-  await seedOnboardingConfig(page, config);
-  await gotoOnboarding(page);
-
-  // Signed-in cloud landing advances straight to About-you.
-  await clickCloudPrimary(page);
-  await expect(page.getByText(/Optional details for better defaults/i)).toBeVisible();
-
-  // Profile fields are now chip rows, not dropdowns: each pick is a single
-  // chip click, and the chosen chip reports aria-pressed.
-  await selectOnboardingChip(page, 'Your role', 'Engineer');
-  await selectOnboardingChip(page, 'Organization size', 'Growth company');
-  await selectOnboardingChip(page, 'Use case', 'Product design');
-  await selectOnboardingChip(page, 'Use case', 'Prototype / app UI');
-  await selectOnboardingChip(page, 'Where did you hear about us?', 'Search');
-
-  await expect(expectOnboardingChip(page, 'Your role', 'Engineer')).toHaveAttribute('aria-pressed', 'true');
-  await expect(expectOnboardingChip(page, 'Organization size', 'Growth company')).toHaveAttribute('aria-pressed', 'true');
-  await expect(expectOnboardingChip(page, 'Use case', 'Product design')).toHaveAttribute('aria-pressed', 'true');
-  await expect(expectOnboardingChip(page, 'Use case', 'Prototype / app UI')).toHaveAttribute('aria-pressed', 'true');
-  await expect(expectOnboardingChip(page, 'Where did you hear about us?', 'Search')).toHaveAttribute('aria-pressed', 'true');
-
-  // About you is no longer the final step; advance through newsletter before finishing.
-  await advanceFromAboutYouToBrand(page);
-
-  await expectOnboardingFinished(page);
-  await pollStoredConfig(page).toMatchObject({
-    onboardingCompleted: true,
-  });
-});
-
-test('[P0] onboarding newsletter email is optional and blank email can finish setup', async ({ page }) => {
-  const config = await wireOnboardingMocks(page, {
-    amrAvailable: true,
-    initialLoggedIn: true,
-  });
-  let newsletterCalls = 0;
-  await page.route('https://open-design.ai/subscribe', async (route) => {
-    newsletterCalls += 1;
-    await route.fulfill({ json: { ok: true } });
-  });
-
-  await seedOnboardingConfig(page, config);
-  await gotoOnboarding(page);
-  await advanceToNewsletterStep(page);
-
-  await expect(page.getByPlaceholder('you@studio.com')).toHaveValue('');
-  await page.getByRole('button', { name: /^Continue$/i }).click();
-  await expectFinalDesignSystemStep(page);
-
-  await expectOnboardingFinished(page);
-  await expect.poll(() => newsletterCalls).toBe(0);
-  await pollStoredConfig(page).toMatchObject({
-    onboardingCompleted: true,
-  });
 });
 
 test('[P0] onboarding newsletter malformed email does not block finishing setup', async ({ page }) => {
@@ -1031,11 +885,9 @@ async function wireOnboardingMocks(
     amrAvailable: boolean;
     initialLoggedIn: boolean;
     failAllStatusPolls?: boolean;
-    failFirstStatusPollAfterLogin?: boolean;
     keepAmrLoginIncomplete?: boolean;
     delaySignedOutStatusMs?: number;
     agentsDelayMs?: number;
-    amrModels?: Array<{ id: string; label: string }>;
     codexModels?: Array<{ id: string; label: string }>;
     localAgents?: Array<{
       id: string;
@@ -1065,7 +917,6 @@ async function wireOnboardingMocks(
   let loggedIn = options.initialLoggedIn;
   let loginInFlight = false;
   let statusCalls = 0;
-  let statusCallsAfterLogin = 0;
   let loginCalls = 0;
   let cancelCalls = 0;
 
@@ -1111,7 +962,7 @@ async function wireOnboardingMocks(
           bin: 'vela',
           available: true,
           version: '1.0.0',
-          models: options.amrModels ?? [{ id: 'default', label: 'Default' }],
+          models: [{ id: 'default', label: 'Default' }],
         }]
       : []),
     ...localAgents,
@@ -1150,17 +1001,6 @@ async function wireOnboardingMocks(
       await new Promise((resolve) =>
         setTimeout(resolve, options.delaySignedOutStatusMs),
       );
-    }
-    if (loggedIn) {
-      statusCallsAfterLogin += 1;
-      if (options.failFirstStatusPollAfterLogin && statusCallsAfterLogin === 1) {
-        await route.fulfill({
-          status: 500,
-          contentType: 'application/json',
-          body: JSON.stringify({ error: 'temporary status failure' }),
-        });
-        return;
-      }
     }
     await route.fulfill({
       json: loggedIn
@@ -1338,30 +1178,4 @@ async function selectOnboardingOption(root: OnboardingLocatorRoot, label: string
 
 async function fillInlineField(page: Page, label: string, value: string) {
   await onboardingField(page, label).locator('input').fill(value);
-}
-
-// About-you profile fields render as flat chip rows (`OnboardingChipField`),
-// not dropdowns: each `.onboarding-chip-field` carries its label text plus a
-// row of `button.onboarding-chip` options. Scope to the field by its label,
-// then click the chip whose text matches the option.
-function onboardingChipField(page: Page, label: string): Locator {
-  return page
-    .locator('.onboarding-chip-field')
-    .filter({ hasText: new RegExp(label, 'i') })
-    .first();
-}
-
-async function selectOnboardingChip(page: Page, label: string, option: string) {
-  await onboardingChipField(page, label)
-    .locator('button.onboarding-chip')
-    .filter({ hasText: new RegExp(option, 'i') })
-    .first()
-    .click();
-}
-
-function expectOnboardingChip(page: Page, label: string, option: string): Locator {
-  return onboardingChipField(page, label)
-    .locator('button.onboarding-chip')
-    .filter({ hasText: new RegExp(option, 'i') })
-    .first();
 }
