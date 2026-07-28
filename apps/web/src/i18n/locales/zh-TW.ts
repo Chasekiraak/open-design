@@ -4339,11 +4339,8 @@ export const zhTW: Dict = {
   "updater.reinstallReadyVersion": "Open Design {version} 需要完整重新安裝。Open Design 將關閉並開啟安裝程式。",
   "updater.restartAnyway": "仍然重新啟動",
 
-  "whatsNew.cta": "看看有什麼新功能",
-  "whatsNew.dismissAria": "關閉更新亮點",
-  "updateReminder.title": "Open Design {version} 已發布",
-  "updateReminder.notesLabel": "本次更新內容：",
-  "updateReminder.confirm": "立即更新",
+  "whatsNew.updatedTitle": "Open Design {version} 已更新",
+  "whatsNew.cta": "查看更新說明",
 
   'designBrowser.copyScreenshot': '複製截圖',
   'designBrowser.hardReload': '強制重新整理',
