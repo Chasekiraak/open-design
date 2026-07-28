@@ -785,6 +785,10 @@ Options:
       const account = merged?.user?.email ?? merged?.user?.id ?? '-';
       console.log(`AMR account\t${account}`);
       console.log(`Profile\t${merged?.profile ?? '-'}`);
+      // Only present when this build was given a vela web console origin
+      // (OD_VELA_WEB_URL); printing it makes "which backend is this app
+      // pointed at" answerable without reading the packaged config.
+      if (merged?.consoleOrigin) console.log(`Console\t${merged.consoleOrigin}`);
       if (merged?.account?.plan) console.log(`Plan\t${merged.account.plan}`);
       if (merged?.account?.balanceUsd) {
         console.log(`Wallet balance\t$${merged.account.balanceUsd}`);
