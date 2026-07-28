@@ -2327,6 +2327,39 @@ describe('FileViewer SVG artifacts', () => {
       expect(typeof nexts[0].slide_index).toBe('number');
     });
 
+    it('advances host slide state when deck iframe does not echo slide-state', () => {
+      const { container } = render(
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={deckFile()}
+          isDeck
+          liveHtml={twoSlideDeck}
+        />,
+      );
+      const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+      const previewWindow = installSandboxedPreviewWindow(frame);
+
+      act(() => {
+        window.dispatchEvent(new MessageEvent('message', {
+          source: previewWindow,
+          data: { type: 'od:slide-state', active: 0, count: 2 },
+        }));
+      });
+      const counterText = () => (
+        container.querySelector('.deck-floating-count, .deck-nav-counter')?.textContent ?? ''
+      ).replace(/\s+/g, '');
+      expect(counterText()).toBe('1/2');
+
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+      expect(counterText()).toBe('2/2');
+      expect(previewWindow.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'od:slide', action: 'next' }),
+        '*',
+      );
+    });
+
     it('tracks opening speaker notes for edit', () => {
       render(
         <FileViewer

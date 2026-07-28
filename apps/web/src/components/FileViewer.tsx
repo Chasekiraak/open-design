@@ -8998,6 +8998,29 @@ function HtmlViewer({
         slide_count: deckSlideTotal,
       });
     }
+    const current = activeDeckSlideIndex;
+    const knownCount = Math.max(deckSlideTotal, deckSlideCount, slideState?.count ?? 0, current + 1, 1);
+    let target: number | null = null;
+    let nextCount = knownCount;
+    if (action === 'go') {
+      if (typeof index === 'number' && Number.isFinite(index) && index >= 0) {
+        target = Math.floor(index);
+        nextCount = Math.max(knownCount, target + 1);
+      }
+    } else if (action === 'next') {
+      target = Math.min(current + 1, knownCount - 1);
+    } else if (action === 'prev') {
+      target = Math.max(current - 1, 0);
+    } else if (action === 'first') {
+      target = 0;
+    } else if (action === 'last') {
+      target = knownCount - 1;
+    }
+    if (target !== null) {
+      const next = { active: target, count: nextCount };
+      setSlideStateCached(previewStateKey, next);
+      setSlideState(next);
+    }
     const win = iframeRef.current?.contentWindow;
     if (!win) return;
     win.postMessage({
@@ -9275,7 +9298,15 @@ function HtmlViewer({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [effectiveDeck, mode]);
+  }, [
+    activeDeckSlideIndex,
+    deckSlideCount,
+    deckSlideTotal,
+    effectiveDeck,
+    mode,
+    previewStateKey,
+    slideState?.count,
+  ]);
 
   useEffect(() => {
     function onPresenterMessage(ev: MessageEvent) {

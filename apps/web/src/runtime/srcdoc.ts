@@ -2586,7 +2586,7 @@ function injectDeckBridge(
   const styleFix = isFrameworkDeck
     ? ''
     : `<style data-od-deck-fix>
-.stage, .deck-stage, .deck-shell { place-content: center !important; }
+.stage, .deck-stage, .deck-shell { flex: none !important; place-content: center !important; }
 </style>`;
   const script = `<script data-od-deck-bridge>(function(){
   var initialSlideIndex = ${safeInitialSlideIndex};
@@ -3302,6 +3302,12 @@ function injectDeckBridge(
   var odAutoFitAppliedTransform = '';
   var odAutoFitOriginalTransform = '';
   var odAutoFitOriginalTransformOrigin = '';
+  var odAutoFitOriginalPosition = '';
+  var odAutoFitOriginalLeft = '';
+  var odAutoFitOriginalTop = '';
+  var odAutoFitOriginalRight = '';
+  var odAutoFitOriginalBottom = '';
+  var odAutoFitOwnsMisfitTransform = false;
   var odAutoFitDisabled = false;
   function isGenuineScrollTrack(list){
     var scrollTarget = primaryScrollTarget();
@@ -3315,6 +3321,38 @@ function injectDeckBridge(
       if (Math.abs(left - firstLeft) > 1 || Math.abs(top - firstTop) > 1) return true;
     }
     return false;
+  }
+  function hasCanvasTransform(parent){
+    try {
+      var computed = window.getComputedStyle(parent);
+      return !!(parent.style.transform || (computed.transform && computed.transform !== 'none'));
+    } catch (_) {
+      return !!(parent && parent.style && parent.style.transform);
+    }
+  }
+  function transformedCanvasNeedsFallback(parent, width, height){
+    var viewportWidth = Number(window.innerWidth) || 0;
+    var viewportHeight = Number(window.innerHeight) || 0;
+    if (!viewportWidth || !viewportHeight) return false;
+    var rect = null;
+    try { rect = parent.getBoundingClientRect(); } catch (_) {}
+    if (
+      !rect ||
+      !Number.isFinite(rect.width) ||
+      !Number.isFinite(rect.height) ||
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
+      return false;
+    }
+    var visibleWidth = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0));
+    var visibleHeight = Math.max(0, Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0));
+    var visibleRatio = (visibleWidth * visibleHeight) / (rect.width * rect.height);
+    if (visibleRatio < 0.85) return true;
+    var scale = Math.min(viewportWidth / width, viewportHeight / height, 1);
+    var expectedWidth = width * scale;
+    var expectedHeight = height * scale;
+    return rect.width < expectedWidth * 0.8 || rect.height < expectedHeight * 0.8;
   }
   function fixedCanvasTarget(){
     if (${JSON.stringify(isFrameworkDeck)}) return null;
@@ -3334,39 +3372,49 @@ function injectDeckBridge(
     if (ratio < 1.2 || ratio > 2.2) return null;
     if (width <= window.innerWidth + 1 && height <= window.innerHeight + 1) return null;
     if (isGenuineScrollTrack(list)) return null;
-    try {
-      var computed = window.getComputedStyle(parent);
-      if (parent.style.transform || (computed.transform && computed.transform !== 'none')) return null;
-    } catch (_) {}
+    if (hasCanvasTransform(parent) && !transformedCanvasNeedsFallback(parent, width, height)) return null;
     return parent;
   }
   function fitFixedCanvas(){
     if (odAutoFitDisabled || ${JSON.stringify(isFrameworkDeck)}) return;
     var target = odAutoFitTarget || fixedCanvasTarget();
     if (!target) return;
-    if (!odAutoFitTarget) {
-      odAutoFitTarget = target;
-      odAutoFitOriginalTransform = target.style.transform || '';
-      odAutoFitOriginalTransformOrigin = target.style.transformOrigin || '';
-    } else if (
-      odAutoFitAppliedTransform &&
-      target.style.transform !== odAutoFitAppliedTransform
-    ) {
-      // The artifact changed its own transform after our fallback ran. Yield
-      // ownership permanently so a late native fit runtime is never clobbered.
-      odAutoFitDisabled = true;
-      target.removeAttribute('data-od-deck-auto-fit');
-      return;
-    }
     var width = Number(target.offsetWidth) || 0;
     var height = Number(target.offsetHeight) || 0;
     var viewportWidth = Number(window.innerWidth) || 0;
     var viewportHeight = Number(window.innerHeight) || 0;
     if (!width || !height || !viewportWidth || !viewportHeight) return;
+    if (!odAutoFitTarget) {
+      odAutoFitTarget = target;
+      odAutoFitOriginalTransform = target.style.transform || '';
+      odAutoFitOriginalTransformOrigin = target.style.transformOrigin || '';
+      odAutoFitOriginalPosition = target.style.position || '';
+      odAutoFitOriginalLeft = target.style.left || '';
+      odAutoFitOriginalTop = target.style.top || '';
+      odAutoFitOriginalRight = target.style.right || '';
+      odAutoFitOriginalBottom = target.style.bottom || '';
+      odAutoFitOwnsMisfitTransform = hasCanvasTransform(target);
+    } else if (
+      odAutoFitAppliedTransform &&
+      target.style.transform !== odAutoFitAppliedTransform
+    ) {
+      if (!odAutoFitOwnsMisfitTransform || !transformedCanvasNeedsFallback(target, width, height)) {
+        // The artifact changed its own transform after our fallback ran. Yield
+        // ownership permanently so a late native fit runtime is never clobbered.
+        odAutoFitDisabled = true;
+        target.removeAttribute('data-od-deck-auto-fit');
+        return;
+      }
+    }
     var scale = Math.min(viewportWidth / width, viewportHeight / height, 1);
     if (scale >= 1) {
       target.style.transform = odAutoFitOriginalTransform;
       target.style.transformOrigin = odAutoFitOriginalTransformOrigin;
+      target.style.position = odAutoFitOriginalPosition;
+      target.style.left = odAutoFitOriginalLeft;
+      target.style.top = odAutoFitOriginalTop;
+      target.style.right = odAutoFitOriginalRight;
+      target.style.bottom = odAutoFitOriginalBottom;
       target.removeAttribute('data-od-deck-auto-fit');
       odAutoFitAppliedTransform = '';
       return;
@@ -3374,6 +3422,11 @@ function injectDeckBridge(
     var x = (viewportWidth - width * scale) / 2;
     var y = (viewportHeight - height * scale) / 2;
     var transform = 'translate(' + x + 'px, ' + y + 'px) scale(' + scale + ')';
+    target.style.position = 'fixed';
+    target.style.left = '0px';
+    target.style.top = '0px';
+    target.style.right = 'auto';
+    target.style.bottom = 'auto';
     target.style.transformOrigin = 'top left';
     target.style.transform = transform;
     target.setAttribute('data-od-deck-auto-fit', 'true');

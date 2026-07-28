@@ -155,9 +155,89 @@ describe('deck bridge - CSS-only decks', () => {
     flushTimers();
 
     expect(stage.dataset.odDeckAutoFit).toBe('true');
+    expect(stage.style.position).toBe('fixed');
+    expect(stage.style.left).toBe('0px');
+    expect(stage.style.top).toBe('0px');
     expect(stage.style.transformOrigin).toBe('top left');
     expect(stage.style.transform).toContain('scale(0.790625)');
     expect(stage.style.transform).toContain('translate(0px, 8.0625px)');
+    win.close();
+  });
+
+  it('takes over a fixed slide canvas whose native transform is clipped by flex centering', () => {
+    const bodyHtml = `
+      <style>
+        .viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+        .stage { width: 1920px; height: 1080px; position: relative; transform-origin: 0 0; transform: translate(0px, 36px) scale(0.321875); }
+        .slide { position: absolute; inset: 0; }
+        .slide:not(:first-child) { display: none; }
+      </style>
+      <main class="viewport">
+        <div class="stage">
+          <section class="slide">One</section>
+          <section class="slide">Two</section>
+        </div>
+      </main>
+    `;
+    const script = extractDeckBridgeScript(buildSrcdoc(
+      `<!doctype html><html><body>${bodyHtml}</body></html>`,
+      { deck: true },
+    ));
+    const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: vi.fn() },
+    });
+    Object.defineProperty(win, 'innerWidth', {
+      configurable: true,
+      value: 618,
+    });
+    Object.defineProperty(win, 'innerHeight', {
+      configurable: true,
+      value: 420,
+    });
+    const stage = win.document.querySelector<HTMLElement>('.stage');
+    if (!stage) throw new Error('stage not found');
+    Object.defineProperty(stage, 'offsetWidth', {
+      configurable: true,
+      value: 1920,
+    });
+    Object.defineProperty(stage, 'offsetHeight', {
+      configurable: true,
+      value: 1080,
+    });
+    stage.getBoundingClientRect = vi.fn(() => ({
+      bottom: 72,
+      height: 347.625,
+      left: -651,
+      right: -33,
+      top: -275.625,
+      width: 618,
+      x: -651,
+      y: -275.625,
+      toJSON: () => ({}),
+    } as DOMRect));
+    const flushTimers = installQueuedTimers(win);
+
+    new win.Function(script).call(win);
+    win.dispatchEvent(new win.Event('load'));
+    flushTimers();
+
+    expect(stage.dataset.odDeckAutoFit).toBe('true');
+    expect(stage.style.position).toBe('fixed');
+    expect(stage.style.transformOrigin).toBe('top left');
+    expect(stage.style.transform).toContain('translate(0px, 36.1875px)');
+    expect(stage.style.transform).toContain('scale(0.321875)');
+
+    stage.style.transform = 'translate(0px, 36px) scale(0.321875)';
+    win.dispatchEvent(new win.Event('resize'));
+
+    expect(stage.dataset.odDeckAutoFit).toBe('true');
+    expect(stage.style.transform).toContain('translate(0px, 36.1875px)');
     win.close();
   });
 
