@@ -69,13 +69,142 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function injectExportDeckChromeHiding(doc: string): string {
-  const tag = `<style data-od-export-deck-chrome-hidden>
-${DECK_CHROME_HIDE_CSS}
-</style>`;
+const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation>
+(function () {
+  var ACTIVE_CLASSES = ['active', 'is-active', 'current', 'visible'];
+  var SLIDE_SELECTOR = 'deck-stage > section, section[data-screen-label], .deck-slide, .ppt-slide, .slide';
+
+  function slides() {
+    return Array.prototype.slice.call(document.querySelectorAll(SLIDE_SELECTOR));
+  }
+
+  function scrollContainers() {
+    return [document.scrollingElement, document.documentElement, document.body]
+      .filter(Boolean)
+      .filter(function (el, index, all) { return all.indexOf(el) === index; });
+  }
+
+  function activeClass(list) {
+    for (var i = 0; i < ACTIVE_CLASSES.length; i++) {
+      var name = ACTIVE_CLASSES[i];
+      if (list.some(function (slide) { return slide.classList.contains(name); })) return name;
+    }
+    return '';
+  }
+
+  function activeIndex(list) {
+    var name = activeClass(list);
+    if (name) {
+      var found = list.findIndex(function (slide) { return slide.classList.contains(name); });
+      if (found >= 0) return found;
+    }
+    var left = scrollContainers().reduce(function (value, el) {
+      return Math.abs(Number(el.scrollLeft) || 0) > Math.abs(value)
+        ? Number(el.scrollLeft) || 0
+        : value;
+    }, 0);
+    return Math.max(0, Math.min(list.length - 1, Math.round(left / Math.max(1, window.innerWidth))));
+  }
+
+  function state(list) {
+    var slideState = list.map(function (slide) {
+      return [
+        slide.className || '',
+        slide.getAttribute('style') || '',
+        slide.getAttribute('hidden') === null ? '' : 'hidden',
+        slide.getAttribute('aria-hidden') || '',
+      ].join(':');
+    }).join('|');
+    var scrollState = scrollContainers().map(function (el) {
+      return Math.round(Number(el.scrollLeft) || 0) + ',' + Math.round(Number(el.scrollTop) || 0);
+    }).join('|');
+    return slideState + '//' + scrollState + '//' + String(location.hash || '');
+  }
+
+  function shouldIgnore(event) {
+    if (event.defaultPrevented || (event.button !== undefined && event.button !== 0)) return true;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return true;
+    var root = document.documentElement;
+    if (
+      root.hasAttribute('data-od-comment-mode')
+      || root.hasAttribute('data-od-inspect-mode')
+      || root.hasAttribute('data-od-edit-mode')
+    ) return true;
+    var target = event.target;
+    if (
+      target
+      && target.closest
+      && target.closest('a,button,input,textarea,select,summary,[contenteditable],[role="button"],[role="link"]')
+    ) return true;
+    var selection = window.getSelection && window.getSelection();
+    return !!(selection && !selection.isCollapsed);
+  }
+
+  function dispatchArrow(direction) {
+    var key = direction < 0 ? 'ArrowLeft' : 'ArrowRight';
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: key,
+      code: key,
+      bubbles: true,
+      cancelable: true,
+    }));
+  }
+
+  function directFallback(list, direction) {
+    var current = activeIndex(list);
+    var next = Math.max(0, Math.min(list.length - 1, current + direction));
+    if (next === current) return;
+    var name = activeClass(list);
+    if (name) {
+      list.forEach(function (slide, index) { slide.classList.toggle(name, index === next); });
+      return;
+    }
+    var left = next * Math.max(1, window.innerWidth);
+    scrollContainers().forEach(function (el) {
+      try { el.scrollLeft = left; } catch (_) {}
+      try { el.scrollTo({ left: left, behavior: 'smooth' }); } catch (_) {}
+    });
+  }
+
+  // Register in <head> on window capture so this snapshot precedes any deck
+  // click handler declared later in <body>. Existing navigation gets first
+  // ownership; the fallback runs only when that click leaves deck state intact.
+  window.addEventListener('click', function (event) {
+    if (shouldIgnore(event)) return;
+    var list = slides();
+    if (list.length < 2) return;
+    var before = state(list);
+    var direction = event.clientX < window.innerWidth / 2 ? -1 : 1;
+    setTimeout(function () {
+      list = slides();
+      if (event.defaultPrevented || state(list) !== before) return;
+      dispatchArrow(direction);
+      setTimeout(function () {
+        list = slides();
+        if (state(list) === before) directFallback(list, direction);
+      }, 80);
+    }, 80);
+  }, true);
+})();
+</script>`;
+
+function injectIntoHead(doc: string, tag: string): string {
   if (/<\/head>/i.test(doc)) return doc.replace(/<\/head>/i, `${tag}</head>`);
   if (/<head[^>]*>/i.test(doc)) return doc.replace(/<head[^>]*>/i, (match) => `${match}${tag}`);
   return tag + doc;
+}
+
+export function prepareStandaloneDeckHtml(doc: string): string {
+  const styleTag = `<style data-od-export-deck-chrome-hidden>
+${DECK_CHROME_HIDE_CSS}
+</style>`;
+  let prepared = doc.includes('data-od-export-deck-chrome-hidden')
+    ? doc
+    : injectIntoHead(doc, styleTag);
+  if (!prepared.includes('data-od-export-deck-navigation')) {
+    prepared = injectIntoHead(prepared, EXPORT_DECK_NAVIGATION_SCRIPT);
+  }
+  return prepared;
 }
 
 export function exportAsHtml(
@@ -84,7 +213,7 @@ export function exportAsHtml(
   options: { deck?: boolean } = {},
 ): void {
   const srcdoc = buildSrcdoc(html);
-  const doc = options.deck ? injectExportDeckChromeHiding(srcdoc) : srcdoc;
+  const doc = options.deck ? prepareStandaloneDeckHtml(srcdoc) : srcdoc;
   const blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
   triggerDownload(blob, `${safeFilename(title, 'artifact')}.html`);
 }
@@ -110,7 +239,7 @@ export async function exportProjectAsHtml(opts: {
     if (!resp.ok) throw new Error(`html export request failed (${resp.status})`);
     const blob = opts.deck
       ? new Blob(
-        [injectExportDeckChromeHiding(await resp.text())],
+        [prepareStandaloneDeckHtml(await resp.text())],
         { type: 'text/html;charset=utf-8' },
       )
       : await resp.blob();

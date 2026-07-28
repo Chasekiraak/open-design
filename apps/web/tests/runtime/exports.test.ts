@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import { JSDOM } from 'jsdom';
 import {
   archiveFilenameFrom,
   archiveRootFromFilePath,
@@ -20,6 +21,7 @@ import {
   exportProjectAsPptx,
   exportProjectAsZip,
   openSandboxedPreviewInNewTab,
+  prepareStandaloneDeckHtml,
   prepareImageExportTarget,
   planDeckImageCapture,
   requestPreviewSnapshot,
@@ -618,6 +620,7 @@ describe('exportProjectAsHtml', () => {
 
     const exported = await capturedBlob!.text();
     expect(exported).toContain('data-od-export-deck-chrome-hidden');
+    expect(exported).toContain('data-od-export-deck-navigation');
     expect(exported).toContain('.data-deck-nav,');
     expect(exported).toContain('[data-deck-nav],');
     expect(exported).toContain('display: none !important');
@@ -638,6 +641,95 @@ describe('exportProjectAsHtml', () => {
     expect(capturedFilename).toBe('Fallback.html');
     expect(await capturedBlob!.text()).toContain('<main>fallback</main>');
     expect(await capturedBlob!.text()).toContain('data-od-export-deck-chrome-hidden');
+    expect(await capturedBlob!.text()).toContain('data-od-export-deck-navigation');
+  });
+
+  it('adds click navigation when a standalone deck only implements keyboard navigation', async () => {
+    const source = `<!doctype html><html><head></head><body>
+      <section class="slide active">A</section>
+      <section class="slide">B</section>
+      <script>
+        (function () {
+          var slides = document.querySelectorAll('.slide');
+          var current = 0;
+          function show(index) {
+            slides.forEach(function (slide, i) { slide.classList.toggle('active', i === index); });
+            current = index;
+          }
+          document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowRight') show(Math.min(slides.length - 1, current + 1));
+            if (event.key === 'ArrowLeft') show(Math.max(0, current - 1));
+          });
+        })();
+      </script>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 900,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+
+    const slides = Array.from(dom.window.document.querySelectorAll('.slide'));
+    expect(slides[0]?.classList.contains('active')).toBe(false);
+    expect(slides[1]?.classList.contains('active')).toBe(true);
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 100,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    expect(slides[0]?.classList.contains('active')).toBe(true);
+    expect(slides[1]?.classList.contains('active')).toBe(false);
+    dom.window.close();
+  });
+
+  it('does not advance twice when the deck already implements click navigation', async () => {
+    const source = `<!doctype html><html><head></head><body>
+      <section class="slide active">A</section>
+      <section class="slide">B</section>
+      <section class="slide">C</section>
+      <script>
+        (function () {
+          var slides = document.querySelectorAll('.slide');
+          var current = 0;
+          function show(index) {
+            slides.forEach(function (slide, i) { slide.classList.toggle('active', i === index); });
+            current = index;
+          }
+          document.addEventListener('click', function () {
+            show(Math.min(slides.length - 1, current + 1));
+          }, true);
+        })();
+      </script>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 900,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+
+    const slides = Array.from(dom.window.document.querySelectorAll('.slide'));
+    expect(slides[1]?.classList.contains('active')).toBe(true);
+    expect(slides[2]?.classList.contains('active')).toBe(false);
+    dom.window.close();
   });
 });
 
