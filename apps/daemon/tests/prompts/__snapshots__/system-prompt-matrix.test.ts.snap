@@ -60,7 +60,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 71804,
+    "totalChars": 71985,
   },
   "classic-design-minimal": {
     "sections": [
@@ -73,7 +73,7 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "host-question-form-protocol",
       "role-marker-guard",
     ],
-    "totalChars": 60059,
+    "totalChars": 60240,
   },
   "codex-imagegen": {
     "sections": [
@@ -110,11 +110,12 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "slim-core-charter",
       "project-metadata",
       "deck-directive",
+      "deck-outcome-rules",
       "media-dispatch-hint",
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 27486,
+    "totalChars": 28213,
   },
   "deck-kind-with-skill-seed": {
     "sections": [
@@ -122,11 +123,12 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "slim-core-charter",
       "active-skill",
       "project-metadata",
+      "deck-outcome-rules",
       "media-dispatch-hint",
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 21963,
+    "totalChars": 26954,
   },
   "design-ds-fixture-fallback": {
     "sections": [
@@ -213,11 +215,12 @@ exports[`composeSystemPrompt — scenario × section golden matrix > keeps the s
       "slim-core-charter",
       "project-metadata",
       "deck-directive",
+      "deck-outcome-rules",
       "media-dispatch-hint",
       "host-clarification-gate",
       "role-marker-guard",
     ],
-    "totalChars": 27455,
+    "totalChars": 28182,
   },
   "freeform-other-no-deck-signal": {
     "sections": [

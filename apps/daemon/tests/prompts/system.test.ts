@@ -742,6 +742,24 @@ describe('composeSystemPrompt', () => {
     expect(prompt).not.toContain('## Media generation contract');
   });
 
+  it('keeps shared deck quality criteria when a skill supplies the template seed', () => {
+    const prompt = composeSystemPrompt({
+      metadata: { kind: 'deck' } as any,
+      skillName: 'simple-deck',
+      skillMode: 'deck',
+      skillBody: 'Copy `assets/template.html` as the seed, then edit slides.',
+    });
+
+    expect(prompt).toContain('## Active skill — simple-deck');
+    expect(prompt).not.toContain('# Deck delivery contract');
+    expect(prompt).toContain('# Deck outcome quality rules');
+    expect(prompt).toContain('## Rendered verification — filesystem decks');
+    expect(prompt).toContain('**Local contrast over imagery.**');
+    expect(prompt).toContain('**Intentional canvas.**');
+    expect(prompt).toContain('**Container-content fit.**');
+    expect(prompt).not.toContain('# Slide deck — fixed framework');
+  });
+
   it('pins outcome-based quantitative chart integrity into deck runs (#907)', () => {
     const prompt = composeSystemPrompt({ skillMode: 'deck' });
 

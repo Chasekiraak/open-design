@@ -7,5 +7,6 @@ export {
   DECK_SKELETON_HTML,
   DECK_VNEXT_DIRECTIVE,
   renderDeckFrameworkDirective,
+  renderDeckQualityDirective,
   renderDeckVNextDirective,
 } from '@open-design/contracts';

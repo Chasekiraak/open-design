@@ -14,14 +14,11 @@
  *      (`assets/template.html`) and references (`references/layouts.md`,
  *      `references/checklist.md`), we inject a hard pre-flight rule above
  *      the skill body so the agent reads them BEFORE writing any code.
- *   4. For decks (skillMode === 'deck' OR metadata.kind === 'deck'), the
- *      generic deck directive (./deck-framework.ts) is pinned LAST. It is a
- *      minimal host-delivery contract plus outcome-quality rules. We also
- *      fire on the metadata path so
- *      deck-kind projects without a bound skill (skill_id null) still get the
- *      directive. When the active skill ships its own seed (skill body
- *      references `assets/template.html`), we defer to that seed and skip the
- *      generic directive — the skill's framework wins to avoid double-injection.
+ *   4. For decks (skillMode === 'deck' OR metadata.kind === 'deck'), outcome
+ *      quality rules are pinned LAST. Decks without a skill seed also receive
+ *      the shared delivery contract. When a skill supplies
+ *      `assets/template.html`, its framework owns implementation details while
+ *      the shared quality and rendered-verification criteria still apply.
  *
  * The composed string is what the daemon sees as `systemPrompt` and what
  * the Anthropic path sends as `system`.
@@ -36,7 +33,10 @@ import {
   renderSlimPlanFoundation,
 } from './core-slim.js';
 import { renderDirectionIndexBlock, renderDirectionSpecBlock } from './directions.js';
-import { renderDeckVNextDirective } from './deck-framework.js';
+import {
+  renderDeckQualityDirective,
+  renderDeckVNextDirective,
+} from './deck-framework.js';
 import {
   DEFAULT_IMAGE_GENERATION_MODEL_ID,
   DEFAULT_VIDEO_GENERATION_MODEL_ID,
@@ -1182,28 +1182,18 @@ export function composeSystemPrompt({
   );
   if (metaBlock) parts.push(metaBlock);
 
-  // Decks have a load-bearing framework (nav, counter, scroll JS, print
-  // stylesheet for PDF stitching). Pin it last so it overrides any softer
-  // wording earlier in the stack ("write a script that handles arrows…").
-  //
-  // We fire on either (a) the active skill is a deck skill OR (b) the
-  // project metadata declares kind=deck. Case (b) catches projects created
-  // without a skill (skill_id null) — without this, a deck-kind project
-  // with no bound skill gets neither a skill seed nor the framework
-  // skeleton, and the agent writes scaling / nav / print logic from scratch
-  // with the same buggy `place-items: center` + transform pattern we keep
-  // having to fix at runtime. Skill seeds (when present) win — they
-  // already define their own opinionated framework (simple-deck's
-  // scroll-snap, guizang-ppt's magazine layout) and re-pinning the generic
-  // skeleton would conflict. The skill-seed path takes over via
-  // `derivePreflight` above, so we only fire the generic directive when no
-  // skill seed is on offer.
+  // Deck outcome quality and rendered verification stay binding for every
+  // deck project. A skill seed owns its template/runtime, while unseeded decks
+  // also receive the shared delivery contract.
   const isDeckProject = resolvedExclusiveSurface === 'deck';
   const hasSkillSeed =
     !!skillBody && /assets\/template\.html/.test(skillBody);
-  if (!isAskMode && sessionMode !== 'plan' && isDeckProject && !hasSkillSeed) {
+  if (!isAskMode && sessionMode !== 'plan' && isDeckProject) {
+    const deckDirective = hasSkillSeed
+      ? renderDeckQualityDirective(resolvedExecutionProfile)
+      : renderDeckVNextDirective(resolvedExecutionProfile);
     parts.push(
-      `\n\n---\n\n${renderDeckVNextDirective(resolvedExecutionProfile)}`,
+      `\n\n---\n\n${deckDirective}`,
     );
   }
 

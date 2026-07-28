@@ -579,9 +579,11 @@ Apply these as result criteria for the deck and for every slide. They constrain 
 2. **Purposeful close.** End by reinforcing the takeaway and intended next step: ask, action, recommendation, decision, contact, Q&A, or a thank-you only when gratitude has real relational, ceremonial, or brand value. The requested count includes this slide; no empty "Thank you."
 3. **Claim → evidence → implication.** Support the title with the strongest relevant fact, example, comparison, mechanism, or proof and show why it matters. No unsupported conclusion or evidence without a takeaway.
 4. **Structure carries meaning.** Use parallel groups for peers, flows for causality, timelines for sequence, comparisons for choices, and charts for quantities. Do not force unrelated ideas into equal cards or decorate prose with meaningless diagrams.
-5. **Functional canvas.** Whitespace must create hierarchy, pacing, grouping, or emphasis. If content feels stranded, strengthen the message/evidence or choose a structure that deliberately uses the canvas.
-6. **Presentation distance.** At thumbnail scale, the claim, primary evidence, and reading order remain clear. On 1920×1080, use headlines ≥ 36px and body ≥ 24px unless an explicit brief or trusted seed defines another safe scale.
-7. **Epistemic honesty.** Distinguish sourced/user-provided facts, assumptions, and recommendations. Never invent metrics, traction, quotes, customers, or research; use labelled placeholders or qualitative framing.
+5. **Intentional canvas.** Whitespace must create hierarchy, pacing, direction, grouping, or emphasis. When sparse content is stranded in one corner, enlarge, recenter, redistribute, or pair it with meaningful evidence or imagery; never fill the gap with arbitrary decoration.
+6. **Local contrast over imagery.** Judge text contrast against the exact region behind it, not the image's average tone. Place copy on a visually quiet region, adjust the crop, or add a deliberate scrim, gradient, or solid plate; if none yields reliable legibility, move the copy off the image.
+7. **Container-content fit.** Size cards and panels to their payload. Do not stretch containers merely to occupy the slide; empty interior space must create deliberate focus or carry meaningful visual, data, process, or state content. Otherwise shorten or remove the container.
+8. **Presentation distance.** At thumbnail scale, the claim, primary evidence, and reading order remain clear. On 1920×1080, use headlines ≥ 36px and body ≥ 24px unless an explicit brief or trusted seed defines another safe scale.
+9. **Epistemic honesty.** Distinguish sourced/user-provided facts, assumptions, and recommendations. Never invent metrics, traction, quotes, customers, or research; use labelled placeholders or qualitative framing.
 
 ## Presentation presence
 
@@ -611,9 +613,18 @@ The export stitches all slides into one review image. Inspect the overview and a
 export function renderDeckVNextDirective(
   executionProfile: ExecutionProfile = 'filesystem',
 ): string {
-  const renderedVerification =
-    executionProfile === 'filesystem' ? FILESYSTEM_DECK_RENDERED_VERIFICATION : '';
-  return `${DECK_DELIVERY_CONTRACT_DIRECTIVE}${renderedVerification}
+  const qualityDirective = renderDeckQualityDirective(executionProfile);
+  const separator = executionProfile === 'filesystem' ? '' : '\n\n---\n\n';
+  return `${DECK_DELIVERY_CONTRACT_DIRECTIVE}${separator}${qualityDirective}`;
+}
+
+export function renderDeckQualityDirective(
+  executionProfile: ExecutionProfile = 'filesystem',
+): string {
+  if (executionProfile !== 'filesystem') {
+    return DECK_OUTCOME_RULES_DIRECTIVE;
+  }
+  return `${FILESYSTEM_DECK_RENDERED_VERIFICATION}
 
 ---
 

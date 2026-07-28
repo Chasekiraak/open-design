@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   renderDeckFrameworkDirective,
+  renderDeckQualityDirective,
   renderDeckVNextDirective,
 } from '../src/prompts/deck-framework.js';
 import { stripCssCommentsForPrompt } from '../src/prompts/design-system-runtime.js';
@@ -631,10 +632,45 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(directive).toContain('explicit background');
     expect(directive).toContain('# Deck outcome quality rules');
     expect(directive).toContain('Every element earns its place');
+    expect(directive).toContain('**Local contrast over imagery.**');
+    expect(directive).toContain('the exact region behind it');
+    expect(directive).toContain('**Intentional canvas.**');
+    expect(directive).toContain('sparse content is stranded in one corner');
+    expect(directive).toContain('**Container-content fit.**');
+    expect(directive).toContain('Size cards and panels to their payload');
     expect(directive).not.toContain('persist position to localStorage');
     expect(directive).toContain('Charts/diagrams');
     expect(directive).not.toContain('# Slide deck — fixed framework');
     expect(directive).not.toContain('## Canonical skeleton');
+  });
+
+  it('keeps shared deck quality criteria when a skill supplies the template seed', () => {
+    const prompt = composeSystemPrompt({
+      metadata: { kind: 'deck' } as any,
+      skillName: 'simple-deck',
+      skillMode: 'deck',
+      skillBody: 'Copy `assets/template.html` as the seed, then edit slides.',
+    });
+
+    expect(prompt).toContain('## Active skill — simple-deck');
+    expect(prompt).not.toContain('# Deck delivery contract');
+    expect(prompt).toContain('# Deck outcome quality rules');
+    expect(prompt).toContain('## Rendered verification — filesystem decks');
+    expect(prompt).toContain('**Local contrast over imagery.**');
+    expect(prompt).toContain('**Container-content fit.**');
+    expect(prompt).not.toContain('# Slide deck — fixed framework');
+  });
+
+  it('keeps skill-seeded deck quality profile-aware without adding delivery implementation', () => {
+    const filesystem = renderDeckQualityDirective('filesystem');
+    const textArtifact = renderDeckQualityDirective('text_artifact');
+
+    expect(filesystem).toContain('## Rendered verification — filesystem decks');
+    expect(filesystem).toContain('# Deck outcome quality rules');
+    expect(filesystem).not.toContain('# Deck delivery contract');
+    expect(textArtifact).not.toContain('## Rendered verification — filesystem decks');
+    expect(textArtifact).toContain('# Deck outcome quality rules');
+    expect(textArtifact).not.toContain('# Deck delivery contract');
   });
 
   it('requires one real stitched render for filesystem decks without leaking tools into text-artifact runs', () => {

@@ -63,6 +63,7 @@ const SECTION_MARKERS = [
   ['active-stage-blocks', '## Active stage:'],
   ['project-metadata', '## Project metadata'],
   ['deck-directive', '# Deck delivery contract'],
+  ['deck-outcome-rules', '# Deck outcome quality rules'],
   ['media-generation-contract', '## Media generation contract'],
   ['media-dispatch-hint', '## Media generation (if asked)'],
   ['codex-imagegen-override', '## Codex built-in imagegen override'],
@@ -158,9 +159,9 @@ const SCENARIOS: ReadonlyArray<[name: string, input: ComposeInput]> = [
       executionProfile: 'filesystem',
     },
   ],
-  // Deck-kind project with no skill seed gets the generic deck directive.
+  // An unseeded deck gets the shared delivery contract and quality rules.
   ['deck-kind-no-skill', { metadata: { kind: 'deck' }, executionProfile: 'filesystem' }],
-  // A skill seed (assets/template.html) suppresses the generic directive.
+  // A skill seed owns implementation details but keeps shared quality rules.
   [
     'deck-kind-with-skill-seed',
     {
