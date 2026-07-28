@@ -188,6 +188,46 @@ describe('creation page active template chip → lightweight preview', () => {
   });
 });
 
+describe('creation page lightweight preview escapes the home stacking context', () => {
+  // `.home-view` carries `isolation: isolate` (home-hero.css) to contain its
+  // kinetic-grid canvas, which makes it a stacking context: any fixed-position
+  // scrim rendered INSIDE that subtree has its z-index resolved locally, so the
+  // entry rail (z-index 30) and the workspace tab chrome paint on top of the
+  // backdrop — the exact "modal only dims the center pane" regression. The
+  // overlay must portal to document.body (the PluginDetailsModal convention)
+  // so its z-index participates in the root stacking context.
+  it('portals the preview overlay to document.body so the scrim covers the rail and tab strip', async () => {
+    stubAnimationFrame();
+    render(
+      <HomeView
+        projects={[]}
+        onSubmit={() => undefined}
+        onOpenProject={() => undefined}
+        onViewAllProjects={() => undefined}
+        promptHandoff={createPluginUseHandoff(1, 'example-fundraising-deck')}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('home-hero-active-plugin')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTitle('Plugin: Seed Round Pitch'));
+
+    await waitFor(() => {
+      expect(document.querySelector('.community-template-preview')).not.toBeNull();
+    });
+    const overlay = document.querySelector('.community-template-preview')!;
+
+    // The symptom: trapped inside the home-view subtree, the fixed scrim is
+    // clipped to the home stacking context and never covers the shell chrome.
+    expect(overlay.closest('[data-testid="home-view"]')).toBeNull();
+
+    // The contract: direct child of <body>, exactly like PluginDetailsModal.
+    expect(overlay.parentElement).toBe(document.body);
+  });
+});
+
 const HERO_PROPS = {
   prompt: '',
   onPromptChange: () => undefined,

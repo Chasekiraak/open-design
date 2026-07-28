@@ -13,6 +13,7 @@
 // duplicated data shaping.
 
 import type { InstalledPluginRecord } from '@open-design/contracts';
+import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { Dict, Locale } from '../i18n/types';
 import { Icon } from './Icon';
@@ -195,7 +196,13 @@ export function TemplatePreviewModal({
   busy?: boolean;
 }) {
   const t = useT();
-  return (
+  // The overlay is `position: fixed; inset: 0`, so it must render as a direct
+  // child of <body> (the PluginDetailsModal convention). Left inline, any host
+  // ancestor that forms a stacking context — e.g. `.home-view`'s
+  // `isolation: isolate` (home-hero.css), which contains its kinetic-grid
+  // canvas — traps the scrim's z-index locally, and shell chrome like the
+  // entry rail (z-index 30) and the workspace tabs paints on top of it.
+  const overlay = (
     <div className="community-template-preview" role="presentation" onMouseDown={onClose}>
       <section
         className="community-template-preview__panel"
@@ -232,6 +239,8 @@ export function TemplatePreviewModal({
       </section>
     </div>
   );
+  if (typeof document === 'undefined') return overlay;
+  return createPortal(overlay, document.body);
 }
 
 export function isPromptArtifact(template: TemplateDemo): boolean {
