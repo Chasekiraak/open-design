@@ -254,7 +254,7 @@ describe('AmrLoginPill', () => {
     expect(screen.getByText('leaf@example.com')).toBeTruthy();
     expect(screen.getByText('TEST')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Manage' }).getAttribute('href')).toBe(
-      'https://vela.powerformer.net/wallet?source=open_design',
+      'https://vela.powerformer.net/dashboard?source=open_design',
     );
   });
 
@@ -269,7 +269,7 @@ describe('AmrLoginPill', () => {
 
     expect(screen.getByText('LOCAL')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Manage' }).getAttribute('href')).toBe(
-      'http://localhost:5173/wallet?source=open_design',
+      'http://localhost:5173/dashboard?source=open_design',
     );
   });
 
@@ -284,7 +284,7 @@ describe('AmrLoginPill', () => {
 
     expect(screen.queryByText('PROD')).toBeNull();
     expect(screen.getByRole('link', { name: 'Manage' }).getAttribute('href')).toBe(
-      'https://open-design.ai/amr/wallet?source=open_design',
+      'https://open-design.ai/amr/dashboard?source=open_design',
     );
   });
 
@@ -292,7 +292,7 @@ describe('AmrLoginPill', () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url === '/api/attribution/bridge-url') {
-        return jsonResponse({ body: { url: 'https://open-design.ai/amr/wallet?od_bridge=odbr_12345678' } });
+        return jsonResponse({ body: { url: 'https://open-design.ai/amr/dashboard?od_bridge=odbr_12345678' } });
       }
       if (url === '/api/system/open-external') return jsonResponse({ body: { ok: true } });
       return new Response('{}', { status: 202 });
@@ -341,7 +341,7 @@ describe('AmrLoginPill', () => {
       '/api/system/open-external',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ url: 'https://open-design.ai/amr/wallet?od_bridge=odbr_12345678' }),
+        body: JSON.stringify({ url: 'https://open-design.ai/amr/dashboard?od_bridge=odbr_12345678' }),
       }),
     );
   });
