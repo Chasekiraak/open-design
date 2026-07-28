@@ -234,6 +234,90 @@ process.exit(0);
     );
   });
 
+  it('fails missing artifacts only when the request explicitly requires delivery', async () => {
+    await withFakeAgent(
+      'opencode',
+      `
+console.log(JSON.stringify({ type: 'step_start', sessionID: 'artifact-delivery-session' }));
+console.log(JSON.stringify({
+  type: 'text',
+  sessionID: 'artifact-delivery-session',
+  part: { text: 'Analysis complete. No project files were changed.' },
+}));
+console.log(JSON.stringify({ type: 'step_finish', part: { tokens: { input: 1, output: 1 } } }));
+process.exit(0);
+`,
+      async () => {
+        const createProject = async (suffix: string) => {
+          const projectId = `artifact-delivery-${suffix}-${randomUUID()}`;
+          const response = await fetch(`${baseUrl}/api/projects`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: projectId,
+              name: `Artifact delivery ${suffix}`,
+              metadata: { kind: 'prototype' },
+            }),
+          });
+          expect(response.status).toBe(200);
+          return projectId;
+        };
+        const run = async (projectId: string, artifactDeliveryRequired?: boolean) => {
+          const response = await fetch(`${baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: 'opencode',
+              projectId,
+              sessionMode: 'design',
+              message: 'Handle this design turn.',
+              ...(artifactDeliveryRequired === undefined
+                ? {}
+                : { artifactDeliveryRequired }),
+            }),
+          });
+          expect(response.ok).toBe(true);
+          return response.text();
+        };
+
+        const reportProjectId = await createProject('report');
+        const reportBody = await run(reportProjectId);
+        expect(reportBody).toContain('"status":"succeeded"');
+        expect(reportBody).not.toContain('NO_ARTIFACT_PRODUCED');
+
+        const blankGenerationProjectId = await createProject('blank-generation');
+        const blankGenerationBody = await run(blankGenerationProjectId, true);
+        expect(blankGenerationBody).toContain('"status":"failed"');
+        expect(blankGenerationBody).toContain('NO_ARTIFACT_PRODUCED');
+
+        const existingGenerationProjectId = await createProject('existing-generation');
+        const createFileResponse = await fetch(
+          `${baseUrl}/api/projects/${existingGenerationProjectId}/files`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: 'index.html',
+              content: '<!doctype html><h1>Existing artifact</h1>',
+              artifactManifest: {
+                version: 1,
+                kind: 'html',
+                title: 'Existing artifact',
+                entry: 'index.html',
+                renderer: 'html',
+                exports: ['html'],
+              },
+            }),
+          },
+        );
+        expect(createFileResponse.status).toBe(200);
+        const existingGenerationBody = await run(existingGenerationProjectId, true);
+        expect(existingGenerationBody).toContain('"status":"failed"');
+        expect(existingGenerationBody).toContain('NO_ARTIFACT_PRODUCED');
+      },
+    );
+  });
+
   it('marks json stream runs failed when an error frame exits with code 0', async () => {
     const conversationId = `conv-${randomUUID()}`;
 

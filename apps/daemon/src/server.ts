@@ -4928,7 +4928,6 @@ export async function startServer({
         artifactCount: runArtifactCountForRun(run),
         designSystemCreated: runDesignSystemCreatedForRun(run),
         previewModuleCount: runPreviewModuleCountForRun(run),
-        baselineHadTrackedFiles: true,
       });
       let outcome;
       if (!artifactBaseline || artifactBaseline.contended) {
@@ -4945,7 +4944,6 @@ export async function startServer({
             artifactsModified: diff.modified,
             designSystemCreated: diff.designSystemCreated,
             previewModuleCount: diff.previewModuleCount,
-            baselineHadTrackedFiles: artifactBaseline.before.size > 0,
             projectRoot: artifactBaseline.cwd,
             diff,
           };
@@ -4972,12 +4970,7 @@ export async function startServer({
       });
     };
     const requiresArtifactDeliveryForRun = () => {
-      if (executionProfile !== 'filesystem') return false;
-      if (run.sessionMode === 'chat' || run.sessionMode === 'plan') return false;
-      const kind = projectRecord?.metadata && typeof projectRecord.metadata.kind === 'string'
-        ? projectRecord.metadata.kind
-        : null;
-      return kind === 'deck' || kind === 'prototype' || kind === 'template' || kind === 'other';
+      return executionProfile === 'filesystem' && run.artifactDeliveryRequired === true;
     };
     const maybeFailSucceededRunWithoutArtifact = (status, code) => {
       if (status !== 'succeeded') return { status, code };
@@ -4989,7 +4982,6 @@ export async function startServer({
         outcome?.designSystemCreated === true ||
         (outcome?.previewModuleCount ?? 0) > 0;
       if (produced) return { status, code };
-      if (outcome?.baselineHadTrackedFiles !== false) return { status, code };
       const message = 'Agent finished without producing a project artifact.';
       run.error = run.error || message;
       run.errorCode = run.errorCode || 'NO_ARTIFACT_PRODUCED';

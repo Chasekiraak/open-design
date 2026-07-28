@@ -177,6 +177,7 @@ export function createChatRunService({
         meta.sessionMode === 'chat' || meta.sessionMode === 'design' || meta.sessionMode === 'plan'
           ? meta.sessionMode
           : null,
+      artifactDeliveryRequired: meta.artifactDeliveryRequired === true,
       context:
         meta.context && typeof meta.context === 'object' && !Array.isArray(meta.context)
           ? meta.context

@@ -3303,8 +3303,21 @@ function injectDeckBridge(
   var odAutoFitOriginalTransform = '';
   var odAutoFitOriginalTransformOrigin = '';
   var odAutoFitDisabled = false;
+  function isGenuineScrollTrack(list){
+    var scrollTarget = primaryScrollTarget();
+    if (!scrollTarget) return false;
+    if (!isRootScrollContainer(scrollTarget)) return true;
+    var firstLeft = Number(list[0] && list[0].offsetLeft) || 0;
+    var firstTop = Number(list[0] && list[0].offsetTop) || 0;
+    for (var i=1; i<list.length; i++) {
+      var left = Number(list[i] && list[i].offsetLeft) || 0;
+      var top = Number(list[i] && list[i].offsetTop) || 0;
+      if (Math.abs(left - firstLeft) > 1 || Math.abs(top - firstTop) > 1) return true;
+    }
+    return false;
+  }
   function fixedCanvasTarget(){
-    if (${JSON.stringify(isFrameworkDeck)} || isScrollDeck()) return null;
+    if (${JSON.stringify(isFrameworkDeck)}) return null;
     var list = slides();
     if (!list.length) return null;
     var parent = list[0] && list[0].parentElement;
@@ -3320,6 +3333,7 @@ function injectDeckBridge(
     // vertical slide tracks whose parent spans multiple pages.
     if (ratio < 1.2 || ratio > 2.2) return null;
     if (width <= window.innerWidth + 1 && height <= window.innerHeight + 1) return null;
+    if (isGenuineScrollTrack(list)) return null;
     try {
       var computed = window.getComputedStyle(parent);
       if (parent.style.transform || (computed.transform && computed.transform !== 'none')) return null;
@@ -3327,7 +3341,7 @@ function injectDeckBridge(
     return parent;
   }
   function fitFixedCanvas(){
-    if (odAutoFitDisabled || ${JSON.stringify(isFrameworkDeck)} || isScrollDeck()) return;
+    if (odAutoFitDisabled || ${JSON.stringify(isFrameworkDeck)}) return;
     var target = odAutoFitTarget || fixedCanvasTarget();
     if (!target) return;
     if (!odAutoFitTarget) {

@@ -878,6 +878,9 @@ describe('ProjectView daemon cleanup', () => {
       );
 
       await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+      expect(streamViaDaemon.mock.calls[0]?.[0]).toMatchObject({
+        artifactDeliveryRequired: true,
+      });
       const seededCall = chatPaneSpy.mock.calls.find(
         (call) => call[0]?.initialDraft === 'design a landing page for a coffee shop',
       );

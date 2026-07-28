@@ -128,6 +128,16 @@ describe('deck bridge - CSS-only decks', () => {
       configurable: true,
       value: 870,
     });
+    for (const root of [win.document.documentElement, win.document.body]) {
+      Object.defineProperty(root, 'clientWidth', {
+        configurable: true,
+        value: 1518,
+      });
+      Object.defineProperty(root, 'scrollWidth', {
+        configurable: true,
+        value: 1920,
+      });
+    }
     const stage = win.document.querySelector<HTMLElement>('.stage');
     if (!stage) throw new Error('stage not found');
     Object.defineProperty(stage, 'offsetWidth', {
