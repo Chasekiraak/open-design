@@ -1634,6 +1634,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Chips may shrink, their GLYPHS may not: the row-wide `min-width: 0` frees
+   flex shrink for label ellipsis, but an SVG flex item defaults to
+   shrinkable too, so a hard squeeze rendered the palette icon tiny. The
+   label's ellipsis is the intended give — pin every chip glyph. */
+.composer-row .icon-btn > svg,
+.composer-row .composer-ds-icon-trigger > svg {
+  flex: 0 0 auto;
+}
 .composer-row {
   display: flex;
   align-items: center;
