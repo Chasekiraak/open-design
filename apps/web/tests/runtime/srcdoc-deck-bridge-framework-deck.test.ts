@@ -72,7 +72,9 @@ describe('injectDeckBridge — framework-deck detection (#deck-stage)', () => {
   it('keeps injecting the place-content fix for legacy / non-framework decks', () => {
     const out = buildSrcdoc(legacyDeckHtml(), { deck: true });
     expect(out).toMatch(/<style[^>]*data-od-deck-fix/);
-    expect(out).toContain('.stage, .deck-stage, .deck-shell { place-content: center !important; }');
+    expect(out).toContain(
+      '.stage, .deck-stage, .deck-shell { flex: none !important; place-content: center !important; }',
+    );
     expect(out).toMatch(/<script[^>]*data-od-deck-bridge/);
   });
 
