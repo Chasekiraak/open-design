@@ -5,6 +5,8 @@ import {
   startHubEventsSubscriber,
   type HubEventsSubscriber,
 } from '../../src/collab/hub-events-subscriber.js';
+import { createWorkspaceBillingRuntimeCoordinator } from '../../src/collab/workspace-billing-runtime.js';
+import type { VelaWorkspaceBillingProjection } from '../../src/integrations/vela-billing.js';
 
 function sseResponse(frames: string[], opts: { holdOpen?: boolean } = {}) {
   const encoder = new TextEncoder();
@@ -49,6 +51,32 @@ const READY = 'event: ready\ndata: {"workspaceId":"w1"}\n\n';
 const HEARTBEAT = 'event: heartbeat\ndata: {}\n\n';
 const COMMENT_EVENT =
   'event: workspace-event\ndata: {"type":"comment-changed","workspaceId":"w1","projectId":"p1","seq":7}\n\n';
+const BILLING_KEY = { workspaceId: 'w1', workspaceMemberId: 'm1' };
+
+function billingProjection(balanceUsd: string): VelaWorkspaceBillingProjection {
+  return {
+    snapshot: {
+      schemaVersion: 1,
+      workspaceId: BILLING_KEY.workspaceId,
+      workspaceMemberId: BILLING_KEY.workspaceMemberId,
+      billingScopeVersion: 2,
+      billing: { billingState: 'active', planId: 'team_plus' },
+      wallet: {
+        balanceUsd,
+        expiresAt: null,
+        updatedAt: '2026-07-28T00:00:00.000Z',
+      },
+      revisions: { billing: 'billing-1', wallet: `wallet-${balanceUsd}` },
+    },
+    workspaceBalance: {
+      ...BILLING_KEY,
+      billingScopeVersion: 2,
+      balanceUsd,
+      expiresAt: null,
+      updatedAt: '2026-07-28T00:00:00.000Z',
+    },
+  };
+}
 
 let subscriber: HubEventsSubscriber | null = null;
 
@@ -314,6 +342,85 @@ describe('startHubEventsSubscriber', () => {
     subscriber.stop();
     expect(fetches).toBeGreaterThanOrEqual(2);
     expect(connections).toEqual([false, true]);
+  });
+
+  it('authoritatively catches up an interested wallet mutation made while SSE is disconnected', async () => {
+    let upstreamBalance = '1.00';
+    let projectionReads = 0;
+    let endpointResolutions = 0;
+    const timeline: string[] = [];
+    const runtime = createWorkspaceBillingRuntimeCoordinator({
+      fetchProjection: async () => {
+        projectionReads += 1;
+        timeline.push(`projection:${upstreamBalance}`);
+        return billingProjection(upstreamBalance);
+      },
+    });
+
+    await runtime.read(BILLING_KEY, {
+      clientId: 'renderer-1',
+      clientGeneration: '1',
+    });
+
+    let resolveRecovered!: () => void;
+    const recovered = new Promise<void>((resolve) => {
+      resolveRecovered = resolve;
+    });
+
+    subscriber = startHubEventsSubscriber({
+      resolveEndpoint: async () => {
+        endpointResolutions += 1;
+        timeline.push(`resolve:${endpointResolutions}`);
+        if (endpointResolutions === 2) {
+          // The wallet commits after the first stream has closed and before
+          // the reconnect becomes ready. No wallet invalidation is delivered.
+          upstreamBalance = '2.00';
+          timeline.push('wallet:2.00');
+        }
+        return { url: 'https://hub/events', headers: {} };
+      },
+      onEvent: () => undefined,
+      onConnect: ({ reconnect }) => {
+        timeline.push(reconnect ? 'ready:reconnect' : 'ready:first');
+        if (!reconnect) return;
+        runtime.reconnect(BILLING_KEY.workspaceId);
+        void runtime
+          .read(BILLING_KEY, {
+            clientId: 'renderer-1',
+            clientGeneration: '1',
+          })
+          .then((result) => {
+            timeline.push(
+              `fresh:${result.state.status}:${result.projection.workspaceBalance?.balanceUsd}`,
+            );
+            resolveRecovered();
+          });
+      },
+      backoffMinMs: 1,
+      backoffMaxMs: 2,
+      fetchImpl: async () =>
+        endpointResolutions === 1
+          ? sseResponse([READY])
+          : sseResponse([READY], { holdOpen: true }),
+    });
+
+    await recovered;
+    expect(projectionReads).toBe(2);
+    expect(runtime.peek(BILLING_KEY)).toMatchObject({
+      projection: { workspaceBalance: { balanceUsd: '2.00' } },
+      state: { status: 'fresh', reason: 'reconnect' },
+    });
+    expect(timeline).toEqual([
+      'projection:1.00',
+      'resolve:1',
+      'ready:first',
+      'resolve:2',
+      'wallet:2.00',
+      'ready:reconnect',
+      'projection:2.00',
+      'fresh:fresh:2.00',
+    ]);
+    runtime.dispose();
   });
 
   it('reports ready capabilities per verified connection without retaining stale values', async () => {
