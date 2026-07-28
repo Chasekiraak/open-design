@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildProjectRawFileUrl } from '@open-design/contracts';
 
-import { _resetWebBaseUrlCache, handleMcpToolCall } from '../src/mcp.js';
+import { handleMcpToolCall } from '../src/mcp.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -19,7 +19,6 @@ describe('public MCP discovery + generation tools', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     globalThis.fetch = originalFetch;
-    _resetWebBaseUrlCache();
   });
 
   it('list_skills proxies GET /api/skills', async () => {
@@ -370,6 +369,53 @@ describe('public MCP discovery + generation tools', () => {
     const parsed = JSON.parse(firstText(result));
     expect(parsed.studioUrl).toBe(
       'http://127.0.0.1:65321/projects/project-1/conversations/conv-9/files/index.html',
+    );
+  });
+
+  it('get_run uses the newly registered web port on the next delivery lookup', async () => {
+    let webBaseUrl = 'http://127.0.0.1:65321';
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/mcp/install-info')) {
+        return new Response(JSON.stringify({ webBaseUrl }), { status: 200 });
+      }
+      if (url.endsWith('/api/runs/run-42')) {
+        return new Response(JSON.stringify({
+          id: 'run-42',
+          status: 'succeeded',
+          projectId: 'project-1',
+          conversationId: 'conv-9',
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/projects/project-1')) {
+        return new Response(JSON.stringify({
+          project: {
+            id: 'project-1',
+            metadata: { entryFile: 'index.html' },
+          },
+        }), { status: 200 });
+      }
+      if (url.endsWith('/api/runs/run-42/events')) {
+        return new Response('', { status: 200 });
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await handleMcpToolCall(
+      'http://127.0.0.1:17456',
+      'get_run',
+      { runId: 'run-42' },
+    );
+    expect(JSON.parse(firstText(first)).studioUrl).toContain('127.0.0.1:65321');
+
+    webBaseUrl = 'http://127.0.0.1:53421';
+    const afterRebind = await handleMcpToolCall(
+      'http://127.0.0.1:17456',
+      'get_run',
+      { runId: 'run-42' },
+    );
+    expect(JSON.parse(firstText(afterRebind)).studioUrl).toContain(
+      '127.0.0.1:53421',
     );
   });
 

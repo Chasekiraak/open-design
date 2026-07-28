@@ -2544,31 +2544,14 @@ async function fetchRunAgentMessage(baseUrl: string, runId: string): Promise<str
 // Studio deep links (browser-facing OD page that shows the file
 // preview alongside the conversation history for a run). Built from
 // the daemon's advertised webBaseUrl + project + conversation + entry
-// file. The webBaseUrl is exposed by /api/mcp/install-info; we cache
-// it briefly because each get_run/get_project poll otherwise pays for
-// an extra fetch. Returns null when any required piece is missing —
-// callers omit the field rather than emit a half-built URL.
-
-interface WebBaseUrlCache {
-  t: number;
-  url: string | null;
-}
-const WEB_BASE_URL_TTL_MS = 5_000;
-let webBaseUrlCache: WebBaseUrlCache | null = null;
-
-// Internal — for tests only. Module-scoped caches persist across `it`
-// blocks inside the same vitest module load, so an earlier test that
-// returns `null` would otherwise poison subsequent tests for 5s. Test
-// files call this in afterEach to start each case with a clean cache.
-export function _resetWebBaseUrlCache(): void {
-  webBaseUrlCache = null;
-}
+// file. The webBaseUrl is exposed by /api/mcp/install-info. Read it for
+// every delivery lookup: the endpoint already has a small cache keyed by
+// the live packaged web port, while an additional MCP-process cache could
+// return a stale localhost URL immediately after the runtime rebinds.
+// Returns null when any required piece is missing — callers omit the field
+// rather than emit a half-built URL.
 
 async function getWebBaseUrl(daemonBaseUrl: string): Promise<string | null> {
-  const now = Date.now();
-  if (webBaseUrlCache && now - webBaseUrlCache.t < WEB_BASE_URL_TTL_MS) {
-    return webBaseUrlCache.url;
-  }
   try {
     const data = await getJson<{ webBaseUrl?: string | null }>(
       `${daemonBaseUrl}/api/mcp/install-info`,
@@ -2577,10 +2560,8 @@ async function getWebBaseUrl(daemonBaseUrl: string): Promise<string | null> {
       typeof data?.webBaseUrl === 'string' && data.webBaseUrl.length > 0
         ? data.webBaseUrl
         : null;
-    webBaseUrlCache = { t: now, url };
     return url;
   } catch {
-    webBaseUrlCache = { t: now, url: null };
     return null;
   }
 }

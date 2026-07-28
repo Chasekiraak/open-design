@@ -12,6 +12,7 @@ import {
   SIDECAR_MODES,
   type AppKey,
   type DaemonStatusSnapshot,
+  type RegisterWebUrlResult,
   type SidecarStamp,
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
@@ -607,6 +608,23 @@ async function closeManagedChild(child: ManagedSidecarChild): Promise<void> {
   await child.logHandle.close().catch(() => undefined);
 }
 
+export async function registerPackagedWebUrl(
+  daemonIpcPath: string,
+  webUrl: string,
+): Promise<void> {
+  const result = await requestJsonIpc<RegisterWebUrlResult>(
+    daemonIpcPath,
+    {
+      input: { url: webUrl },
+      type: SIDECAR_MESSAGES.REGISTER_WEB_URL,
+    },
+    { timeoutMs: 1_200 },
+  );
+  if (result.accepted !== true) {
+    throw new Error("daemon rejected packaged web URL registration");
+  }
+}
+
 export async function startPackagedSidecars(
   runtime: SidecarRuntimeContext<SidecarStamp>,
   paths: PackagedNamespacePaths,
@@ -762,6 +780,7 @@ export async function startPackagedSidecars(
       { child: web.child, logPath: logPathFor(paths, APP_KEYS.WEB) },
     );
     if (webStatus.url == null) throw new Error("web did not report a URL");
+    await registerPackagedWebUrl(daemon.ipcPath, webStatus.url);
     options.onPhase?.("web-ready");
 
     return {

@@ -27,6 +27,7 @@ import { APP_KEYS, OPEN_DESIGN_SIDECAR_CONTRACT } from '@open-design/sidecar-pro
 import {
   buildPackagedDaemonSpawnEnv,
   createPackagedSidecarSpawnOptions,
+  registerPackagedWebUrl,
   resolveDaemonStatusTimeoutMs,
   resolvePackagedChildBaseEnv,
   resolvePackagedElectronNodeCommand,
@@ -92,6 +93,42 @@ describe('resolveDaemonStatusTimeoutMs', () => {
     } finally {
       if (original == null) delete process.env.OD_LEGACY_DATA_DIR;
       else process.env.OD_LEGACY_DATA_DIR = original;
+    }
+  });
+});
+
+describe('packaged web URL registration', () => {
+  it('registers the current dynamic web URL with the daemon sidecar and supports a later port', async () => {
+    const namespace = `web-url-${process.pid}-${Date.now()}`;
+    const daemonIpc = resolveAppIpcPath({
+      app: APP_KEYS.DAEMON,
+      contract: OPEN_DESIGN_SIDECAR_CONTRACT,
+      namespace,
+    });
+    const received: unknown[] = [];
+    const server = await createJsonIpcServer({
+      socketPath: daemonIpc,
+      handler: async (message) => {
+        received.push(message);
+        return { accepted: true };
+      },
+    });
+
+    try {
+      await registerPackagedWebUrl(daemonIpc, 'http://127.0.0.1:64248');
+      await registerPackagedWebUrl(daemonIpc, 'http://127.0.0.1:53421');
+      expect(received).toEqual([
+        {
+          input: { url: 'http://127.0.0.1:64248' },
+          type: 'register-web-url',
+        },
+        {
+          input: { url: 'http://127.0.0.1:53421' },
+          type: 'register-web-url',
+        },
+      ]);
+    } finally {
+      await server.close();
     }
   });
 });
