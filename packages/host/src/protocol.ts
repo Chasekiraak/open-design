@@ -53,15 +53,14 @@ export type OpenDesignHostActionResult =
  * Only the fields the host actually forwards are modelled, and the enum-like
  * fields stay `string` because the host treats them as opaque pass-through
  * values — the daemon remains the authority that parses and validates them.
- * The index signatures are load-bearing: callers hand over their full context
- * object, so both levels must tolerate the richer payload the host ignores.
+ * Deliberately no index signature: an interface never satisfies one, so adding
+ * it would reject the very `WorkspaceCollabContext` callers pass. Callers hand
+ * over a variable, not a fresh literal, so the extra fields ride along fine.
  */
 export type OpenDesignHostWorkspaceContext = {
-  [key: string]: unknown;
   lifecycleState: string;
   memberStatus: string;
   permissions: {
-    [key: string]: unknown;
     canShareProjects: boolean;
     canWriteSyncedFiles: boolean;
   };
