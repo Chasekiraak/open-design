@@ -139,6 +139,7 @@ import {
   useWorkspaceBillingResponse,
   useWorkspaceContext,
   workspaceBillingBalanceUsd,
+  workspaceBillingSummaryForContext,
 } from '../collab/useWorkspaceContext';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
 import {
@@ -588,7 +589,15 @@ export function EntryShell({
   const workspaceContextRef = useRef(workspaceContext);
   workspaceContextRef.current = workspaceContext;
   const workspaceBillingResponse = useWorkspaceBillingResponse();
-  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
+  // Plan and money are both workspace-scoped questions, so both go through a
+  // context-partitioned projection. `response.summary` on its own is an ACCOUNT
+  // read (`workspaceId: null` by contract) — feeding it to the rail's plan
+  // nameplate is what kept a personal Plus badge on a 免费 workspace while the
+  // 额度 row beside it correctly followed the switch.
+  const workspaceBilling = workspaceBillingSummaryForContext(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
   const workspaceBalanceUsd = workspaceBillingBalanceUsd(
     workspaceBillingResponse,
     workspaceContext,

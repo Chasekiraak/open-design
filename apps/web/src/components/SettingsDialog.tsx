@@ -158,6 +158,7 @@ import {
   useWorkspaceBillingResponse,
   useWorkspaceContext,
   workspaceBillingBalanceUsd,
+  workspaceBillingSummaryForContext,
 } from '../collab/useWorkspaceContext';
 import { resolvePlanTier } from '../collab/team-plan';
 import { planBadgeTierForLabel } from './PlanWordmark';
@@ -1630,7 +1631,13 @@ export function SettingsDialog({
   // real balance into the number. `useWorkspaceBillingResponse` carries the
   // explicit v2 workspace-wallet source independently from account metadata.
   const workspaceBillingResponse = useWorkspaceBillingResponse();
-  const workspaceBilling = workspaceBillingResponse?.summary ?? null;
+  // Same partition for the plan half: `response.summary` is an ACCOUNT read, so
+  // the AMR card's plan badge and both upgrade routes must consume it projected
+  // onto the selected workspace. See `workspaceBillingSummaryForContext`.
+  const workspaceBilling = workspaceBillingSummaryForContext(
+    workspaceBillingResponse,
+    workspaceContext,
+  );
   const showWorkspaceSettings = canShowWorkspaceSettings(workspaceContext);
   // The 「升级」 buttons on the AMR model card route through
   // `workspaceUpgradeUrl` — the one decision point every upgrade affordance
