@@ -15,8 +15,11 @@
  * after every navigation so the host can render its own counter / dots.
  */
 import {
+  DECK_ACTIVE_ATTRIBUTE,
+  DECK_ACTIVE_CLASSES,
   DECK_SLIDE_SELECTOR,
   DECK_STRUCTURED_SLIDE_SELECTOR,
+  htmlUsesCanonicalDeckFramework,
   injectDeckStageFallback,
 } from '@open-design/contracts/runtime/deck-stage-fallback';
 
@@ -2586,7 +2589,7 @@ function injectDeckBridge(
   const hasInlineSlideMessageListener =
     /addEventListener\s*\(\s*['"]message['"]/i.test(doc) && /\bod:slide\b/.test(doc);
   const hasInlineKeydownListener = !!options.artifactHasKeydownNavigation;
-  const isFrameworkDeck = /\bid\s*=\s*["']deck-stage["']/i.test(doc);
+  const isFrameworkDeck = htmlUsesCanonicalDeckFramework(doc);
   const clickNavigation = !!options.clickNavigation && !isFrameworkDeck;
   const styleFix = isFrameworkDeck
     ? ''
@@ -2635,6 +2638,8 @@ function injectDeckBridge(
     }, true);
   }
   window.__odDeckBridgeOwnListenerInstall = false;
+  var OD_ACTIVE_ATTRIBUTE = ${JSON.stringify(DECK_ACTIVE_ATTRIBUTE)};
+  var OD_ACTIVE_CLASSES = ${JSON.stringify(DECK_ACTIVE_CLASSES)};
   function slides(){
     // Structured selectors first so decorative .slide markup in non-deck
     // pages (icons, badges, code samples) is not counted as deck slides;
@@ -2734,7 +2739,16 @@ function injectDeckBridge(
   function findActiveByClass(list){
     for (var i=0; i<list.length; i++) {
       var cl = list[i].classList;
-      if (cl && (cl.contains('is-active') || cl.contains('active') || cl.contains('current'))) return i;
+      if (!cl) continue;
+      for (var j=0; j<OD_ACTIVE_CLASSES.length; j++) {
+        if (cl.contains(OD_ACTIVE_CLASSES[j])) return i;
+      }
+    }
+    return -1;
+  }
+  function findActiveByAttribute(list){
+    for (var i=0; i<list.length; i++) {
+      if (list[i].hasAttribute && list[i].hasAttribute(OD_ACTIVE_ATTRIBUTE)) return i;
     }
     return -1;
   }
@@ -2758,6 +2772,8 @@ function injectDeckBridge(
     if (byTransform >= 0) return byTransform;
     var byClass = findActiveByClass(list);
     if (byClass >= 0) return byClass;
+    var byAttribute = findActiveByAttribute(list);
+    if (byAttribute >= 0) return byAttribute;
     var byVis = findActiveByVisibility(list);
     if (byVis >= 0) return byVis;
     return 0;
@@ -2781,10 +2797,11 @@ function injectDeckBridge(
   }
   function pad2(n){ return (n < 10 ? '0' : '') + n; }
   function activeClassName(list){
-    var names = ['active', 'is-active', 'current'];
-    for (var n=0; n<names.length; n++) {
+    for (var n=0; n<OD_ACTIVE_CLASSES.length; n++) {
       for (var i=0; i<list.length; i++) {
-        if (list[i].classList && list[i].classList.contains(names[n])) return names[n];
+        if (list[i].classList && list[i].classList.contains(OD_ACTIVE_CLASSES[n])) {
+          return OD_ACTIVE_CLASSES[n];
+        }
       }
     }
     return 'active';
@@ -3016,8 +3033,11 @@ function injectDeckBridge(
       usesVisibleClass = usesVisibleClass || (list[j].classList && list[j].classList.contains('visible'));
     }
     for (var k=0; k<list.length; k++) {
+      list[k].toggleAttribute(OD_ACTIVE_ATTRIBUTE, k === target);
       if (list[k].classList) {
-        list[k].classList.remove('active', 'is-active', 'current');
+        for (var n=0; n<OD_ACTIVE_CLASSES.length; n++) {
+          if (OD_ACTIVE_CLASSES[n] !== 'visible') list[k].classList.remove(OD_ACTIVE_CLASSES[n]);
+        }
         if (k === target) list[k].classList.add(activeClass);
         if (usesVisibleClass) list[k].classList.toggle('visible', k === target);
       }
@@ -3025,10 +3045,14 @@ function injectDeckBridge(
         if (k === target) list[k].removeAttribute('hidden');
         else list[k].setAttribute('hidden', '');
       }
-      if ((usesInlineDisplay || odComputedDisplayMode) && list[k].style) {
-        list[k].style.display = k === target
-          ? (odComputedDisplayMode || '')
-          : 'none';
+      if (odComputedDisplayMode && list[k].style) {
+        list[k].style.setProperty(
+          'display',
+          k === target ? odComputedDisplayMode : 'none',
+          'important',
+        );
+      } else if (usesInlineDisplay && list[k].style) {
+        list[k].style.display = k === target ? '' : 'none';
       }
       if (usesInlineVisibility && list[k].style) {
         list[k].style.visibility = k === target ? '' : 'hidden';

@@ -20,6 +20,7 @@
 import DOMPurify from 'dompurify';
 
 import {
+  DECK_ACTIVE_CLASSES,
   DECK_SLIDE_SELECTOR,
   DECK_STRUCTURED_SLIDE_SELECTOR,
 } from '@open-design/contracts/runtime/deck-stage-fallback';
@@ -311,11 +312,9 @@ function hasScriptBuiltSlideContent(doc: Document, slides: Element[]): boolean {
   return false;
 }
 
-const SLIDE_STATE_CLASSES = ['active', 'is-active', 'current', 'visible'] as const;
-
 function collectSlideStateClasses(slides: Element[], css: string): string[] {
   const selectors = Array.from(iterateRuleBlocks(css), (block) => block.selector);
-  return SLIDE_STATE_CLASSES.filter((className) => {
+  return DECK_ACTIVE_CLASSES.filter((className) => {
     if (slides.some((slide) => slide.classList.contains(className))) return true;
     const classToken = new RegExp(`\\.${className}(?![\\w-])`);
     return selectors.some((selector) =>

@@ -14,6 +14,10 @@
 // iframe thumbnail for that item.
 
 import { memo, useEffect, useLayoutEffect, useRef } from 'react';
+import {
+  DECK_ACTIVE_ATTRIBUTE,
+  DECK_ACTIVE_CLASSES,
+} from '@open-design/contracts/runtime/deck-stage-fallback';
 import { DECK_CHROME_HIDE_CSS, DECK_MOTION_FREEZE_CSS } from '../runtime/srcdoc';
 import type { ParsedDeckThumbnails } from '../runtime/deck-thumbnail-parser';
 
@@ -180,9 +184,9 @@ export const DeckSlideThumbnail = memo(function DeckSlideThumbnail({
       if (!slide) throw new Error('deck thumbnail: empty slide markup');
       // Inert already (parsed via <template>), but drop scripts defensively.
       slide.querySelectorAll('script').forEach((s) => s.remove());
-      slide.classList.remove('active', 'is-active', 'current', 'visible');
+      slide.classList.remove(...DECK_ACTIVE_CLASSES);
       slide.classList.add(...parsed.stateClasses);
-      slide.setAttribute('data-od-deck-active', '');
+      slide.setAttribute(DECK_ACTIVE_ATTRIBUTE, '');
       slide.setAttribute('data-od-thumb-slide', '');
       slide.removeAttribute('hidden');
       slide.setAttribute('aria-hidden', 'false');

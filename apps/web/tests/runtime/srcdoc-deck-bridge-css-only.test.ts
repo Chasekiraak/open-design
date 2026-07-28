@@ -154,8 +154,8 @@ describe('deck bridge - CSS-only decks', () => {
     const bodyHtml = `
       <style>
         .stage { width: 1920px; height: 1080px; position: relative; }
-        .slide { display: none; }
-        .slide:first-child { display: flex; }
+        .slide { display: none !important; }
+        .slide:first-child { display: flex !important; }
       </style>
       <main class="stage">
         <section class="slide">One</section>
@@ -260,7 +260,7 @@ describe('deck bridge - CSS-only decks', () => {
         .slide { position: absolute; inset: 0; }
         .slide:not(:first-child) { display: none; }
       </style>
-      <main class="stage">
+      <main class="stage" data-od-id="deck-stage">
         <section class="slide">One</section>
         <section class="slide">Two</section>
       </main>

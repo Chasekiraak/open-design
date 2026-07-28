@@ -78,6 +78,17 @@ describe('injectDeckBridge — framework-deck detection (#deck-stage)', () => {
     expect(out).toMatch(/<script[^>]*data-od-deck-bridge/);
   });
 
+  it('does not mistake editable data-od-id metadata for canonical framework identity', () => {
+    const html = legacyDeckHtml().replace(
+      '<div class="stage">',
+      '<div class="stage" data-od-id="deck-stage">',
+    );
+    const out = buildSrcdoc(html, { deck: true, deckClickNavigation: true });
+
+    expect(out).toMatch(/<style[^>]*data-od-deck-fix/);
+    expect(out).toContain('if (true) {');
+  });
+
   it('can hide generated deck chrome so host preview chrome owns navigation', () => {
     const out = buildSrcdoc(frameworkDeckHtml(), { deck: true, hideDeckChrome: true });
 

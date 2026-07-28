@@ -19,6 +19,12 @@ import {
   isOpenDesignHostAvailable,
   printHostPdf,
 } from '@open-design/host';
+import {
+  DECK_ACTIVE_ATTRIBUTE,
+  DECK_ACTIVE_CLASSES,
+  DECK_SLIDE_SELECTOR,
+  DECK_STRUCTURED_SLIDE_SELECTOR,
+} from '@open-design/contracts/runtime/deck-stage-fallback';
 
 // Re-exported so app components can gate desktop-only export paths without
 // importing the host package directly.
@@ -71,11 +77,18 @@ function triggerDownload(blob: Blob, filename: string): void {
 
 const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
 (function () {
-  var SLIDE_SELECTOR = 'deck-stage > section, section[data-screen-label], .deck-slide, .ppt-slide, .slide';
+  var SLIDE_SELECTOR = ${JSON.stringify(DECK_SLIDE_SELECTOR)};
+  var STRUCTURED_SLIDE_SELECTOR = ${JSON.stringify(DECK_STRUCTURED_SLIDE_SELECTOR)};
   var ownedTransform = '';
 
+  function slides() {
+    var structured = document.querySelectorAll(STRUCTURED_SLIDE_SELECTOR);
+    if (structured.length) return Array.prototype.slice.call(structured);
+    return Array.prototype.slice.call(document.querySelectorAll(SLIDE_SELECTOR));
+  }
+
   function inferredDeckRoot() {
-    var list = Array.prototype.slice.call(document.querySelectorAll(SLIDE_SELECTOR));
+    var list = slides();
     if (!list.length) return null;
     var parent = list[0] && list[0].parentElement;
     if (!parent || parent === document.documentElement) return null;
@@ -101,11 +114,11 @@ const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
   }
 
   function deckRoot() {
-    return document.querySelector('.deck-stage, .deck-viewport') ||
+    return inferredDeckRoot() ||
+      document.querySelector('deck-stage, #deck-stage, .deck-stage, [data-od-id="deck-stage"], .stage, .deck-viewport') ||
       document.querySelector('[data-od-id="deck-root"]') ||
       document.querySelector('.deck') ||
-      document.querySelector('[data-od-export-fit-owned="true"]') ||
-      inferredDeckRoot();
+      document.querySelector('[data-od-export-fit-owned="true"]');
   }
 
   function dimension(element, property) {
@@ -173,12 +186,16 @@ const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
 })();
 </script>`;
 
-const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="2">
+const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="3">
 (function () {
-  var ACTIVE_CLASSES = ['active', 'is-active', 'current', 'visible'];
-  var SLIDE_SELECTOR = 'deck-stage > section, section[data-screen-label], .deck-slide, .ppt-slide, .slide';
+  var ACTIVE_ATTRIBUTE = ${JSON.stringify(DECK_ACTIVE_ATTRIBUTE)};
+  var ACTIVE_CLASSES = ${JSON.stringify(DECK_ACTIVE_CLASSES)};
+  var SLIDE_SELECTOR = ${JSON.stringify(DECK_SLIDE_SELECTOR)};
+  var STRUCTURED_SLIDE_SELECTOR = ${JSON.stringify(DECK_STRUCTURED_SLIDE_SELECTOR)};
 
   function slides() {
+    var structured = document.querySelectorAll(STRUCTURED_SLIDE_SELECTOR);
+    if (structured.length) return Array.prototype.slice.call(structured);
     return Array.prototype.slice.call(document.querySelectorAll(SLIDE_SELECTOR));
   }
 
@@ -202,12 +219,51 @@ const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="2
       var found = list.findIndex(function (slide) { return slide.classList.contains(name); });
       if (found >= 0) return found;
     }
+    var byAttribute = list.findIndex(function (slide) {
+      return slide.hasAttribute(ACTIVE_ATTRIBUTE);
+    });
+    if (byAttribute >= 0) return byAttribute;
+    var byVisibility = computedVisibleIndex(list);
+    if (byVisibility >= 0) return byVisibility;
     var left = scrollContainers().reduce(function (value, el) {
       return Math.abs(Number(el.scrollLeft) || 0) > Math.abs(value)
         ? Number(el.scrollLeft) || 0
         : value;
     }, 0);
     return Math.max(0, Math.min(list.length - 1, Math.round(left / Math.max(1, window.innerWidth))));
+  }
+
+  function computedVisibleIndex(list) {
+    var found = -1;
+    for (var i = 0; i < list.length; i++) {
+      try {
+        var style = window.getComputedStyle(list[i]);
+        var visible = style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number.parseFloat(style.opacity || '1') > 0.001;
+        if (!visible) continue;
+        if (found >= 0) return -1;
+        found = i;
+      } catch (_) {}
+    }
+    return found;
+  }
+
+  function computedDisplayDeckMode(list) {
+    var visible = computedVisibleIndex(list);
+    if (visible < 0) return '';
+    var hiddenCount = 0;
+    for (var i = 0; i < list.length; i++) {
+      try {
+        if (window.getComputedStyle(list[i]).display === 'none') hiddenCount += 1;
+      } catch (_) {}
+    }
+    if (hiddenCount < 1) return '';
+    try {
+      return window.getComputedStyle(list[visible]).display || 'block';
+    } catch (_) {
+      return 'block';
+    }
   }
 
   function state(list) {
@@ -217,6 +273,7 @@ const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="2
         slide.getAttribute('style') || '',
         slide.getAttribute('hidden') === null ? '' : 'hidden',
         slide.getAttribute('aria-hidden') || '',
+        slide.hasAttribute(ACTIVE_ATTRIBUTE) ? ACTIVE_ATTRIBUTE : '',
       ].join(':');
     }).join('|');
     var scrollState = scrollContainers().map(function (el) {
@@ -254,15 +311,46 @@ const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="2
     }));
   }
 
+  function setStaticVisibility(list, next) {
+    var displayMode = computedDisplayDeckMode(list);
+    var usesInlineDisplay = list.some(function (slide) { return slide.style.display === 'none'; });
+    var usesInlineVisibility = list.some(function (slide) { return slide.style.visibility === 'hidden'; });
+    var usesHidden = list.some(function (slide) { return slide.hasAttribute('hidden'); });
+    if (!displayMode && !usesInlineDisplay && !usesInlineVisibility && !usesHidden) return false;
+
+    list.forEach(function (slide, index) {
+      var active = index === next;
+      slide.toggleAttribute(ACTIVE_ATTRIBUTE, active);
+      slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+      if (usesHidden) slide.toggleAttribute('hidden', !active);
+      if (displayMode) {
+        slide.style.setProperty('display', active ? displayMode : 'none', 'important');
+      } else if (usesInlineDisplay) {
+        slide.style.display = active ? '' : 'none';
+      }
+      if (usesInlineVisibility) slide.style.visibility = active ? '' : 'hidden';
+    });
+    return true;
+  }
+
   function directFallback(list, direction) {
     var current = activeIndex(list);
     var next = Math.max(0, Math.min(list.length - 1, current + direction));
     if (next === current) return;
     var name = activeClass(list);
     if (name) {
-      list.forEach(function (slide, index) { slide.classList.toggle(name, index === next); });
+      var usesVisibleClass = list.some(function (slide) {
+        return slide.classList.contains('visible');
+      });
+      list.forEach(function (slide, index) {
+        var active = index === next;
+        slide.toggleAttribute(ACTIVE_ATTRIBUTE, active);
+        slide.classList.toggle(name, active);
+        if (name !== 'visible' && usesVisibleClass) slide.classList.toggle('visible', active);
+      });
       return;
     }
+    if (setStaticVisibility(list, next)) return;
     var left = next * Math.max(1, window.innerWidth);
     scrollContainers().forEach(function (el) {
       try { el.scrollLeft = left; } catch (_) {}
@@ -310,7 +398,7 @@ ${DECK_CHROME_HIDE_CSS}
   let prepared = doc.includes('data-od-export-deck-chrome-hidden')
     ? doc
     : injectIntoHead(doc, styleTag);
-  if (!prepared.includes('data-od-export-deck-navigation="2"')) {
+  if (!prepared.includes('data-od-export-deck-navigation="3"')) {
     prepared = prepared.replace(
       /<script\s+data-od-export-deck-navigation(?:=(?:"[^"]*"|'[^']*'))?[^>]*>[\s\S]*?<\/script>/i,
       '',

@@ -188,6 +188,26 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.designHeight).toBe(1080);
   });
 
+  it('uses editable .stage metadata as a structured deck boundary', () => {
+    const html = `<!doctype html><html><head><style>
+      .stage { position: relative; width: 1920px; height: 1080px; }
+      .slide { position: absolute; inset: 0; }
+    </style></head><body>
+      <aside><div class="slide">Decorative sample</div></aside>
+      <main class="stage" data-od-id="deck-stage">
+        <section class="slide">One</section>
+        <section class="slide">Two</section>
+      </main>
+    </body></html>`;
+    const parsed = parseDeckThumbnails(html);
+
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.slides).toHaveLength(2);
+    expect(parsed.slides.join(' ')).not.toContain('Decorative sample');
+    expect(parsed.designWidth).toBe(1920);
+    expect(parsed.designHeight).toBe(1080);
+  });
+
   it('falls back instead of accepting an implausibly small slide canvas', () => {
     const html = `<!doctype html><html><head><style>
       .slide { width: 10px; height: 10px; }

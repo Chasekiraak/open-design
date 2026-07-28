@@ -719,6 +719,64 @@ describe('exportProjectAsHtml', () => {
     dom.window.close();
   });
 
+  it('navigates CSS-only exports with editable stage metadata in all four directions', async () => {
+    const source = `<!doctype html><html><head><style>
+      html, body { width: 100%; height: 100%; overflow: hidden; }
+      .stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+      .slide { position: absolute; inset: 0; display: none !important; }
+      .slide:first-child { display: flex !important; }
+    </style></head><body>
+      <main class="stage" data-od-id="deck-stage">
+        <section class="slide">A</section>
+        <section class="slide">B</section>
+      </main>
+    </body></html>`;
+    const prepared = prepareStandaloneDeckHtml(source);
+    expect(prepared).toContain('data-od-export-deck-navigation="3"');
+    const dom = new JSDOM(prepared, {
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+    const slides = Array.from(dom.window.document.querySelectorAll<HTMLElement>('.slide'));
+    const click = async (x: number, y: number): Promise<void> => {
+      dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+        bubbles: true,
+        button: 0,
+        cancelable: true,
+        clientX: x,
+        clientY: y,
+      }));
+      await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    };
+    const visible = (): string[] => slides.map((slide) => dom.window.getComputedStyle(slide).display);
+
+    expect(visible()).toEqual(['flex', 'none']);
+    await click(900, 384);
+    expect(visible()).toEqual(['none', 'flex']);
+    expect(slides[1]?.hasAttribute('data-od-deck-active')).toBe(true);
+
+    await click(512, 100);
+    expect(visible()).toEqual(['flex', 'none']);
+    await click(512, 700);
+    expect(visible()).toEqual(['none', 'flex']);
+    await click(100, 384);
+    expect(visible()).toEqual(['flex', 'none']);
+    dom.window.close();
+  });
+
+  it('upgrades an older standalone navigation adapter instead of installing both', () => {
+    const legacy = `<!doctype html><html><head>
+      <script data-od-export-deck-navigation="2">window.__legacyDeckNav = true;</script>
+    </head><body><section class="slide">A</section></body></html>`;
+    const prepared = prepareStandaloneDeckHtml(legacy);
+
+    expect(prepared).toContain('data-od-export-deck-navigation="3"');
+    expect(prepared).not.toContain('data-od-export-deck-navigation="2"');
+    expect(prepared).not.toContain('__legacyDeckNav');
+    expect(prepared.match(/data-od-export-deck-navigation=/g)).toHaveLength(1);
+  });
+
   it('owns directional clicks without double-advancing an existing click runtime', async () => {
     const source = `<!doctype html><html><head></head><body>
       <section class="slide active">A</section>
