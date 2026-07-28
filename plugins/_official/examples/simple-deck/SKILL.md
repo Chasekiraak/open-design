@@ -50,7 +50,7 @@ Produce a single-file horizontal-swipe HTML deck using the seed and layout libra
 simple-deck/
 ├── SKILL.md                ← you're reading this
 ├── assets/
-│   └── template.html       ← seed: tokens + slide primitives + proven nav script (READ FIRST)
+│   └── template.html       ← seed: tokens + slide primitives + proven chrome-free navigation runtime (READ FIRST)
 └── references/
     ├── layouts.md          ← 8 paste-ready slide layouts + surface-hierarchy rules
     └── checklist.md        ← P0/P1/P2 self-review (surface spot-check at bottom)
@@ -129,6 +129,6 @@ a source-code `<artifact>` block.
 - **One dominant surface.** Every inverse surface has a named narrative role; never alternate by slide index or quota.
 - **Display = serif via `var(--font-display)`.** `.h-hero` / `.h-xl` / `.h-md` already enforce.
 - **One accent per slide, used at most twice.**
-- **Don't rewrite the nav script.** It's proven.
+- **Don't rewrite the navigation runtime.** It is chrome-free and proven.
 - **No `scrollIntoView()`.** Breaks iframe.
 - **`data-screen-label` on every slide.**

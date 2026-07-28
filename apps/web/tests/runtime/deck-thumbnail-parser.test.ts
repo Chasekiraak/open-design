@@ -324,6 +324,24 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.slides).toHaveLength(2);
   });
 
+  it('keeps navigation counters separate from queried slide content', () => {
+    const deck = frameworkDeck(2).replace(
+      '<script>/* nav */</script>',
+      `<script>
+        const slides = document.querySelectorAll('.slide');
+        const counter = document.querySelector('.data-deck-nav');
+        function paint(index) {
+          slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+          counter.textContent = (index + 1) + ' / ' + slides.length;
+        }
+        paint(0);
+      </script>`,
+    );
+    const parsed = parseDeckThumbnails(deck);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.slides).toHaveLength(2);
+  });
+
   it('strips executable content from untrusted slide markup', () => {
     const deck = [
       '<!doctype html><html><head><style>',

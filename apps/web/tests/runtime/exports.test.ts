@@ -599,6 +599,30 @@ describe('exportProjectAsHtml', () => {
     expect(await capturedBlob!.text()).toBe('<!doctype html><p>version</p>');
   });
 
+  it('hides authored navigation chrome in standalone deck HTML', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      '<!doctype html><html><body><nav class="data-deck-nav">1 / 12</nav><section class="slide">A</section></body></html>',
+      {
+        headers: { 'content-type': 'text/html' },
+        status: 200,
+      },
+    )));
+
+    await exportProjectAsHtml({
+      projectId: 'proj-1',
+      filePath: 'deck.html',
+      fallbackHtml: '<section class="slide">fallback</section>',
+      fallbackTitle: 'Deck',
+      deck: true,
+    });
+
+    const exported = await capturedBlob!.text();
+    expect(exported).toContain('data-od-export-deck-chrome-hidden');
+    expect(exported).toContain('.data-deck-nav,');
+    expect(exported).toContain('[data-deck-nav],');
+    expect(exported).toContain('display: none !important');
+  });
+
   it('falls back to the source HTML export when the daemon inline endpoint fails', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
@@ -608,10 +632,12 @@ describe('exportProjectAsHtml', () => {
       filePath: 'index.html',
       fallbackHtml: '<main>fallback</main>',
       fallbackTitle: 'Fallback',
+      deck: true,
     });
 
     expect(capturedFilename).toBe('Fallback.html');
     expect(await capturedBlob!.text()).toContain('<main>fallback</main>');
+    expect(await capturedBlob!.text()).toContain('data-od-export-deck-chrome-hidden');
   });
 });
 

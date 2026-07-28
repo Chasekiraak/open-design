@@ -247,12 +247,23 @@ function collectSlideElements(doc: Document): Element[] {
 const SCRIPT_CONTENT_MUTATION_RE =
   /(?:\.innerHTML\s*=|\.outerHTML\s*=|\.textContent\s*=|\.appendChild\s*\(|\.append\s*\(|\.prepend\s*\(|\.replaceChildren\s*\(|\.insertAdjacentHTML\s*\()/;
 
+function escapeScriptRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function scriptMutatesBinding(source: string, binding: string): boolean {
+  const access = `\\b${escapeScriptRegex(binding)}\\s*(?:\\?\\.|\\.)\\s*`;
+  return new RegExp(
+    `(?:${access}(?:innerHTML|outerHTML|textContent)\\s*=|${access}(?:appendChild|append|prepend|replaceChildren|insertAdjacentHTML)\\s*\\()`,
+  ).test(source);
+}
+
 /**
  * Static thumbnails cannot reproduce DOM that a deck builds at runtime.
- * Detect only high-confidence cases: an executable script both performs a
- * content-building mutation and directly looks up an element that belongs to
- * a slide. Ordinary deck navigation (querying slides and toggling classes)
- * deliberately stays on the cheap static path.
+ * Detect only high-confidence cases: a script binds a slide-owned element and
+ * then content-mutates that same binding. Keeping lookup and mutation coupled
+ * matters: deck navigation often queries every slide while separately updating
+ * an outside counter, which must stay on the cheap static thumbnail path.
  */
 function hasScriptBuiltSlideContent(doc: Document, slides: Element[]): boolean {
   const belongsToSlide = (target: Element): boolean =>
@@ -266,23 +277,34 @@ function hasScriptBuiltSlideContent(doc: Document, slides: Element[]): boolean {
     const source = script.textContent || '';
     if (!SCRIPT_CONTENT_MUTATION_RE.test(source)) continue;
 
-    const idLookup = /getElementById\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
-    let idMatch: RegExpExecArray | null;
-    while ((idMatch = idLookup.exec(source))) {
-      const target = doc.getElementById(idMatch[2] || '');
-      if (target && belongsToSlide(target)) return true;
-    }
-
-    const selectorLookup = /querySelector(?:All)?\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
-    let selectorMatch: RegExpExecArray | null;
-    while ((selectorMatch = selectorLookup.exec(source))) {
+    const lookupBinding =
+      /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.(getElementById|querySelector)\s*\(\s*(['"])([^'"]+)\3\s*\)/g;
+    let bindingMatch: RegExpExecArray | null;
+    while ((bindingMatch = lookupBinding.exec(source))) {
+      const binding = bindingMatch[1] || '';
+      if (!scriptMutatesBinding(source, binding)) continue;
       try {
-        if (Array.from(doc.querySelectorAll(selectorMatch[2] || '')).some(belongsToSlide)) {
-          return true;
-        }
+        const target = bindingMatch[2] === 'getElementById'
+          ? doc.getElementById(bindingMatch[4] || '')
+          : doc.querySelector(bindingMatch[4] || '');
+        if (target && belongsToSlide(target)) return true;
       } catch {
         // Invalid or dynamically escaped selectors are not high-confidence
         // evidence; the iframe fallback remains available for known media.
+      }
+    }
+
+    const directLookupMutation =
+      /document\.(getElementById|querySelector)\s*\(\s*(['"])([^'"]+)\2\s*\)\s*(?:\?\.|\.)\s*(?:(?:innerHTML|outerHTML|textContent)\s*=|(?:appendChild|append|prepend|replaceChildren|insertAdjacentHTML)\s*\()/g;
+    let directMatch: RegExpExecArray | null;
+    while ((directMatch = directLookupMutation.exec(source))) {
+      try {
+        const target = directMatch[1] === 'getElementById'
+          ? doc.getElementById(directMatch[3] || '')
+          : doc.querySelector(directMatch[3] || '');
+        if (target && belongsToSlide(target)) return true;
+      } catch {
+        // Same high-confidence rule as bound lookups above.
       }
     }
   }

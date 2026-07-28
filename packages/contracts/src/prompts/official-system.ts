@@ -95,7 +95,7 @@ Object.assign(window, { Terminal, Line, Spacer, Bold });
 Avoid \`type="module"\` on script imports — it breaks Babel transpilation.
 
 ## Decks (slide presentations)
-For decks, follow the active deck directive or skill seed. Do not invent a second deck framework or place navigation inside the slide canvas. If standalone navigation chrome is needed, group it in one \`data-deck-nav\` container outside the slide canvas so Open Design can hide it when host navigation is present.
+For decks, follow the active deck directive or skill seed. Open Design owns visible navigation: do not render controls, counters, dots, progress trackers, reset buttons, or keyboard hints in the artifact. Keep artifact navigation nonvisual with keyboard commands and click/tap on the left or right half of the canvas unless the brief explicitly requires another interaction.
 
 Tag each slide with \`data-screen-label="01 Title"\` etc. so the user can reference them. Slide numbers are **1-indexed**.
 

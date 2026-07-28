@@ -102,12 +102,13 @@ describe('generic deck surface guidance', () => {
         /persist position to localStorage/i.test(text)
           ? 'localStorage navigation instruction'
           : null,
-        !/do not (?:invent|add) a second (?:deck framework|navigation layer)/i.test(
-          text,
-        )
-          ? 'missing second-navigation guard'
+        !/Open Design owns visible navigation/i.test(text)
+          ? 'missing host-navigation ownership'
           : null,
-        !/data-deck-nav/.test(text) ? 'missing host-hide marker' : null,
+        !/(?:keyboard|key commands?)/i.test(text) || !/click\/tap/i.test(text)
+          ? 'missing nonvisual navigation contract'
+          : null,
+        /data-deck-nav/.test(text) ? 'still permits authored navigation chrome' : null,
       ].filter(Boolean);
       return reasons.map((reason) => `${relativePath}: ${reason}`);
     });
@@ -115,8 +116,8 @@ describe('generic deck surface guidance', () => {
     expect(violations).toEqual([]);
   });
 
-  it('[P1] marks standalone simple-deck chrome for host hiding', async () => {
-    const missing = (
+  it('[P1] keeps the simple-deck runtime chrome-free but navigable', async () => {
+    const violations = (
       await Promise.all(
         simpleDeckTemplateFiles.map(async (relativePath) => ({
           relativePath,
@@ -124,9 +125,21 @@ describe('generic deck surface guidance', () => {
         })),
       )
     )
-      .filter(({ text }) => !/<div data-deck-nav\b/.test(text))
-      .map(({ relativePath }) => relativePath);
+      .flatMap(({ relativePath, text }) => [
+        /<[^>]+data-deck-nav\b/.test(text)
+          ? `${relativePath}: authored navigation container`
+          : null,
+        /class="deck-(?:counter|hint|progress)"/.test(text)
+          ? `${relativePath}: visible navigation chrome`
+          : null,
+        !/addEventListener\('keydown'/.test(text)
+          ? `${relativePath}: missing keyboard navigation`
+          : null,
+        !/addEventListener\('click'/.test(text)
+          ? `${relativePath}: missing click navigation`
+          : null,
+      ].filter((value): value is string => value !== null));
 
-    expect(missing).toEqual([]);
+    expect(violations).toEqual([]);
   });
 });

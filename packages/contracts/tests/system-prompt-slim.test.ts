@@ -623,7 +623,10 @@ describe('composeSystemPrompt — shared slim default', () => {
     const directive = renderDeckVNextDirective('filesystem');
 
     expect(directive).toContain('# Deck delivery contract');
-    expect(directive).toContain('data-deck-nav');
+    expect(directive).toContain('Open Design owns visible navigation');
+    expect(directive).toContain('exported slides must remain chrome-free');
+    expect(directive).toContain('click/tap');
+    expect(directive).not.toContain('data-deck-nav');
     expect(directive).toContain('emit exactly N');
     expect(directive).toContain('explicit background');
     expect(directive).toContain('# Deck outcome quality rules');

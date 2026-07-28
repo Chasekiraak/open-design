@@ -10456,6 +10456,7 @@ function HtmlViewer({
       filePath: file.name,
       fallbackHtml: context?.content ?? source ?? '',
       fallbackTitle: context?.title ?? exportTitle,
+      deck: deckExportSignalForContext(context),
       ...(context?.versionId ? { versionId: context.versionId } : {}),
     }));
   }

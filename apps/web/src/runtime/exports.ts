@@ -10,7 +10,7 @@
 //            file content is the same source the Source view shows. See
 //            issue #279.
 
-import { buildSrcdoc, type SrcdocOptions } from './srcdoc';
+import { buildSrcdoc, DECK_CHROME_HIDE_CSS, type SrcdocOptions } from './srcdoc';
 import { buildReactComponentSrcdoc } from './react-component';
 import { buildZip } from './zip';
 import { randomUUID } from '../utils/uuid';
@@ -69,8 +69,22 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function exportAsHtml(html: string, title: string): void {
-  const doc = buildSrcdoc(html);
+function injectExportDeckChromeHiding(doc: string): string {
+  const tag = `<style data-od-export-deck-chrome-hidden>
+${DECK_CHROME_HIDE_CSS}
+</style>`;
+  if (/<\/head>/i.test(doc)) return doc.replace(/<\/head>/i, `${tag}</head>`);
+  if (/<head[^>]*>/i.test(doc)) return doc.replace(/<head[^>]*>/i, (match) => `${match}${tag}`);
+  return tag + doc;
+}
+
+export function exportAsHtml(
+  html: string,
+  title: string,
+  options: { deck?: boolean } = {},
+): void {
+  const srcdoc = buildSrcdoc(html);
+  const doc = options.deck ? injectExportDeckChromeHiding(srcdoc) : srcdoc;
   const blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
   triggerDownload(blob, `${safeFilename(title, 'artifact')}.html`);
 }
@@ -81,6 +95,7 @@ export async function exportProjectAsHtml(opts: {
   fallbackHtml: string;
   fallbackTitle: string;
   versionId?: string;
+  deck?: boolean;
 }): Promise<void> {
   const segments = opts.filePath
     .split('/')
@@ -93,11 +108,16 @@ export async function exportProjectAsHtml(opts: {
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`html export request failed (${resp.status})`);
-    const blob = await resp.blob();
+    const blob = opts.deck
+      ? new Blob(
+        [injectExportDeckChromeHiding(await resp.text())],
+        { type: 'text/html;charset=utf-8' },
+      )
+      : await resp.blob();
     triggerDownload(blob, `${safeFilename(opts.fallbackTitle, 'artifact')}.html`);
   } catch (err) {
     console.warn('[exportProjectAsHtml] falling back to source HTML export:', err);
-    exportAsHtml(opts.fallbackHtml, opts.fallbackTitle);
+    exportAsHtml(opts.fallbackHtml, opts.fallbackTitle, { deck: opts.deck });
   }
 }
 
@@ -1520,7 +1540,8 @@ const DECK_PRINT_CSS = `
     transition: none !important;
   }
   .slide:last-child, [data-screen-label]:last-child { page-break-after: auto; break-after: auto; }
-  .deck-counter, .deck-hint, .deck-nav,
+  .deck-counter, .deck-hint, .deck-nav, .data-deck-nav,
+  [data-deck-nav], [data-od-id="deck-nav"], [data-slide-nav],
   [aria-label="Previous slide"], [aria-label="Next slide"] {
     display: none !important;
   }
@@ -1678,7 +1699,10 @@ async function captureArtifactSlides(
   iframe.setAttribute('aria-hidden', 'true');
   iframe.setAttribute('tabindex', '-1');
   iframe.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px;border:0;background:#fff;`;
-  iframe.srcdoc = buildSrcdoc(html, { deck: opts.deck });
+  iframe.srcdoc = buildSrcdoc(html, {
+    deck: opts.deck,
+    hideDeckChrome: opts.deck,
+  });
   document.body.appendChild(iframe);
 
   const slides: CapturedSlide[] = [];
