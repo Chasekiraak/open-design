@@ -88,6 +88,10 @@ expect(retry).toHaveBeenCalledTimes(1);
 - 不依赖同文件前序用例或同 worker 前序文件遗留的数据。
 - 不为了摊薄启动成本共享可变 daemon、浏览器上下文或数据目录。
 - 不用 serial group 隐藏竞争条件。
+- 嵌套资源按后创建、先关闭的顺序释放：page、browser context 和 browser
+  必须在提供它们所连接服务的 runtime、server 或临时目录之前关闭。优先使用
+  资源原生的异步释放协议或局部 `try/finally`，不要把消费方清理推迟到外层
+  `afterEach`。
 - 只有在生命周期成本已经被证明为主要瓶颈，且隔离模型仍然明确时，才调整
   harness 的预热或复用策略。
 

@@ -3,8 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { chromium, expect as playwrightExpect, type Browser, type Page } from '@playwright/test';
-import { afterEach, describe, expect, test } from 'vitest';
+import { chromium, expect as playwrightExpect, type Page } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { createFakeAgentRuntimes } from '@/fake-agents';
 import { T } from '@/timeouts';
@@ -30,13 +30,6 @@ type ProjectResponse = {
 };
 
 describe('dialog artifact consistency', () => {
-  let browser: Browser | null = null;
-
-  afterEach(async () => {
-    await browser?.close();
-    browser = null;
-  });
-
   test('keeps run status, saved message, persisted file metadata, and raw artifact content aligned', async () => {
     const suite = await createSmokeSuite('dialog-artifact-consistency');
 
@@ -71,8 +64,8 @@ describe('dialog artifact consistency', () => {
         },
       });
 
-      browser = await chromium.launch();
-      const context = await browser.newContext({ baseURL: webUrl });
+      await using browser = await chromium.launch();
+      await using context = await browser.newContext({ baseURL: webUrl });
       await context.addInitScript(({ key, codexEnv }) => {
         window.localStorage.setItem(
           key,
@@ -93,7 +86,7 @@ describe('dialog artifact consistency', () => {
         );
       }, { key: STORAGE_KEY, codexEnv: fakeAgents.codex.env });
 
-      const page = await context.newPage();
+      await using page = await context.newPage();
       page.setDefaultNavigationTimeout(T.xlong);
       await page.goto('/', { waitUntil: 'domcontentloaded' });
       await waitForLoadingToClear(page);
