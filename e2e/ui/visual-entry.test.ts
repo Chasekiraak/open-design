@@ -140,15 +140,30 @@ test('[P2] captures the home staged attachment surface', async ({ page }) => {
 
 test('[P2] captures the home plugin use staged surface', async ({ page }) => {
   await configureVisualPage(page);
-  // Stay on Home: every locator below is Home's own plugin section.
-  // `openVisualPluginsCatalog` routes to `/plugins`, which unmounts them.
-  await gotoVisualHome(page);
+  // #5517 removed Home's own plugin grid: `PluginsHomeSection` (and with it
+  // `plugins-home-pill-category-*` / `plugins-home__card`) now lives only in
+  // the unrendered legacy `PluginsView`; `EntryShell` mounts
+  // `ExtensionsMarketplace` on /plugins instead. The journey this capture
+  // exists for is unchanged — narrow the catalog, open the plugin's details,
+  // Use it — and Use still hands the plugin to Home's hero, which is the
+  // state being captured.
+  const plugins = await openVisualPluginsCatalog(page);
 
-  const home = page.getByTestId('entry-view-home');
-  await home.getByTestId('plugins-home-pill-category-prototype').click();
-  const card = home.locator('article.plugins-home__card[data-plugin-id="visual-prototype-starter"]');
+  // Category chips are derived from the same `extractCategories` taxonomy the
+  // old Home pills used, so the fixture still lands under Prototype; the chips
+  // carry no per-slug testid, only the taxonomy's `Prototype` label.
+  await plugins
+    .getByTestId('plugins-category-tags')
+    .getByRole('button', { name: 'Prototype', exact: true })
+    .click();
+  // The filter has to really bite: Deck Writer is the deck-mode fixture.
+  await expect(pluginMarketplaceCard(plugins, 'Deck Writer')).toHaveCount(0);
+
+  const card = plugins.getByTestId('plugins-card-visual-prototype-starter');
   await expect(card).toBeVisible();
-  await home.getByTestId('plugins-home-details-visual-prototype-starter').click({ force: true });
+  // The row's own "Try it" button stops propagation, so target the row body —
+  // clicking the card anywhere else is what opens the details modal.
+  await card.locator('.plugin-marketplace__row-main').click();
   await expect(page.getByRole('dialog', { name: /Prototype Starter details/i })).toBeVisible();
   await page.getByTestId('plugin-details-use-visual-prototype-starter').click();
   await expect(page.getByTestId('home-hero-active-plugin')).toContainText('Prototype Starter');
