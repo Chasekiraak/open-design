@@ -99,8 +99,9 @@ export interface QuestionFormFileSubmission {
 // Lets an embedding host trigger submission.
 export interface QuestionFormHandle {
   submit: () => void;
-  // Submit with no answers — backs the "skip all" affordance. Every question
-  // is optional, so this just records each as "(skipped)" and moves on.
+  // Submit with no answers — backs the "skip all" affordance. This is an
+  // explicit user decision, so it records every question as "(skipped)" and
+  // moves on even when the normal form path marks a question required.
   skipAll: () => void;
 }
 
@@ -350,13 +351,13 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
   }
 
   function handleSkipAll() {
-    if (locked || !onSubmit || !canSkipAll) return;
+    if (locked || !onSubmit) return;
     const empty: Record<string, string | string[]> = {};
     onSubmit(formatFormAnswers(formWithVisualStyleOptions(form, visualStyleContext), empty), empty, 'skip');
   }
 
   function handleSkipCurrent() {
-    if (locked || !onSubmit || !activeQuestion || activeQuestion.required === true) return;
+    if (locked || !onSubmit || !activeQuestion) return;
     onInteraction?.({
       element: 'step_skip',
       questionId: activeQuestion.id,
@@ -401,17 +402,20 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
     const v = currentAnswers[q.id];
     return !Array.isArray(v) || v.length <= q.maxSelections;
   });
-  // Required questions must carry a non-empty answer. Without this, main-path forms (the discovery router's
-  // required taskType/output, the ElevenLabs voice picker) would accept an
-  // empty submit and serialize "(skipped)" for fields the rest of the system
-  // treats as mandatory.
+  // Required questions must carry a non-empty answer on the normal path. An
+  // explicit per-question Skip is a deliberate alternative: it serializes the
+  // value as "(skipped)" and lets the agent proceed with sensible defaults.
   const requiredAnswered = form.questions.every((q) => {
     if (q.required !== true) return true;
+    if (skippedQuestionIds.has(q.id)) return true;
     const v = currentAnswers[q.id];
     return questionAnswerIsPresent(v);
   });
   const ready = withinSelectionLimits && requiredAnswered;
-  const canSkipAll = form.questions.every((q) => q.required !== true);
+  // A manual Skip all is always available; unlike the timeout it is an
+  // intentional user choice and may bypass required-answer validation.
+  const canSkipAll = true;
+  const hasRequiredQuestions = form.questions.some((q) => q.required === true);
   // Required answers remain required after a timeout. A flat form may only
   // auto-continue once every required answer is present; a stepped form can
   // auto-continue on an optional active step after its earlier requirements
@@ -420,10 +424,11 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
     autoContinueAfterTimeout &&
     !locked &&
     !submitDisabled &&
-    (canSkipAll || (ready && (!stepped || activeQuestion?.required !== true)));
+    (!hasRequiredQuestions || (ready && (!stepped || activeQuestion?.required !== true)));
   const currentQuestionReady =
     !activeQuestion ||
     activeQuestion.required !== true ||
+    skippedQuestionIds.has(activeQuestion.id) ||
     questionAnswerIsPresent(currentAnswers[activeQuestion.id]);
   const autoContinueCountdown = `${Math.floor(autoContinueRemaining / 60)}:${String(
     autoContinueRemaining % 60,
@@ -809,16 +814,14 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
                   {autoContinueCountdown}
                 </span>
               ) : null}
-              {activeQuestion?.required === true ? null : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={handleSkipCurrent}
-                  disabled={submitDisabled}
-                >
-                  {t('questionForm.skip')}
-                </Button>
-              )}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleSkipCurrent}
+                disabled={submitDisabled}
+              >
+                {t('questionForm.skip')}
+              </Button>
               <span className="qf-submit-actions">
                 <Button
                   type="button"
@@ -853,7 +856,7 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
                 </Button>
               </span>
             </>
-          ) : autoContinueEnabled || canSkipAll ? (
+          ) : autoContinueEnabled || !hasRequiredQuestions ? (
             <span
               className={autoContinueEnabled ? 'qf-auto-continue' : 'qf-hint'}
               title={autoContinueEnabled ? t('questions.autoSkipHint') : undefined}
