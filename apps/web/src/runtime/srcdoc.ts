@@ -2697,14 +2697,6 @@ function injectDeckBridge(
     }
     return targets;
   }
-  function maxScrollLeft(){
-    var targets = scrollTargets();
-    var value = 0;
-    for (var i=0; i<targets.length; i++) {
-      value = Math.max(value, Number(targets[i].scrollLeft || 0));
-    }
-    return value;
-  }
   function hasHorizontalScroll(){
     var targets = scrollTargets();
     for (var i=0; i<targets.length; i++) {
@@ -2712,16 +2704,22 @@ function injectDeckBridge(
     }
     return false;
   }
-  function isScrollDeck(){
+  function primaryScrollTarget(){
     var targets = scrollTargets();
     for (var i=0; i<targets.length; i++) {
       var candidate = targets[i];
       if (scrollOverflow(candidate) <= 1) continue;
       var mode = overflowMode(candidate);
-      if (isScrollableOverflowMode(mode)) return true;
-      if (isRootScrollContainer(candidate) && !isClippedOverflowMode(mode) && !rootScrollerClipped()) return true;
+      if (isScrollableOverflowMode(mode)) return candidate;
+      if (isRootScrollContainer(candidate) && !isClippedOverflowMode(mode) && !rootScrollerClipped()) return candidate;
     }
-    return false;
+    return null;
+  }
+  function scrollPageWidth(target){
+    return Math.max(1, Number(target && target.clientWidth) || Number(window.innerWidth) || 1);
+  }
+  function isScrollDeck(){
+    return !!primaryScrollTarget();
   }
   function findActiveByClass(list){
     for (var i=0; i<list.length; i++) {
@@ -2741,9 +2739,10 @@ function injectDeckBridge(
   }
   function activeIndex(list){
     if (!list || !list.length) return 0;
-    if (isScrollDeck()) {
-      var w = Math.max(1, window.innerWidth);
-      return Math.max(0, Math.min(list.length - 1, Math.round(maxScrollLeft() / w)));
+    var scrollTarget = primaryScrollTarget();
+    if (scrollTarget) {
+      var w = scrollPageWidth(scrollTarget);
+      return Math.max(0, Math.min(list.length - 1, Math.round(scrollLeftOf(scrollTarget) / w)));
     }
     var byTransform = activeIndexFromTransform(list);
     if (byTransform >= 0) return byTransform;
@@ -2911,7 +2910,9 @@ function injectDeckBridge(
   function scrollGo(i){
     var list = slides();
     var next = Math.max(0, Math.min(list.length - 1, i));
-    var left = next * window.innerWidth;
+    var target = primaryScrollTarget();
+    if (!target) return;
+    var left = next * scrollPageWidth(target);
     var targets = scrollTargets();
     for (var t=0; t<targets.length; t++) {
       try {

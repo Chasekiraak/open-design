@@ -245,11 +245,11 @@ describe('deck bridge - scroll container fallback', () => {
     const viewport = win.document.getElementById('deck-viewport') as HTMLElement;
     Object.defineProperty(viewport, 'scrollWidth', {
       configurable: true,
-      value: 3000,
+      value: 1800,
     });
     Object.defineProperty(viewport, 'clientWidth', {
       configurable: true,
-      value: 1000,
+      value: 600,
     });
     let viewportScrollLeft = 0;
     Object.defineProperty(viewport, 'scrollLeft', {
@@ -275,7 +275,15 @@ describe('deck bridge - scroll container fallback', () => {
     }));
     await new Promise<void>((resolve) => win.setTimeout(resolve, 420));
 
-    expect(viewport.scrollLeft).toBe(1000);
+    expect(viewport.scrollLeft).toBe(600);
     expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 1, count: 3 });
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'next' },
+    }));
+    await new Promise<void>((resolve) => win.setTimeout(resolve, 420));
+
+    expect(viewport.scrollLeft).toBe(1200);
+    expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 2, count: 3 });
   });
 });
