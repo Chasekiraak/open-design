@@ -279,7 +279,12 @@ async function main(): Promise<void> {
   // mounting the web bundle (the runtime re-asserts this stage at its reveal
   // gate, which is a no-op when the label is already current).
   setSplashStage(splash.window, "workspace");
-  registerOdProtocol(sidecars.web.url ?? "http://127.0.0.1:0");
+  // Resolve the web sidecar address per request instead of freezing it here.
+  // `startPackagedSidecars` already rejects a web sidecar that reports no URL,
+  // so in practice this reads a stable value — but the protocol layer no
+  // longer *depends* on that, and a null (however it arises) now surfaces as a
+  // structured 503 rather than a connection attempt against `127.0.0.1:0`.
+  registerOdProtocol(() => sidecars.web.url);
 
   const { runDesktopMain } = await import("@open-design/desktop/main");
   await runDesktopMain(runtime, {
