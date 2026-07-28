@@ -3,6 +3,7 @@ import type { Locator, Page, Route } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fulfillAgentsRoute } from './mock-factory.js';
+import { settingsSurface } from './amr.js';
 import { T } from '@/timeouts';
 
 const STORAGE_KEY = 'open-design:config';
@@ -694,7 +695,14 @@ export async function openAvatarMenu(page: Page): Promise<Locator> {
 }
 
 export async function openSettingsDetailsFromHeader(page: Page): Promise<Locator> {
-  const dialog = page.locator('.modal-settings[role="dialog"]').first();
+  // #5517 routes the entry's settings to `/settings`, where `SettingsDialog`
+  // renders in `presentation="page"` mode: same markup, but `role="region"`
+  // instead of `role="dialog"`. Pinning `[role="dialog"]` therefore never
+  // matched the page presentation, so an already-open settings surface looked
+  // absent and this fell through to hunting for entry triggers that surface
+  // does not carry. Reuse `settingsSurface` — the one bare `.modal-settings`
+  // matcher both presentations share — instead of a third local variant.
+  const dialog = settingsSurface(page);
   const triggers = [
     // `entry-settings-button` (the rail-footer chip) was cut by #5971; signed
     // out the entry is the rail's own `entry-nav-settings` item.

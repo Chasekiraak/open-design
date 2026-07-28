@@ -116,6 +116,7 @@ import {
   createPluginAuthoringHandoff,
   createPluginUseHandoff,
   createSkillUseHandoff,
+  takeHomePromptHandoff,
   type HomePromptHandoff,
 } from './home-hero/plugin-authoring';
 import {
@@ -1007,7 +1008,13 @@ export function EntryShell({
   const [newProjectInitialTab, setNewProjectInitialTab] =
     useState<CreateTab>('prototype');
   const [integrationTab, setIntegrationTab] = useState<IntegrationTab>(integrationInitialTab);
-  const [homePromptHandoff, setHomePromptHandoff] = useState<HomePromptHandoff | null>(null);
+  // Lazy initializer, so a handoff published by a surface that then navigated
+  // here — the `/marketplace/<id>` detail route, which `App` renders outside
+  // this shell — is claimed on the very first render and reaches HomeView in
+  // the same commit as the mount. The read is destructive, so it applies once.
+  const [homePromptHandoff, setHomePromptHandoff] = useState<HomePromptHandoff | null>(
+    () => takeHomePromptHandoff(),
+  );
   // Personalized first-run starting point. Computed once, in memory, when the
   // user finishes the About-you survey with real answers (see
   // `finishOnboarding`); null for returning users, skipped/blank surveys, and
