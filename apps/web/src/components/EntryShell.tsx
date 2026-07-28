@@ -371,6 +371,19 @@ function defaultPluginInputsForCreate(
   };
 }
 
+export interface ProjectTitleHint {
+  name: string;
+  /** Workspace whose catalog produced this hint; null for a local-only row. */
+  workspaceId: string | null;
+  /** Member authorization lifetime that produced the catalog row. */
+  workspaceMemberId: string | null;
+  /**
+   * The team catalog is the title authority for a project shared by another
+   * member. Own/private projects may still accept a newer local rename.
+   */
+  authoritative: boolean;
+}
+
 interface Props {
   skills: SkillSummary[];
   designTemplates: SkillSummary[];
@@ -427,7 +440,11 @@ interface Props {
   ) => Promise<ImportClaudeDesignOutcome | void> | ImportClaudeDesignOutcome | void;
   onImportFolder?: (baseDir: string) => Promise<void> | void;
   onImportFolderResponse?: (response: OpenDesignHostProjectImportSuccess) => Promise<void> | void;
-  onOpenProject: (id: string, fileName?: string) => Promise<boolean> | boolean | void;
+  onOpenProject: (
+    id: string,
+    fileName?: string,
+    projectTitleHint?: ProjectTitleHint,
+  ) => Promise<boolean> | boolean | void;
   onOpenLiveArtifact: (projectId: string, artifactId: string) => void;
   onDeleteProject: (id: string) => Promise<boolean | void> | boolean | void;
   onDuplicateProject?: (id: string) => Promise<void> | void;
@@ -766,8 +783,30 @@ export function EntryShell({
   // the useProjectCollab single-writer path keeps it read-only.
   const [pullingProjectId, setPullingProjectId] = useState<string | null>(null);
   async function handleOpenAllProjects(id: string): Promise<boolean> {
+    // The grid already reconciled the local row with the authoritative team
+    // catalog (notably the owner's current project name). Carry its title and
+    // provenance into App before navigation. Passing only the id made App reopen its local
+    // SQLite placeholder ("共享项目"), throwing away data already visible on the
+    // list and leaving the project header stale until a later metadata event.
+    const projectName = allProjectsList.find((project) => project.id === id)?.name.trim();
+    const teamProject = teamProjects.projects.find((project) => project.projectId === id);
+    const projectTitleHint = projectName
+      ? {
+          name: projectName,
+          workspaceId: workspaceContext?.workspaceId ?? null,
+          workspaceMemberId: workspaceContext?.workspaceMemberId ?? null,
+          // A member must render the owner's catalog title even when their
+          // local mirror has a newer timestamp or an older non-placeholder
+          // title. The owner may rename locally before the catalog catches up.
+          authoritative: Boolean(
+            teamProject
+            && teamProject.ownerMemberId !== workspaceContext?.workspaceMemberId,
+          ),
+        }
+      : undefined;
+    const open = () => Promise.resolve(onOpenProject(id, undefined, projectTitleHint));
     if (localProjectIds.has(id) || contentReadyProjectIdsRef.current.has(id)) {
-      await Promise.resolve(onOpenProject(id));
+      await open();
       return true;
     }
     const scopeKey = contentReadyScopeKeyRef.current;
@@ -777,7 +816,7 @@ export function EntryShell({
     if (hydration) {
       const hydrated = await hydration;
       if (hydrated) {
-        await Promise.resolve(onOpenProject(id));
+        await open();
         return true;
       }
       if (contentReadyScopeKeyRef.current !== scopeKey) return false;
@@ -796,7 +835,7 @@ export function EntryShell({
     } finally {
       setPullingProjectId(null);
     }
-    await Promise.resolve(onOpenProject(id));
+    await open();
     return true;
   }
   // Resolve the effective light/dark theme so the rail's account-menu theme toggle

@@ -428,6 +428,19 @@ function ensureConversationPresent(
 
 interface Props {
   project: Project;
+  /** Workspace/member authorization lifetime for async title reads. */
+  projectAuthorizationKey?: string;
+  /**
+   * The current title from the team catalog when this project is shared by
+   * another member. That catalog is the naming authority; the member's local
+   * mirror may carry an older real name with a newer local timestamp.
+   */
+  authoritativeProjectName?: string;
+  /** Re-read the catalog after a metadata invalidation before merging detail. */
+  resolveAuthoritativeProjectName?: (
+    projectId: string,
+    expectedAuthorizationKey: string,
+  ) => Promise<ProjectNameAuthorityResolution>;
   routeFileName: string | null;
   /**
    * Routed conversation id. When set (the URL is
@@ -1432,8 +1445,54 @@ function artifactWithHtml(
       };
 }
 
+const SHARED_PROJECT_PLACEHOLDER_NAME = '共享项目';
+
+export type ProjectNameAuthorityResolution =
+  | { kind: 'resolved'; name: string | null }
+  | { kind: 'stale' };
+
+/**
+ * Reconcile the route/list snapshot with the daemon detail response.
+ *
+ * A shared-project placeholder is created locally with `updatedAt = now`, so
+ * timestamp-only selection can make it look newer than the catalog row whose
+ * real title the user already saw. Detail still owns newer project fields, but
+ * it must never replace a meaningful catalog title with that transport
+ * placeholder. The project-id check also keeps a late response from a previous
+ * route out of the next project.
+ */
+export function reconcileProjectDetail(
+  project: Project,
+  detail: Project | null,
+  authoritativeProjectName?: string | null,
+): Project {
+  const authoritativeName = authoritativeProjectName?.trim() || null;
+  const routedProject = authoritativeName
+    ? { ...project, name: authoritativeName }
+    : project;
+  if (!detail || detail.id !== project.id || detail.updatedAt < project.updatedAt) {
+    return routedProject;
+  }
+  const projectName = routedProject.name.trim();
+  const detailName = detail.name.trim();
+  if (
+    detailName === SHARED_PROJECT_PLACEHOLDER_NAME
+    && projectName
+    && projectName !== SHARED_PROJECT_PLACEHOLDER_NAME
+  ) {
+    // The placeholder is an unmaterialized transport row, not a newer project
+    // authority. Reject the whole row so its null skill/design metadata cannot
+    // regress the catalog/local record along with its synthetic title.
+    return routedProject;
+  }
+  return authoritativeName ? { ...detail, name: authoritativeName } : detail;
+}
+
 export function ProjectView({
   project,
+  projectAuthorizationKey = project.id,
+  authoritativeProjectName,
+  resolveAuthoritativeProjectName,
   routeFileName,
   routeConversationId = null,
   config,
@@ -1469,6 +1528,15 @@ export function ProjectView({
   onDuplicateProject,
 }: Props) {
   const { locale, t } = useI18n();
+  const activeAuthorizationLifetimeRef = useRef<string | null>(projectAuthorizationKey);
+  useEffect(() => {
+    activeAuthorizationLifetimeRef.current = projectAuthorizationKey;
+    return () => {
+      if (activeAuthorizationLifetimeRef.current === projectAuthorizationKey) {
+        activeAuthorizationLifetimeRef.current = null;
+      }
+    };
+  }, [projectAuthorizationKey]);
   const analytics = useAnalytics();
   const workspaceContextState = useWorkspaceContext();
   const { context: workspaceContext } = workspaceContextState;
@@ -1556,8 +1624,11 @@ export function ProjectView({
       : null;
   const projectDetail = useProjectDetail(project.id);
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
-  const currentProject =
-    detailedProject && detailedProject.updatedAt >= project.updatedAt ? detailedProject : project;
+  const currentProject = reconcileProjectDetail(
+    project,
+    detailedProject,
+    authoritativeProjectName,
+  );
   const projectDesignSystemId = resolveProjectDesignSystemId(currentProject);
   const projectIsDesignSystemProject = isDesignSystemProject(currentProject);
   // Website-clone turns reproduce a whole multi-page site; auto-open should
@@ -2869,19 +2940,35 @@ export function ProjectView({
         // rendered field actually changed — an unconditional apply would
         // re-render the whole App on every content-publish nudge.
         const capturedProjectId = project.id;
-        void getProject(capturedProjectId).then((fresh) => {
+        const capturedAuthorizationKey = projectAuthorizationKey;
+        void Promise.all([
+          getProject(capturedProjectId),
+          resolveAuthoritativeProjectName
+            ? resolveAuthoritativeProjectName(capturedProjectId, capturedAuthorizationKey)
+            : Promise.resolve<ProjectNameAuthorityResolution>({
+                kind: 'resolved',
+                name: authoritativeProjectName ?? null,
+              }),
+        ]).then(([fresh, authorityResolution]) => {
           if (!fresh) return;
+          if (authorityResolution.kind === 'stale') return;
+          if (activeAuthorizationLifetimeRef.current !== capturedAuthorizationKey) return;
           // User switched projects while the fetch was in flight.
           if (projectIdRef.current !== capturedProjectId) return;
           const current = projectRef.current;
+          const reconciled = reconcileProjectDetail(
+            current,
+            fresh,
+            authorityResolution.name,
+          );
           if (
-            fresh.name === current.name
-            && fresh.skillId === current.skillId
-            && fresh.designSystemId === current.designSystemId
+            reconciled.name === current.name
+            && reconciled.skillId === current.skillId
+            && reconciled.designSystemId === current.designSystemId
           ) {
             return;
           }
-          onProjectChange(fresh);
+          onProjectChange(reconciled);
         });
       }
       return;
@@ -2942,7 +3029,19 @@ export function ProjectView({
     // Live artifact events come from chat-turn-emitted artifacts; they
     // also imply the conversation transcript changed.
     setDesignMdRefreshKey((n) => n + 1);
-  }, [coalescedFileChangedRefresh, collabCheckStatusNow, collabRefreshPresence, iframeKeepAlivePool, onProjectChange, onProjectsRefresh, refreshLiveArtifacts, project.id]);
+  }, [
+    authoritativeProjectName,
+    coalescedFileChangedRefresh,
+    collabCheckStatusNow,
+    collabRefreshPresence,
+    iframeKeepAlivePool,
+    onProjectChange,
+    onProjectsRefresh,
+    refreshLiveArtifacts,
+    resolveAuthoritativeProjectName,
+    project.id,
+    projectAuthorizationKey,
+  ]);
   useProjectFileEvents(project.id, daemonLive, handleProjectEvent, {
     onConnectedChange: setProjectEventsSseConnected,
   });
@@ -9226,7 +9325,7 @@ export function ProjectView({
                   <span
                     className={`title${projectCollab.viewerOnly ? ' readonly' : ' editable'}`}
                     data-testid="project-title"
-                    title={projectCollab.viewerOnly ? t('workspace.readonlyNotice') : project.name}
+                    title={projectCollab.viewerOnly ? t('workspace.readonlyNotice') : currentProject.name}
                     tabIndex={projectCollab.viewerOnly ? -1 : 0}
                     role={projectCollab.viewerOnly ? undefined : 'textbox'}
                     suppressContentEditableWarning
@@ -9242,7 +9341,7 @@ export function ProjectView({
                       }
                     }}
                   >
-                    {project.name}
+                    {currentProject.name}
                   </span>
                   {projectTypeLabel ? (
                     <span className="meta" data-testid="project-meta">{projectTypeLabel}</span>
@@ -9287,7 +9386,7 @@ export function ProjectView({
         ) : null}
         <FileWorkspace
           projectId={project.id}
-          projectName={project.name}
+          projectName={currentProject.name}
           viewerOnly={projectCollab.viewerOnly}
           readonlyNotice={readonlyNoticeText}
           fileSyncBadge={fileSyncBadge}

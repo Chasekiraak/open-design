@@ -22,12 +22,14 @@ import type {
   AmrModelsResponse,
   ChatSessionMode,
   RunContextSelection,
+  TeamProject,
   WorkspaceTeamProjectsResponse,
   WorkspaceCollabContext,
   WorkspaceProjectSummary,
 } from '@open-design/contracts';
 import { DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID } from '@open-design/contracts';
 import { EntryView } from './components/EntryView';
+import type { ProjectTitleHint } from './components/EntryShell';
 import type { IntegrationTab } from './components/IntegrationsView';
 import { MarketplaceView } from './components/MarketplaceView';
 import { PluginDetailView } from './components/PluginDetailView';
@@ -38,7 +40,10 @@ import { CenteredLoader } from './components/Loading';
 import { PetOverlay, type PetTaskCenter } from './components/pet/PetOverlay';
 import { buildPetTaskCenter } from './components/pet/taskCenter';
 import { migrateCustomPetAtlas } from './components/pet/pets';
-import { ProjectView } from './components/ProjectView';
+import {
+  ProjectView,
+  type ProjectNameAuthorityResolution,
+} from './components/ProjectView';
 import { AmrArtifactUpgradeGate } from './components/AmrArtifactUpgradeGate';
 import { AmrArtifactUpgradeHomeCard } from './components/AmrArtifactUpgradeHomeCard';
 import { TooltipLayer } from './components/TooltipLayer';
@@ -467,13 +472,28 @@ type TeamSharedProjectPullOutcome = {
   pulled: boolean;
 };
 
-async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<TeamSharedProjectPullOutcome> {
+type TeamProjectCatalogLookup =
+  | { ok: true; project: TeamProject | null }
+  | { ok: false };
+
+async function fetchTeamProjectCatalogEntry(projectId: string): Promise<TeamProjectCatalogLookup> {
   try {
-    const listResponse = await fetch('/api/workspace/projects/team');
-    if (!listResponse.ok) return { isTeamShared: false, pulled: false };
-    const body = (await listResponse.json()) as WorkspaceTeamProjectsResponse;
-    const isTeamShared = (body.projects ?? []).some((project) => project.projectId === projectId);
-    if (!isTeamShared) return { isTeamShared: false, pulled: false };
+    const response = await fetch('/api/workspace/projects/team');
+    if (!response.ok) return { ok: false };
+    const body = (await response.json()) as WorkspaceTeamProjectsResponse;
+    return {
+      ok: true,
+      project: (body.projects ?? []).find((project) => project.projectId === projectId) ?? null,
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function pullTeamSharedProjectIfAvailable(projectId: string): Promise<TeamSharedProjectPullOutcome> {
+  const lookup = await fetchTeamProjectCatalogEntry(projectId);
+  if (!lookup.ok || !lookup.project) return { isTeamShared: false, pulled: false };
+  try {
     const pullResponse = await fetch(`/api/projects/${encodeURIComponent(projectId)}/collab/pull`, {
       method: 'POST',
     });
@@ -760,6 +780,16 @@ function AppInner() {
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
+  // Project names from another member's team-catalog row are authoritative:
+  // the local mirror can carry an older real name (not only "共享项目") with a
+  // newer local timestamp. Scope keys prevent a project id observed in one
+  // workspace/member context from leaking its title authority into another.
+  const [authoritativeProjectNames, setAuthoritativeProjectNames] = useState<
+    Record<string, string>
+  >({});
+  const authoritativeProjectNamesRef = useRef(authoritativeProjectNames);
+  authoritativeProjectNamesRef.current = authoritativeProjectNames;
+  const projectNameAuthorityRequestGenerationRef = useRef<Map<string, number>>(new Map());
   const [petTaskCenter, setPetTaskCenter] = useState<PetTaskCenter>({
     running: [],
     queued: [],
@@ -768,6 +798,12 @@ function AppInner() {
   const pendingLocalProjectIdsRef = useRef<Set<string>>(new Set());
   const pendingLocalProjectScopeRef = useRef(projectListScopeKey(workspaceContext));
   const currentProjectListScope = projectListScopeKey(workspaceContext);
+  const projectAuthorizationScopeRef = useRef(currentProjectListScope);
+  const projectAuthorizationGenerationRef = useRef(0);
+  if (projectAuthorizationScopeRef.current !== currentProjectListScope) {
+    projectAuthorizationScopeRef.current = currentProjectListScope;
+    projectAuthorizationGenerationRef.current += 1;
+  }
   if (pendingLocalProjectScopeRef.current !== currentProjectListScope) {
     pendingLocalProjectScopeRef.current = currentProjectListScope;
     pendingLocalProjectIdsRef.current.clear();
@@ -2453,35 +2489,226 @@ function AppInner() {
     });
   }, [beginProjectListRequest, listCurrentWorkspaceProjects, rememberLocalProject, reconcileFetchedProjects, workspaceProjectView]);
 
-  const handleOpenProject = useCallback(async (id: string, fileName?: string): Promise<boolean> => {
+  const rememberAuthoritativeProjectName = useCallback((
+    key: string,
+    name: string | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    setAuthoritativeProjectNames((current) => {
+      if (!isCurrent()) return current;
+      if (name) {
+        if (current[key] === name) return current;
+        return { ...current, [key]: name };
+      }
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const resolveAuthoritativeProjectName = useCallback(async (
+    projectId: string,
+    expectedAuthorizationKey: string,
+  ): Promise<ProjectNameAuthorityResolution> => {
+    const context = workspaceContextRef.current;
+    const key = projectViewAuthorizationLifetimeKey(projectId, context);
+    if (key !== expectedAuthorizationKey) return { kind: 'stale' };
+    const authorizationGeneration = projectAuthorizationGenerationRef.current;
+    const requestGeneration =
+      (projectNameAuthorityRequestGenerationRef.current.get(key) ?? 0) + 1;
+    projectNameAuthorityRequestGenerationRef.current.set(key, requestGeneration);
+    const authorityRequestIsCurrent = () =>
+      projectAuthorizationGenerationRef.current === authorizationGeneration
+      && projectNameAuthorityRequestGenerationRef.current.get(key) === requestGeneration
+      && projectViewAuthorizationLifetimeKey(projectId, workspaceContextRef.current) === key;
+    const lookup = await fetchTeamProjectCatalogEntry(projectId);
+    if (!authorityRequestIsCurrent()) {
+      // Workspace/member changed while the catalog request was in flight.
+      // A newer same-key request also supersedes this response, so an older
+      // catalog snapshot cannot roll back a rename that resolved first.
+      return { kind: 'stale' };
+    }
+    if (!lookup.ok) {
+      // A transport failure is not evidence that ownership/title authority
+      // changed. Keep the last catalog title until a successful read says so.
+      return {
+        kind: 'resolved',
+        name: authoritativeProjectNamesRef.current[key] ?? null,
+      };
+    }
+    const catalogProject = lookup.project;
+    const catalogName = catalogProject?.name?.trim() || null;
+    const belongsToAnotherMember = Boolean(
+      catalogProject
+      && catalogProject.ownerMemberId !== context?.workspaceMemberId,
+    );
+    const authoritativeName = belongsToAnotherMember ? catalogName : null;
+    rememberAuthoritativeProjectName(key, authoritativeName, authorityRequestIsCurrent);
+    if (authoritativeName) {
+      // Merge title only into the already-authorized local row; never construct
+      // a catalog-shaped Project because catalog rows do not carry workspace
+      // binding or the full project metadata.
+      setProjects((current) => {
+        if (!authorityRequestIsCurrent()) return current;
+        return current.map((project) =>
+          project.id === projectId
+            && project.workspaceId
+            && (!context?.workspaceId || project.workspaceId === context.workspaceId)
+            ? { ...project, name: authoritativeName }
+            : project);
+      });
+    }
+    return { kind: 'resolved', name: authoritativeName };
+  }, [rememberAuthoritativeProjectName]);
+
+  const handleOpenProject = useCallback(async (
+    id: string,
+    fileName?: string,
+    projectTitleHint?: ProjectTitleHint,
+  ): Promise<boolean> => {
     const routeFileName = fileName ?? null;
-    if (projectsRef.current.some((project) => project.id === id)) {
+    const hintedProjectName = projectTitleHint?.name.trim() || null;
+    const requiresBoundCatalogProject = projectTitleHint?.authoritative === true;
+    const openingContext = workspaceContextRef.current;
+    const openingAuthorizationGeneration = projectAuthorizationGenerationRef.current;
+    const openingScopeKey = projectListScopeKey(openingContext);
+    const expectedWorkspaceId = openingContext?.workspaceId ?? null;
+    const hintMatchesOpeningScope =
+      !projectTitleHint
+      || Boolean(
+        expectedWorkspaceId
+        && openingContext?.workspaceMemberId
+        && projectTitleHint.workspaceId === expectedWorkspaceId
+        && projectTitleHint.workspaceMemberId === openingContext.workspaceMemberId,
+      );
+    if (requiresBoundCatalogProject && !hintMatchesOpeningScope) return false;
+    // A stale non-authoritative card may still open the current local row, but
+    // its old-workspace title must never overwrite that row. Authoritative
+    // catalog cards fail closed above; own/local cards simply drop the hint.
+    const catalogName = hintMatchesOpeningScope ? hintedProjectName : null;
+    const titleAuthorityKey = projectViewAuthorizationLifetimeKey(
+      id,
+      openingContext,
+    );
+    const openingScopeIsCurrent = () =>
+      projectAuthorizationGenerationRef.current === openingAuthorizationGeneration
+      && projectListScopeKey(workspaceContextRef.current) === openingScopeKey;
+    const canUseLocalProject = (project: Project) => {
+      if (project.workspaceId) return project.workspaceId === expectedWorkspaceId;
+      return !requiresBoundCatalogProject;
+    };
+    const rememberHintAuthority = () => {
+      if (projectTitleHint?.authoritative && catalogName && openingScopeIsCurrent()) {
+        // A catalog card is an authority response too. Invalidate any older
+        // deep-link/metadata lookup that started before this newer UI snapshot
+        // was accepted, otherwise its late response could roll the title back.
+        const nextRequestGeneration =
+          (projectNameAuthorityRequestGenerationRef.current.get(titleAuthorityKey) ?? 0) + 1;
+        projectNameAuthorityRequestGenerationRef.current.set(
+          titleAuthorityKey,
+          nextRequestGeneration,
+        );
+        rememberAuthoritativeProjectName(
+          titleAuthorityKey,
+          catalogName,
+          openingScopeIsCurrent,
+        );
+      }
+    };
+    // EntryShell's shared-project grid has already reconciled local SQLite with
+    // the workspace catalog. Preserve its authoritative display name during the
+    // route transition instead of reopening the stale local placeholder by id.
+    //
+    // The catalog row is NOT a local project record: it may omit workspaceId
+    // and other binding fields. Treat it as a name hint only, and merge it into
+    // an already-bound local row. If App has not observed that row yet, keep
+    // loading through GET/pull/list below instead of inserting an unbound
+    // catalog-shaped Project into local state.
+    if (
+      catalogName
+      && projectsRef.current.some((project) => project.id === id && canUseLocalProject(project))
+    ) {
+      setProjects((current) => {
+        if (!openingScopeIsCurrent()) return current;
+        const existingIndex = current.findIndex(
+          (project) => project.id === id && canUseLocalProject(project),
+        );
+        if (existingIndex < 0) return current;
+        const existing = current[existingIndex]!;
+        if (existing.name === catalogName) return current;
+        const next = [...current];
+        next[existingIndex] = {
+          ...existing,
+          name: catalogName,
+        };
+        return next;
+      });
+      rememberHintAuthority();
+      navigate({ kind: 'project', projectId: id, fileName: routeFileName });
+      return true;
+    }
+    if (
+      !catalogName
+      && projectsRef.current.some(
+        (project) => project.id === id && canUseLocalProject(project),
+      )
+    ) {
       navigate({ kind: 'project', projectId: id, fileName: routeFileName });
       return true;
     }
     try {
       const project = await getProject(id);
-      if (project) {
-        setProjects((curr) => [project, ...curr.filter((candidate) => candidate.id !== project.id)]);
+      if (!openingScopeIsCurrent()) return false;
+      if (project && canUseLocalProject(project)) {
+        const openedProject = catalogName ? { ...project, name: catalogName } : project;
+        setProjects((curr) => openingScopeIsCurrent()
+          ? [
+              openedProject,
+              ...curr.filter((candidate) => candidate.id !== openedProject.id),
+            ]
+          : curr);
+        rememberHintAuthority();
         navigate({ kind: 'project', projectId: id, fileName: routeFileName });
         return true;
       }
       const { pulled } = await pullTeamSharedProjectIfAvailable(id);
+      if (!openingScopeIsCurrent()) return false;
       if (pulled) {
         const pulledProject = await getProject(id);
-        if (pulledProject) {
-          setProjects((curr) => [pulledProject, ...curr.filter((candidate) => candidate.id !== pulledProject.id)]);
+        if (!openingScopeIsCurrent()) return false;
+        if (pulledProject && canUseLocalProject(pulledProject)) {
+          const openedProject = catalogName
+            ? { ...pulledProject, name: catalogName }
+            : pulledProject;
+          setProjects((curr) => openingScopeIsCurrent()
+            ? [
+                openedProject,
+                ...curr.filter((candidate) => candidate.id !== openedProject.id),
+              ]
+            : curr);
+          rememberHintAuthority();
           navigate({ kind: 'project', projectId: id, fileName: routeFileName });
           return true;
         }
       }
       const request = beginProjectListRequest();
       const list = await listCurrentWorkspaceProjects({ workspaceView: 'all' });
-      reconcileFetchedProjects(list, request);
+      if (!openingScopeIsCurrent()) return false;
+      const reconciledList = catalogName
+        ? list.map((candidate) =>
+            candidate.id === id && canUseLocalProject(candidate)
+              ? { ...candidate, name: catalogName }
+              : candidate)
+        : list;
+      reconcileFetchedProjects(reconciledList, request);
       const fetchedProject = locallyDeletedProjectIdsRef.current.has(id)
         ? undefined
-        : list.find((candidate) => candidate.id === id);
+        : reconciledList.find(
+            (candidate) => candidate.id === id && canUseLocalProject(candidate),
+          );
       if (fetchedProject) {
+        rememberHintAuthority();
         navigate({ kind: 'project', projectId: id, fileName: routeFileName });
         return true;
       }
@@ -2490,9 +2717,16 @@ function AppInner() {
       // return 404 or transiently fail while reconciling a deleted backing
       // project; either way the user needs feedback instead of a silent bounce.
     }
+    if (!openingScopeIsCurrent()) return false;
     setProjectOpenError(t('project.missing'));
     return false;
-  }, [beginProjectListRequest, listCurrentWorkspaceProjects, reconcileFetchedProjects, t]);
+  }, [
+    beginProjectListRequest,
+    listCurrentWorkspaceProjects,
+    reconcileFetchedProjects,
+    rememberAuthoritativeProjectName,
+    t,
+  ]);
 
   useEffect(() => {
     if (!config.pet?.enabled || !daemonLive) {
@@ -2678,6 +2912,40 @@ function AppInner() {
     };
   }, [route]);
   const activeProject = loadedActiveProject ?? routeProjectPlaceholder;
+  const activeAuthoritativeProjectName =
+    route.kind === 'project'
+      ? authoritativeProjectNames[
+          projectViewAuthorizationLifetimeKey(route.projectId, workspaceContext)
+        ]
+      : undefined;
+  const activeProjectAuthorizationKey =
+    route.kind === 'project'
+      ? projectViewAuthorizationLifetimeKey(route.projectId, workspaceContext)
+      : null;
+
+  // A full-page refresh/deep link does not pass through EntryShell's card
+  // click, and the local list may already contain a stale shared-project row.
+  // Calibrate that bound row from the hub catalog as soon as both the route and
+  // workspace identity have settled. This closes the path where the effect
+  // below skipped resolution merely because SQLite returned "some" row.
+  useEffect(() => {
+    if (route.kind !== 'project') return;
+    if (workspaceContextLoading) return;
+    if (!loadedActiveProject?.workspaceId) return;
+    if (!activeProjectAuthorizationKey || activeAuthoritativeProjectName) return;
+    void resolveAuthoritativeProjectName(route.projectId, activeProjectAuthorizationKey);
+  }, [
+    route.kind,
+    route.kind === 'project' ? route.projectId : null,
+    loadedActiveProject?.id,
+    loadedActiveProject?.workspaceId,
+    activeAuthoritativeProjectName,
+    activeProjectAuthorizationKey,
+    workspaceContextLoading,
+    workspaceContext?.workspaceId,
+    workspaceContext?.workspaceMemberId,
+    resolveAuthoritativeProjectName,
+  ]);
 
   // Deep-linked route to a project we don't have yet (e.g. after a refresh
   // that finishes after the project list comes back, OR a member's first-ever
@@ -3093,6 +3361,11 @@ function AppInner() {
       <ProjectView
         key={projectViewAuthorizationLifetimeKey(activeProject.id, workspaceContext)}
         project={activeProject}
+        projectAuthorizationKey={
+          activeProjectAuthorizationKey ?? activeProject.id
+        }
+        authoritativeProjectName={activeAuthoritativeProjectName}
+        resolveAuthoritativeProjectName={resolveAuthoritativeProjectName}
         routeFileName={route.kind === 'project' ? route.fileName : null}
         routeConversationId={route.kind === 'project' ? route.conversationId : null}
         config={config}

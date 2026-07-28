@@ -25,6 +25,10 @@ import { PluginMetaSections } from './plugin-details/PluginMetaSections';
 import { buildPluginInstallCommand } from './plugin-details/PluginShareMenu';
 import { localizePluginChrome } from '../i18n/plugin-content';
 import { derivePluginSourceLinks } from '../runtime/plugin-source';
+import {
+  loadPluginSkillDescriptions,
+  normalizePluginSkillAssetPath,
+} from '../runtime/plugin-skill-descriptions';
 
 interface Props {
   pluginId: string;
@@ -33,12 +37,18 @@ interface Props {
 interface KnowledgeSkill {
   key: string;
   label: string;
+  assetPath: string | null;
 }
 
 interface ConnectionRow {
   id: string;
   tools: string[];
   requirement: 'required' | 'optional';
+}
+
+interface SkillDescriptionState {
+  pluginId: string;
+  descriptions: Record<string, string>;
 }
 
 function referenceLabel(reference: { ref?: string; path?: string }): string {
@@ -67,7 +77,11 @@ function normalizeSkillReferences(
     const label = referenceLabel(reference);
     if (!label || seen.has(label)) return [];
     seen.add(label);
-    return [{ key: label, label }];
+    return [{
+      key: label,
+      label,
+      assetPath: normalizePluginSkillAssetPath(reference.path),
+    }];
   });
 }
 
@@ -152,6 +166,10 @@ export function PluginDetailView(props: Props) {
   const [error, setError] = useState<{ kind: 'load' | 'apply'; message: string } | null>(null);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState<ApplyResult | null>(null);
+  const [skillDescriptionState, setSkillDescriptionState] = useState<SkillDescriptionState>({
+    pluginId: '',
+    descriptions: {},
+  });
 
   const onBack = () => {
     trackPluginDetailClick(analytics.track, {
@@ -182,6 +200,21 @@ export function PluginDetailView(props: Props) {
       cancelled = true;
     };
   }, [props.pluginId]);
+
+  useEffect(() => {
+    if (!plugin || plugin.id !== props.pluginId) return;
+    const controller = new AbortController();
+    void loadPluginSkillDescriptions(
+      plugin.id,
+      knowledgeSkillsFor(plugin),
+      controller.signal,
+    ).then((descriptions) => {
+      if (!controller.signal.aborted) {
+        setSkillDescriptionState({ pluginId: plugin.id, descriptions });
+      }
+    });
+    return () => controller.abort();
+  }, [plugin, props.pluginId]);
 
   if (error) {
     return (
@@ -313,11 +346,20 @@ export function PluginDetailView(props: Props) {
         count={skills.length}
       >
         <div className="plugin-suite-detail__skill-list">
-          {skills.length > 0 ? skills.map((skill) => (
-            <article key={skill.key} className="plugin-suite-detail__skill">
-              <h3>{skill.label}</h3>
-            </article>
-          )) : (
+          {skills.length > 0 ? skills.map((skill) => {
+            const description = (
+              skillDescriptionState.pluginId === props.pluginId
+              && plugin.id === props.pluginId
+            )
+              ? skillDescriptionState.descriptions[skill.key]
+              : '';
+            return (
+              <article key={skill.key} className="plugin-suite-detail__skill">
+                <h3>{skill.label}</h3>
+                {description ? <p>{description}</p> : null}
+              </article>
+            );
+          }) : (
             <div className="plugin-suite-detail__empty-row">
               {t('pluginDetail.noKnowledgeSkills')}
             </div>
