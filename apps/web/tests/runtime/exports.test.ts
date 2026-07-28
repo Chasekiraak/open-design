@@ -822,6 +822,72 @@ describe('exportProjectAsHtml', () => {
     dom.window.close();
   });
 
+  it('fits fixed-canvas slides mounted directly under the document body', async () => {
+    const source = `<!doctype html><html><head><style>
+      html, body { width: 1920px; height: 1080px; overflow: hidden; }
+      .slide { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+      .slide.active { position: relative; }
+    </style></head><body>
+      <section class="slide active" data-screen-label="01">A</section>
+      <section class="slide" data-screen-label="02">B</section>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      beforeParse(window) {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 2048 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1005 });
+      },
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    expect(dom.window.document.body.getAttribute('data-od-export-fit-owned')).toBe('true');
+    expect(dom.window.document.body.style.transform).toContain('scale(0.9009259259259259)');
+    expect(dom.window.document.body.style.width).toBe('');
+    expect(dom.window.document.body.style.height).toBe('');
+    expect(dom.window.document.body.style.overflow).toBe('hidden');
+    expect(dom.window.document.documentElement.style.overflow).toBe('hidden');
+
+    Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(dom.window, 'innerHeight', { configurable: true, value: 720 });
+    dom.window.dispatchEvent(new dom.window.Event('resize'));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    expect(dom.window.document.body.getAttribute('data-od-export-fit-owned')).toBe('true');
+    expect(dom.window.document.body.style.transform).toContain('scale(0.6370370370370371)');
+    dom.window.close();
+  });
+
+  it('does not fit direct-body slides arranged as a genuine scroll track', async () => {
+    const source = `<!doctype html><html><head><style>
+      html, body { width: 1920px; height: 1080px; }
+      .slide { position: absolute; width: 1920px; height: 1080px; }
+    </style></head><body>
+      <section class="slide" data-screen-label="01">A</section>
+      <section class="slide" data-screen-label="02">B</section>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      beforeParse(window) {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+      },
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+    const slides = Array.from(dom.window.document.querySelectorAll<HTMLElement>('.slide'));
+    Object.defineProperty(slides[0], 'offsetLeft', { configurable: true, value: 0 });
+    Object.defineProperty(slides[1], 'offsetLeft', { configurable: true, value: 1920 });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    expect(dom.window.document.body.getAttribute('data-od-export-fit-owned')).toBeNull();
+    expect(dom.window.document.body.style.transform).toBe('');
+    dom.window.close();
+  });
+
   it('does not override a deck that already owns scale-to-fit', async () => {
     const source = `<!doctype html><html><head><style>
       .deck-stage { width: 1920px; height: 1080px; transform: scale(0.5); }

@@ -71,12 +71,41 @@ function triggerDownload(blob: Blob, filename: string): void {
 
 const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
 (function () {
+  var SLIDE_SELECTOR = 'deck-stage > section, section[data-screen-label], .deck-slide, .ppt-slide, .slide';
   var ownedTransform = '';
+
+  function inferredDeckRoot() {
+    var list = Array.prototype.slice.call(document.querySelectorAll(SLIDE_SELECTOR));
+    if (!list.length) return null;
+    var parent = list[0] && list[0].parentElement;
+    if (!parent || parent === document.documentElement) return null;
+    for (var i = 1; i < list.length; i++) {
+      if (list[i].parentElement !== parent) return null;
+    }
+
+    var width = dimension(parent, 'width');
+    var height = dimension(parent, 'height');
+    if (width < 320 || height < 180) return null;
+    var ratio = width / height;
+    if (ratio < 1.2 || ratio > 2.2) return null;
+    if (width <= window.innerWidth + 1 && height <= window.innerHeight + 1) return null;
+
+    var firstLeft = Number(list[0] && list[0].offsetLeft) || 0;
+    var firstTop = Number(list[0] && list[0].offsetTop) || 0;
+    for (var j = 1; j < list.length; j++) {
+      var left = Number(list[j] && list[j].offsetLeft) || 0;
+      var top = Number(list[j] && list[j].offsetTop) || 0;
+      if (Math.abs(left - firstLeft) > 1 || Math.abs(top - firstTop) > 1) return null;
+    }
+    return parent;
+  }
 
   function deckRoot() {
     return document.querySelector('.deck-stage, .deck-viewport') ||
       document.querySelector('[data-od-id="deck-root"]') ||
-      document.querySelector('.deck');
+      document.querySelector('.deck') ||
+      document.querySelector('[data-od-export-fit-owned="true"]') ||
+      inferredDeckRoot();
   }
 
   function dimension(element, property) {
@@ -121,8 +150,10 @@ const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
     document.documentElement.style.width = '100%';
     document.documentElement.style.height = '100%';
     document.documentElement.style.overflow = 'hidden';
-    document.body.style.width = '100%';
-    document.body.style.height = '100%';
+    if (root !== document.body) {
+      document.body.style.width = '100%';
+      document.body.style.height = '100%';
+    }
     document.body.style.margin = '0';
     document.body.style.overflow = 'hidden';
     root.style.position = 'fixed';
@@ -131,6 +162,7 @@ const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
     root.style.margin = '0';
     root.style.transformOrigin = 'top left';
     root.style.transform = ownedTransform;
+    ownedTransform = root.style.transform;
     root.setAttribute('data-od-export-fit-owned', 'true');
   }
 
