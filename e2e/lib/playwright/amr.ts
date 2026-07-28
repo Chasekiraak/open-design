@@ -121,18 +121,61 @@ export function settingsSurface(page: Page) {
   return page.locator('.modal-settings').first();
 }
 
+/**
+ * Open Settings from a project/workspace surface.
+ *
+ * Every `entry-*` settings trigger lives on the entry (Home) shell, so none of
+ * them exists once a project is open. #5517 also left `EntrySettingsMenu`
+ * (`entry-settings-menu-trigger` / `entry-settings-open-details`) and
+ * `AppChromeHeader`'s `SettingsIconButton` (`.settings-icon-btn`) unrendered,
+ * so the project surface's only settings entry is the composer's model popover:
+ * open `AvatarMenu`, then take its pinned `avatar-open-execution-settings` row.
+ * The topbar `InlineModelSwitcher` carries the same row under
+ * `inline-model-switcher-open-settings`, so try that as a second route.
+ *
+ * Returns true when it managed to click a trigger, false when this page has no
+ * in-project settings entry to drive.
+ */
+async function openSettingsFromProjectSurface(page: Page): Promise<boolean> {
+  const avatarTrigger = page.locator('.avatar-menu .avatar-agent-trigger').first();
+  if (await avatarTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await avatarTrigger.click();
+    const openSettings = page.getByTestId('avatar-open-execution-settings').first();
+    if (await openSettings.isVisible({ timeout: T.short }).catch(() => false)) {
+      await openSettings.click();
+      return true;
+    }
+    // Leave no popover behind for the next attempt to trip over.
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+
+  const switcherChip = page.getByTestId('inline-model-switcher-chip').first();
+  if (await switcherChip.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await switcherChip.click();
+    const openSettings = page.getByTestId('inline-model-switcher-open-settings').first();
+    if (await openSettings.isVisible({ timeout: T.short }).catch(() => false)) {
+      await openSettings.click();
+      return true;
+    }
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+
+  return false;
+}
+
 export async function openSettingsDialog(page: Page) {
   await waitForLoadingToClear(page);
   await dismissPrivacyDialog(page);
   await ensureEntryRailOpenIfPresent(page);
   const dialog = settingsSurface(page);
-  // `entry-settings-button` (the rail-footer chip) was cut by #5971; signed
-  // out the entry is the rail's own `entry-nav-settings` item, signed in it is
-  // the account menu. Keep the cut testid in the chain so older skins still
-  // resolve, and fall back to the aria-label last.
+  // On the entry, `entry-settings-button` is the rail nav item that carries
+  // settings when signed out (see EntryNavRail — it calls itself the e2e
+  // contract); signed in, settings lives in the account menu, which the
+  // aria-label reaches. `entry-settings-menu-trigger` belongs to
+  // `EntrySettingsMenu`, which #5517 left unrendered — kept last so an older
+  // skin still resolves.
   const settingsTrigger = page
     .getByTestId('entry-settings-button')
-    .or(page.getByTestId('entry-nav-settings'))
     .or(page.getByTestId('entry-settings-menu-trigger'))
     .or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL }))
     .first();
@@ -143,7 +186,10 @@ export async function openSettingsDialog(page: Page) {
     await dismissPrivacyDialog(page);
     if (await settingsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await settingsTrigger.evaluate((element: HTMLElement) => element.click());
-    } else {
+    } else if (!(await openSettingsFromProjectSurface(page))) {
+      // Neither the entry triggers nor the project surface's model popover is
+      // on this page — fall back to the aria-label so the failure names the
+      // missing trigger rather than timing out on the surface.
       const fallback = page.getByRole('button', { name: OPEN_SETTINGS_LABEL }).first();
       await expect(fallback).toBeVisible({ timeout: T.medium });
       await fallback.evaluate((element: HTMLElement) => element.click());

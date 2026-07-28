@@ -4225,7 +4225,12 @@ describe('FileViewer SVG artifacts', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Versions' })).toBeNull();
     });
-    expect((await screen.findByRole('status')).textContent).toContain('Switched to this version.');
+    // Scope to the toast: #6156 added the `artifact-preview-first-load` cover,
+    // which is a `role="status"` of its own, so a bare `findByRole('status')`
+    // now resolves ambiguously against the preview's loading state.
+    await waitFor(() => {
+      expect(document.querySelector('.od-toast')?.textContent).toContain('Switched to this version.');
+    });
     expect(onFileSaved).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/project-1/files/index.html/versions/v1/restore',

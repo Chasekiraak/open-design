@@ -124,9 +124,17 @@ describe('recvq4iEq1Esno — settings full page swallowed the autosave "Saved" p
     // The old rule targeted `.settings-chrome` itself — the shared corner
     // strip that also contains `.settings-autosave` — so hiding the
     // close/fullscreen buttons for page mode took the save confirmation
-    // down with them. Assert the bare `.settings-chrome` selector no longer
-    // carries a page-mode `display: none` block at all.
-    expect(() => cssDeclarations(mentionHomeCss, '.settings-page-shell .settings-chrome')).toThrow();
+    // down with them. #6156 re-introduced the bare selector to centre the
+    // pill under the top nav, which is fine: what must never come back is a
+    // page-mode rule that hides the whole strip. Absent is fine too, hence the
+    // tolerant read.
+    let chromeStrip = '';
+    try {
+      chromeStrip = cssDeclarations(mentionHomeCss, '.settings-page-shell .settings-chrome');
+    } catch {
+      chromeStrip = '';
+    }
+    expect(chromeStrip).not.toMatch(/display\s*:\s*none/);
 
     // The fix must still hide the buttons that don't belong on a full page
     // (there's a "返回首页" link instead of a floating close/fullscreen pair).
