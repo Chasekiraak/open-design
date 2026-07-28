@@ -242,7 +242,7 @@ interface DaemonSpy {
  * headerless create → unbound project → the workspace-scoped PATCH cannot find
  * a row for the caller's workspace → 403.
  */
-function installDaemonStub(): DaemonSpy {
+function installDaemonStub(options: { refusePatch?: boolean } = {}): DaemonSpy {
   const spy: DaemonSpy = {
     boundWorkspaceId: null,
     duplicateInit: undefined,
@@ -287,7 +287,7 @@ function installDaemonStub(): DaemonSpy {
       const workspaceId = headerOf(init, 'x-od-workspace-id');
       // enforceWorkspaceResourceMutation: a workspace-aware caller is checked
       // against the row for ITS OWN workspace; no row means no standing.
-      if (workspaceId && spy.boundWorkspaceId !== workspaceId) {
+      if (options.refusePatch || (workspaceId && spy.boundWorkspaceId !== workspaceId)) {
         spy.patchStatus = 403;
         return jsonResponse(
           { error: { code: 'WORKSPACE_PROJECT_PERMISSION_DENIED', message: 'not allowed' } },
@@ -315,7 +315,12 @@ function installDaemonStub(): DaemonSpy {
   return spy;
 }
 
-function renderEntryShellCommunity() {
+function renderEntryShellCommunity(
+  handlers: {
+    onOpenProject?: (id: string, fileName?: string) => void;
+    onCreateProject?: (input: unknown) => Promise<boolean>;
+  } = {},
+) {
   return render(
     <I18nProvider initial="en">
       <EntryShell
@@ -339,10 +344,10 @@ function renderEntryShellCommunity() {
         onConfigPersist={vi.fn()}
         onRefreshAgents={vi.fn(() => [codexAgent()])}
         onThemeChange={vi.fn()}
-        onCreateProject={vi.fn(async () => true)}
+        onCreateProject={handlers.onCreateProject ?? vi.fn(async () => true)}
         onCreatePluginShareProject={vi.fn()}
         onImportClaudeDesign={vi.fn()}
-        onOpenProject={vi.fn()}
+        onOpenProject={handlers.onOpenProject ?? vi.fn()}
         onOpenLiveArtifact={vi.fn()}
         onDeleteProject={vi.fn()}
         onRenameProject={vi.fn()}
@@ -407,6 +412,30 @@ describe('Community Remix workspace binding', () => {
     await waitFor(() => expect(daemon.patchStatus).not.toBeNull());
     expect(daemon.patchStatus).toBe(200);
     expect(daemon.seededPendingPrompt).toBe(TEMPLATE_PROMPT);
+  });
+
+  // The remaining `null` shapes once binding is correct are genuine transient
+  // refusals (daemon down, membership revoked mid-flight, workspace locked
+  // between the two requests). The copied project is real and bound by then, so
+  // the flow must NOT fall into its own catch: that would strand the copy and
+  // hand the user a second, empty prompt-only project. It keeps the user on the
+  // remix and reports the dropped seed instead of swallowing it.
+  it('keeps the user on the remixed project — and creates no second one — when the prompt seed is refused', async () => {
+    currentRoute = { kind: 'home', view: 'community' };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const daemon = installDaemonStub({ refusePatch: true });
+    const onOpenProject = vi.fn();
+    const onCreateProject = vi.fn(async () => true);
+    renderEntryShellCommunity({ onOpenProject, onCreateProject });
+    await waitFor(() => expect(daemon.contextReads).toBeGreaterThan(0));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remix template' }));
+
+    await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(REMIXED_PROJECT_ID, 'index.html'));
+    expect(daemon.patchStatus).toBe(403);
+    expect(onCreateProject).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it('binds a standalone /community remix to the team workspace the member is standing in', async () => {
