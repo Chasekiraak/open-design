@@ -2395,6 +2395,7 @@ export async function startServer({
     readAvailableDesignSystemPackageInfo,
     readAvailableDesignSystemStaticFile,
     readDesignSystemWorkspaceTextFile,
+    resolveUserDesignSystemShareDirectory,
     syncUserDesignSystemAssetsFromWorkspace,
     validateProjectDesignSystemId,
     validateProjectSkillId,
@@ -4625,8 +4626,7 @@ export async function startServer({
   const designSystemsTeamShare = createTeamResourceShareService({
     kind: 'design_system',
     idPrefix: 'ds',
-    resolveDir: (id) =>
-      path.join(USER_DESIGN_SYSTEMS_DIR, stripPrefixAndValidateId(id, 'user:') ?? '__invalid__'),
+    resolveDir: (id) => resolveUserDesignSystemShareDirectory(db, id),
     describeResource: async (id) => {
       const system = (await listAllDesignSystems()).find((candidate) => candidate.id === id);
       return {
