@@ -1,5 +1,5 @@
 import { expect, type Page, type Request, type Route } from '@playwright/test';
-import { expectStableCount } from './assertions';
+import { expectStableCount } from './assertions.js';
 
 export const STORAGE_KEY = 'open-design:config';
 
