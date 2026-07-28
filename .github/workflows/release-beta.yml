@@ -475,6 +475,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          OPEN_DESIGN_AMR_PROFILE: test
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-build/mac_arm64"
@@ -508,6 +509,8 @@ jobs:
 
       - name: Retry beta mac_arm64 without restored cache
         if: ${{ steps.mac_arm64_tools_pack_build.outcome == 'failure' }}
+        env:
+          OPEN_DESIGN_AMR_PROFILE: test
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tools-pack-cache"
@@ -780,6 +783,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          OPEN_DESIGN_AMR_PROFILE: test
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-build/mac_x64"
@@ -812,6 +816,8 @@ jobs:
 
       - name: Retry beta mac_x64 without restored cache
         if: ${{ steps.mac_x64_tools_pack_build.outcome == 'failure' }}
+        env:
+          OPEN_DESIGN_AMR_PROFILE: test
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/tools-pack-cache"
