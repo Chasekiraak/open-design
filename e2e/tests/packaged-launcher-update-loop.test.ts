@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -581,20 +581,27 @@ async function publishableFloor(
 
 
 /**
- * A release feed offering BOTH a payload and a dmg for the same version, which
- * is the only shape where the floor's effect is observable: the updater prefers
- * the payload, so selecting the dmg can only be the floor's doing.
+ * A release feed offering BOTH a payload and the platform's full installer for
+ * the same version, which is the only shape where the floor's effect is
+ * observable: the updater prefers the payload, so selecting the installer can
+ * only be the floor's doing.
+ *
+ * The installer artifact key differs per platform — `dmg` on macOS, `installer`
+ * on Windows — so a feed that only ever describes one of them cannot catch a
+ * regression in the other's selection branch.
  */
 async function createFloorMetadataFixture(options: {
   floor: LauncherVersionFloor | null;
   launcherSchema?: number;
+  target: FloorPlatformTarget;
 }): Promise<FixtureServer> {
+  const { target } = options;
   const payloadBody = Buffer.from("open design reinstall floor fixture payload");
   const payloadDigest = createHash("sha256").update(payloadBody).digest("hex");
-  const payloadArchiveName = `open-design-${RELEASE_VERSION}-mac-arm64-payload.zip`;
+  const payloadArchiveName = `open-design-${RELEASE_VERSION}-${target.fixturePlatformKey}-${target.arch}-payload${target.payloadArchiveExtension}`;
   // The installer artifact needs real bytes and a real digest here: every
-  // reinstall scenario selects the dmg, and the updater verifies it before it
-  // will expose an install action.
+  // reinstall scenario selects it, and the updater verifies it before it will
+  // expose an install action.
   const installerBody = Buffer.from("open design reinstall floor fixture installer");
   const installerDigest = createHash("sha256").update(installerBody).digest("hex");
   const server = createServer((request, response) => {
@@ -606,21 +613,21 @@ async function createFloorMetadataFixture(options: {
         ...(options.floor == null ? {} : { control: { launcher: { version: options.floor } } }),
         ...(options.launcherSchema == null ? {} : { launcher: { schema: options.launcherSchema } }),
         platforms: {
-          mac: {
-            arch: "arm64",
+          [target.fixturePlatformKey]: {
+            arch: target.arch,
             enabled: true,
             artifacts: {
-              dmg: {
-                name: `open-design-${RELEASE_VERSION}-mac-arm64.dmg`,
+              [target.installerArtifactKey]: {
+                name: `open-design-${RELEASE_VERSION}-${target.fixturePlatformKey}-${target.arch}${target.installerExtension}`,
                 sha256: installerDigest,
                 size: installerBody.byteLength,
-                url: `http://${serverAddress(server)}/app.dmg`,
+                url: `http://${serverAddress(server)}/installer${target.installerExtension}`,
               },
               payload: {
                 name: payloadArchiveName,
-                sha256Url: `http://${serverAddress(server)}/payload.zip.sha256`,
+                sha256Url: `http://${serverAddress(server)}/payload${target.payloadArchiveExtension}.sha256`,
                 size: payloadBody.byteLength,
-                url: `http://${serverAddress(server)}/payload.zip`,
+                url: `http://${serverAddress(server)}/payload${target.payloadArchiveExtension}`,
               },
             },
           },
@@ -630,19 +637,19 @@ async function createFloorMetadataFixture(options: {
       }));
       return;
     }
-    if (url === "/app.dmg") {
+    if (url === `/installer${target.installerExtension}`) {
       response.setHeader("accept-ranges", "bytes");
       response.setHeader("content-length", String(installerBody.byteLength));
       response.end(installerBody);
       return;
     }
-    if (url === "/payload.zip") {
+    if (url === `/payload${target.payloadArchiveExtension}`) {
       response.setHeader("accept-ranges", "bytes");
       response.setHeader("content-length", String(payloadBody.byteLength));
       response.end(payloadBody);
       return;
     }
-    if (url === "/payload.zip.sha256") {
+    if (url === `/payload${target.payloadArchiveExtension}.sha256`) {
       response.end(`${payloadDigest}  ${payloadArchiveName}\n`);
       return;
     }
@@ -668,10 +675,37 @@ async function createFloorMetadataFixture(options: {
 }
 
 /**
- * Stand in for `ditto -x -k` on the fixture's synthetic archive: write the
- * minimum extracted mac payload the launcher will accept, so the payload path
- * can reach a real DOWNLOADED state and the floor's effect stays the only
- * difference between scenarios.
+ * The per-platform facts the floor scenarios vary. Everything a reinstall
+ * decision touches differs between macOS and Windows — the installer artifact
+ * key, and above all WHERE the physically installed outer package records its
+ * own version — so the scenarios below run against this table rather than
+ * hard-coding one platform's shape.
+ */
+type FloorPlatformTarget = {
+  arch: "arm64" | "x64";
+  /** Where `resolveInstalledOuterVersion` looks, relative to the launch path. */
+  installedOuterConfigPath: (launchPath: string) => string;
+  /**
+   * The launch path an outer install presents. macOS points at the `.app`
+   * bundle directory; Windows points at the executable file, and the config is
+   * read from a sibling `resources/` directory instead of inside the target.
+   */
+  installedLaunchPath: (installedRoot: string) => string;
+  /** Whether the launch path itself is a directory (mac bundle) or a file. */
+  installedLaunchPathIsDirectory: boolean;
+  installerArtifactKey: "dmg" | "installer";
+  installerExtension: ".dmg" | ".exe";
+  fixturePlatformKey: "mac" | "win";
+  payloadArchiveExtension: ".7z" | ".zip";
+  platform: "darwin" | "win32";
+  writeExtractedPayload: (destinationRoot: string) => Promise<void>;
+};
+
+/**
+ * Stand in for the platform extractor (`ditto -x -k` / 7-Zip) on the fixture's
+ * synthetic archive: write the minimum extracted mac payload the launcher will
+ * accept, so the payload path can reach a real DOWNLOADED state and the floor's
+ * effect stays the only difference between scenarios.
  */
 async function writeExtractedFloorMacPayload(destinationRoot: string): Promise<void> {
   const appBundleName = "Open Design.app";
@@ -712,11 +746,103 @@ async function writeExtractedFloorMacPayload(destinationRoot: string): Promise<v
   );
 }
 
+/** The Windows counterpart: a flat payload rooted at the executable. */
+async function writeExtractedFloorWindowsPayload(destinationRoot: string): Promise<void> {
+  const executableName = "Open Design.exe";
+  const payloadRoot = join(destinationRoot, "payload");
+  const resourcesRoot = join(payloadRoot, "resources");
+  await mkdir(join(resourcesRoot, "open-design", "bin"), { recursive: true });
+  await mkdir(join(resourcesRoot, "prebundled", "daemon"), { recursive: true });
+  await mkdir(join(resourcesRoot, "prebundled", "web"), { recursive: true });
+  await writeFile(join(payloadRoot, executableName), "");
+  await writeFile(join(resourcesRoot, "open-design", "bin", "node.exe"), "");
+  await writeFile(join(resourcesRoot, "prebundled", "daemon", "daemon-sidecar.mjs"), "");
+  await writeFile(join(resourcesRoot, "prebundled", "web", "web-sidecar.mjs"), "");
+  await writeFile(
+    join(resourcesRoot, "open-design-config.json"),
+    `${JSON.stringify({
+      appVersion: RELEASE_VERSION,
+      daemonSidecarEntryRelative: "prebundled/daemon/daemon-sidecar.mjs",
+      nodeCommandRelative: "open-design/bin/node.exe",
+      webOutputMode: "standalone",
+      webSidecarEntryRelative: "prebundled/web/web-sidecar.mjs",
+    })}\n`,
+  );
+  await writeFile(
+    join(destinationRoot, "manifest.json"),
+    `${JSON.stringify({
+      channel: CHANNEL,
+      entry: { cwd: "payload", executable: `payload/${executableName}` },
+      namespace: "default",
+      payloadRoot: "payload",
+      platform: "win32",
+      schemaVersion: LAUNCHER_SCHEMA_VERSION,
+      version: RELEASE_VERSION,
+    })}\n`,
+  );
+}
+
+const floorPlatformTargets = {
+  mac: {
+    arch: "arm64",
+    // Inside the bundle: <launchPath>/Contents/Resources/open-design-config.json
+    installedOuterConfigPath: (launchPath) => join(launchPath, "Contents", "Resources", "open-design-config.json"),
+    installedLaunchPath: (installedRoot) => join(installedRoot, "Open Design.app"),
+    installedLaunchPathIsDirectory: true,
+    installerArtifactKey: "dmg",
+    installerExtension: ".dmg",
+    fixturePlatformKey: "mac",
+    payloadArchiveExtension: ".zip",
+    platform: "darwin",
+    writeExtractedPayload: writeExtractedFloorMacPayload,
+  },
+  win: {
+    arch: "x64",
+    // Beside the executable: dirname(<launchPath>)/resources/open-design-config.json
+    installedOuterConfigPath: (launchPath) => join(dirname(launchPath), "resources", "open-design-config.json"),
+    installedLaunchPath: (installedRoot) => join(installedRoot, "Open Design.exe"),
+    installedLaunchPathIsDirectory: false,
+    installerArtifactKey: "installer",
+    installerExtension: ".exe",
+    fixturePlatformKey: "win",
+    payloadArchiveExtension: ".7z",
+    platform: "win32",
+    writeExtractedPayload: writeExtractedFloorWindowsPayload,
+  },
+} as const satisfies Record<string, FloorPlatformTarget>;
+
+/**
+ * Materialize the physically installed outer package the update check will read
+ * its version from — the real file at the real per-platform location, never the
+ * `OD_UPDATE_INSTALLED_VERSION` override, because that override short-circuits
+ * `resolveInstalledOuterVersion` before the platform branch it is meant to
+ * exercise. Pass a null version to leave the package present but unidentifiable.
+ */
+async function writeInstalledOuterPackage(
+  installedRoot: string,
+  target: FloorPlatformTarget,
+  appVersion: string | null,
+): Promise<string> {
+  const launchPath = target.installedLaunchPath(installedRoot);
+  if (target.installedLaunchPathIsDirectory) {
+    await mkdir(launchPath, { recursive: true });
+  } else {
+    await mkdir(dirname(launchPath), { recursive: true });
+    await writeFile(launchPath, "");
+  }
+  if (appVersion != null) {
+    const configPath = target.installedOuterConfigPath(launchPath);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, `${JSON.stringify({ appVersion })}\n`);
+  }
+  return launchPath;
+}
+
 type FloorScenario = {
   /**
-   * What the physically installed outer bundle reports, or `null` to leave it
-   * unreadable — the state a client lands in when the outer's own
-   * `open-design-config.json` cannot be read.
+   * What the physically installed outer package reports, or `null` to leave it
+   * present but unidentifiable — the state a client lands in when the outer's
+   * own `open-design-config.json` cannot be read.
    */
   installedOuterVersion: string | null;
   /** Remote launcher-contract schema, when the ABI axis is under test. */
@@ -725,6 +851,8 @@ type FloorScenario = {
   releaseEnv: NodeJS.ProcessEnv;
   /** The payload version this install is currently running. */
   runningVersion?: string;
+  /** Which platform's install shape to drive. */
+  target: FloorPlatformTarget;
 };
 
 /**
@@ -741,9 +869,11 @@ async function checkPackagedUpdate(scenario: FloorScenario): Promise<{
   const { resolvePackagedLauncherRuntime } = await loadPackagedLauncherRuntimeModule();
 
   const runningVersion = scenario.runningVersion ?? RUNNING_PAYLOAD_VERSION;
+  const target = scenario.target;
   const floor = await publishableFloor(scenario.releaseEnv, RELEASE_VERSION);
   const fixture = await createFloorMetadataFixture({
     floor,
+    target,
     ...(scenario.launcherSchema == null ? {} : { launcherSchema: scenario.launcherSchema }),
   });
   const root = await mkdtemp(join(tmpdir(), "od-reinstall-floor-"));
@@ -766,32 +896,34 @@ async function checkPackagedUpdate(scenario: FloorScenario): Promise<{
     };
     const paths = resolvePackagedNamespacePaths(config);
     const runtime = await resolvePackagedLauncherRuntime(config, paths);
+    // The install the floor is judged against. Deliberately NOT the launch path
+    // resolvePackagedLauncherRuntime derived from this test process — that would
+    // put the outer config next to the node binary instead of at the
+    // platform-specific location under test.
+    const installedLaunchPath = await writeInstalledOuterPackage(
+      join(root, "installed"),
+      target,
+      scenario.installedOuterVersion,
+    );
 
     const updater = createDesktopUpdater({
-      arch: "arm64",
+      arch: target.arch,
       currentVersion: runningVersion,
       downloadRoot: paths.updateRoot,
       env: {
         [DESKTOP_UPDATE_ENV.CURRENT_VERSION]: runningVersion,
-        // The documented test override for "what outer package is physically
-        // installed" (tools/pack/AGENTS.md). Left unset for the unreadable
-        // case, where the updater falls back to reading the outer bundle's own
-        // open-design-config.json — absent under this fixture's launch path.
-        ...(scenario.installedOuterVersion == null
-          ? {}
-          : { [DESKTOP_UPDATE_ENV.INSTALLED_VERSION]: scenario.installedOuterVersion }),
         [DESKTOP_UPDATE_ENV.METADATA_URL]: fixture.metadataUrl,
-        [DESKTOP_UPDATE_ENV.PLATFORM]: "darwin",
+        [DESKTOP_UPDATE_ENV.PLATFORM]: target.platform,
       },
       launcherRoot: paths.installationRoot,
-      launcherLaunchPath: runtime.installedLaunchPath,
+      launcherLaunchPath: installedLaunchPath,
       launcherRuntimePath: runtime.launcherPaths.runtimePath,
       namespace: config.namespace,
-      platform: "darwin",
+      platform: target.platform,
       source: PACKAGED_SOURCE,
     }, {
       extractLauncherPayloadArchive: async (input: { destinationRoot: string }) =>
-        writeExtractedFloorMacPayload(input.destinationRoot),
+        target.writeExtractedPayload(input.destinationRoot),
       now: () => new Date("2026-07-28T00:00:00.000Z"),
     });
 
@@ -806,15 +938,20 @@ async function checkPackagedUpdate(scenario: FloorScenario): Promise<{
   }
 }
 
-describe("packaged installer-reinstall floor", () => {
+describe.each([
+  ["mac", floorPlatformTargets.mac],
+  ["win", floorPlatformTargets.win],
+] as const)("packaged installer-reinstall floor (%s)", (_label, target) => {
   it("[P1] routes an outer below the floor to the installer instead of the payload", async () => {
     const { runtimeActive, snapshot } = await checkPackagedUpdate({
       installedOuterVersion: BELOW_FLOOR_OUTER_VERSION,
       releaseEnv: CONFIGURED_FLOOR,
+      target,
     });
 
-    // The floor turned an in-place payload update into a full reinstall...
-    expect(snapshot.artifact?.type).toBe("dmg");
+    // The floor turned an in-place payload update into a full reinstall, and
+    // the artifact is this platform's own installer shape...
+    expect(snapshot.artifact?.type).toBe(target.installerArtifactKey);
     // ...and told the user why, with the operator's recovery link intact.
     expect(snapshot.reinstall).toMatchObject({
       installedVersion: BELOW_FLOOR_OUTER_VERSION,
@@ -829,20 +966,25 @@ describe("packaged installer-reinstall floor", () => {
   it("[P1] judges the floor by the installed outer, not the payload it is running", async () => {
     // The regression this whole mechanism exists for. Both installs run the
     // same already-updated payload; only the shell underneath differs, and only
-    // the stale shell may be sent to the installer.
+    // the stale shell may be sent to the installer. The installed version is
+    // read from this platform's real on-disk location, so a regression in that
+    // lookup surfaces here rather than being masked by a test override.
     const stale = await checkPackagedUpdate({
       installedOuterVersion: BELOW_FLOOR_OUTER_VERSION,
       releaseEnv: CONFIGURED_FLOOR,
       runningVersion: RUNNING_PAYLOAD_VERSION,
+      target,
     });
     const current = await checkPackagedUpdate({
       installedOuterVersion: RELEASE_VERSION,
       releaseEnv: CONFIGURED_FLOOR,
       runningVersion: RUNNING_PAYLOAD_VERSION,
+      target,
     });
 
-    expect(stale.snapshot.artifact?.type).toBe("dmg");
+    expect(stale.snapshot.artifact?.type).toBe(target.installerArtifactKey);
     expect(stale.snapshot.reinstall?.reason).toBe("outer-below-min");
+    expect(stale.snapshot.reinstall?.installedVersion).toBe(BELOW_FLOOR_OUTER_VERSION);
     expect(current.snapshot.artifact?.type).toBe("payload");
     expect(current.snapshot.reinstall).toBeUndefined();
     expect(current.snapshot.state).toBe(UPDATE_DOWNLOADED);
@@ -855,9 +997,10 @@ describe("packaged installer-reinstall floor", () => {
     const { snapshot } = await checkPackagedUpdate({
       installedOuterVersion: null,
       releaseEnv: CONFIGURED_FLOOR,
+      target,
     });
 
-    expect(snapshot.artifact?.type).toBe("dmg");
+    expect(snapshot.artifact?.type).toBe(target.installerArtifactKey);
     expect(snapshot.reinstall).toMatchObject({
       minVersion: RELEASE_VERSION,
       reason: "outer-version-unreadable",
@@ -874,9 +1017,10 @@ describe("packaged installer-reinstall floor", () => {
       installedOuterVersion: RELEASE_VERSION,
       launcherSchema: LAUNCHER_SCHEMA_VERSION + 1,
       releaseEnv: {},
+      target,
     });
 
-    expect(snapshot.artifact?.type).toBe("dmg");
+    expect(snapshot.artifact?.type).toBe(target.installerArtifactKey);
     expect(snapshot.reinstall?.reason).toBe("launcher-schema");
   });
 
@@ -887,12 +1031,15 @@ describe("packaged installer-reinstall floor", () => {
     const { snapshot } = await checkPackagedUpdate({
       installedOuterVersion: BELOW_FLOOR_OUTER_VERSION,
       releaseEnv: {},
+      target,
     });
 
     expect(snapshot.reinstall).toBeUndefined();
     expect(snapshot.artifact?.type).toBe("payload");
   });
+});
 
+describe("packaged installer-reinstall floor publication policy", () => {
   it("[P1] refuses a floor the release cannot satisfy", async () => {
     // publish-metadata/verify-metadata hard-fail here; a floor above the
     // release version would nag every client to reinstall forever.
