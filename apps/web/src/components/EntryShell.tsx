@@ -78,7 +78,6 @@ import type {
   ApiProtocol,
   ApiProtocolConfig,
   AppConfig,
-  AppTheme,
   ConnectionTestResponse,
   DesignSystemSummary,
   ExecMode,
@@ -426,10 +425,6 @@ interface Props {
   onSkillsRefresh?: () => Promise<void> | void;
   onSkillsChanged?: (affectedSkillId?: string) => void;
   onRefreshAgents: () => Promise<AgentInfo[]> | AgentInfo[];
-  // Quick theme switch from the avatar-popover dropdown. Lets the user
-  // flip between system / light / dark without opening the full Settings
-  // dialog. App owns persistence; this component just calls the callback.
-  onThemeChange: (theme: AppTheme) => void;
   onCreateProject: (input: EntryCreateProjectInput) => Promise<boolean> | boolean | void;
   onCreatePluginShareProject: (
     pluginId: string,
@@ -551,7 +546,6 @@ export function EntryShell({
   onSkillsRefresh,
   onSkillsChanged,
   onRefreshAgents,
-  onThemeChange,
   onCreateProject,
   onCreatePluginShareProject,
   onImportClaudeDesign,
@@ -839,15 +833,6 @@ export function EntryShell({
     await open();
     return true;
   }
-  // Resolve the effective light/dark theme so the rail's account-menu theme toggle
-  // flips to the opposite of what's actually shown (system → resolved).
-  const activeTheme: AppTheme = config.theme ?? 'system';
-  const resolvedDark =
-    activeTheme === 'dark' ||
-    (activeTheme === 'system' &&
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
   // Workspace-only destinations. Personal and team workspaces both use these;
   // signed-out/local state falls back to home once the context has resolved.
   // `community` is allowed in both states, so it is not guarded.
@@ -1322,7 +1307,7 @@ export function EntryShell({
 
   // #5517 removes the entry top-bar settings cog: the nav-rail account menu owns
   // the settings entry (EntryNavRail onOpenSettings), so the top strip no longer
-  // carries a redundant one. Theme switching lives in 设置·通用 alone.
+  // carries a redundant one.
 
 
   if (view === 'onboarding') {
@@ -1344,7 +1329,6 @@ export function EntryShell({
             onConfigPersist={onConfigPersist}
             onRefreshAgents={onRefreshAgents}
             onFinish={finishOnboarding}
-            onThemeChange={onThemeChange}
             onGoBuild={() => {
               onCompleteOnboarding();
               refreshWorkspaceSurfacesAfterOnboarding();
@@ -1753,7 +1737,6 @@ function OnboardingView({
   onConfigPersist,
   onRefreshAgents,
   onFinish,
-  onThemeChange,
   onGoBuild,
 }: {
   config: AppConfig;
@@ -1775,7 +1758,6 @@ function OnboardingView({
   // `survey` is passed on the About-you completion paths (not on skip) so the
   // shell can build a personalized Home recommendation.
   onFinish: (survey?: { role: string; useCases: string[] }) => void;
-  onThemeChange: (theme: AppTheme) => void;
   onGoBuild: () => void;
 }) {
   const t = useT();
@@ -3027,16 +3009,8 @@ function OnboardingView({
 
   // Connect step, default face: a minimal, centered Open Design Cloud sign-in
   // landing. No stepper, no runtime cards — just the cloud CTA, a secondary
-  // link into the full runtime chooser, and a top-left language/theme bar.
+  // link into the full runtime chooser, and a top-left language bar.
   if (step === 0 && connectExpanded === null) {
-    const activeTheme: AppTheme = config.theme ?? 'system';
-    const resolvedDark =
-      activeTheme === 'dark' ||
-      (activeTheme === 'system' &&
-        typeof window !== 'undefined' &&
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
-    const themeIcon: 'sun' | 'moon' = resolvedDark ? 'moon' : 'sun';
     const cloudBusy = amrLoginPending;
     const amrStatusResolving = !amrStatusResolved;
     return (
@@ -3046,15 +3020,6 @@ function OnboardingView({
       >
         <div className="onboarding-cloud__topbar">
           <LanguageMenu compact placement="down" align="end" />
-          <button
-            type="button"
-            className="onboarding-cloud__theme"
-            aria-label={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            title={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            onClick={() => onThemeChange(resolvedDark ? 'light' : 'dark')}
-          >
-            <Icon name={themeIcon} size={25} />
-          </button>
         </div>
         <div className="onboarding-cloud__center">
           <span
