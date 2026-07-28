@@ -43,6 +43,21 @@ export function markWhatsNewSeen(
   }
 }
 
+/**
+ * Splits a highlights document body into the dialog's bullet rows.
+ *
+ * The hosted document carries the highlights as one `body` string, one per
+ * line. Blank lines and leading list markers ("-", "*", "•") are operator
+ * formatting, not content, so they never reach the rendered row. A body with no
+ * line breaks yields exactly one bullet.
+ */
+export function whatsNewNotesFromBody(body: string): string[] {
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*•]\s*/, '').trim())
+    .filter((line) => line.length > 0);
+}
+
 /** Resolves the card copy for a locale, overlaying locale overrides on the base fields. */
 export function localizedWhatsNewContent(
   content: WhatsNewContent,

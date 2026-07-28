@@ -1100,18 +1100,12 @@ export interface Dict {
   'updater.upToDate': string;
   'updater.viewVersionFeatures': string;
 
-  // Post-update "what's new" card on the home surface. Release-configured
-  // copy comes from the release feed; these keys cover the card chrome and
-  // the generic fallback when a version ships without highlights.
+  // Post-update "what's new" dialog on the home surface. Cover art, release
+  // headline and highlight bullets come from the hosted highlights document;
+  // these keys cover the dialog chrome only. `updatedTitle` takes the RUNNING
+  // app version — never a literal.
+  'whatsNew.updatedTitle': string;
   'whatsNew.cta': string;
-  'whatsNew.dismissAria': string;
-
-  // Update reminder card on /community: cover artwork, release highlights, and
-  // a cancel/update action pair. Highlight copy comes from the release payload;
-  // these keys cover the card chrome only.
-  'updateReminder.title': string;
-  'updateReminder.notesLabel': string;
-  'updateReminder.confirm': string;
 
   // Newsletter email field on the onboarding About-you step.
   'newsletter.label': string;
