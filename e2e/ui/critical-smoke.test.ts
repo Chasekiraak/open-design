@@ -31,10 +31,12 @@ test('[P0] @critical settings dialog is reachable from home', async ({ page }) =
   await gotoEntryHome(page);
 
   // #5971 cut the rail-footer settings chip; signed out, Settings is the rail's
-  // own nav item. Collapsed, the rail is `inert` and it cannot be clicked, so
+  // own nav item — `entry-settings-button` is the testid that item carries (see
+  // EntryNavRail: it is the ONLY signed-out settings entry, and the e2e
+  // contract). Collapsed, the rail is `inert` and it cannot be clicked, so
   // expand first.
   await ensureRailOpen(page);
-  await clickVisible(page.getByTestId('entry-nav-settings'));
+  await clickVisible(page.getByTestId('entry-settings-button'));
   // From the entry, settings is now a routed page (`role="region"`), not a
   // modal — `.modal-settings` is the class both presentations share.
   const settingsDialog = settingsSurface(page);

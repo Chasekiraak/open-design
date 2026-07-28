@@ -167,7 +167,7 @@ test('[P0] @critical entry chrome exposes the primary home creation surface and 
   // entry layout.
   await expect(page.locator('.pet-rail')).toHaveCount(0);
 
-  await page.getByTestId('entry-nav-settings').click();
+  await page.getByTestId('entry-settings-button').click();
   // From the entry, settings routes to a page surface rather than a modal.
   const settingsDialog = settingsSurface(page);
   await expect(settingsDialog).toBeVisible();
@@ -991,7 +991,7 @@ test('[P2] home topbar overlays close on outside click, Escape, and Settings ope
 
   // Settings is a rail nav item now, and the collapsed rail is `inert`.
   await ensureRailOpen(page);
-  await page.getByTestId('entry-nav-settings').click();
+  await page.getByTestId('entry-settings-button').click();
   await expect(executionPopover).toHaveCount(0);
   await expect(settingsSurface(page)).toBeVisible();
   await page.keyboard.press('Escape');

@@ -10,12 +10,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '@open-design/components';
 import type {
-  ApplyResult,
   InstalledPluginRecord,
   PluginConnectorRef,
 } from '@open-design/contracts';
 import { applyPlugin } from '../state/projects';
 import { goBack, navigate } from '../router';
+import {
+  createPluginUseHandoff,
+  stashHomePromptHandoff,
+} from './home-hero/plugin-authoring';
 import { useI18n } from '../i18n';
 import { localizePluginDescription, localizePluginTitle } from './plugins-home/localization';
 import { useAnalytics } from '../analytics/provider';
@@ -165,7 +168,6 @@ export function PluginDetailView(props: Props) {
   const [plugin, setPlugin] = useState<InstalledPluginRecord | null>(null);
   const [error, setError] = useState<{ kind: 'load' | 'apply'; message: string } | null>(null);
   const [applying, setApplying] = useState(false);
-  const [applied, setApplied] = useState<ApplyResult | null>(null);
   const [skillDescriptionState, setSkillDescriptionState] = useState<SkillDescriptionState>({
     pluginId: '',
     descriptions: {},
@@ -273,7 +275,12 @@ export function PluginDetailView(props: Props) {
       setError({ kind: 'apply', message: '' });
       return;
     }
-    setApplied(result);
+    // This surface is a route rendered outside `EntryShell`, so navigating home
+    // unmounts whatever held the result. Publish the same `plugin-use` handoff
+    // the marketplace card's "Try it" produces and let Home's existing
+    // pendingPluginUseHandoff path select the plugin and pre-fill the brief;
+    // keeping the result in local state here dropped both on navigation.
+    stashHomePromptHandoff(createPluginUseHandoff(Date.now(), plugin.id, { action: 'use' }));
     navigate({ kind: 'home', view: 'home' });
   };
 
@@ -458,12 +465,6 @@ export function PluginDetailView(props: Props) {
         >
           {applying ? t('pluginCard.applying') : t('preview.usePlugin')}
         </Button>
-        {applied ? (
-          <div className="plugin-detail__applied">
-            Applied (snapshot {applied.appliedPlugin.snapshotId.slice(0, 8)}…) —
-            redirected to Home with the brief pre-filled.
-          </div>
-        ) : null}
       </footer>
     </section>
   );

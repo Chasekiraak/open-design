@@ -3,6 +3,7 @@ import type { Locator, Page, Route } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fulfillAgentsRoute } from './mock-factory.js';
+import { openSettingsDialog } from './amr.js';
 import { T } from '@/timeouts';
 
 const STORAGE_KEY = 'open-design:config';
@@ -694,50 +695,26 @@ export async function openAvatarMenu(page: Page): Promise<Locator> {
 }
 
 export async function openSettingsDetailsFromHeader(page: Page): Promise<Locator> {
-  const dialog = page.locator('.modal-settings[role="dialog"]').first();
-  const triggers = [
-    // `entry-settings-button` (the rail-footer chip) was cut by #5971; signed
-    // out the entry is the rail's own `entry-nav-settings` item.
-    page.getByTestId('entry-settings-button').first(),
-    page.getByTestId('entry-nav-settings').first(),
-    page.getByTestId('entry-settings-menu-trigger').first(),
-    page.locator('.settings-icon-btn').first(),
-  ];
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await dialog.isVisible().catch(() => false)) return dialog;
-
-    let clicked = false;
-    for (const trigger of triggers) {
-      if (await trigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await trigger.evaluate((element: HTMLElement) => element.click());
-        clicked = true;
-        break;
-      }
-    }
-    if (!clicked) {
-      await expect(page.locator('.settings-icon-btn').first()).toBeVisible({ timeout: T.medium });
-      await page.locator('.settings-icon-btn').first().evaluate((element: HTMLElement) => element.click());
-    }
-
-    const detailsTrigger = page.getByTestId('entry-settings-open-details').first();
-    if (await detailsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await detailsTrigger.click();
-    }
-
-    await expect
-      .poll(
-        async () => {
-          if (await dialog.isVisible().catch(() => false)) return 'dialog';
-          return 'pending';
-        },
-        { timeout: T.medium },
-      )
-      .not.toBe('pending')
-      .catch(() => {});
-  }
-
-  return dialog;
+  // Delegates to amr.ts's `openSettingsDialog`, which already encodes
+  // everything this local copy was missing and getting wrong:
+  //
+  //   - It expands the nav rail first. #5517 moved the entry settings chip into
+  //     the rail footer, and a collapsed rail is `inert` + `aria-hidden`, so the
+  //     chip is present but invisible to `getByRole` and even a programmatic
+  //     `element.click()` is a no-op. This copy never opened the rail, so none
+  //     of its triggers was ever visible and every capture died on the same
+  //     `.settings-icon-btn` line.
+  //   - It matches the surface with bare `.modal-settings`, the one class both
+  //     the modal and the #5517 `presentation="page"` route share, instead of
+  //     pinning `[role="dialog"]` which the page presentation never sets.
+  //   - It ends the trigger chain on the settings aria-label rather than
+  //     `.settings-icon-btn`, which the entry surface does not carry.
+  //
+  // It also clicks `entry-settings-open-details`, so it is a superset of what
+  // this helper did. Kept as a named re-export so visual-workspace.test.ts
+  // keeps reading in terms of the header, and so there is exactly one settings
+  // opener rather than a third variant.
+  return openSettingsDialog(page);
 }
 export async function waitForVisualFonts(page: Page): Promise<void> {
   await page.evaluate(async () => {

@@ -116,7 +116,7 @@ test('[P2] home chrome exposes the composer execution pill and the rail settings
   await expect(page.getByTestId('inline-model-switcher-chip')).toBeVisible();
 
   await ensureRailOpen(page);
-  await expect(page.getByTestId('entry-nav-settings')).toBeVisible();
+  await expect(page.getByTestId('entry-settings-button')).toBeVisible();
 });
 
 test('[P1] home execution pill reflects the selected Local CLI agent and opens the switcher', async ({ page }) => {
@@ -154,7 +154,7 @@ test('[P1] rail settings entry opens settings and closes the execution popover',
   // Settings is a rail nav item now, so the rail has to be expanded before it
   // is interactive (collapsed the rail is `inert`).
   await ensureRailOpen(page);
-  await page.getByTestId('entry-nav-settings').click();
+  await page.getByTestId('entry-settings-button').click();
   await expect(settingsSurface(page)).toBeVisible();
   await expect(popover).toHaveCount(0);
 });

@@ -130,3 +130,30 @@ export function createPluginUseHandoff(
     source: 'plugin-use',
   };
 }
+
+/**
+ * A handoff published by a surface that is about to navigate away, for the home
+ * entry to pick up once it mounts.
+ *
+ * `EntryShell` owns `homePromptHandoff` in component state, which is enough for
+ * its own in-place surfaces (the marketplace tab calls `usePluginFromLibrary`
+ * and only switches view). It is not enough for the `/marketplace/<id>` detail
+ * route: `App` renders `PluginDetailView` outside `EntryShell`, so navigating
+ * home unmounts the holder and drops the handoff with it.
+ *
+ * Module scope — deliberately not `window` — so the value survives that unmount
+ * without becoming globally reachable. Reads are destructive: a handoff is a
+ * one-shot instruction, and leaving it behind would re-apply the plugin on the
+ * next visit to home.
+ */
+let pendingHomePromptHandoff: HomePromptHandoff | null = null;
+
+export function stashHomePromptHandoff(handoff: HomePromptHandoff): void {
+  pendingHomePromptHandoff = handoff;
+}
+
+export function takeHomePromptHandoff(): HomePromptHandoff | null {
+  const handoff = pendingHomePromptHandoff;
+  pendingHomePromptHandoff = null;
+  return handoff;
+}

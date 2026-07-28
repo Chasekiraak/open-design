@@ -2367,6 +2367,8 @@
   border-color: transparent;
   color: var(--brand, #87ea5c);
 }
+/* Hover keeps the solid fill but flips the label to brand-green ink — the
+   same black-fill/green-ink pairing as the Community selected tab. */
 .page-creator-use:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text-strong) 88%, var(--brand, #87ea5c));
   border-color: transparent;

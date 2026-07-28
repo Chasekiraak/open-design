@@ -341,6 +341,7 @@ export function NextStepActions({
   onShareToOpenDesign,
   shareToOpenDesignBusy = false,
   variant = 'default',
+  onOpenComposerPanel,
 }: Props) {
   const { t, locale } = useI18n();
   const analytics = useAnalytics();

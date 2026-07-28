@@ -131,7 +131,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Read every type tab as { label, badge } plus the cards currently gridded. */
+/** Read every type tab as { label } plus the cards currently gridded. */
 function readFacets() {
   const tabs = Array.from(
     document.querySelectorAll('.community-template-view__type-tabs button'),
@@ -139,8 +139,23 @@ function readFacets() {
   return tabs.map((tab) => ({
     tab,
     label: tab.querySelector('span')?.textContent?.trim() ?? '',
-    badge: Number(tab.querySelector('small')?.textContent?.trim()),
   }));
+}
+
+/**
+ * Each type's share of the catalogue, in tab order.
+ *
+ * #6156 replaced the tabs' `<small>` count badges with type icons, so a
+ * facet's size is no longer advertised anywhere in the markup. Drive each tab
+ * and count the grid instead — that is the same array the badges used to be
+ * derived from, so the catalogue-fidelity invariant survives the badge's
+ * removal. Leaves the last tab active; re-click if the caller needs another.
+ */
+function readFacetCardCounts(): number[] {
+  return readFacets().map(({ tab }) => {
+    fireEvent.click(tab);
+    return renderedCards().length;
+  });
 }
 
 function renderedCards() {
@@ -164,20 +179,24 @@ describe('CommunityView catalogue source', () => {
     // served — not a bundled demo array.
     const facets = readFacets();
     expect(facets.map((facet) => facet.label)).toEqual(['Slides', 'Prototype', 'Image']);
-    expect(facets.map((facet) => facet.badge)).toEqual([2, 1, 1]);
 
     // The card footer reads "<type> · <sub-facet>", both resolved from the
-    // shared plugins-home taxonomy.
+    // shared plugins-home taxonomy. Asserted before the tab walk below, which
+    // leaves a different facet active.
     expect(renderedCards().map((card) => card.querySelector('.community-template-card__foot span')?.textContent))
       .toEqual(['Slides · Fundraising pitch', 'Slides · B2B sales']);
+
+    // Slides leads and carries exactly the two deck plugins the daemon served
+    // — not a bundled demo array.
+    expect(readFacetCardCounts()).toEqual([2, 1, 1]);
   });
 
   it('leaves hidden and design-system plugins out of the gallery', async () => {
     await renderCommunity();
 
-    // Neither plugin has a home in the artifact taxonomy, so no tab may count
-    // them and no tab may render them.
-    const total = readFacets().reduce((sum, facet) => sum + facet.badge, 0);
+    // Neither plugin has a home in the artifact taxonomy, so no tab may render
+    // them — the four eligible plugins are the whole gallery.
+    const total = readFacetCardCounts().reduce((sum, count) => sum + count, 0);
     expect(total).toBe(4);
     expect(screen.queryByText(/Airbnb/)).toBeNull();
     expect(screen.queryByText(/Hidden Utility/)).toBeNull();
@@ -369,39 +388,36 @@ describe('CommunityView remix', () => {
 });
 
 describe('CommunityView facet counts', () => {
-  it('shows a badge equal to the number of cards each type actually renders', async () => {
+  it('grids only the cards belonging to the active type', async () => {
     // Regression: the badges were a hand-written lookup table unrelated to the
     // catalogue, so Slides advertised 80 while rendering 2 cards, and Live
-    // Artifact advertised 5 while rendering 8. The badge must be derived from
-    // the same array the grid maps over.
+    // Artifact advertised 5 while rendering 8. #6156 dropped the badges
+    // themselves (type icons took their place), so what survives is the
+    // invariant that always mattered: a tab may only grid cards of its own
+    // type, straight from the array the grid maps over.
     await renderCommunity();
 
     const facets = readFacets();
     expect(facets.length).toBeGreaterThan(0);
 
-    for (const { tab, label, badge } of facets) {
+    for (const { tab, label } of facets) {
       fireEvent.click(tab);
-      expect(
-        { type: label, badge, rendered: renderedCards().length },
-      ).toEqual({ type: label, badge, rendered: badge });
+      const footers = renderedCards().map(
+        (card) => card.querySelector('.community-template-card__foot span')?.textContent ?? '',
+      );
+      expect(footers.length).toBeGreaterThan(0);
+      for (const footer of footers) expect(footer.startsWith(`${label} ·`)).toBe(true);
     }
   });
 
-  it('never advertises a facet total larger than the whole catalogue', async () => {
-    // The old table summed to 269 across 24 templates; the badges must sum to
-    // the catalogue size instead.
+  it('never grids more templates than the whole catalogue', async () => {
+    // The old badge table summed to 269 across 24 templates. With the badges
+    // gone (#6156) the tabs can still over-report by gridding the same plugin
+    // under several types, so pin the walked total to the eligible catalogue.
     await renderCommunity();
 
-    const facets = readFacets();
-    const badgeTotal = facets.reduce((sum, facet) => sum + facet.badge, 0);
+    const renderedTotal = readFacetCardCounts().reduce((sum, count) => sum + count, 0);
 
-    // Walk every tab to collect the true catalogue size from the grid itself.
-    let renderedTotal = 0;
-    for (const { tab } of facets) {
-      fireEvent.click(tab);
-      renderedTotal += renderedCards().length;
-    }
-
-    expect(badgeTotal).toBe(renderedTotal);
+    expect(renderedTotal).toBe(4);
   });
 });

@@ -38,7 +38,7 @@ describe('Home logo assets', () => {
     expect(brandIconSvg).toContain('currentColor');
   });
 
-  it('renders the brand mark on both Home entry surfaces', () => {
+  it('renders the brand mark on the Home hero', () => {
     // #5517: the hero renders the shipped logotype image (not the glyph pair).
     expect(heroLogotypeSvg).toContain('<svg');
     // Round 7: the hero mounts the animated PixelScanLogo component instead of
@@ -49,7 +49,11 @@ describe('Home logo assets', () => {
     expect(homeHeroSource).not.toContain('src="/logo-03.svg"');
     expect(homeHeroSource).not.toContain('src="/app-icon.svg"');
 
-    expect(entryNavRailSource).toContain('od-brand-glyph');
+    // #6156 cut the rail's signed-out brand header entirely — with no cloud
+    // identity the rail now starts at the search box, and expand/collapse moved
+    // to the workspace tabs bar's pinned Home toggle. So the rail carries no
+    // brand mark at all; what still matters is that it never falls back to the
+    // retired raster app icon.
     expect(entryNavRailSource).not.toContain('src="/app-icon.svg"');
   });
 });
