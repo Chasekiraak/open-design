@@ -2690,6 +2690,28 @@ function sourceLooksLikeDeckPreview(source: string | null | undefined): boolean 
   );
 }
 
+export function countDeckSlidesInSource(source: string | null | undefined): number {
+  if (!source) return 0;
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const doc = new DOMParser().parseFromString(source, 'text/html');
+      const structured = doc.querySelectorAll(
+        'deck-stage > .slide, .deck > .slide, .deck-stage > .slide, .deck-shell > .slide, ' +
+        '#deck > .slide, body > .slide, ' +
+        'deck-stage > [data-screen-label], .deck-stage > [data-screen-label], ' +
+        '#deck > [data-screen-label], body > [data-screen-label]',
+      );
+      if (structured.length > 0) return structured.length;
+      return doc.querySelectorAll('.slide, [data-screen-label], .deck-slide, .ppt-slide').length;
+    } catch {
+      // Fall through to the cheap string count below.
+    }
+  }
+  const slideClassCount = source.match(/class\s*=\s*['"][^'"]*\bslide\b[^'"]*['"]/gi)?.length ?? 0;
+  const screenLabelCount = source.match(/\bdata-screen-label\s*=/gi)?.length ?? 0;
+  return Math.max(slideClassCount, screenLabelCount);
+}
+
 export function fileVersionPreviewOptions(
   projectId: string,
   fileName: string,
@@ -7104,10 +7126,16 @@ function HtmlViewer({
     slideState?.active ??
     htmlPreviewSlideState.get(previewStateKey)?.active ??
     0;
+  const detectedDeckSlideCount = useMemo(
+    () => (effectiveDeck ? countDeckSlidesInSource(source ?? routingHtmlSource) : 0),
+    [effectiveDeck, source, routingHtmlSource],
+  );
   const deckSlideCount =
-    slideState?.count ??
-    htmlPreviewSlideState.get(previewStateKey)?.count ??
-    0;
+    Math.max(
+      slideState?.count ?? 0,
+      htmlPreviewSlideState.get(previewStateKey)?.count ?? 0,
+      detectedDeckSlideCount,
+    );
   const speakerNotes = useMemo(
     () => extractSpeakerNotesFromHtml(source, deckSlideCount),
     [source, deckSlideCount],

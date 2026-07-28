@@ -59,6 +59,7 @@ import {
   appendSavedPreviewCommentOrder,
   applyInspectOverridesToSource,
   commentPreviewCanvasSize,
+  countDeckSlidesInSource,
   desktopPreviewAutoFitZoomPercent,
   desktopPreviewDocumentContentWidth,
   deckKeyboardShortcutForEvent,
@@ -2239,6 +2240,15 @@ describe('FileViewer SVG artifacts', () => {
       '<section class="slide">two</section>',
       '</body></html>',
     ].join('');
+    const nestedStageDeck = [
+      '<!doctype html><html><body>',
+      '<div class="deck-wrap"><div class="deck-frame"><main class="deck-stage">',
+      ...Array.from({ length: 10 }, (_, index) => (
+        `<section class="slide${index === 0 ? ' is-active' : ''}" data-screen-label="${String(index + 1).padStart(2, '0')} Slide">${index + 1}</section>`
+      )),
+      '</main></div></div>',
+      '</body></html>',
+    ].join('');
 
     function trackedEvents(name: string) {
       return analyticsTrackMock.mock.calls
@@ -2270,6 +2280,26 @@ describe('FileViewer SVG artifacts', () => {
       // rather than a specific value.
       expect(typeof views[0].slide_count).toBe('number');
       expect(typeof views[0].artifact_id).toBe('string');
+    });
+
+    it('uses structured slide count before iframe slide-state settles', () => {
+      expect(countDeckSlidesInSource(nestedStageDeck)).toBe(10);
+
+      const { container } = render(
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={deckFile()}
+          isDeck
+          liveHtml={nestedStageDeck}
+        />,
+      );
+
+      const counterText = (
+        container.querySelector('.deck-floating-count, .deck-nav-counter')?.textContent ?? ''
+      ).replace(/\s+/g, '');
+      expect(counterText).toBe('1/10');
+      expect(container.querySelectorAll('.deck-thumbnail-button')).toHaveLength(10);
     });
 
     it('tracks thumbnail rail toggle with expand/collapse action', () => {
