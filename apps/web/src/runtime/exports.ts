@@ -69,7 +69,77 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation>
+const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
+(function () {
+  var ownedTransform = '';
+
+  function deckRoot() {
+    return document.querySelector('.deck-stage, .deck-viewport');
+  }
+
+  function dimension(element, property) {
+    var layout = property === 'width' ? element.offsetWidth : element.offsetHeight;
+    if (layout > 0) return layout;
+    var parsed = parseFloat(getComputedStyle(element)[property]);
+    return isFinite(parsed) ? parsed : 0;
+  }
+
+  function fit() {
+    var root = deckRoot();
+    if (!root) return;
+    var owned = root.getAttribute('data-od-export-fit-owned') === 'true';
+    if (owned && root.style.transform !== ownedTransform) {
+      root.removeAttribute('data-od-export-fit-owned');
+      return;
+    }
+    if (!owned) {
+      var nativeTransform = getComputedStyle(root).transform;
+      if (nativeTransform && nativeTransform !== 'none') return;
+    }
+
+    var width = dimension(root, 'width');
+    var height = dimension(root, 'height');
+    if (width <= 0 || height <= 0) return;
+    var viewportWidth = Math.max(1, window.innerWidth);
+    var viewportHeight = Math.max(1, window.innerHeight);
+    var alreadyViewportSized =
+      Math.abs(width - viewportWidth) <= 1 && Math.abs(height - viewportHeight) <= 1;
+    if (!owned && alreadyViewportSized) return;
+
+    var padding = 32;
+    var scale = Math.min(
+      Math.max(1, viewportWidth - padding) / width,
+      Math.max(1, viewportHeight - padding) / height
+    );
+    if (!isFinite(scale) || scale <= 0) return;
+    var x = (viewportWidth - width * scale) / 2;
+    var y = (viewportHeight - height * scale) / 2;
+    ownedTransform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
+
+    document.documentElement.style.width = '100%';
+    document.documentElement.style.height = '100%';
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+    document.body.style.margin = '0';
+    document.body.style.overflow = 'hidden';
+    root.style.position = 'fixed';
+    root.style.left = '0';
+    root.style.top = '0';
+    root.style.margin = '0';
+    root.style.transformOrigin = 'top left';
+    root.style.transform = ownedTransform;
+    root.setAttribute('data-od-export-fit-owned', 'true');
+  }
+
+  function scheduleFit() { setTimeout(fit, 0); }
+  window.addEventListener('load', scheduleFit);
+  window.addEventListener('resize', fit);
+  if (document.readyState === 'complete') scheduleFit();
+})();
+</script>`;
+
+const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation="2">
 (function () {
   var ACTIVE_CLASSES = ['active', 'is-active', 'current', 'visible'];
   var SLIDE_SELECTOR = 'deck-stage > section, section[data-screen-label], .deck-slide, .ppt-slide, .slide';
@@ -166,25 +236,30 @@ const EXPORT_DECK_NAVIGATION_SCRIPT = `<script data-od-export-deck-navigation>
     });
   }
 
-  // Register in <head> on window capture so this snapshot precedes any deck
-  // click handler declared later in <body>. Existing navigation gets first
-  // ownership; the fallback runs only when that click leaves deck state intact.
+  function directionForPoint(x, y) {
+    var horizontal = (x / Math.max(1, window.innerWidth) - 0.5) * 2;
+    var vertical = (y / Math.max(1, window.innerHeight) - 0.5) * 2;
+    if (Math.abs(horizontal) > Math.abs(vertical)) return horizontal < 0 ? -1 : 1;
+    return vertical < 0 ? -1 : 1;
+  }
+
+  // Standalone exports own blank-canvas clicks. Register in <head> on window
+  // capture so older left/right-only artifact handlers cannot double-advance
+  // or override the host's four-direction contract.
   window.addEventListener('click', function (event) {
     if (shouldIgnore(event)) return;
     var list = slides();
     if (list.length < 2) return;
     var before = state(list);
-    var direction = event.clientX < window.innerWidth / 2 ? -1 : 1;
+    var direction = directionForPoint(event.clientX, event.clientY);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    dispatchArrow(direction);
     setTimeout(function () {
       list = slides();
-      if (event.defaultPrevented || state(list) !== before) return;
-      dispatchArrow(direction);
-      setTimeout(function () {
-        list = slides();
-        if (state(list) === before) directFallback(list, direction);
-      }, 80);
+      if (state(list) === before) directFallback(list, direction);
     }, 80);
-  }, true);
+  }, { capture: true });
 })();
 </script>`;
 
@@ -201,8 +276,15 @@ ${DECK_CHROME_HIDE_CSS}
   let prepared = doc.includes('data-od-export-deck-chrome-hidden')
     ? doc
     : injectIntoHead(doc, styleTag);
-  if (!prepared.includes('data-od-export-deck-navigation')) {
+  if (!prepared.includes('data-od-export-deck-navigation="2"')) {
+    prepared = prepared.replace(
+      /<script\s+data-od-export-deck-navigation(?:=(?:"[^"]*"|'[^']*'))?[^>]*>[\s\S]*?<\/script>/i,
+      '',
+    );
     prepared = injectIntoHead(prepared, EXPORT_DECK_NAVIGATION_SCRIPT);
+  }
+  if (!prepared.includes('data-od-export-deck-fit="1"')) {
+    prepared = injectIntoHead(prepared, EXPORT_DECK_FIT_SCRIPT);
   }
   return prepared;
 }

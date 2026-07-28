@@ -621,6 +621,7 @@ describe('exportProjectAsHtml', () => {
     const exported = await capturedBlob!.text();
     expect(exported).toContain('data-od-export-deck-chrome-hidden');
     expect(exported).toContain('data-od-export-deck-navigation');
+    expect(exported).toContain('data-od-export-deck-fit');
     expect(exported).toContain('.data-deck-nav,');
     expect(exported).toContain('[data-deck-nav],');
     expect(exported).toContain('display: none !important');
@@ -642,6 +643,7 @@ describe('exportProjectAsHtml', () => {
     expect(await capturedBlob!.text()).toContain('<main>fallback</main>');
     expect(await capturedBlob!.text()).toContain('data-od-export-deck-chrome-hidden');
     expect(await capturedBlob!.text()).toContain('data-od-export-deck-navigation');
+    expect(await capturedBlob!.text()).toContain('data-od-export-deck-fit');
   });
 
   it('adds click navigation when a standalone deck only implements keyboard navigation', async () => {
@@ -674,6 +676,7 @@ describe('exportProjectAsHtml', () => {
       button: 0,
       cancelable: true,
       clientX: 900,
+      clientY: 384,
     }));
     await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
 
@@ -685,7 +688,30 @@ describe('exportProjectAsHtml', () => {
       bubbles: true,
       button: 0,
       cancelable: true,
+      clientX: 512,
+      clientY: 100,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    expect(slides[0]?.classList.contains('active')).toBe(true);
+    expect(slides[1]?.classList.contains('active')).toBe(false);
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 512,
+      clientY: 700,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    expect(slides[0]?.classList.contains('active')).toBe(false);
+    expect(slides[1]?.classList.contains('active')).toBe(true);
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
       clientX: 100,
+      clientY: 384,
     }));
     await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
     expect(slides[0]?.classList.contains('active')).toBe(true);
@@ -693,7 +719,7 @@ describe('exportProjectAsHtml', () => {
     dom.window.close();
   });
 
-  it('does not advance twice when the deck already implements click navigation', async () => {
+  it('owns directional clicks without double-advancing an existing click runtime', async () => {
     const source = `<!doctype html><html><head></head><body>
       <section class="slide active">A</section>
       <section class="slide">B</section>
@@ -706,9 +732,16 @@ describe('exportProjectAsHtml', () => {
             slides.forEach(function (slide, i) { slide.classList.toggle('active', i === index); });
             current = index;
           }
-          document.addEventListener('click', function () {
-            show(Math.min(slides.length - 1, current + 1));
+          document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowRight') show(Math.min(slides.length - 1, current + 1));
+            if (event.key === 'ArrowLeft') show(Math.max(0, current - 1));
+          });
+          document.addEventListener('click', function (event) {
+            show(event.clientX < window.innerWidth / 2
+              ? Math.max(0, current - 1)
+              : Math.min(slides.length - 1, current + 1));
           }, true);
+          show(1);
         })();
       </script>
     </body></html>`;
@@ -722,13 +755,63 @@ describe('exportProjectAsHtml', () => {
       bubbles: true,
       button: 0,
       cancelable: true,
-      clientX: 900,
+      clientX: 512,
+      clientY: 100,
     }));
     await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
 
     const slides = Array.from(dom.window.document.querySelectorAll('.slide'));
-    expect(slides[1]?.classList.contains('active')).toBe(true);
+    expect(slides[0]?.classList.contains('active')).toBe(true);
+    expect(slides[1]?.classList.contains('active')).toBe(false);
     expect(slides[2]?.classList.contains('active')).toBe(false);
+    dom.window.close();
+  });
+
+  it('fits an oversized fixed canvas into the standalone browser viewport', async () => {
+    const source = `<!doctype html><html><head><style>
+      .deck-viewport { width: 1920px; height: 1080px; }
+      .slide { width: 1920px; height: 1080px; }
+    </style></head><body>
+      <main class="deck-viewport"><section class="slide active">A</section></main>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      beforeParse(window) {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+      },
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    const root = dom.window.document.querySelector<HTMLElement>('.deck-viewport');
+    expect(root?.getAttribute('data-od-export-fit-owned')).toBe('true');
+    expect(root?.style.transform).toContain('scale(0.7333333333333333)');
+    expect(dom.window.document.body.style.overflow).toBe('hidden');
+    expect(dom.window.document.documentElement.style.overflow).toBe('hidden');
+    dom.window.close();
+  });
+
+  it('does not override a deck that already owns scale-to-fit', async () => {
+    const source = `<!doctype html><html><head><style>
+      .deck-stage { width: 1920px; height: 1080px; transform: scale(0.5); }
+    </style></head><body>
+      <main class="deck-stage"><section class="slide active">A</section></main>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    const root = dom.window.document.querySelector<HTMLElement>('.deck-stage');
+    expect(root?.getAttribute('data-od-export-fit-owned')).toBeNull();
+    expect(dom.window.getComputedStyle(root!).transform).toBe('scale(0.5)');
+    expect(dom.window.document.body.style.overflow).toBe('');
     dom.window.close();
   });
 });
