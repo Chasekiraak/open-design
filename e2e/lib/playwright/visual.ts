@@ -410,6 +410,22 @@ export async function configureVisualPage(page: Page, options: VisualPageOptions
     await fulfillGet(route, { plugins: VISUAL_PLUGINS });
   });
 
+  // Single-plugin GET. #5517 turned plugin details into the `/marketplace/<id>`
+  // route, and `PluginDetailView` refetches the record by id instead of reusing
+  // the list payload the catalog already holds — so a fixture that mocks only
+  // the list renders the detail surface's "Failed to load plugin: HTTP 404"
+  // branch. The route returns the record unwrapped, matching the daemon.
+  // `*` never spans `/`, so this cannot shadow `*/preview` or `*/apply`.
+  await page.route('**/api/plugins/*', async (route) => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1) ?? '');
+    const plugin = VISUAL_PLUGINS.find((candidate) => candidate.id === id);
+    if (!plugin) {
+      await route.fulfill({ status: 404, json: { error: `unknown plugin ${id}` } });
+      return;
+    }
+    await fulfillGet(route, plugin);
+  });
+
   await page.route('**/api/plugins/*/preview', async (route) => {
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-2) ?? 'plugin');
     await route.fulfill({

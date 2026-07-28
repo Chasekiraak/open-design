@@ -41,6 +41,7 @@ import { handleOdRequest, registerOdProtocol } from '../src/protocol.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('od:// protocol proxy', () => {
@@ -517,6 +518,43 @@ describe('od:// protocol target resolution', () => {
       'http://127.0.0.1:61424/_next/static/chunk-a.js',
       'http://127.0.0.1:52001/_next/static/chunk-b.js',
     ]);
+  });
+
+  it('falls back to undici when net.fetch rejects a CSS-mask GET', async () => {
+    vi.mocked(net.fetch).mockRejectedValue(new Error('net::ERR_FAILED'));
+    const undiciFetch = vi.fn(async (_input: Request | string | URL) =>
+      new Response('<svg viewBox="0 0 24 24"></svg>', {
+        status: 200,
+        headers: { 'content-type': 'image/svg+xml' },
+      }));
+    vi.stubGlobal('fetch', undiciFetch);
+
+    registerOdProtocol(() => 'http://127.0.0.1:61424/');
+    const handler = registeredHandler();
+    const response = await handler(new Request('od://app/agent-icons/opencode.svg'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/svg+xml');
+    expect(await response.text()).toContain('<svg');
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1);
+    expect(undiciFetch).toHaveBeenCalledTimes(1);
+    expect((undiciFetch.mock.calls[0]![0] as Request).url)
+      .toBe('http://127.0.0.1:61424/agent-icons/opencode.svg');
+  });
+
+  it('does not replay a non-idempotent request through undici when net.fetch rejects', async () => {
+    vi.mocked(net.fetch).mockRejectedValue(new Error('net::ERR_FAILED'));
+    const undiciFetch = vi.fn(async (_input: Request | string | URL) =>
+      new Response('unexpected', { status: 200 }));
+    vi.stubGlobal('fetch', undiciFetch);
+
+    registerOdProtocol(() => 'http://127.0.0.1:61424/');
+    const handler = registeredHandler();
+    const response = await handler(new Request('od://app/api/projects', { method: 'POST' }));
+
+    expect(response.status).toBe(502);
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1);
+    expect(undiciFetch).not.toHaveBeenCalled();
   });
 
   it('answers a missing web runtime address with a structured 503 instead of dialling a placeholder port', async () => {

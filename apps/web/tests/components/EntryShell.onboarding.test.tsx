@@ -835,7 +835,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     expect(screen.queryByText('Signing in…')).toBeNull();
   });
 
-  it('clears AMR login pending when the cloud sign-in is canceled', async () => {
+  it('clears AMR login pending when canceled and allows a fresh sign-in attempt', async () => {
     const fetchMock = vi.fn(async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/integrations/vela/status')) {
@@ -866,6 +866,15 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     });
     expect(cloudButton.hasAttribute('disabled')).toBe(false);
     expect(screen.getByRole('button', { name: /Local coding agent/i })).toBeTruthy();
+
+    fireEvent.click(cloudButton);
+    await act(async () => {});
+    expect(screen.getByText('Signing in…')).toBeTruthy();
+    const loginCalls = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input).endsWith('/api/integrations/vela/login') && init?.method === 'POST',
+    );
+    expect(loginCalls).toHaveLength(2);
   });
 
   it('cancels AMR login and re-enables onboarding after the login timeout', async () => {

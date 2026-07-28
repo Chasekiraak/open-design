@@ -389,12 +389,38 @@ export function packagedEntryUrl(): string {
  * renderer request through undici serialized them: a project-open request burst
  * that a browser tab runs in parallel dribbled out over minutes in the packaged
  * app. `net.fetch` gives the packaged client the same concurrency as the
- * browser. Set OD_OD_PROXY_FETCH=undici to force the old path if `net.fetch`
- * ever regresses a streaming/upload edge on a specific Electron/OS combo.
+ * browser.
+ *
+ * Electron can nevertheless reject particular renderer-owned subresource
+ * requests with a generic `net::ERR_FAILED` even while the same URL succeeds
+ * through ordinary fetch and the sidecar returns 200. CSS mask images are one
+ * concrete case: packaged agent icons disappeared while their SVG files were
+ * present and directly readable. For GET/HEAD only, fall back to undici after
+ * that transport-level rejection. Those methods are safe to replay; write
+ * requests deliberately stay on a single transport.
+ *
+ * Set OD_OD_PROXY_FETCH=undici to force the old path for all requests if
+ * `net.fetch` regresses a broader streaming edge on a specific Electron/OS
+ * combo.
  */
 function resolveOdProxyFetch(): OdProtocolFetch {
   if (process.env.OD_OD_PROXY_FETCH === "undici") return fetch;
-  return (request) => net.fetch(request);
+  const undiciFetch = fetch;
+  return async (request) => {
+    try {
+      return await net.fetch(request);
+    } catch (error) {
+      if (!OD_PROXY_RETRYABLE_METHODS.has(request.method) || isClientCancelled(request)) {
+        throw error;
+      }
+      console.warn("[open-design packaged] net.fetch failed; falling back to undici", {
+        message: error instanceof Error ? error.message : String(error),
+        method: request.method,
+        target: request.url,
+      });
+      return await undiciFetch(request);
+    }
+  };
 }
 
 /**

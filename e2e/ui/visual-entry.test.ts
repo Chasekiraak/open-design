@@ -162,10 +162,20 @@ test('[P2] captures the home plugin use staged surface', async ({ page }) => {
   const card = plugins.getByTestId('plugins-card-visual-prototype-starter');
   await expect(card).toBeVisible();
   // The row's own "Try it" button stops propagation, so target the row body —
-  // clicking the card anywhere else is what opens the details modal.
+  // clicking the card anywhere else is what opens the plugin's details.
   await card.locator('.plugin-marketplace__row-main').click();
-  await expect(page.getByRole('dialog', { name: /Prototype Starter details/i })).toBeVisible();
-  await page.getByTestId('plugin-details-use-visual-prototype-starter').click();
+  // #5517 turned plugin details into a full-page route: `openCardDetail` calls
+  // navigate({ kind: 'marketplace-detail' }) for plugin records, so the details
+  // surface is `PluginDetailView` at /marketplace/<id> — not a role="dialog"
+  // overlay — and its Use control is the single `plugin-detail-use` button
+  // rather than a per-slug `plugin-details-use-<id>` menu item.
+  // Assert on the Use control rather than the `plugin-detail` shell: the shell
+  // also renders for the loading and load-failed states, so it would go green
+  // on a detail that never resolved.
+  await expect(page).toHaveURL(/\/marketplace\/visual-prototype-starter$/);
+  const usePlugin = page.getByTestId('plugin-detail-use');
+  await expect(usePlugin).toBeVisible();
+  await usePlugin.click();
   await expect(page.getByTestId('home-hero-active-plugin')).toContainText('Prototype Starter');
   await expect(page.getByTestId('home-hero-input')).toBeVisible();
 
