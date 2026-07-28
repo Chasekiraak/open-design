@@ -2906,7 +2906,7 @@ async function startNewConversation(page: Page) {
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 10_000 })
     .not.toBe(previousPath);
-  await expect(page).toHaveURL(/\/projects\/[^/]+\/conversations\/[^/]+$/);
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/conversations\/[^/]+(?:\/files\/[^/]+)?$/);
 }
 
 function tabBySuffix(page: Page, name: string): Locator {
