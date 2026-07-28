@@ -88,6 +88,7 @@ import {
   type ChatComposerHandle,
   type ChatSendOutcome,
   type ChatSendMeta,
+  type ComposerStandalonePanel,
 } from './ChatComposer';
 import type { PlaceholderScenario } from './home-hero/placeholderScenarios';
 import { listDesignArtifactCandidates } from './design-files/designArtifacts';
@@ -966,6 +967,14 @@ export function ChatPane({
   const chatLogScrollIdleTimerRef = useRef<number | null>(null);
   const historyWrapRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
+  // The 插件 / 设计百宝箱 quick pills. The popovers they open live inside
+  // ChatComposer, so the pills need both a way to report their expanded state
+  // and a stable identity for the popover to return focus to.
+  const quickPillRefs = {
+    plugins: useRef<HTMLButtonElement | null>(null),
+    toolbox: useRef<HTMLButtonElement | null>(null),
+  };
+  const [openComposerPanel, setOpenComposerPanel] = useState<ComposerStandalonePanel>(null);
   const composerSlotRef = useRef<HTMLDivElement | null>(null);
   const composerLayerRef = useRef<HTMLDivElement | null>(null);
   const pinnedTodoRef = useRef<HTMLDivElement | null>(null);
@@ -1079,8 +1088,11 @@ export function ChatPane({
       clearTimeout(pillHoverTimerRef.current);
       pillHoverTimerRef.current = null;
     }
-    if (which === 'toolbox') composerRef.current?.openDesignToolbox();
-    else composerRef.current?.openPluginsPanel();
+    // Hand the pill down as the popover's return-focus target: it opens a
+    // surface that takes focus, and it is the control the user came from.
+    const opener = quickPillRefs[which].current;
+    if (which === 'toolbox') composerRef.current?.openDesignToolbox(opener);
+    else composerRef.current?.openPluginsPanel(opener);
   }, []);
   const handleQuickPillHoverEnter = useCallback((which: 'plugins' | 'toolbox') => {
     if (pillHoverTimerRef.current) clearTimeout(pillHoverTimerRef.current);
@@ -2152,9 +2164,12 @@ export function ChatPane({
           data-testid="composer-quick-pills"
         >
           <button
+            ref={quickPillRefs.plugins}
             type="button"
             className={nextStepStyles.quickPill}
             data-testid="next-step-quick-pill-plugins"
+            aria-haspopup="menu"
+            aria-expanded={openComposerPanel === 'plugins'}
             onClick={() => handleNextStepOpenComposerPanel('plugins')}
             onMouseEnter={() => handleQuickPillHoverEnter('plugins')}
             onMouseLeave={handleQuickPillHoverLeave}
@@ -2163,9 +2178,12 @@ export function ChatPane({
             <span>{t('entry.navPlugins')}</span>
           </button>
           <button
+            ref={quickPillRefs.toolbox}
             type="button"
             className={nextStepStyles.quickPill}
             data-testid="next-step-quick-pill-toolbox"
+            aria-haspopup="menu"
+            aria-expanded={openComposerPanel === 'toolbox'}
             onClick={() => handleNextStepOpenComposerPanel('toolbox')}
             onMouseEnter={() => handleQuickPillHoverEnter('toolbox')}
             onMouseLeave={handleQuickPillHoverLeave}
@@ -2231,6 +2249,7 @@ export function ChatPane({
       onOpenSettings={onOpenSettings}
       onOpenMcpSettings={onOpenMcpSettings}
       onBrowsePlugins={onBrowsePlugins}
+      onStandalonePanelChange={setOpenComposerPanel}
       onOpenConnectors={onOpenConnectors}
       petConfig={petConfig}
       onAdoptPet={onAdoptPet}

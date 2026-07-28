@@ -273,6 +273,10 @@ interface Props {
   // ChatPane → ProjectView → App. Omitted → the add rows are hidden.
   onBrowsePlugins?: () => void;
   onOpenConnectors?: () => void;
+  /** Reports which standalone quick-pill popover is open (null when none), so
+   *  the host that renders the pills can carry `aria-expanded` on them. The
+   *  popovers live here but their triggers do not. */
+  onStandalonePanelChange?: (panel: ComposerStandalonePanel) => void;
   // Optional pet wiring. The composer no longer renders a visible pet
   // entry, but existing manual `/pet` commands still route here.
   petConfig?: AppConfig['pet'];
@@ -347,6 +351,9 @@ export interface ChatComposerDraftOptions {
   sessionMode?: ChatSessionMode;
 }
 
+/** Which of the two standalone quick-pill popovers is open, if either. */
+export type ComposerStandalonePanel = 'plugins' | 'toolbox' | null;
+
 export interface ChatComposerHandle {
   setDraft: (text: string, options?: ChatComposerDraftOptions) => void;
   restoreDraft: (draft: {
@@ -377,11 +384,13 @@ export interface ChatComposerHandle {
    */
   applyDesignToolboxSkill: (skillId: string) => void;
   /** Open the standalone toolbox popover (the 设计百宝箱 quick pill above the
-   *  composer input; the "+" menu no longer carries a toolbox row). */
-  openDesignToolbox: () => void;
+   *  composer input; the "+" menu no longer carries a toolbox row). `opener` is
+   *  the control focus returns to when the popover is dismissed. */
+  openDesignToolbox: (opener?: HTMLElement | null) => void;
   /** Open the standalone plugins popover (the 插件 quick pill above the
-   *  composer input; the "+" menu no longer carries a plugins row). */
-  openPluginsPanel: () => void;
+   *  composer input; the "+" menu no longer carries a plugins row). `opener` is
+   *  the control focus returns to when the popover is dismissed. */
+  openPluginsPanel: (opener?: HTMLElement | null) => void;
   /** Schedule closing whichever standalone popover is open (hover-leave from
    *  a quick pill); re-opening or hovering the popup cancels it. */
   scheduleComposerPanelClose: () => void;
@@ -447,6 +456,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       onStop,
       onOpenMcpSettings,
       onBrowsePlugins,
+      onStandalonePanelChange,
       onOpenConnectors,
       petConfig,
       onAdoptPet,
@@ -557,6 +567,43 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     useEffect(() => () => {
       if (panelCloseTimerRef.current) clearTimeout(panelCloseTimerRef.current);
     }, []);
+    // The quick pill a standalone popover was opened from. Both popovers move
+    // focus inside themselves (the plugins pane autofocuses its search box), so
+    // a dismissal has to hand focus back — the pill lives in the host above the
+    // composer and is the only control still mounted afterwards.
+    const panelOpenerRef = useRef<HTMLElement | null>(null);
+    /** Close whichever standalone popover is open BECAUSE THE USER DISMISSED IT
+     *  (Escape, backdrop) and return focus to the pill that opened it. Paths
+     *  where the user picked something keep the plain setters: the composer
+     *  takes focus there, and pulling it back to the pill would fight that. */
+    function dismissStandalonePanels() {
+      cancelComposerPanelClose();
+      setPluginsPanelOpen(false);
+      setDesignToolboxOpen(false);
+      const opener = panelOpenerRef.current;
+      panelOpenerRef.current = null;
+      opener?.focus();
+    }
+    const openStandalonePanel: ComposerStandalonePanel = designToolboxOpen
+      ? 'toolbox'
+      : pluginsPanelOpen
+        ? 'plugins'
+        : null;
+    useEffect(() => {
+      onStandalonePanelChange?.(openStandalonePanel);
+    }, [onStandalonePanelChange, openStandalonePanel]);
+    // Escape closes the popover, matching ComposerPlusMenu's own document-level
+    // handler. Without it, Escape pressed while focus sat in the plugin search
+    // did nothing at all.
+    useEffect(() => {
+      if (openStandalonePanel == null) return;
+      function onKey(event: KeyboardEvent) {
+        if (event.key !== 'Escape') return;
+        dismissStandalonePanels();
+      }
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    }, [openStandalonePanel]);
     // External "+"-menu open request (next-step quick pills) — nonce-keyed so
     // every pill click re-opens even after the menu was dismissed.
     const [plusMenuOpenRequest, setPlusMenuOpenRequest] = useState<
@@ -1157,17 +1204,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           pendingEntryFromRef.current = 'next_step';
           applyDesignToolboxSkillByIdRef.current(skillId);
         },
-        openDesignToolbox: () => {
+        openDesignToolbox: (opener?: HTMLElement | null) => {
           cancelComposerPanelClose();
           setComposerEngaged(true);
+          panelOpenerRef.current = opener ?? null;
           // The two popovers share one anchor spot — opening one closes the
           // other so hover-switching between the pills swaps panels.
           setPluginsPanelOpen(false);
           setDesignToolboxOpen(true);
         },
-        openPluginsPanel: () => {
+        openPluginsPanel: (opener?: HTMLElement | null) => {
           cancelComposerPanelClose();
           setComposerEngaged(true);
+          panelOpenerRef.current = opener ?? null;
           setDesignToolboxOpen(false);
           setPluginsPanelOpen(true);
         },
@@ -2761,7 +2810,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
             <div
               className="composer-toolbox-standalone-backdrop"
               aria-hidden="true"
-              onClick={() => setDesignToolboxOpen(false)}
+              onClick={dismissStandalonePanels}
             />
             <div
               className="plus-menu__popup composer-toolbox-standalone-popup"
@@ -2820,7 +2869,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
             <div
               className="composer-toolbox-standalone-backdrop"
               aria-hidden="true"
-              onClick={() => setPluginsPanelOpen(false)}
+              onClick={dismissStandalonePanels}
             />
             <div
               className="plus-menu__popup composer-toolbox-standalone-popup composer-plugins-standalone-popup"
