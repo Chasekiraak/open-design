@@ -135,11 +135,18 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
     });
   });
 
-  await createEmptyProject(page, 'Workspace active tab restore');
+  const projectId = await createEmptyProject(page, 'Workspace active tab restore');
   await expectWorkspaceReady(page);
 
   await sendPrompt(page, 'Create a workspace persistence artifact');
   await expect(page.getByText('workspace-artifact.html', { exact: true }).first()).toBeVisible();
+  const { conversationId } = await getCurrentProjectContext(page);
+  await expectPersistedArtifactMessage(
+    page,
+    projectId,
+    conversationId,
+    'workspace-artifact.html',
+  );
 
   const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
     timeout: T.short,
@@ -170,11 +177,17 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
   await expect(restoredManualFileTab).toBeVisible();
   await expect(restoredManualFileTab).toHaveAttribute('aria-selected', 'true');
   const restoredArtifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
-  if ((await restoredArtifactTab.count()) === 0) {
+  const artifactTabRestored = await restoredArtifactTab
+    .waitFor({ state: 'visible', timeout: T.short })
+    .then(() => true, () => false);
+  if (!artifactTabRestored) {
     const turnCard = page.locator('.msg.assistant').filter({ hasText: 'workspace-artifact.html' }).first();
-    const openButton = turnCard.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible();
-    await openButton.click();
+    const artifactButton = turnCard.getByRole('button', {
+      name: 'workspace-artifact.html',
+      exact: true,
+    });
+    await expect(artifactButton).toBeVisible();
+    await artifactButton.click();
 
     await expect(restoredArtifactTab).toBeVisible();
     await expect(restoredArtifactTab).toHaveAttribute('aria-selected', 'true');
@@ -4023,6 +4036,35 @@ async function listConversationsFromApi(
     conversations: Array<{ id: string; updatedAt: number }>;
   };
   return conversations;
+}
+
+async function expectPersistedArtifactMessage(
+  page: Page,
+  projectId: string,
+  conversationId: string,
+  fileName: string,
+) {
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(
+        `/api/projects/${projectId}/conversations/${conversationId}/messages`,
+      );
+      if (!response.ok()) return false;
+      const { messages } = (await response.json()) as {
+        messages: Array<{
+          role: string;
+          runStatus?: string;
+          producedFiles?: Array<{ name: string }>;
+        }>;
+      };
+      return messages.some(
+        (message) =>
+          message.role === 'assistant'
+          && message.runStatus === 'succeeded'
+          && message.producedFiles?.some((file) => file.name.endsWith(fileName)),
+      );
+    }, { timeout: T.medium })
+    .toBe(true);
 }
 
 async function expectProjectFilesToIncludeSuffixes(
