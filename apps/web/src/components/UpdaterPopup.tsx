@@ -531,9 +531,9 @@ function UpdaterPopupPanel({
       exit="exit"
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className="updater-popup__icon">
-        <Icon name="arrow-up" size={20} strokeWidth={2.2} />
-      </div>
+      {/* Cover art on top (update-reminder dialog language); scales with the
+          panel width at its natural aspect ratio. */}
+      <img className="updater-popup__cover" src="/updater-ready-cover.jpg" alt="" />
       <div className="updater-popup__body">
         <h2 id="updater-popup-title">{quitRecoverable ? t('updater.quitFailedTitle') : t('updater.ready')}</h2>
         {quitRecoverable && model.updateKind === 'payload'
