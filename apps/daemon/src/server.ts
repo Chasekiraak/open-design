@@ -18,7 +18,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import {
-  DEFAULT_DECK_PROMPT_VARIANT,
   executionProfileFromStreamFormat,
   isCritiqueRunEligible,
   PLUGIN_SHARE_ACTION_PLUGIN_IDS,
@@ -4227,8 +4226,6 @@ export async function startServer({
       ...(pluginBlock ? { pluginBlock } : {}),
       ...(activeStageBlocks ? { activeStageBlocks } : {}),
       userInstructions,
-      deckPromptVariant:
-        appConfigForPrompt?.deckPromptVariant ?? DEFAULT_DECK_PROMPT_VARIANT,
       freeformDeckSignal,
       mediaHintSignal,
       platformHintSignal,

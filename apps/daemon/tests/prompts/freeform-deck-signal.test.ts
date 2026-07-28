@@ -69,17 +69,15 @@ describe('composeSystemPrompt — freeform deck promotion', () => {
     expect(out).not.toContain(MAYBE_DECK_HEADING);
   });
 
-  it('uses the selected deck prompt variant for deck-kind and signaled freeform runs', () => {
+  it('uses the production deck prompt for deck-kind and signaled freeform runs', () => {
     for (const input of [
       {
         metadata: { kind: 'deck' as const },
         executionProfile: 'filesystem' as const,
-        deckPromptVariant: 'outcome_only' as const,
       },
       {
         ...freeform,
         freeformDeckSignal: true,
-        deckPromptVariant: 'outcome_only' as const,
       },
     ]) {
       const out = composeSystemPrompt(input);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   renderDeckFrameworkDirective,
-  renderDeckPromptDirective,
+  renderDeckVNextDirective,
 } from '../src/prompts/deck-framework.js';
 import { stripCssCommentsForPrompt } from '../src/prompts/design-system-runtime.js';
 import { composeSystemPrompt } from '../src/prompts/system.js';
@@ -619,30 +619,22 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(framework).not.toContain('no 3+ same-theme');
   });
 
-  it('keeps the current deck directive byte-identical as the legacy rollback variant', () => {
-    expect(renderDeckPromptDirective('current', 'filesystem')).toBe(
-      renderDeckFrameworkDirective('filesystem'),
-    );
-  });
+  it('uses the vNext delivery and outcome directive for production decks', () => {
+    const directive = renderDeckVNextDirective('filesystem');
 
-  it('uses the vNext delivery and outcome directive as the production default', () => {
-    const defaultDirective = renderDeckPromptDirective();
-    const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
-
-    expect(defaultDirective).toBe(outcomeOnly);
-    expect(defaultDirective).toContain('# Deck delivery contract');
-    expect(defaultDirective).toContain('data-deck-nav');
-    expect(defaultDirective).toContain('# Deck outcome quality rules');
-    expect(defaultDirective).toContain('Every element earns its place');
-    expect(defaultDirective).not.toContain('persist position to localStorage');
-    expect(defaultDirective).toContain('Charts/diagrams');
-    expect(defaultDirective).not.toContain('# Slide deck — fixed framework');
-    expect(defaultDirective).not.toContain('## Canonical skeleton');
+    expect(directive).toContain('# Deck delivery contract');
+    expect(directive).toContain('data-deck-nav');
+    expect(directive).toContain('# Deck outcome quality rules');
+    expect(directive).toContain('Every element earns its place');
+    expect(directive).not.toContain('persist position to localStorage');
+    expect(directive).toContain('Charts/diagrams');
+    expect(directive).not.toContain('# Slide deck — fixed framework');
+    expect(directive).not.toContain('## Canonical skeleton');
   });
 
   it('requires one real stitched render for filesystem decks without leaking tools into text-artifact runs', () => {
-    const filesystem = renderDeckPromptDirective('outcome_only', 'filesystem');
-    const textArtifact = renderDeckPromptDirective('outcome_only', 'text_artifact');
+    const filesystem = renderDeckVNextDirective('filesystem');
+    const textArtifact = renderDeckVNextDirective('text_artifact');
 
     expect(filesystem).toContain('## Rendered verification — filesystem decks');
     expect(filesystem).toContain('export <deck-file>');
@@ -654,8 +646,8 @@ describe('composeSystemPrompt — shared slim default', () => {
   });
 
   it('requires a purposeful closing while preserving meaningful thank-you endings', () => {
-    const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
-    const legacy = renderDeckPromptDirective('current', 'filesystem');
+    const outcomeOnly = renderDeckVNextDirective('filesystem');
+    const legacy = renderDeckFrameworkDirective('filesystem');
 
     expect(outcomeOnly).toContain('**Purposeful close.**');
     expect(outcomeOnly).toContain('intended next step');
@@ -666,91 +658,46 @@ describe('composeSystemPrompt — shared slim default', () => {
   });
 
   it('adds presentation presence without reducing visual value to comprehension alone', () => {
-    const directives = [
-      renderDeckPromptDirective('outcome_only', 'filesystem'),
-      renderDeckPromptDirective('current_outcome', 'filesystem'),
-    ];
-    const legacy = renderDeckPromptDirective('current', 'filesystem');
+    const directive = renderDeckVNextDirective('filesystem');
+    const legacy = renderDeckFrameworkDirective('filesystem');
     const composedDeck = composeSystemPrompt({
       metadata: { kind: 'deck' } as any,
-      deckPromptVariant: 'outcome_only',
     });
     const composedNonDeck = composeSystemPrompt({
       metadata: { kind: 'other' } as any,
     });
 
-    for (const directive of directives) {
-      expect(directive.match(/## Presentation presence/g)).toHaveLength(1);
-      expect(directive).toContain('**Live-delivery composition.**');
-      expect(directive).toContain('coherent type character, palette, image treatment, grid');
-      expect(directive).toContain(
-        'Vary surface, density, and layout only when the story changes mode',
-      );
-      expect(directive).toContain('**Narrative rhythm.**');
-      expect(directive).toContain('**One dominant, fitting medium.**');
-      expect(directive).toContain(
-        'product views for product proof, charts for quantities',
-      );
-      expect(directive).toContain(
-        'imagery for emotion/context, and expressive type for reveals',
-      );
-      expect(directive).toContain(
-        'use calmer workhorse slides between peaks',
-      );
-      expect(directive).toContain(
-        'comprehension, emphasis, pacing, atmosphere, or brand recognition',
-      );
-      expect(directive).toContain(
-        'Keep supporting elements subordinate',
-      );
-      expect(directive).toContain('**Shareable payoff.**');
-      expect(directive).not.toContain(
-        'If removing it does not reduce comprehension, remove it.',
-      );
-    }
+    expect(directive.match(/## Presentation presence/g)).toHaveLength(1);
+    expect(directive).toContain('**Live-delivery composition.**');
+    expect(directive).toContain('coherent type character, palette, image treatment, grid');
+    expect(directive).toContain(
+      'Vary surface, density, and layout only when the story changes mode',
+    );
+    expect(directive).toContain('**Narrative rhythm.**');
+    expect(directive).toContain('**One dominant, fitting medium.**');
+    expect(directive).toContain(
+      'product views for product proof, charts for quantities',
+    );
+    expect(directive).toContain(
+      'imagery for emotion/context, and expressive type for reveals',
+    );
+    expect(directive).toContain(
+      'use calmer workhorse slides between peaks',
+    );
+    expect(directive).toContain(
+      'comprehension, emphasis, pacing, atmosphere, or brand recognition',
+    );
+    expect(directive).toContain(
+      'Keep supporting elements subordinate',
+    );
+    expect(directive).toContain('**Shareable payoff.**');
+    expect(directive).not.toContain(
+      'If removing it does not reduce comprehension, remove it.',
+    );
 
     expect(legacy).not.toContain('## Presentation presence');
     expect(composedDeck).toContain('## Presentation presence');
     expect(composedNonDeck).not.toContain('## Presentation presence');
-  });
-
-  it('renders the two experimental deck directive variants from shared blocks', () => {
-    const currentWithOutcome = renderDeckPromptDirective(
-      'current_outcome',
-      'filesystem',
-    );
-    const outcomeOnly = renderDeckPromptDirective('outcome_only', 'filesystem');
-
-    expect(currentWithOutcome).toContain('# Slide deck — fixed framework');
-    expect(currentWithOutcome).toContain('# Deck outcome quality rules');
-    expect(currentWithOutcome).not.toContain('# Deck delivery contract');
-    expect(outcomeOnly).toContain('# Deck delivery contract');
-    expect(outcomeOnly).toContain('# Deck outcome quality rules');
-    expect(outcomeOnly).not.toContain('# Slide deck — fixed framework');
-    expect(outcomeOnly).not.toContain('## Canonical skeleton');
-  });
-
-  it('composes the selected deck directive variant into real deck runs', () => {
-    const current = composeSystemPrompt({
-      metadata: { kind: 'deck' } as any,
-      deckPromptVariant: 'current',
-    });
-    const currentWithOutcome = composeSystemPrompt({
-      metadata: { kind: 'deck' } as any,
-      deckPromptVariant: 'current_outcome',
-    });
-    const outcomeOnly = composeSystemPrompt({
-      metadata: { kind: 'deck' } as any,
-      deckPromptVariant: 'outcome_only',
-    });
-
-    expect(current).toContain('# Slide deck — fixed framework');
-    expect(current).not.toContain('# Deck outcome quality rules');
-    expect(currentWithOutcome).toContain('# Slide deck — fixed framework');
-    expect(currentWithOutcome).toContain('# Deck outcome quality rules');
-    expect(outcomeOnly).not.toContain('# Slide deck — fixed framework');
-    expect(outcomeOnly).toContain('# Deck delivery contract');
-    expect(outcomeOnly).toContain('# Deck outcome quality rules');
   });
 
   it('does not inject the freeform deck framework without a positive query signal', () => {

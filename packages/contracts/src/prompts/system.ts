@@ -15,10 +15,9 @@
  *      `references/checklist.md`), we inject a hard pre-flight rule above
  *      the skill body so the agent reads them BEFORE writing any code.
  *   4. For decks (skillMode === 'deck' OR metadata.kind === 'deck'), the
- *      generic deck directive (./deck-framework.ts) is pinned LAST. Its
- *      production default is a minimal host-delivery contract plus
- *      outcome-quality rules; the experiment variants retain the legacy
- *      fixed framework for comparison. We also fire on the metadata path so
+ *      generic deck directive (./deck-framework.ts) is pinned LAST. It is a
+ *      minimal host-delivery contract plus outcome-quality rules. We also
+ *      fire on the metadata path so
  *      deck-kind projects without a bound skill (skill_id null) still get the
  *      directive. When the active skill ships its own seed (skill body
  *      references `assets/template.html`), we defer to that seed and skip the
@@ -32,11 +31,7 @@ import type { MediaSurface } from '../api/media.js';
 import type { ProjectMetadata, ProjectTemplate } from '../api/projects.js';
 import { OFFICIAL_DESIGNER_PROMPT, renderOfficialDesignerPrompt } from './official-system.js';
 import { DISCOVERY_AND_PHILOSOPHY } from './discovery.js';
-import {
-  DEFAULT_DECK_PROMPT_VARIANT,
-  renderDeckPromptDirective,
-  type DeckPromptVariant,
-} from './deck-framework.js';
+import { renderDeckVNextDirective } from './deck-framework.js';
 import { renderDirectionSpecBlock } from './directions.js';
 import { renderMediaGenerationContract } from './media-contract.js';
 import { HOST_QUESTION_FORM_PROTOCOL } from './question-form-runtime.js';
@@ -246,9 +241,6 @@ export interface ComposeInput {
   // Shared Design-doctrine variant. Slim is the default for BYOK/API too;
   // classic is retained only as an explicit Design-mode rollback path.
   promptCoreVariant?: 'classic' | 'slim' | undefined;
-  // Selects the generic deck directive for experiment and rollback runs.
-  // The default is the production vNext delivery + outcome directive.
-  deckPromptVariant?: DeckPromptVariant | undefined;
   executionProfile?: ExecutionProfile | undefined;
   // Turn-level platform intent detected by the caller. Metadata remains the
   // stable source; this signal covers a platform first named in conversation.
@@ -284,7 +276,6 @@ export function composeSystemPrompt({
   projectInstructions,
   freeformDeckSignal,
   promptCoreVariant = 'slim',
-  deckPromptVariant = DEFAULT_DECK_PROMPT_VARIANT,
   executionProfile,
   platformHintSignal,
 }: ComposeInput): string {
@@ -602,7 +593,7 @@ export function composeSystemPrompt({
     !!skillBody && /assets\/template\.html/.test(skillBody);
   if (!isAskMode && sessionMode !== 'plan' && isDeckProject && !hasSkillSeed) {
     parts.push(
-      `\n\n---\n\n${renderDeckPromptDirective(deckPromptVariant, resolvedExecutionProfile)}`,
+      `\n\n---\n\n${renderDeckVNextDirective(resolvedExecutionProfile)}`,
     );
   }
 

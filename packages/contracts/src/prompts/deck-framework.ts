@@ -1,8 +1,7 @@
 /**
- * Legacy fixed deck framework retained for the `current` and
- * `current_outcome` experiment / rollback variants. The production vNext
- * directive is defined below as a minimal delivery contract plus outcome
- * quality rules.
+ * Legacy fixed deck framework retained for internal compatibility. The
+ * production directive is defined below as a minimal delivery contract plus
+ * outcome quality rules.
  *
  * The legacy framework's purpose was to stop regenerating the scale-to-fit JS,
  * keyboard handler, slide visibility toggle, counter, and print rules each turn
@@ -47,13 +46,6 @@
  */
 
 import type { ExecutionProfile } from '../execution-profile.js';
-
-export type DeckPromptVariant =
-  | 'current'
-  | 'current_outcome'
-  | 'outcome_only';
-
-export const DEFAULT_DECK_PROMPT_VARIANT: DeckPromptVariant = 'outcome_only';
 
 export const DECK_SKELETON_HTML = `<!doctype html>
 <html lang="en">
@@ -628,18 +620,6 @@ ${DECK_OUTCOME_RULES_DIRECTIVE}`;
 }
 
 export const DECK_VNEXT_DIRECTIVE = renderDeckVNextDirective('filesystem');
-
-export function renderDeckPromptDirective(
-  variant: DeckPromptVariant = DEFAULT_DECK_PROMPT_VARIANT,
-  executionProfile: ExecutionProfile = 'filesystem',
-): string {
-  if (variant === 'outcome_only') return renderDeckVNextDirective(executionProfile);
-  const current = renderDeckFrameworkDirective(executionProfile);
-  if (variant === 'current_outcome') {
-    return `${current}\n\n---\n\n${DECK_OUTCOME_RULES_DIRECTIVE}`;
-  }
-  return current;
-}
 
 /** Filesystem compatibility constant for existing imports. */
 export const DECK_FRAMEWORK_DIRECTIVE = renderDeckFrameworkDirective('filesystem');

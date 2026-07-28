@@ -6,9 +6,6 @@ export {
   DECK_OUTCOME_RULES_DIRECTIVE,
   DECK_SKELETON_HTML,
   DECK_VNEXT_DIRECTIVE,
-  DEFAULT_DECK_PROMPT_VARIANT,
   renderDeckFrameworkDirective,
-  renderDeckPromptDirective,
   renderDeckVNextDirective,
-  type DeckPromptVariant,
 } from '@open-design/contracts';

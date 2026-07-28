@@ -40,7 +40,6 @@ import type {
   DesignSystemTokenContractRebuildDecision,
   DesignSystemTokenContractRebuildJobRequest,
   DesignSystemTokenContractRebuildJobResponse,
-  DeckPromptVariant,
   LiveArtifact,
   LiveArtifactDetailResponse,
   LiveArtifactListResponse,
@@ -464,8 +463,6 @@ export interface AppConfig {
   // it through `syncConfigToDaemon`.
   telemetry?: TelemetryConfig;
   customInstructions?: string;
-  /** Generic Deck prompt experiment used for runs without a skill-owned template seed. */
-  deckPromptVariant?: DeckPromptVariant;
   projectLocations?: ProjectLocationPrefs[];
   defaultProjectLocationId?: string | null;
 }
