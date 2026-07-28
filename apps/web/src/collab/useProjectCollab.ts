@@ -43,6 +43,40 @@ export function resetProjectsCreatedByViewerCache(): void {
   projectIdsCreatedByViewerThisSession.clear();
 }
 
+/**
+ * Whether the project's local file list must be read as "not downloaded yet"
+ * rather than "this project is empty". Drives the syncing state that replaces
+ * DesignFilesPanel's empty state and its create-a-file CTAs.
+ *
+ * Invariant: a shared project this daemon has never materialized is ALWAYS
+ * download-pending, whatever the status poll has managed to learn about the
+ * hub. `awaitingFirstMaterialization` is a purely local daemon fact (it holds
+ * only a placeholder record for the project), so it is the one signal
+ * available on the very first status response. The other three all need remote
+ * enrichment that a fresh install's first response cannot carry, which is why
+ * a brand-new member's first open showed an empty project with "create a new
+ * sketch" CTAs over content that was still on its way.
+ *
+ * It also deliberately bypasses `shouldAutoPull` (member-of-a-shared-project).
+ * The owner of a placeholder they have not materialized either — the reinstall
+ * case, where the daemon self-pulls on their behalf — is looking at the same
+ * empty directory, and "these files are not the content" is a fact about the
+ * local record, not about who is allowed to pull it.
+ */
+function localFilesAreNotTheContentYet(signals: {
+  awaitingFirstMaterialization: boolean;
+  shouldAutoPull: boolean;
+  transferring: boolean;
+  behindPublishedHead: boolean;
+  pullInFlight: boolean;
+}): boolean {
+  if (signals.awaitingFirstMaterialization) return true;
+  return (
+    signals.shouldAutoPull
+    && (signals.transferring || signals.behindPublishedHead || signals.pullInFlight)
+  );
+}
+
 export interface UseProjectCollabOptions {
   /** Injectable for tests. */
   fetch?: typeof fetch;
@@ -405,18 +439,19 @@ export function useProjectCollab(
     checkStatusNow,
   ]);
 
-  // Status latency alone is not a download. Only replace local file rows with
-  // skeletons after status has confirmed this member should pull and the
-  // durable/local cursor is actually behind (or that pull is still active).
-  // `pullTick` is not read directly, but its state bump forces this render to
-  // observe the ref cursor written by a successful pull.
-  const downloadPending = shouldAutoPull
-    && (
-      collab.contentTransferState?.status === 'downloading'
-      ||
-      (publishedVersion != null && publishedVersion > pullCursorRef.current.version)
-      || pullInFlightRef.current
-    );
+  // Status latency alone is not a download: absent a placeholder, only replace
+  // local file rows with skeletons after status has confirmed this member
+  // should pull and the durable/local cursor is actually behind (or that pull
+  // is still active). `pullTick` is not read directly, but its state bump
+  // forces this render to observe the ref cursor written by a successful pull.
+  const downloadPending = localFilesAreNotTheContentYet({
+    awaitingFirstMaterialization: collab.awaitingFirstMaterialization,
+    shouldAutoPull,
+    transferring: collab.contentTransferState?.status === 'downloading',
+    behindPublishedHead:
+      publishedVersion != null && publishedVersion > pullCursorRef.current.version,
+    pullInFlight: pullInFlightRef.current,
+  });
 
   return {
     enabled: collabEnabled,

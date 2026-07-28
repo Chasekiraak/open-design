@@ -39,6 +39,7 @@ export interface UseCollabResult {
   publishedVersion: number | null;
   materializedVersion: number | null;
   contentTransferState: ProjectContentTransferState | null;
+  awaitingFirstMaterialization: boolean;
   statusPollGeneration: number;
   syncState: CollabSnapshot['syncState'];
   ownerMemberId: CollabSnapshot['ownerMemberId'];
@@ -61,6 +62,7 @@ const EMPTY: CollabSnapshot = {
   publishedVersion: null,
   materializedVersion: null,
   contentTransferState: null,
+  awaitingFirstMaterialization: false,
   statusPollGeneration: 0,
   syncState: null,
   ownerMemberId: null,
@@ -217,6 +219,7 @@ export function useCollab(options: UseCollabOptions): UseCollabResult {
     publishedVersion: snapshot.publishedVersion,
     materializedVersion: snapshot.materializedVersion,
     contentTransferState: snapshot.contentTransferState,
+    awaitingFirstMaterialization: snapshot.awaitingFirstMaterialization,
     statusPollGeneration: snapshot.statusPollGeneration,
     syncState: snapshot.syncState,
     ownerMemberId: snapshot.ownerMemberId,

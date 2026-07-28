@@ -927,6 +927,79 @@ export function registerCollabSyncRoutes(
     markSharedProjectPlaceholder?.(projectId, true);
   }
 
+  /**
+   * Invariant: opening a shared project whose only local record is an
+   * unmaterialized placeholder starts that project's content pull on the very
+   * request that discovered it — for EVERY viewer, owner or member.
+   *
+   * Neither side of the product had another way to start it on first open. The
+   * web's auto-pull is gated on `publishedVersion` advancing past its cursor,
+   * and a fresh daemon's first status response cannot carry a published head:
+   * `collab.publishedVersion()` reads an in-process map that has never been
+   * written, and the real hub head is fetched fire-and-forget into
+   * `headEnrichmentCache` for a LATER poll to consume. So a brand-new member
+   * who opened a shared project on a fresh install got a placeholder, an empty
+   * file list, and no pull at all — materialization arrived only whenever a
+   * proactive lane (hub push / reconnect catch-up / the recovery floor) next
+   * fired, which is why the content appeared to show up "only on the second
+   * open".
+   *
+   * Fire-and-forget by design: the pull replaces the whole project tree and
+   * must never hold the status response open. Callers surface progress through
+   * `awaitingFirstMaterialization` + `contentTransferState` instead.
+   */
+  function materializePlaceholderOnOpen(
+    projectId: string,
+    req: Parameters<typeof pullAccessForRequest>[1],
+    viewer: {
+      principal: ResourceHubPrincipal | null;
+      workspaceId: string | null;
+      ownerMemberId: string | null;
+      callerIsOwner: boolean;
+    },
+  ): void {
+    if (!viewer.ownerMemberId) return;
+    void (async () => {
+      const { principal: resourcePrincipal, scope } = await pullAccessForRequest(
+        projectId,
+        req,
+        viewer.ownerMemberId,
+        { principal: viewer.principal, workspaceId: viewer.workspaceId },
+      );
+      if (!scope) return;
+      try {
+        await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
+      } catch (error) {
+        // Retracted-share heal (飞书 recvqA6qhV7St1): the catalog names this
+        // caller as the project's owner, yet the published pull answered
+        // `resource_not_found` — the hub's tombstone gate. A live share can
+        // never produce that pair; it is the hub-authoritative signature of a
+        // HALF-LANDED retraction: an unshare's `resource remove` landed but
+        // its `team-projects remove` did not, leaving a dangling catalog row.
+        // On a fresh data root there is no `cloudTombstonedAt` left to
+        // suppress it, so the retracted project revives as a ghost team card
+        // for every member (reproduced live on the feature-test hub,
+        // 2026-07-27). Finish the retraction from the hub's own state instead
+        // of trusting local memory: complete the catalog removal (unpublish is
+        // idempotent against the tombstone), retire the contentless
+        // placeholder this open registered, and drop the cached listing.
+        //
+        // Owner-only: retracting a share is the sharer's action. A member who
+        // hits the same tombstone has merely lost access and must not unshare
+        // anyone's project on their behalf.
+        if (!viewer.callerIsOwner) throw error;
+        if (!isRetractedHubResourceError(error)) throw error;
+        if (
+          !projectStore?.get ||
+          !isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
+        ) return;
+        await requestTeamUnshare(projectId, resourcePrincipal ?? undefined);
+        retireUnmaterializedSharedPlaceholder?.(projectId);
+        invalidateTeamProjectCatalog?.();
+      }
+    })().catch(() => undefined);
+  }
+
   app.post('/api/projects/:id/collab/changed', (req, res) => {
     scheduler.notifyChanged(req.params.id, 'change');
     res.json({ ok: true });
@@ -1880,55 +1953,21 @@ export function registerCollabSyncRoutes(
     if (ownerMemberId) {
       ensureSharedProjectPlaceholder(projectId);
     }
-    // Owner self-materialization (recvqzaDvUU6B3): an owner opening their OWN
-    // shared project whose local record is still an unmaterialized
-    // placeholder (fresh data root after a reinstall, or shared from another
-    // machine) has no other pull path — "the owner never auto-pulls" below
-    // only holds for owners whose local copy IS the source of truth. Pull the
-    // published hub content in the background through the exact same
-    // coalesced flow a member pull uses; on success the registration clears
-    // the placeholder stamp and normal owner publishing resumes on top of the
-    // materialized content instead of an empty directory.
-    if (
-      callerIsOwner &&
-      projectStore?.get &&
-      isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
-    ) {
-      void (async () => {
-        const { principal: resourcePrincipal, scope } = await pullAccessForRequest(
-          projectId,
-          req,
-          ownerMemberId,
-          { principal, workspaceId: resolvedWorkspaceId ?? null },
-        );
-        if (!scope) return;
-        try {
-          await pullSharedProjectCoalesced(projectId, resourcePrincipal, scope);
-        } catch (error) {
-          // Retracted-share heal (飞书 recvqA6qhV7St1): the catalog names this
-          // caller as the project's owner (that is what routed us here), yet
-          // the published pull answered `resource_not_found` — the hub's
-          // tombstone gate. A live share can never produce that pair; it is
-          // the hub-authoritative signature of a HALF-LANDED retraction: an
-          // unshare's `resource remove` landed but its `team-projects remove`
-          // did not, leaving a dangling catalog row. On this fresh data root
-          // there is no `cloudTombstonedAt` left to suppress it, so the
-          // retracted project revives as a ghost team card for every member
-          // (reproduced live on the feature-test hub, 2026-07-27). Finish the
-          // retraction from the hub's own state instead of trusting local
-          // memory: complete the catalog removal (unpublish is idempotent
-          // against the tombstone), retire the contentless placeholder this
-          // open registered, and drop the cached listing.
-          if (!isRetractedHubResourceError(error)) throw error;
-          if (
-            !projectStore?.get ||
-            !isUnmaterializedSharedPlaceholder(projectStore.get(projectId))
-          ) return;
-          await requestTeamUnshare(projectId, resourcePrincipal ?? undefined);
-          retireUnmaterializedSharedPlaceholder?.(projectId);
-          invalidateTeamProjectCatalog?.();
-        }
-      })().catch(() => undefined);
+    // Whether this daemon's only local record for the project is still an
+    // unmaterialized placeholder. Purely local and synchronous — it needs no
+    // hub round-trip, which is exactly why it is the signal the client can act
+    // on from the FIRST status response (see `awaitingFirstMaterialization` on
+    // CollabSyncStatusResponse).
+    const awaitingFirstMaterialization = Boolean(
+      projectStore?.get && isUnmaterializedSharedPlaceholder(projectStore.get(projectId)),
+    );
+    if (awaitingFirstMaterialization) {
+      materializePlaceholderOnOpen(projectId, req, {
+        principal,
+        workspaceId: resolvedWorkspaceId ?? null,
+        ownerMemberId,
+        callerIsOwner,
+      });
     }
     // A verified local mirror binding is enough to return shared identity and
     // unlock presence immediately. The owner-name directory and published-head
@@ -2043,6 +2082,7 @@ export function registerCollabSyncRoutes(
         transferScope
           ? deps.readContentTransferState?.(projectId, transferScope) ?? null
           : null,
+      awaitingFirstMaterialization,
       syncState,
       ownerMemberId,
       ...(ownerDisplayName ? { ownerDisplayName } : {}),

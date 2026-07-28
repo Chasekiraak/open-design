@@ -984,6 +984,11 @@ async function runCollab(args) {
       return emit(body, () => {
         console.log(`publishedVersion\t${body?.publishedVersion ?? '-'}`);
         console.log(`materializedVersion\t${body?.materializedVersion ?? '-'}`);
+        // Whether this daemon's local files are the project's content at all:
+        // true means it holds only an unmaterialized shared-project
+        // placeholder, so an `od files list` here would report an empty
+        // project that is really still downloading.
+        console.log(`awaitingFirstMaterialization\t${body?.awaitingFirstMaterialization === true}`);
         console.log(`syncState\t${body?.syncState ?? '-'}`);
       });
     }
