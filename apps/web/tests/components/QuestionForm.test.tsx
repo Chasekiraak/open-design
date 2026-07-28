@@ -694,7 +694,7 @@ describe('QuestionFormView', () => {
     );
   });
 
-  it('only auto-continues when no required answer is missing', () => {
+  it('auto-continues unanswered required questions as skipped', () => {
     vi.useFakeTimers();
     try {
       const optionalSubmit = vi.fn();
@@ -730,9 +730,13 @@ describe('QuestionFormView', () => {
           onSubmit={requiredSubmit}
         />,
       );
-      expect(screen.queryByLabelText(/Auto-continues when the timer ends 10:00/)).toBeNull();
+      expect(screen.getByLabelText(/Auto-continues when the timer ends 10:00/)).toBeTruthy();
       act(() => vi.advanceTimersByTime(10 * 60 * 1000));
-      expect(requiredSubmit).not.toHaveBeenCalled();
+      expect(requiredSubmit).toHaveBeenCalledWith(
+        expect.stringContaining('- Primary surface: (skipped)'),
+        { platform: '' },
+        'auto',
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -752,7 +756,7 @@ describe('QuestionFormView', () => {
     );
 
     expect(screen.getByText('1 / 3').closest('.question-form-head')).toBeTruthy();
-    expect(screen.queryByLabelText(/Auto-continues when the timer ends 10:00/)).toBeNull();
+    expect(screen.getByLabelText(/Auto-continues when the timer ends 10:00/)).toBeTruthy();
     expect(screen.getByText('Who will see this deck?')).toBeTruthy();
     expect(screen.queryByText('How detailed should it be?')).toBeNull();
     const nextStep = screen.getByRole('button', { name: 'Next step' }) as HTMLButtonElement;

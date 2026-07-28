@@ -85,8 +85,8 @@ interface Props {
   ) => void;
   submitDisabled?: boolean;
   visualStyleContext?: VisualStyleContext;
-  // Optional paths can move on after the timeout. A required answer never
-  // becomes a skipped answer merely because the form was left unattended.
+  // When enabled, the form moves on after the timeout. Any unanswered field,
+  // including a required one, is submitted as "(skipped)".
   autoContinueAfterTimeout?: boolean;
 }
 
@@ -412,19 +412,15 @@ export const QuestionFormView = forwardRef<QuestionFormHandle, Props>(function Q
     return questionAnswerIsPresent(v);
   });
   const ready = withinSelectionLimits && requiredAnswered;
-  // A manual Skip all is always available; unlike the timeout it is an
-  // intentional user choice and may bypass required-answer validation.
+  // A manual Skip all is always available, including for required questions.
   const canSkipAll = true;
   const hasRequiredQuestions = form.questions.some((q) => q.required === true);
-  // Required answers remain required after a timeout. A flat form may only
-  // auto-continue once every required answer is present; a stepped form can
-  // auto-continue on an optional active step after its earlier requirements
-  // have been met. Fully optional forms retain the countdown throughout.
+  // Timeout continuation shares the explicit Skip semantics: unanswered
+  // questions, including required ones, are serialized as "(skipped)".
   const autoContinueEnabled =
     autoContinueAfterTimeout &&
     !locked &&
-    !submitDisabled &&
-    (!hasRequiredQuestions || (ready && (!stepped || activeQuestion?.required !== true)));
+    !submitDisabled;
   const currentQuestionReady =
     !activeQuestion ||
     activeQuestion.required !== true ||
