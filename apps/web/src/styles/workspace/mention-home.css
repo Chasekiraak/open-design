@@ -365,9 +365,9 @@
   gap: 12px;
   padding: 18px;
   border: 1px solid var(--border);
-  /* Same panel radius as the update-reminder dialog — the two update
-     surfaces share one visual language (white panel, black CTA pill with
-     brand-green ink). */
+  /* Same panel radius as the what's-new dialog — the two update surfaces
+     share one visual language (white panel, black CTA pill with brand-green
+     ink). */
   border-radius: var(--radius-lg, 12px);
   background: var(--bg-elevated);
   color: var(--text);
@@ -389,15 +389,6 @@
 [dir='rtl'] .entry-main__topbar .entry-updater-menu .updater-popup {
   right: auto;
   left: 0;
-}
-
-/* Cover art (update-reminder dialog language): full panel width, natural
-   aspect ratio, its own rounded card inset. */
-.updater-popup__cover {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: var(--radius-md, 8px);
 }
 
 .updater-popup__body {
@@ -444,7 +435,7 @@
   text-decoration: underline;
 }
 
-/* Footer stacks (update-reminder dialog layout): the silent-update checkbox
+/* Footer stacks (what's-new dialog layout): the silent-update checkbox
    gets the full panel width on its own row — the old single-row layout
    squeezed its label into a skinny always-wrapping column once the pill
    buttons widened — and the two action pills split the row below 50/50. */
@@ -495,8 +486,8 @@
   min-height: 34px;
 }
 
-/* Buttons mirror the update-reminder dialog: a soft white pill for the
-   secondary action, a black pill with brand-green ink for the CTA. */
+/* Buttons mirror the what's-new dialog: a soft white pill for the secondary
+   action, a black pill with brand-green ink for the CTA. */
 .updater-popup__button {
   min-height: 34px;
   padding: 0 16px;

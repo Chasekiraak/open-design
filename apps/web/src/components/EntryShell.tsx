@@ -78,7 +78,6 @@ import type {
   ApiProtocol,
   ApiProtocolConfig,
   AppConfig,
-  AppTheme,
   ConnectionTestResponse,
   DesignSystemSummary,
   ExecMode,
@@ -131,11 +130,6 @@ import { Icon } from './Icon';
 import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
 import { AgentIcon } from './AgentIcon';
 import { CommunityView } from './CommunityView';
-import { UpdateReminderDialog, UpdateReminderStrip } from './UpdateReminderDialog';
-import {
-  markUpdateReminderSeen,
-  markUpdateReminderUpdated,
-} from '../lib/update-reminder';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
   notifyTeamProjectsChanged,
@@ -434,10 +428,6 @@ interface Props {
   onSkillsRefresh?: () => Promise<void> | void;
   onSkillsChanged?: (affectedSkillId?: string) => void;
   onRefreshAgents: () => Promise<AgentInfo[]> | AgentInfo[];
-  // Quick theme switch from the avatar-popover dropdown. Lets the user
-  // flip between system / light / dark without opening the full Settings
-  // dialog. App owns persistence; this component just calls the callback.
-  onThemeChange: (theme: AppTheme) => void;
   onCreateProject: (input: EntryCreateProjectInput) => Promise<boolean> | boolean | void;
   onCreatePluginShareProject: (
     pluginId: string,
@@ -528,21 +518,6 @@ function inactiveViewProps(active: boolean) {
   };
 }
 
-// Placeholder release payload for the update reminder. Real wiring should
-// derive version/notes from the updater release feed (see ../lib/updater);
-// until then this drives the dialog on the Community view and the collapsed
-// strip above the nav rail's account row.
-const UPDATE_REMINDER_DEMO = {
-  version: '1.4.6',
-  coverSrc: '/update-reminder-cover.jpg',
-  notes: [
-    'Faster canvas rendering with smoother pan and zoom',
-    'New community template filters and search',
-    'Fixes for project import and dark mode contrast',
-  ],
-};
-
-
 export function EntryShell({
   skills,
   designTemplates,
@@ -574,7 +549,6 @@ export function EntryShell({
   onSkillsRefresh,
   onSkillsChanged,
   onRefreshAgents,
-  onThemeChange,
   onCreateProject,
   onCreatePluginShareProject,
   onImportClaudeDesign,
@@ -866,15 +840,6 @@ export function EntryShell({
     await open();
     return true;
   }
-  // Resolve the effective light/dark theme so the rail's account-menu theme toggle
-  // flips to the opposite of what's actually shown (system → resolved).
-  const activeTheme: AppTheme = config.theme ?? 'system';
-  const resolvedDark =
-    activeTheme === 'dark' ||
-    (activeTheme === 'system' &&
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
   // Workspace-only destinations. Personal and team workspaces both use these;
   // signed-out/local state falls back to home once the context has resolved.
   // `community` is allowed in both states, so it is not guarded.
@@ -925,57 +890,6 @@ export function EntryShell({
   // route) and a reload, instead of snapping back to collapsed.
   const [railOpen, setRailOpen] = useState<boolean>(readStoredRailOpen);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
-
-  // Update reminder lifecycle: 'dialog' (unseen version, shown on the
-  // Community view) → 'strip' (dismissed; collapses to the icon button above
-  // the nav rail's account row) → 'updating' (progress shown above the
-  // button) → 'hidden' (update finished). Transitions are persisted per
-  // version (see ../lib/update-reminder).
-  const [updateReminderStage, setUpdateReminderStage] =
-    useState<'hidden' | 'dialog' | 'strip' | 'updating'>('hidden');
-  const [updateReminderProgress, setUpdateReminderProgress] = useState(0);
-  // DEMO ENTRY DISABLED: the release-dialog visual now ships on the real
-  // What's-new surface (WhatsNewPopup ← /api/whats-new), and the placeholder
-  // payload must not drive ANY reminder surface (dialog, strip, or the fake
-  // download). The stage machine, strip, and progress ring below stay intact
-  // for the real updater-feed wiring (../lib/updater) — re-enable by deriving
-  // the stage from that feed here instead of UPDATE_REMINDER_DEMO:
-  //
-  //   useEffect(() => {
-  //     if (readUpdatedUpdateReminderVersion() === feed.version) return;
-  //     setUpdateReminderStage(
-  //       readSeenUpdateReminderVersion() === feed.version ? 'strip' : 'dialog',
-  //     );
-  //   }, []);
-  const collapseUpdateReminder = useCallback(() => {
-    markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
-    setUpdateReminderStage('strip');
-  }, []);
-  const confirmUpdateReminder = useCallback(() => {
-    markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
-    setUpdateReminderProgress(0);
-    setUpdateReminderStage('updating');
-  }, []);
-  // Simulated download progress until the reminder is wired to the real
-  // updater feed (see ../lib/updater): ease toward 100% in uneven steps so the
-  // bar reads like a live download rather than a linear animation.
-  useEffect(() => {
-    if (updateReminderStage !== 'updating') return;
-    const timer = window.setInterval(() => {
-      setUpdateReminderProgress((prev) =>
-        prev >= 100 ? 100 : Math.min(100, prev + Math.max(1, Math.round((100 - prev) * 0.14))),
-      );
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [updateReminderStage]);
-  useEffect(() => {
-    if (updateReminderStage !== 'updating' || updateReminderProgress < 100) return;
-    const done = window.setTimeout(() => {
-      markUpdateReminderUpdated(UPDATE_REMINDER_DEMO.version);
-      setUpdateReminderStage('hidden');
-    }, 600);
-    return () => window.clearTimeout(done);
-  }, [updateReminderStage, updateReminderProgress]);
 
   // ⌘K / Ctrl+K opens the project search palette — same as clicking the rail
   // search box.
@@ -1340,9 +1254,10 @@ export function EntryShell({
   // #5517: the GitHub/Discord/X/mail badges and the settings chip leave the
   // rail footer. Socials live in the account menu, while settings stays
   // reachable through either the account menu or the signed-out rail item.
-  // The updater popup host also lives here (the entry topbar is gone — the
-  // rail toggle is the pinned Home tab in the workspace tabs bar); it renders
-  // nothing until an update is in flight.
+  // The updater host also lives here (the entry topbar is gone — the rail
+  // toggle is the pinned Home tab in the workspace tabs bar), which puts the
+  // bottom-left rocket indicator in this slot; it renders nothing until the
+  // real updater reports a downloaded, unopened installer.
   const railFooterActions = (
     <UpdaterPopup
       allowSilentUpdates={config.allowSilentUpdates}
@@ -1399,7 +1314,7 @@ export function EntryShell({
 
   // #5517 removes the entry top-bar settings cog: the nav-rail account menu owns
   // the settings entry (EntryNavRail onOpenSettings), so the top strip no longer
-  // carries a redundant one. Theme switching lives in 设置·通用 alone.
+  // carries a redundant one.
 
 
   if (view === 'onboarding') {
@@ -1421,7 +1336,6 @@ export function EntryShell({
             onConfigPersist={onConfigPersist}
             onRefreshAgents={onRefreshAgents}
             onFinish={finishOnboarding}
-            onThemeChange={onThemeChange}
             onGoBuild={() => {
               onCompleteOnboarding();
               refreshWorkspaceSurfacesAfterOnboarding();
@@ -1492,23 +1406,7 @@ export function EntryShell({
               workspaceLoading ? <RailAccountSyncTip /> : <CloudSignInTip />
             ) : null
           }
-          accountNotice={
-            updateReminderStage === 'strip' || updateReminderStage === 'updating' ? (
-              <UpdateReminderStrip
-                onConfirm={confirmUpdateReminder}
-                updating={updateReminderStage === 'updating'}
-                progress={updateReminderProgress}
-              />
-            ) : null
-          }
         />
-        {updateReminderStage === 'dialog' && view === 'community' ? (
-          <UpdateReminderDialog
-            content={UPDATE_REMINDER_DEMO}
-            onCancel={collapseUpdateReminder}
-            onConfirm={confirmUpdateReminder}
-          />
-        ) : null}
         {projectSearchOpen ? (
           <ProjectSearchModal
             // The same merged catalog as the All Projects grid (own + team-
@@ -1884,7 +1782,6 @@ function OnboardingView({
   onConfigPersist,
   onRefreshAgents,
   onFinish,
-  onThemeChange,
   onGoBuild,
 }: {
   config: AppConfig;
@@ -1906,7 +1803,6 @@ function OnboardingView({
   // `survey` is passed on the About-you completion paths (not on skip) so the
   // shell can build a personalized Home recommendation.
   onFinish: (survey?: { role: string; useCases: string[] }) => void;
-  onThemeChange: (theme: AppTheme) => void;
   onGoBuild: () => void;
 }) {
   const t = useT();
@@ -3158,16 +3054,8 @@ function OnboardingView({
 
   // Connect step, default face: a minimal, centered Open Design Cloud sign-in
   // landing. No stepper, no runtime cards — just the cloud CTA, a secondary
-  // link into the full runtime chooser, and a top-left language/theme bar.
+  // link into the full runtime chooser, and a top-left language bar.
   if (step === 0 && connectExpanded === null) {
-    const activeTheme: AppTheme = config.theme ?? 'system';
-    const resolvedDark =
-      activeTheme === 'dark' ||
-      (activeTheme === 'system' &&
-        typeof window !== 'undefined' &&
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
-    const themeIcon: 'sun' | 'moon' = resolvedDark ? 'moon' : 'sun';
     const cloudBusy = amrLoginPending;
     const amrStatusResolving = !amrStatusResolved;
     return (
@@ -3177,15 +3065,6 @@ function OnboardingView({
       >
         <div className="onboarding-cloud__topbar">
           <LanguageMenu compact placement="down" align="end" />
-          <button
-            type="button"
-            className="onboarding-cloud__theme"
-            aria-label={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            title={resolvedDark ? t('settings.themeLight') : t('settings.themeDark')}
-            onClick={() => onThemeChange(resolvedDark ? 'light' : 'dark')}
-          >
-            <Icon name={themeIcon} size={25} />
-          </button>
         </div>
         <div className="onboarding-cloud__center">
           <span

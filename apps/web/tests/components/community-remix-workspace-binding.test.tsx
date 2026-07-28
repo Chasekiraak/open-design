@@ -343,7 +343,6 @@ function renderEntryShellCommunity(
         onApiModelChange={vi.fn()}
         onConfigPersist={vi.fn()}
         onRefreshAgents={vi.fn(() => [codexAgent()])}
-        onThemeChange={vi.fn()}
         onCreateProject={handlers.onCreateProject ?? vi.fn(async () => true)}
         onCreatePluginShareProject={vi.fn()}
         onImportClaudeDesign={vi.fn()}

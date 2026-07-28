@@ -116,9 +116,6 @@ interface Props {
   footerExtra?: ReactNode;
   /** Optional notice shown above the footer controls. */
   footerNotice?: ReactNode;
-  /** Optional compact notice pinned directly above the account row (e.g. the
-   *  collapsed update-reminder strip). */
-  accountNotice?: ReactNode;
 }
 
 interface NavButtonProps {
@@ -462,7 +459,6 @@ export function EntryNavRail({
   onOpenSettings,
   footerExtra,
   footerNotice,
-  accountNotice,
 }: Props) {
   const { t } = useI18n();
   const brandLabel = t('app.brand');
@@ -738,7 +734,6 @@ export function EntryNavRail({
             onMouseEnter={cancelAccountClose}
             onMouseLeave={scheduleAccountClose}
           >
-            {accountNotice}
             <button
               ref={accountTriggerRef}
               type="button"
