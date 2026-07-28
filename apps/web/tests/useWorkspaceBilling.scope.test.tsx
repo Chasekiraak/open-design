@@ -461,6 +461,159 @@ describe('useWorkspaceBilling explicit scope', () => {
     );
   });
 
+  it('idles after the final same-scope consumer unmounts and reactivates on remount', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const context = teamContext('workspace-a');
+    const traffic: Array<{
+      kind: 'interest' | 'billing';
+      method: string;
+      generation: string;
+    }> = [];
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/workspace/billing/interests/')) {
+          if (init?.method === 'DELETE') {
+            traffic.push({
+              kind: 'interest',
+              method: 'DELETE',
+              generation:
+                new URL(url, 'http://open-design.test').searchParams.get(
+                  'generation',
+                ) ?? '',
+            });
+            return new Response(JSON.stringify({ ok: true, released: true }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          const body = JSON.parse(String(init?.body)) as {
+            generation: string;
+          };
+          traffic.push({
+            kind: 'interest',
+            method: init?.method ?? 'GET',
+            generation: body.generation,
+          });
+          const clientId = decodeURIComponent(
+            new URL(url, 'http://open-design.test').pathname.split('/').at(-1)!,
+          );
+          return new Response(JSON.stringify({
+            clientId,
+            acceptedGeneration: body.generation,
+            leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url === '/api/workspace/context') {
+          return new Response(JSON.stringify({ context }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/workspace/billing?')) {
+          traffic.push({
+            kind: 'billing',
+            method: init?.method ?? 'GET',
+            generation:
+              new Headers(init?.headers).get(
+                'x-od-workspace-runtime-generation',
+              ) ?? '',
+          });
+          return new Response(
+            JSON.stringify(billingResponse('workspace-a', '1.25')),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    const firstMount = renderHook(() => ({
+      first: useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+      second: useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+    }));
+    await vi.waitFor(() => {
+      expect(firstMount.result.current.first?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+      expect(firstMount.result.current.second?.workspaceBalance?.balanceUsd).toBe(
+        '1.25',
+      );
+    });
+    expect(traffic.filter(({ kind }) => kind === 'billing')).toEqual([
+      { kind: 'billing', method: 'GET', generation: '1' },
+    ]);
+    expect(
+      traffic.filter(
+        ({ kind, method }) => kind === 'interest' && method === 'PUT',
+      ),
+    ).toEqual([{ kind: 'interest', method: 'PUT', generation: '1' }]);
+
+    firstMount.unmount();
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(
+          ({ kind, method }) => kind === 'interest' && method === 'DELETE',
+        ),
+      ).toEqual([{ kind: 'interest', method: 'DELETE', generation: '2' }]);
+    });
+    const billingReadsAtIdle = traffic.filter(
+      ({ kind }) => kind === 'billing',
+    ).length;
+    const idleStartedAt = traffic.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_000);
+    });
+    expect(traffic.filter(({ kind }) => kind === 'billing')).toHaveLength(
+      billingReadsAtIdle,
+    );
+    expect(traffic.slice(idleStartedAt)).toEqual([]);
+
+    const remountStartedAt = traffic.length;
+    const remount = renderHook(() =>
+      useWorkspaceBillingResponse({
+        context,
+        revision: 'same-scope',
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(({ kind }) => kind === 'billing'),
+      ).toHaveLength(billingReadsAtIdle + 1);
+    });
+    expect(traffic.slice(remountStartedAt)).toEqual([
+      { kind: 'interest', method: 'PUT', generation: '3' },
+      { kind: 'billing', method: 'GET', generation: '3' },
+    ]);
+    remount.unmount();
+    await vi.waitFor(() => {
+      expect(
+        traffic.filter(
+          ({ kind, method }) => kind === 'interest' && method === 'DELETE',
+        ),
+      ).toEqual([
+        { kind: 'interest', method: 'DELETE', generation: '2' },
+        { kind: 'interest', method: 'DELETE', generation: '4' },
+      ]);
+    });
+  });
+
   it('rejects a late response from the first A after switching A to B to A', async () => {
     let currentContext = teamContext('workspace-a');
     let billingACalls = 0;
