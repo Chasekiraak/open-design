@@ -32,6 +32,15 @@ function stagedAttachmentName(page: Page, name: string): Locator {
     .getByText(name, { exact: true });
 }
 
+function isDesignFileUploadResponse(response: Response): boolean {
+  const url = new URL(response.url());
+  return (
+    response.request().method() === 'POST'
+    && url.pathname.startsWith('/api/projects/')
+    && url.pathname.endsWith('/upload')
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((key) => {
     window.localStorage.setItem(
@@ -132,6 +141,9 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
   await sendPrompt(page, 'Create a workspace persistence artifact');
   await expect(page.getByText('workspace-artifact.html', { exact: true }).first()).toBeVisible();
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'manual-reference.png',
     mimeType: 'image/png',
@@ -140,6 +152,7 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
 
   const artifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
   const manualFileTab = tabBySuffix(page, 'manual-reference.png');
@@ -366,6 +379,9 @@ test('[P0] returning from an uploaded design file route to the project root keep
   await createPrototypeProject(page, 'Uploaded file root route restore');
   await expectWorkspaceReady(page);
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'root-design-reference.png',
     mimeType: 'image/png',
@@ -374,6 +390,7 @@ test('[P0] returning from an uploaded design file route to the project root keep
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
   const fileTab = tabBySuffix(page, 'root-design-reference.png');
   await expect(fileTab).toBeVisible();
   const uploadedName = await fileTab.getAttribute('title');
