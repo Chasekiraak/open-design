@@ -74,7 +74,9 @@ const EXPORT_DECK_FIT_SCRIPT = `<script data-od-export-deck-fit="1">
   var ownedTransform = '';
 
   function deckRoot() {
-    return document.querySelector('.deck-stage, .deck-viewport');
+    return document.querySelector('.deck-stage, .deck-viewport') ||
+      document.querySelector('[data-od-id="deck-root"]') ||
+      document.querySelector('.deck');
   }
 
   function dimension(element, property) {

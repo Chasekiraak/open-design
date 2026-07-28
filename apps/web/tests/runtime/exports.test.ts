@@ -794,6 +794,34 @@ describe('exportProjectAsHtml', () => {
     dom.window.close();
   });
 
+  it('fits a generated deck root that uses the standard deck wrapper', async () => {
+    const source = `<!doctype html><html><head><style>
+      .deck { width: 1920px; height: 1080px; }
+      .slide { width: 1920px; height: 1080px; }
+    </style></head><body>
+      <main class="deck" data-od-id="deck-root">
+        <section class="slide active">A</section>
+      </main>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      beforeParse(window) {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+      },
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    const root = dom.window.document.querySelector<HTMLElement>('[data-od-id="deck-root"]');
+    expect(root?.getAttribute('data-od-export-fit-owned')).toBe('true');
+    expect(root?.style.transform).toContain('scale(0.7333333333333333)');
+    expect(dom.window.document.body.style.overflow).toBe('hidden');
+    dom.window.close();
+  });
+
   it('does not override a deck that already owns scale-to-fit', async () => {
     const source = `<!doctype html><html><head><style>
       .deck-stage { width: 1920px; height: 1080px; transform: scale(0.5); }
@@ -811,6 +839,32 @@ describe('exportProjectAsHtml', () => {
     const root = dom.window.document.querySelector<HTMLElement>('.deck-stage');
     expect(root?.getAttribute('data-od-export-fit-owned')).toBeNull();
     expect(dom.window.getComputedStyle(root!).transform).toBe('scale(0.5)');
+    expect(dom.window.document.body.style.overflow).toBe('');
+    dom.window.close();
+  });
+
+  it('prefers an existing fitted stage over a standard deck wrapper', async () => {
+    const source = `<!doctype html><html><head><style>
+      .deck { width: 1920px; height: 1080px; }
+      .deck-stage { width: 1920px; height: 1080px; transform: scale(0.5); }
+    </style></head><body>
+      <main class="deck">
+        <div class="deck-stage"><section class="slide active">A</section></div>
+      </main>
+    </body></html>`;
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+    });
+
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    const wrapper = dom.window.document.querySelector<HTMLElement>('.deck');
+    const stage = dom.window.document.querySelector<HTMLElement>('.deck-stage');
+    expect(wrapper?.getAttribute('data-od-export-fit-owned')).toBeNull();
+    expect(stage?.getAttribute('data-od-export-fit-owned')).toBeNull();
+    expect(dom.window.getComputedStyle(stage!).transform).toBe('scale(0.5)');
     expect(dom.window.document.body.style.overflow).toBe('');
     dom.window.close();
   });
