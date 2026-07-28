@@ -10,6 +10,7 @@ import {
   settingsSectionToTracking,
 } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
+import { byokErrorCode } from '../analytics/byok-error-code';
 import {
   amrHandoffDeviceId,
   attributedAmrUrl,
@@ -135,6 +136,7 @@ import type { MediaProvider } from '../media/models';
 import { Toast } from './Toast';
 import {
   checkForUpdaterUpdate,
+  clearUpdaterCache,
   deriveUpdaterModel,
   downloadUpdaterUpdate,
   openUpdaterInstaller,
@@ -1263,7 +1265,8 @@ function sameAgentModelChoice(
   right: AgentModelChoice | undefined,
 ): boolean {
   return (left?.model ?? null) === (right?.model ?? null)
-    && (left?.reasoning ?? null) === (right?.reasoning ?? null);
+    && (left?.reasoning ?? null) === (right?.reasoning ?? null)
+    && (left?.serviceTier ?? null) === (right?.serviceTier ?? null);
 }
 
 export function reconcileAmrProfileEnv(
@@ -1868,6 +1871,9 @@ export function SettingsDialog({
   const [aboutUpdateActionBusy, setAboutUpdateActionBusy] = useState(false);
   const [aboutUpdateQuitFailed, setAboutUpdateQuitFailed] = useState(false);
   const [aboutToast, setAboutToast] = useState<string | null>(null);
+  // Two-stage inline confirm for the destructive manual cache clear.
+  const [clearUpdaterCacheStage, setClearUpdaterCacheStage] = useState<'idle' | 'confirm'>('idle');
+  const [clearUpdaterCacheBusy, setClearUpdaterCacheBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -1976,6 +1982,29 @@ export function SettingsDialog({
   const handleOpenReleaseNotes = useCallback(() => {
     void openExternalUrl(OPEN_DESIGN_RELEASES_URL);
   }, []);
+
+  // Manual updater/launcher cache clear — the disaster-recovery action for
+  // stuck update state. The desktop owns the capability; this handler only
+  // reports the outcome and refreshes the About updater model.
+  const handleClearUpdaterCache = useCallback(() => {
+    if (clearUpdaterCacheBusy) return;
+    setClearUpdaterCacheBusy(true);
+    void (async () => {
+      try {
+        const result = await clearUpdaterCache();
+        if (result.ok) {
+          setAboutUpdaterModel(result.model);
+          setAboutToast(t('settings.clearUpdaterCacheSuccess'));
+        } else {
+          setAboutToast(t('settings.clearUpdaterCacheFailed'));
+        }
+      } finally {
+        setClearUpdaterCacheBusy(false);
+        setClearUpdaterCacheStage('idle');
+      }
+    })();
+  }, [clearUpdaterCacheBusy, t]);
+
 
   // Imperative handle for the External MCP section. The dialog footer Save
   // routes through this when the MCP tab is active so the user can press the
@@ -2437,6 +2466,7 @@ export function SettingsDialog({
           agentId: selected.id,
           model: choice.model || undefined,
           reasoning: choice.reasoning || undefined,
+          serviceTier: choice.serviceTier || undefined,
           agentCliEnv: cfg.agentCliEnv ?? {},
         },
         controller.signal,
@@ -2573,7 +2603,7 @@ export function SettingsDialog({
           area: 'execution_model',
           provider_id: byokProviderId,
           result: byokTrackingTestResult(result),
-          ...(result.ok ? {} : { error_code: result.kind || 'UNKNOWN' }),
+          ...(result.ok ? {} : { error_code: byokErrorCode(result) }),
           ...(result.ok ? {} : { error_kind: result.kind || 'UNKNOWN' }),
           field_missing: 'none',
           config_key_changed: configKeyChanged,
@@ -3879,15 +3909,22 @@ export function SettingsDialog({
         ? choice.model
         : null;
     const setChoice = (
-      next: { model?: string; reasoning?: string },
+      next: { model?: string; reasoning?: string; serviceTier?: string },
     ) => {
       setCfg((c) => {
         const prev = c.agentModels?.[selected.id] ?? {};
+        const merged = { ...prev, ...next };
+        if (
+          Object.prototype.hasOwnProperty.call(next, 'serviceTier') &&
+          next.serviceTier === undefined
+        ) {
+          delete merged.serviceTier;
+        }
         return {
           ...c,
           agentModels: {
             ...(c.agentModels ?? {}),
-            [selected.id]: { ...prev, ...next },
+            [selected.id]: merged,
           },
         };
       });
@@ -3957,7 +3994,7 @@ export function SettingsDialog({
                         next.add(selected.id);
                         return next;
                       });
-                      setChoice({ model: '' });
+                      setChoice({ model: '', serviceTier: undefined });
                     } else {
                       setAgentCustomModelIds((prev) => {
                         if (!prev.has(selected.id)) return prev;
@@ -3965,7 +4002,17 @@ export function SettingsDialog({
                         next.delete(selected.id);
                         return next;
                       });
-                      setChoice({ model: nextValue });
+                      const nextModelOption = selected.models?.find((m) => m.id === nextValue);
+                      const nextServiceTierOptions =
+                        nextModelOption?.serviceTierOptions ?? [];
+                      setChoice({
+                        model: nextValue,
+                        serviceTier: nextServiceTierOptions.some(
+                          (tier) => tier.id === choice.serviceTier,
+                        )
+                          ? choice.serviceTier
+                          : undefined,
+                      });
                     }
                   }}
                   additionalOptions={
@@ -4015,7 +4062,7 @@ export function SettingsDialog({
               value={modelValue}
               placeholder={t('settings.modelCustomPlaceholder')}
               onChange={(e) =>
-                setChoice({ model: e.target.value.trim() })
+                setChoice({ model: e.target.value.trim(), serviceTier: undefined })
               }
             />
           </label>
@@ -5953,6 +6000,41 @@ export function SettingsDialog({
                   </span>
                 </label>
               </div>
+              {aboutUpdaterModel.environment === 'desktop'
+                && aboutUpdaterModel.supported
+                && appVersionInfo?.packaged !== false ? (
+                <div className="settings-about-diagnostics">
+                  <div className="settings-about-diagnostics-text">
+                    <h4>{t('settings.clearUpdaterCacheTitle')}</h4>
+                    <p className="hint">{t('settings.clearUpdaterCacheHint')}</p>
+                  </div>
+                  {clearUpdaterCacheStage === 'confirm' ? (
+                    <>
+                      <Button
+                        disabled={clearUpdaterCacheBusy}
+                        onClick={() => setClearUpdaterCacheStage('idle')}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                      <Button
+                        data-testid="settings-clear-updater-cache-confirm"
+                        disabled={clearUpdaterCacheBusy || aboutUpdaterModel.busy}
+                        onClick={handleClearUpdaterCache}
+                      >
+                        {t('settings.clearUpdaterCacheConfirmButton')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      data-testid="settings-clear-updater-cache"
+                      disabled={clearUpdaterCacheBusy || aboutUpdaterModel.busy}
+                      onClick={() => setClearUpdaterCacheStage('confirm')}
+                    >
+                      {t('settings.clearUpdaterCacheButton')}
+                    </Button>
+                  )}
+                </div>
+              ) : null}
               <div className="settings-about-diagnostics">
                 <div className="settings-about-diagnostics-text">
                   <h4>{t('diagnostics.exportTitle')}</h4>

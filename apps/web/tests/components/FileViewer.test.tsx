@@ -3516,7 +3516,7 @@ describe('FileViewer SVG artifacts', () => {
   });
 
   // recvq56lzckGtE: publishing a file from a real team workspace 403'd against
-  // the daemon's `canShareProjectsForRequest` gate (apps/daemon/src/routes/
+  // the daemon's `canShareProjectsForRequest` gate (daemon routes,
   // collab-sync.ts), which reads `x-od-workspace-can-share-projects` etc. and
   // falls back to a headerless context re-read (often false/denied) when those
   // headers are missing. `publishProjectFilePublic`/`fetchProjectFilePublicPublication`/

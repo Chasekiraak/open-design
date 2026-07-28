@@ -687,7 +687,9 @@ test('[P1] Settings About reads desktop updater status and runs a manual update 
         download: async () => checkedStatus,
         install: async () => checkedStatus,
         quit: async () => ({ ok: true }),
+        setMenuLabels: async () => ({ ok: true }),
         subscribe: () => () => {},
+        subscribeOpenDialog: () => () => {},
       },
     };
   });
@@ -727,6 +729,189 @@ test('[P1] Settings About reads desktop updater status and runs a manual update 
 // `EntryHelpMenu` is no longer rendered anywhere — and so did the topbar's
 // "Use everywhere" button. Its spec is gone; the Use-everywhere guide itself
 // still lives on the Integrations view and is covered below.
+test('[P1] Settings About surfaces prerelease updater check failures with retry affordance', async ({ page }) => {
+  await page.addInitScript(() => {
+    const idleStatus = {
+      arch: 'arm64',
+      capabilities: {
+        canApplyInPlace: false,
+        canDownload: true,
+        canOpenInstaller: true,
+        requiresManualInstall: false,
+      },
+      channel: 'prerelease',
+      currentVersion: '0.16.0-prerelease.1',
+      enabled: true,
+      mode: 'package-launcher',
+      platform: 'darwin',
+      state: 'idle',
+      supported: true,
+    };
+    const failedStatus = {
+      ...idleStatus,
+      error: {
+        code: 'metadata-fetch-failed',
+        message: 'prerelease metadata returned 503',
+      },
+      lastCheckedAt: '2026-07-21T12:00:00.000Z',
+      state: 'error',
+    };
+    (window as unknown as { __odUpdaterCalls?: string[] }).__odUpdaterCalls = [];
+    (window as unknown as { __od__?: unknown }).__od__ = {
+      version: 2,
+      client: { type: 'desktop', platform: 'darwin', osLocale: 'en-US' },
+      browser: { clearData: async () => ({ ok: true }) },
+      capture: { page: async () => ({ ok: false, reason: 'not mocked' }) },
+      pdf: { print: async () => ({ ok: true }) },
+      pet: { setVisible: () => {} },
+      project: {
+        pickAndImport: async () => ({ ok: false, canceled: true }),
+        pickAndReplaceWorkingDir: async () => ({ ok: false, canceled: true }),
+      },
+      shell: {
+        openExternal: async () => ({ ok: true }),
+        openPath: async () => ({ ok: true }),
+      },
+      updater: {
+        status: async () => idleStatus,
+        check: async () => {
+          (window as unknown as { __odUpdaterCalls: string[] }).__odUpdaterCalls.push('check');
+          return failedStatus;
+        },
+        download: async () => failedStatus,
+        install: async () => failedStatus,
+        quit: async () => ({ ok: true }),
+        setMenuLabels: async () => ({ ok: true }),
+        subscribe: () => () => {},
+        subscribeOpenDialog: () => () => {},
+      },
+    };
+  });
+  await page.route('**/api/version', async (route) => {
+    await route.fulfill({
+      json: {
+        version: {
+          version: '0.16.0-prerelease.1',
+          channel: 'prerelease',
+          packaged: true,
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+      },
+    });
+  });
+
+  await gotoEntryHome(page);
+  await page.getByTestId('entry-settings-menu-trigger').click();
+  await page.getByTestId('entry-settings-open-details').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole('button', { name: /^About\b/i }).click();
+  await expect(dialog.locator('.settings-about-version-num')).toContainText('0.16.0-prerelease.1');
+  await expect(dialog.locator('.settings-about-update-status')).toContainText('Not checked yet');
+
+  await dialog.getByRole('button', { name: 'Check for updates' }).click();
+  await expect(dialog.locator('.settings-about-update-status')).toContainText('Update failed');
+  await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __odUpdaterCalls?: string[] }).__odUpdaterCalls ?? []))
+    .toEqual(['check']);
+});
+
+test('[P1] Settings BYOK connection failures emit a classified analytics error code', async ({ page }) => {
+  const byokConfig = {
+    mode: 'api',
+    apiKey: 'sk-openai-e2e',
+    apiProtocol: 'openai',
+    apiVersion: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    apiProviderBaseUrl: 'https://api.openai.com/v1',
+    agentId: 'codex',
+    skillId: null,
+    designSystemId: null,
+    onboardingCompleted: true,
+    privacyDecisionAt: 1,
+    telemetry: { metrics: true, content: false, artifactManifest: false },
+    agentModels: { codex: { model: 'default' } },
+  };
+  await page.addInitScript(
+    ({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    },
+    { key: STORAGE_KEY, value: byokConfig },
+  );
+
+  await page.route('**/api/app-config', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ json: { config: byokConfig } });
+  });
+  await page.route('**/api/analytics/config', async (route) => {
+    const origin = new URL(route.request().url()).origin;
+    await route.fulfill({
+      json: {
+        enabled: true,
+        key: 'phc_e2e',
+        host: origin,
+        env: 'test',
+        installationId: 'e2e-byok-error-device',
+      },
+    });
+  });
+
+  const analyticsPayloads: string[] = [];
+  for (const pattern of ['**/e/**', '**/batch/**', '**/capture/**', '**/decide/**']) {
+    await page.route(pattern, async (route) => {
+      analyticsPayloads.push(route.request().postData() ?? route.request().url());
+      await route.fulfill({ json: { status: 1 } });
+    });
+  }
+
+  await page.route('**/api/test/connection', async (route) => {
+    expect(route.request().method()).toBe('POST');
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    expect(body).toMatchObject({
+      mode: 'provider',
+      protocol: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-openai-e2e',
+      model: 'gpt-4o-mini',
+    });
+    await route.fulfill({
+      json: {
+        ok: false,
+        kind: 'unknown',
+        status: 402,
+        latencyMs: 12,
+        model: 'gpt-4o-mini',
+        detail: 'provider reported insufficient credits',
+      },
+    });
+  });
+
+  await gotoEntryHome(page);
+  await page.getByTestId('entry-settings-menu-trigger').click();
+  await page.getByTestId('entry-settings-open-details').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+
+  const connectionTest = dialog.locator('.settings-byok-connection-test');
+  await expect(connectionTest).toBeVisible();
+  await connectionTest.getByRole('button', { name: /^Test$/ }).click();
+  await expect(dialog.getByRole('alert')).toContainText(/insufficient credits/i);
+
+  await expect
+    .poll(() => analyticsPayloads.join('\n'), { timeout: 15_000 })
+    .toContain('settings_byok_test_result');
+  const captured = analyticsPayloads.join('\n');
+  expect(captured).toContain('HTTP_402');
+  expect(captured).toContain('unknown');
+});
+
 
 test('[P1] Use everywhere guide uses daemon MCP install info and copies an agent guide', async ({ page }) => {
   await page.addInitScript(() => {

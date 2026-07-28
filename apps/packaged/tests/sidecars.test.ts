@@ -19,13 +19,14 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, posix } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createJsonIpcServer, resolveAppIpcPath } from '@open-design/sidecar';
 import { APP_KEYS, OPEN_DESIGN_SIDECAR_CONTRACT } from '@open-design/sidecar-proto';
 
 import {
   buildPackagedDaemonSpawnEnv,
+  createPackagedSidecarSpawnOptions,
   resolveDaemonStatusTimeoutMs,
   resolvePackagedChildBaseEnv,
   resolvePackagedElectronNodeCommand,
@@ -352,6 +353,28 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     };
   }
 
+  it('uses the namespace runtime root for child processes without reading cwd', () => {
+    const cwd = vi.spyOn(process, 'cwd').mockImplementation(() => {
+      throw new Error('uv_cwd');
+    });
+
+    try {
+      expect(createPackagedSidecarSpawnOptions({
+        env: { NODE_ENV: 'production' },
+        logFd: 42,
+        paths: fakePaths(),
+      })).toEqual({
+        cwd: '/tmp/od-pkg/runtime',
+        env: { NODE_ENV: 'production' },
+        stdio: ['ignore', 42, 42],
+        windowsHide: true,
+      });
+      expect(cwd).not.toHaveBeenCalled();
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it('sets OD_REQUIRE_DESKTOP_AUTH=1 when requireDesktopAuth=true (Electron entry)', () => {
     const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
       appVersion: '1.2.3',
@@ -364,6 +387,26 @@ describe('buildPackagedDaemonSpawnEnv', () => {
     expect(env.OD_RESOURCE_ROOT).toBe('/tmp/od-pkg/resources');
     expect(env.OD_APP_VERSION).toBe('1.2.3');
     expect(env.OD_LEGACY_DATA_DIR).toBeUndefined();
+  });
+
+  it('forwards updater controls needed by a historical desktop handoff', () => {
+    const env = buildPackagedDaemonSpawnEnv(fakePaths(), {
+      appVersion: '1.2.3',
+      daemonCliEntry: null,
+      desktopHandoffEnv: {
+        OD_UPDATE_CURRENT_VERSION: '1.2.3',
+        OD_UPDATE_INSTALLED_VERSION: '1.0.0',
+        OD_UPDATE_METADATA_URL: 'http://127.0.0.1:54321/stable/latest/metadata.json',
+        PATH: 'must-not-leak-through-handoff-env',
+      },
+      legacyDataDir: null,
+      requireDesktopAuth: true,
+    });
+
+    expect(env.OD_UPDATE_CURRENT_VERSION).toBe('1.2.3');
+    expect(env.OD_UPDATE_INSTALLED_VERSION).toBe('1.0.0');
+    expect(env.OD_UPDATE_METADATA_URL).toBe('http://127.0.0.1:54321/stable/latest/metadata.json');
+    expect(env.PATH).toBeUndefined();
   });
 
   it('omits OD_REQUIRE_DESKTOP_AUTH entirely when requireDesktopAuth=false (headless)', () => {

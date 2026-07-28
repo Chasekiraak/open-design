@@ -165,6 +165,25 @@ describe('analytics run_finished contract', () => {
     expect(finished.props.retry_suppressed_reason).toBe('tool_call_seen');
   });
 
+  it.each(['tool_outstanding', 'post_tool_resume'] as const)(
+    'accepts the %s failure stage for run outcomes',
+    (failureStage) => {
+      const payload = {
+        event: 'run_finished',
+        props: {
+          ...makeBaseRunFinishedProps(),
+          failure_category: 'timeout',
+          failure_detail: 'inactivity_timeout',
+          failure_stage: failureStage,
+          retryable: true,
+          user_action: 'retry',
+        },
+      } satisfies Extract<AnalyticsEventPayload, { event: 'run_finished' }>;
+
+      expect(payload.props.failure_stage).toBe(failureStage);
+    },
+  );
+
   it('accepts Langfuse report result events for actual delivery monitoring', () => {
     const payload = {
       event: 'langfuse_report_result',

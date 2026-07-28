@@ -4,6 +4,7 @@ import {
   buildPersistedConfig,
   isAutosaveDraftOnlyChange,
   hydrateReadyTeamProject,
+  mergeAgentModelChoice,
   persistComposioConfigChange,
   projectViewAuthorizationLifetimeKey,
   resolveDeepLinkedTeamSharedProject,
@@ -145,6 +146,34 @@ describe('projectViewAuthorizationLifetimeKey', () => {
       workspaceMemberId: 'member-b',
     })).not.toBe(initial);
     expect(projectViewAuthorizationLifetimeKey(projectId, null)).not.toBe(initial);
+  });
+});
+
+describe('mergeAgentModelChoice', () => {
+  it('preserves serviceTier when an unrelated update omits the key', () => {
+    expect(
+      mergeAgentModelChoice(
+        { model: 'gpt-5.5', reasoning: 'default', serviceTier: 'priority' },
+        { reasoning: 'high' },
+      ),
+    ).toEqual({
+      model: 'gpt-5.5',
+      reasoning: 'high',
+      serviceTier: 'priority',
+    });
+  });
+
+  it('removes serviceTier only when the update explicitly clears it', () => {
+    const merged = mergeAgentModelChoice(
+      { model: 'gpt-5.5', reasoning: 'default', serviceTier: 'priority' },
+      { serviceTier: undefined },
+    );
+
+    expect(merged).toEqual({
+      model: 'gpt-5.5',
+      reasoning: 'default',
+    });
+    expect(Object.prototype.hasOwnProperty.call(merged, 'serviceTier')).toBe(false);
   });
 });
 
