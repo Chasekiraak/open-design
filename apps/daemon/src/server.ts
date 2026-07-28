@@ -144,6 +144,7 @@ import {
   scanRunEventsForFinishedProps,
   scanRunEventsForRetrySideEffects,
 } from './runtimes/run-lifecycle-analytics.js';
+import { runAskedUserQuestion } from './runtimes/run-artifacts.js';
 export {
   composeLiveInstructionPrompt,
   formatDesignFilesWorkspaceHint,
@@ -4927,6 +4928,7 @@ export async function startServer({
         artifactCount: runArtifactCountForRun(run),
         designSystemCreated: runDesignSystemCreatedForRun(run),
         previewModuleCount: runPreviewModuleCountForRun(run),
+        baselineHadTrackedFiles: true,
       });
       let outcome;
       if (!artifactBaseline || artifactBaseline.contended) {
@@ -4943,6 +4945,7 @@ export async function startServer({
             artifactsModified: diff.modified,
             designSystemCreated: diff.designSystemCreated,
             previewModuleCount: diff.previewModuleCount,
+            baselineHadTrackedFiles: artifactBaseline.before.size > 0,
             projectRoot: artifactBaseline.cwd,
             diff,
           };
@@ -4967,6 +4970,37 @@ export async function startServer({
         ...(promptInfo.promptSource ? { promptSource: promptInfo.promptSource } : {}),
         metadata: projectRecord?.metadata,
       });
+    };
+    const requiresArtifactDeliveryForRun = () => {
+      if (executionProfile !== 'filesystem') return false;
+      if (run.sessionMode === 'chat' || run.sessionMode === 'plan') return false;
+      const kind = projectRecord?.metadata && typeof projectRecord.metadata.kind === 'string'
+        ? projectRecord.metadata.kind
+        : null;
+      return kind === 'deck' || kind === 'prototype' || kind === 'template' || kind === 'other';
+    };
+    const maybeFailSucceededRunWithoutArtifact = (status, code) => {
+      if (status !== 'succeeded') return { status, code };
+      if (!requiresArtifactDeliveryForRun()) return { status, code };
+      if (runAskedUserQuestion(run.events)) return { status, code };
+      const outcome = resolveRunArtifactOutcomeBeforeFinish();
+      const produced =
+        (outcome?.artifactCount ?? 0) > 0 ||
+        outcome?.designSystemCreated === true ||
+        (outcome?.previewModuleCount ?? 0) > 0;
+      if (produced) return { status, code };
+      if (outcome?.baselineHadTrackedFiles !== false) return { status, code };
+      const message = 'Agent finished without producing a project artifact.';
+      run.error = run.error || message;
+      run.errorCode = run.errorCode || 'NO_ARTIFACT_PRODUCED';
+      run.forceEndedWithUnfinishedWork = true;
+      design.runs.emit(run, 'diagnostic', {
+        type: 'artifact_delivery_missing',
+        source: 'daemon-run-finalize',
+        projectKind: projectRecord?.metadata?.kind ?? null,
+        artifactCount: outcome?.artifactCount ?? 0,
+      });
+      return { status: 'failed', code: typeof code === 'number' && code !== 0 ? code : 1 };
     };
     // Chain onto the run service's terminal chokepoint so startup rejection,
     // direct cancellation, shutdown, and every explicit finish path all consume
@@ -5623,6 +5657,7 @@ export async function startServer({
         ...(signal ? { signal } : {}),
       });
       pendingRpcCloseReason = null;
+      ({ status, code } = maybeFailSucceededRunWithoutArtifact(status, code));
       const result = runResultFromStatus(status);
       const errorCode = deriveRunErrorCode({
         status,
