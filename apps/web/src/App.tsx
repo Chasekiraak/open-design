@@ -144,7 +144,7 @@ import type {
   PluginShareProjectOutcome,
   WorkspaceProjectListView,
 } from './state/projects';
-import type { OpenDesignHostProjectImportSuccess } from '@open-design/host';
+import { getOpenDesignHost, type OpenDesignHostProjectImportSuccess } from '@open-design/host';
 import { useI18n } from './i18n';
 import { liveArtifactTabId } from './types';
 import type {
@@ -665,6 +665,7 @@ function AppInner() {
   const { t } = useI18n();
   const iframeKeepAlivePool = useIframeKeepAlivePool();
   const clientType = useMemo(() => detectClientType(), []);
+  const hostPlatform = useMemo(() => getOpenDesignHost()?.client.platform, []);
   useModalWindowDragGuard();
   const workspaceContextState = useWorkspaceContext();
   const {
@@ -716,7 +717,11 @@ function AppInner() {
   // scrim to let the wallpaper show through more clearly; on focus the scrim
   // returns to full strength (app-wash.css keys off this class).
   useEffect(() => {
-    if (clientType !== 'desktop' || typeof window === 'undefined') return undefined;
+    if (
+      clientType !== 'desktop'
+      || hostPlatform !== 'darwin'
+      || typeof window === 'undefined'
+    ) return undefined;
     const root = document.documentElement;
     const sync = () => root.classList.toggle('is-window-blurred', !document.hasFocus());
     sync();
@@ -727,7 +732,7 @@ function AppInner() {
       window.removeEventListener('blur', sync);
       root.classList.remove('is-window-blurred');
     };
-  }, [clientType]);
+  }, [clientType, hostPlatform]);
   const [config, setConfig] = useState<AppConfig>(() => loadConfig());
   const configRef = useRef(config);
   configRef.current = config;
@@ -3497,6 +3502,7 @@ function AppInner() {
       <div
         className={`workspace-shell workspace-shell--${clientType}`}
         data-client-type={clientType}
+        data-host-platform={hostPlatform}
       >
         <WorkspaceTabsBar
           route={route}
