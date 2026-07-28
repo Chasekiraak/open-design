@@ -120,6 +120,51 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.ancestors.map((a) => a.tag)).toEqual(['deck-stage']);
   });
 
+  it('uses the real stage size instead of a slide-descendant decoration size', () => {
+    // Regression: `.stage` is the real 1920×1080 canvas, while the broad
+    // `.slide` selector heuristic also matched `.slide-title .accent-dot` and
+    // returned its first width/height pair (10×10). The thumbnail renderer then
+    // clipped the full slide into that tiny canvas and painted an empty frame.
+    const html = `<!doctype html><html><head><style>
+      .stage { position: relative; width: 1920px; height: 1080px; }
+      .slide { position: absolute; inset: 0; }
+      .slide-title .accent-dot { width: 10px; height: 10px; }
+    </style></head><body><main class="stage">
+      <section class="slide slide-title active" data-screen-label="01">
+        <span class="accent-dot"></span><h1>Aether</h1>
+      </section>
+    </main></body></html>`;
+    const parsed = parseDeckThumbnails(html);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.designWidth).toBe(1920);
+    expect(parsed.designHeight).toBe(1080);
+  });
+
+  it('falls back instead of accepting an implausibly small slide canvas', () => {
+    const html = `<!doctype html><html><head><style>
+      .slide { width: 10px; height: 10px; }
+    </style></head><body>
+      <section class="slide active" data-screen-label="01">A</section>
+    </body></html>`;
+    const parsed = parseDeckThumbnails(html);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.designWidth).toBe(1920);
+    expect(parsed.designHeight).toBe(1080);
+  });
+
+  it('preserves a valid portrait canvas instead of forcing a 16:9 ratio', () => {
+    const html = `<!doctype html><html><head><style>
+      .stage { width: 1080px; height: 1920px; }
+      .slide { position: absolute; inset: 0; }
+    </style></head><body><main class="stage">
+      <section class="slide active" data-screen-label="01">Portrait</section>
+    </main></body></html>`;
+    const parsed = parseDeckThumbnails(html);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.designWidth).toBe(1080);
+    expect(parsed.designHeight).toBe(1920);
+  });
+
   it('rewrites viewport units in CSS to canvas px (renderable, faithful)', () => {
     // No explicit px canvas → defaults to 1920×1080; 100vw→1920px, 100vh→1080px.
     const html = `<!doctype html><html><head><style>

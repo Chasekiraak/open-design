@@ -155,7 +155,7 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
   );
   if (!rawStyle.trim()) return unrenderable('no-styles');
 
-  const designSize = resolveDesignSize(doc, rawStyle);
+  const designSize = resolveDesignSize(doc, rawStyle, slideEls[0]!);
 
   // Rewrite viewport units to their px-equivalent against the design canvas so
   // `4vh` on a 1080-tall slide becomes `calc(4 * 10.8px)`. Inside a shadow root
@@ -233,27 +233,53 @@ interface DesignSize {
   height: number;
 }
 
-// Design canvas size (viewport-unit decks are already excluded upstream):
-// explicit `<deck-stage width height>`, then an explicit px `width`+`height` on
-// a stage/slide rule, else the 1920×1080 default.
-const STAGE_SIZE_SELECTOR_RE =
-  /(?:\bdeck-stage\b|\.deck-stage\b|\.canvas\b|#deck\b|\.deck\b|\.slide\b|\.ppt-slide\b|\.deck-slide\b|\[data-screen-label\])/i;
+const MIN_DESIGN_DIMENSION = 180;
 
-function resolveDesignSize(doc: Document, css: string): DesignSize {
-  const stage = doc.querySelector('deck-stage[width][height]');
+function isPlausibleDesignSize(width: number, height: number): boolean {
+  return width >= MIN_DESIGN_DIMENSION
+    && height >= MIN_DESIGN_DIMENSION;
+}
+
+// Design canvas size: explicit `<deck-stage width height>`, then an explicit
+// px width/height rule that matches the first slide's real ancestor chain or
+// the slide itself, else the 1920×1080 default. Matching actual elements avoids
+// mistaking descendant decoration rules such as
+// `.slide-title .accent-dot { width:10px; height:10px }` for the canvas.
+function resolveDesignSize(doc: Document, css: string, slide: Element): DesignSize {
+  const stage = slide.closest('deck-stage[width][height]')
+    ?? doc.querySelector('deck-stage[width][height]');
   if (stage) {
     const w = Number(stage.getAttribute('width'));
     const h = Number(stage.getAttribute('height'));
-    if (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0) {
+    if (Number.isFinite(w) && Number.isFinite(h) && isPlausibleDesignSize(w, h)) {
       return { width: w, height: h };
     }
   }
 
-  for (const block of iterateRuleBlocks(css)) {
-    if (!STAGE_SIZE_SELECTOR_RE.test(block.selector)) continue;
-    const width = matchPxLength(block.body, 'width');
-    const height = matchPxLength(block.body, 'height');
-    if (width && height) return { width, height };
+  const candidates: Element[] = [];
+  let node = slide.parentElement;
+  while (node) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'body' || tag === 'html') break;
+    candidates.push(node);
+    node = node.parentElement;
+  }
+  candidates.push(slide);
+
+  const blocks = Array.from(iterateRuleBlocks(css));
+  for (const candidate of candidates) {
+    for (const block of blocks) {
+      try {
+        if (!candidate.matches(block.selector)) continue;
+      } catch {
+        continue;
+      }
+      const width = matchPxLength(block.body, 'width');
+      const height = matchPxLength(block.body, 'height');
+      if (width !== null && height !== null && isPlausibleDesignSize(width, height)) {
+        return { width, height };
+      }
+    }
   }
 
   return { width: DEFAULT_DESIGN_WIDTH, height: DEFAULT_DESIGN_HEIGHT };
