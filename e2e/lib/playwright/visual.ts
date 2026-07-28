@@ -136,6 +136,16 @@ const VISUAL_PROJECTS = [
 
 type VisualProject = (typeof VISUAL_PROJECTS)[number];
 
+/** The single conversation every workspace capture opens into. */
+const VISUAL_CONVERSATION = {
+  id: 'visual-conversation-launchpad',
+  projectId: 'visual-project-launchpad',
+  title: null,
+  messageCount: 0,
+  createdAt: 1_700_000_000_000,
+  updatedAt: 1_700_000_050_000,
+} as const;
+
 const VISUAL_PROJECT_FILE_HTML =
   '<!doctype html><html><body><main><h1>Visual CSS Smoke</h1><p>Workspace preview remains framed.</p></main></body></html>';
 
@@ -351,6 +361,42 @@ export async function configureVisualPage(page: Page, options: VisualPageOptions
 
   await page.route('**/api/projects', async (route) => {
     await fulfillGet(route, { projects });
+  });
+
+  // The conversation boundary. `ProjectView` renders `ChatPane` — and therefore
+  // the composer every workspace capture waits for — only once a conversation
+  // resolves (`activeConversationId || conversationLoadError`), and both
+  // `listConversations` and `createConversation` swallow a non-ok response
+  // (`[]` / `null`) rather than surfacing an error. So while the catch-all above
+  // answered `/conversations` with 404, the project opened with no conversation
+  // AND no load error, ChatPane never mounted, and every capture that navigates
+  // into the workspace died on `chat-composer` not existing. The catch-all's own
+  // contract is that "every other daemon-owned request terminates at a
+  // deterministic browser-side boundary" — this is that boundary for
+  // conversations, which the catch-all closed without supplying.
+  await page.route('**/api/projects/*/conversations', async (route) => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      await route.fulfill({ json: { conversations: [VISUAL_CONVERSATION] } });
+      return;
+    }
+    if (method === 'POST') {
+      await route.fulfill({ json: { conversation: VISUAL_CONVERSATION } });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.route('**/api/projects/*/conversations/*', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fulfill({ json: { conversation: VISUAL_CONVERSATION } });
+      return;
+    }
+    await fulfillGet(route, { conversation: VISUAL_CONVERSATION });
+  });
+
+  await page.route('**/api/projects/*/conversations/*/messages', async (route) => {
+    await fulfillGet(route, { messages: [] });
   });
 
   await page.route('**/api/projects/*/files', async (route) => {

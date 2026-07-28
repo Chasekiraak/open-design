@@ -203,6 +203,15 @@ test('[P2] captures the topbar local CLI model list surface', async ({ page }) =
 
 test('[P2] captures the topbar BYOK execution switcher surface', async ({ page }) => {
   await configureVisualPage(page, {
+    // No local agent, which is the premise the popover assertions below already
+    // state ("a BYOK config has no local agent"). `configureVisualPage`
+    // otherwise serves `[MOCK_AGENT]` from `/api/agents`, and an installed
+    // agent wins the popover: it renders that agent's model radiogroup
+    // (`radio "Default"`) instead of the BYOK provider/model rows, so the
+    // `.inline-switcher__hint` this case waits for never exists. The chip still
+    // showed the BYOK glyph and `gpt-4o`, which is why the earlier assertions
+    // passed and only the popover shape disagreed.
+    agents: [],
     config: {
       mode: 'api',
       apiKey: 'sk-visual',
