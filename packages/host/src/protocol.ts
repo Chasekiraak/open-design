@@ -1,5 +1,4 @@
 import type { ReleaseChannel } from "@open-design/release";
-import type { WorkspaceCollabContext } from "@open-design/contracts";
 
 /**
  * @module protocol
@@ -40,11 +39,43 @@ export type OpenDesignHostActionResult =
   | { ok: true }
   | OpenDesignHostFailure;
 
+/**
+ * The workspace attribution the renderer gives the host so a folder import
+ * lands in the caller's current workspace instead of the host's ambient one.
+ *
+ * This is a deliberate structural subset of the daemon/web
+ * `WorkspaceCollabContext`, redeclared here rather than imported: this package
+ * is the renderer host-bridge wire contract and must stay independent of the
+ * daemon/web contracts package (enforced by the "stays independent from
+ * daemon/web contracts" test). A full `WorkspaceCollabContext` is structurally
+ * assignable to this type, so callers pass theirs unchanged.
+ *
+ * Only the fields the host actually forwards are modelled, and the enum-like
+ * fields stay `string` because the host treats them as opaque pass-through
+ * values — the daemon remains the authority that parses and validates them.
+ * The index signatures are load-bearing: callers hand over their full context
+ * object, so both levels must tolerate the richer payload the host ignores.
+ */
+export type OpenDesignHostWorkspaceContext = {
+  [key: string]: unknown;
+  lifecycleState: string;
+  memberStatus: string;
+  permissions: {
+    [key: string]: unknown;
+    canShareProjects: boolean;
+    canWriteSyncedFiles: boolean;
+  };
+  role: string;
+  workspaceId: string;
+  workspaceMemberId: string;
+  workspaceType: string;
+};
+
 export type OpenDesignHostProjectImportInit = {
   designSystemId?: string | null;
   name?: string;
   skillId?: string | null;
-  workspaceContext?: WorkspaceCollabContext | null;
+  workspaceContext?: OpenDesignHostWorkspaceContext | null;
 };
 
 export type OpenDesignHostProjectImportSuccess = {

@@ -22,6 +22,7 @@ export type {
   OpenDesignHostClient,
   OpenDesignHostFailure,
   OpenDesignHostActionResult,
+  OpenDesignHostWorkspaceContext,
   OpenDesignHostProjectImportInit,
   OpenDesignHostProjectImportSuccess,
   OpenDesignHostProjectImportResult,
