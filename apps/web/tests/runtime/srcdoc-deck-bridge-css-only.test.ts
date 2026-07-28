@@ -36,6 +36,120 @@ function lastSlideState(parentPostMessage: ReturnType<typeof vi.fn>) {
 }
 
 describe('deck bridge - CSS-only decks', () => {
+  it('hides a persistently-visible first slide after the active page changes', () => {
+    const bodyHtml = `
+      <style>
+        .stage { width: 1920px; height: 1080px; position: relative; }
+        .slide {
+          position: absolute;
+          inset: 0;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.3s;
+        }
+        .slide:first-child { opacity: 1; pointer-events: auto; }
+        .slide.active { opacity: 1; pointer-events: auto; }
+      </style>
+      <main class="stage">
+        <section class="slide active">One</section>
+        <section class="slide">Two</section>
+        <section class="slide">Three</section>
+      </main>
+    `;
+    const srcdoc = buildSrcdoc(
+      `<!doctype html><html><body>${bodyHtml}</body></html>`,
+      { deck: true },
+    );
+    const script = extractDeckBridgeScript(srcdoc);
+    const dom = new JSDOM(srcdoc, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    const parentPostMessage = vi.fn();
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: parentPostMessage },
+    });
+    const flushTimers = installQueuedTimers(win);
+
+    new win.Function(script).call(win);
+    flushTimers();
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'next' },
+    }));
+    flushTimers();
+
+    const slides = Array.from(win.document.querySelectorAll<HTMLElement>('.slide'));
+    expect(slides[0]?.hasAttribute('data-od-deck-host-hidden')).toBe(true);
+    expect(slides[1]?.hasAttribute('data-od-deck-host-hidden')).toBe(false);
+    expect(win.getComputedStyle(slides[0]!).display).toBe('none');
+    expect(win.getComputedStyle(slides[1]!).opacity).toBe('1');
+    expect(win.getComputedStyle(slides[2]!).opacity).toBe('0');
+    expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 1, count: 3 });
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'prev' },
+    }));
+    flushTimers();
+
+    expect(slides[0]?.hasAttribute('data-od-deck-host-hidden')).toBe(false);
+    expect(win.getComputedStyle(slides[0]!).display).not.toBe('none');
+    expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 0, count: 3 });
+    win.close();
+  });
+
+  it('leaves normally hidden inactive slides under artifact control', () => {
+    const bodyHtml = `
+      <style>
+        .stage { width: 1920px; height: 1080px; position: relative; }
+        .slide {
+          position: absolute;
+          inset: 0;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.3s;
+        }
+        .slide.active { opacity: 1; pointer-events: auto; }
+      </style>
+      <main class="stage">
+        <section class="slide active">One</section>
+        <section class="slide">Two</section>
+        <section class="slide">Three</section>
+      </main>
+    `;
+    const srcdoc = buildSrcdoc(
+      `<!doctype html><html><body>${bodyHtml}</body></html>`,
+      { deck: true },
+    );
+    const script = extractDeckBridgeScript(srcdoc);
+    const dom = new JSDOM(srcdoc, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: vi.fn() },
+    });
+    const flushTimers = installQueuedTimers(win);
+
+    new win.Function(script).call(win);
+    flushTimers();
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'next' },
+    }));
+    flushTimers();
+
+    const slides = Array.from(win.document.querySelectorAll<HTMLElement>('.slide'));
+    expect(slides.every((slide) => !slide.hasAttribute('data-od-deck-host-hidden'))).toBe(true);
+    expect(win.getComputedStyle(slides[0]!).opacity).toBe('0');
+    expect(win.getComputedStyle(slides[1]!).opacity).toBe('1');
+    win.close();
+  });
+
   it('navigates decks whose only visibility rule is .slide:first-child', () => {
     const bodyHtml = `
       <style>
@@ -92,6 +206,50 @@ describe('deck bridge - CSS-only decks', () => {
       'flex',
     ]);
     expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 2, count: 3 });
+    win.close();
+  });
+
+  it('preserves each slide layout mode in class-driven decks', () => {
+    const bodyHtml = `
+      <style>
+        .stage { width: 1920px; height: 1080px; position: relative; }
+        .slide { position: absolute; inset: 0; }
+        .slide:not(.active) { display: none; }
+        .slide-layout-flex { display: flex; }
+        .slide-layout-grid { display: grid; }
+      </style>
+      <main class="stage">
+        <section class="slide slide-layout-flex active">One</section>
+        <section class="slide slide-layout-grid">Two</section>
+      </main>
+    `;
+    const script = extractDeckBridgeScript(buildSrcdoc(
+      `<!doctype html><html><body>${bodyHtml}</body></html>`,
+      { deck: true },
+    ));
+    const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: vi.fn() },
+    });
+    const flushTimers = installQueuedTimers(win);
+
+    new win.Function(script).call(win);
+    flushTimers();
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'next' },
+    }));
+    flushTimers();
+
+    const slides = Array.from(win.document.querySelectorAll<HTMLElement>('.slide'));
+    expect(win.getComputedStyle(slides[0]!).display).toBe('none');
+    expect(win.getComputedStyle(slides[1]!).display).toBe('grid');
+    expect(slides[1]!.style.display).toBe('');
     win.close();
   });
 

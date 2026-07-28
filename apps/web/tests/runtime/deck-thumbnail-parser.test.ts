@@ -43,13 +43,38 @@ describe('parseDeckThumbnails', () => {
     expect(parsed.ancestors[1]!.attributes).toContainEqual(['id', 'deck-stage']);
   });
 
-  it('rewrites :root / html / body selectors to :host', () => {
+  it('rewrites root selectors to their shadow-root targets', () => {
     const parsed = parseDeckThumbnails(frameworkDeck(1));
     expect(parsed.styleText).toContain(':host { --bg: #fff');
-    expect(parsed.styleText).toContain(':host { background: var(--shell)');
+    expect(parsed.styleText).toContain(
+      '[data-od-thumb-html], [data-od-thumb-body] { background: var(--shell)',
+    );
     expect(parsed.styleText).not.toMatch(/:root\s*\{/);
-    // Compound selectors are left alone.
     expect(parsed.styleText).toContain('.deck-stage {');
+  });
+
+  it('preserves html/body attributes and rewrites compound root selectors', () => {
+    const html = `<!doctype html><html class="dark" lang="zh-CN"><head><style>
+      :root { --bg: #fff; }
+      html.dark body[data-theme="night"] .slide { background: #111; }
+      body[data-theme="night"]::before { content: "brand"; }
+      .stage { width: 1920px; height: 1080px; }
+    </style></head><body data-theme="night">
+      <main class="stage"><section class="slide active">A</section></main>
+    </body></html>`;
+    const parsed = parseDeckThumbnails(html);
+    expect(parsed.renderable).toBe(true);
+    expect(parsed.rootAttributes.html).toContainEqual(['class', 'dark']);
+    expect(parsed.rootAttributes.html).toContainEqual(['lang', 'zh-CN']);
+    expect(parsed.rootAttributes.body).toContainEqual(['data-theme', 'night']);
+    expect(parsed.styleText).toContain(
+      '[data-od-thumb-html].dark [data-od-thumb-body][data-theme="night"] .slide',
+    );
+    expect(parsed.styleText).toContain(
+      '[data-od-thumb-body][data-theme="night"]::before',
+    );
+    expect(parsed.styleText).not.toContain('html.dark');
+    expect(parsed.styleText).not.toContain('body[data-theme');
   });
 
   it('rewrites :root to :host even when a CSS comment precedes it', () => {
@@ -225,6 +250,22 @@ describe('parseDeckThumbnails', () => {
     expect(parseDeckThumbnails(styleless).reason).toBe('no-styles');
   });
 
+  it.each(['canvas', 'video', 'iframe', 'object', 'embed'])(
+    'falls back when a slide contains runtime-rendered <%s> content',
+    (tag) => {
+      const deck = `<!doctype html><html><head><style>
+        .deck-stage { width: 1920px; height: 1080px; }
+      </style></head><body>
+        <div class="deck-stage" id="deck-stage">
+          <section class="slide active"><${tag}></${tag}></section>
+        </div>
+      </body></html>`;
+      const parsed = parseDeckThumbnails(deck);
+      expect(parsed.renderable).toBe(false);
+      expect(parsed.reason).toBe('runtime-rendered-content');
+    },
+  );
+
   it('strips executable content from untrusted slide markup', () => {
     const deck = [
       '<!doctype html><html><head><style>',
@@ -238,9 +279,6 @@ describe('parseDeckThumbnails', () => {
       '      <a href="java\tscript:alert(3)">tabbed</a>',
       '      <h1 onclick="steal()">Title</h1>',
       '      <script>alert(2)</script>',
-      '      <iframe src="https://evil.example"></iframe>',
-      '      <object data="https://evil.example"></object>',
-      '      <embed src="https://evil.example" />',
       '      <form action="https://evil.example"><button formaction="javascript:go()">x</button></form>',
       '    </section>',
       '  </div></div>',
@@ -253,9 +291,6 @@ describe('parseDeckThumbnails', () => {
     expect(slide).not.toMatch(/onerror/i);
     expect(slide).not.toMatch(/onclick/i);
     expect(slide).not.toMatch(/<script/i);
-    expect(slide).not.toMatch(/<iframe/i);
-    expect(slide).not.toMatch(/<object/i);
-    expect(slide).not.toMatch(/<embed/i);
     expect(slide).not.toMatch(/<form/i);
     expect(slide).not.toMatch(/formaction/i);
     expect(slide).not.toMatch(/javascript:/i);
@@ -283,6 +318,22 @@ describe('parseDeckThumbnails', () => {
     expect(ancestorAttrNames.some((n) => n.startsWith('on'))).toBe(false);
     // benign wrapper attributes (class) survive so CSS still targets the chain
     expect(ancestorAttrNames).toContain('class');
+  });
+
+  it('sanitizes html/body attributes copied into the thumbnail root shims', () => {
+    const deck = `<!doctype html><html class="dark" onclick="steal()"><head><style>
+      .deck-stage { width: 1920px; height: 1080px; }
+    </style></head><body data-theme="night" onload="steal2()">
+      <div class="deck-stage"><section class="slide active">A</section></div>
+    </body></html>`;
+    const parsed = parseDeckThumbnails(deck);
+    const names = [
+      ...parsed.rootAttributes.html,
+      ...parsed.rootAttributes.body,
+    ].map(([name]) => name.toLowerCase());
+    expect(names.some((name) => name.startsWith('on'))).toBe(false);
+    expect(parsed.rootAttributes.html).toContainEqual(['class', 'dark']);
+    expect(parsed.rootAttributes.body).toContainEqual(['data-theme', 'night']);
   });
 
   it('neutralizes a slide whose root element is itself executable/navigable', () => {

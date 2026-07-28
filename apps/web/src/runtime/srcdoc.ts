@@ -2588,6 +2588,11 @@ function injectDeckBridge(
     : `<style data-od-deck-fix>
 .stage, .deck-stage, .deck-shell { flex: none !important; place-content: center !important; }
 </style>`;
+  const exclusiveVisibilityStyle = `<style data-od-deck-exclusive-visibility>
+@media screen {
+  :root [data-od-deck-host-hidden] { display: none !important; }
+}
+</style>`;
   const script = `<script data-od-deck-bridge>(function(){
   var initialSlideIndex = ${safeInitialSlideIndex};
   var didRestoreInitialSlide = initialSlideIndex <= 0;
@@ -2809,6 +2814,7 @@ function injectDeckBridge(
     if (visibleCount !== 1 || hiddenCount < 1) return '';
     return visibleDisplay || 'block';
   }
+  var odComputedDisplayMode = '';
   function canSetActive(list){
     // A bare active-class marker is not enough to prove the host can drive the
     // deck by class mutation alone. Many generated decks keep that marker in
@@ -2819,17 +2825,25 @@ function injectDeckBridge(
     // actually hidden by computed visibility rules.
     var active = findActiveByClass(list);
     if (active >= 0 && hasComputedHiddenSibling(list, active)) return true;
+    // Preserve established inline/hidden-attribute protocols. setActive()
+    // already mirrors those without inventing a display mode for the target.
+    for (var i=0; i<list.length; i++) {
+      if (list[i].style.display === 'none') return true;
+      if (list[i].style.visibility === 'hidden') return true;
+      if (list[i].hasAttribute('hidden')) return true;
+    }
     // Some generated decks have no navigation runtime or active class at all:
     // CSS alone shows the first page (for example
     // ".slide { display:none } .slide:first-child { display:flex }"). When
     // exactly one page is computed-visible and siblings are display-hidden,
     // the bridge can safely take ownership by writing equivalent inline
     // display values. Do not apply this to ordinary all-visible ".slide" DOM.
-    if (computedDisplayDeckMode(list)) return true;
-    for (var i=0; i<list.length; i++) {
-      if (list[i].style.display === 'none') return true;
-      if (list[i].style.visibility === 'hidden') return true;
-      if (list[i].hasAttribute('hidden')) return true;
+    if (active < 0) {
+      var computedDisplay = computedDisplayDeckMode(list);
+      if (computedDisplay) {
+        odComputedDisplayMode = computedDisplay;
+        return true;
+      }
     }
     return false;
   }
@@ -2890,7 +2904,90 @@ function injectDeckBridge(
     if (prev) prev.toggleAttribute('disabled', i <= 0);
     if (next) next.toggleAttribute('disabled', i >= count - 1);
   }
-  var odComputedDisplayMode = '';
+  function cssTimeMs(value){
+    var parts = String(value || '').split(',');
+    var max = 0;
+    for (var i=0; i<parts.length; i++) {
+      var raw = parts[i].trim();
+      var parsed = parseFloat(raw);
+      if (!Number.isFinite(parsed)) continue;
+      var ms = /ms$/i.test(raw) ? parsed : parsed * 1000;
+      if (ms > max) max = ms;
+    }
+    return max;
+  }
+  function visualSettleMs(el){
+    try {
+      var cs = window.getComputedStyle(el);
+      var transitionMs = cssTimeMs(cs.transitionDuration) + cssTimeMs(cs.transitionDelay);
+      var animationMs = cssTimeMs(cs.animationDuration) + cssTimeMs(cs.animationDelay);
+      return Math.min(5000, Math.max(transitionMs, animationMs));
+    } catch (_) {
+      return 0;
+    }
+  }
+  function isPaintedSlide(el){
+    try {
+      var cs = window.getComputedStyle(el);
+      return cs.display !== 'none' &&
+        cs.visibility !== 'hidden' &&
+        Number.parseFloat(cs.opacity || '1') > 0.001;
+    } catch (_) {
+      return false;
+    }
+  }
+  function materiallyOverlaps(a, b){
+    try {
+      var ar = a.getBoundingClientRect();
+      var br = b.getBoundingClientRect();
+      var aw = Math.max(0, ar.width);
+      var ah = Math.max(0, ar.height);
+      var bw = Math.max(0, br.width);
+      var bh = Math.max(0, br.height);
+      if (aw && ah && bw && bh) {
+        var overlapW = Math.max(0, Math.min(ar.right, br.right) - Math.max(ar.left, br.left));
+        var overlapH = Math.max(0, Math.min(ar.bottom, br.bottom) - Math.max(ar.top, br.top));
+        var smallerArea = Math.min(aw * ah, bw * bh);
+        return smallerArea > 0 && (overlapW * overlapH) / smallerArea >= 0.8;
+      }
+      if (a.parentElement !== b.parentElement) return false;
+      var ap = window.getComputedStyle(a).position;
+      var bp = window.getComputedStyle(b).position;
+      return (ap === 'absolute' || ap === 'fixed') && (bp === 'absolute' || bp === 'fixed');
+    } catch (_) {
+      return false;
+    }
+  }
+  function scheduleExclusiveVisibilityRepair(list, active){
+    if (!list || !list.length || active < 0 || active >= list.length) return;
+    if (findActiveByClass(list) !== active || isScrollDeck() || activeIndexFromTransform(list) >= 0) return;
+    var target = list[active];
+    if (!target) return;
+    target.removeAttribute('data-od-deck-host-hidden');
+    for (var i=0; i<list.length; i++) {
+      if (i === active) continue;
+      var candidate = list[i];
+      if (!candidate || candidate.hasAttribute('data-od-deck-host-hidden')) continue;
+      if (!isPaintedSlide(candidate) || !materiallyOverlaps(candidate, target)) continue;
+      if (candidate.__odDeckExclusiveTimer) clearTimeout(candidate.__odDeckExclusiveTimer);
+      var delay = Math.max(visualSettleMs(candidate), visualSettleMs(target)) + 34;
+      (function(el, wait){
+        el.__odDeckExclusiveTimer = setTimeout(function(){
+          el.__odDeckExclusiveTimer = null;
+          var now = slides();
+          var nowActive = findActiveByClass(now);
+          var nowTarget = nowActive >= 0 ? now[nowActive] : null;
+          if (!nowTarget || el === nowTarget) {
+            el.removeAttribute('data-od-deck-host-hidden');
+            return;
+          }
+          if (isPaintedSlide(el) && materiallyOverlaps(el, nowTarget)) {
+            el.setAttribute('data-od-deck-host-hidden', '');
+          }
+        }, wait);
+      })(candidate, delay);
+    }
+  }
   function setActive(i){
     var list = slides();
     if (!list.length) return false;
@@ -2899,7 +2996,6 @@ function injectDeckBridge(
     var usesInlineDisplay = false;
     var usesInlineVisibility = false;
     var usesHidden = false;
-    var computedDisplay = computedDisplayDeckMode(list);
     // Many reveal-animation decks (the frontend-slides family) gate their
     // staggered entrances on a SEPARATE \`.visible\` class — \`.slide.visible
     // .reveal { opacity: 1 }\` — that the deck's own show() adds alongside
@@ -2913,9 +3009,6 @@ function injectDeckBridge(
       usesInlineVisibility = usesInlineVisibility || list[j].style.visibility === 'hidden';
       usesHidden = usesHidden || list[j].hasAttribute('hidden');
       usesVisibleClass = usesVisibleClass || (list[j].classList && list[j].classList.contains('visible'));
-    }
-    if (!usesInlineDisplay && computedDisplay) {
-      odComputedDisplayMode = computedDisplay;
     }
     for (var k=0; k<list.length; k++) {
       if (list[k].classList) {
@@ -3156,6 +3249,7 @@ function injectDeckBridge(
       var i = activeIndex(list);
       var count = list.length;
       var progressWidth = count ? ((i + 1) / count * 100) + '%' : '0';
+      scheduleExclusiveVisibilityRepair(list, i);
       updateDeckChrome(i, count);
       window.parent.postMessage({
         type: 'od:slide-state',
@@ -3509,7 +3603,7 @@ function injectDeckBridge(
   }
   observeSlides();
 })();</script>`;
-  return injectBeforeBodyEnd(injectBeforeHeadEnd(doc, styleFix), script);
+  return injectBeforeBodyEnd(injectBeforeHeadEnd(doc, styleFix + exclusiveVisibilityStyle), script);
 }
 
 // The tweaks bridge lets the host toolbar toggle the visibility of the artifact's

@@ -13,9 +13,9 @@
 //
 // It is intentionally pure and synchronous (DOMParser only) so it memoizes on
 // the source string and is unit-testable. Decks it cannot faithfully render
-// statically (external layout CSS, viewport-unit slides, script-built content)
-// report `renderable: false` with a reason, and the caller keeps the old
-// iframe thumbnail for that deck.
+// statically (external layout CSS or runtime-rendered media) report
+// `renderable: false` with a reason, and the caller keeps the old iframe
+// thumbnail for that deck.
 
 import DOMPurify from 'dompurify';
 
@@ -25,7 +25,8 @@ export type DeckThumbnailFallbackReason =
   | 'no-dom-parser'
   | 'no-slides'
   | 'no-styles'
-  | 'external-stylesheet';
+  | 'external-stylesheet'
+  | 'runtime-rendered-content';
 
 /** One reconstructed wrapper element between the shadow root and the slide. */
 export interface DeckThumbnailAncestor {
@@ -39,8 +40,8 @@ export interface ParsedDeckThumbnails {
   reason?: DeckThumbnailFallbackReason;
   /** `outerHTML` of each slide, in document order. */
   slides: string[];
-  /** Concatenated deck stylesheets, `:root`/`html`/`body` rewritten to `:host`,
-   *  `@font-face` stripped (see `fontFaces`), relative `url()` absolutized. */
+  /** Concatenated deck stylesheets, root selectors rewritten for the shadow
+   *  root shims, `@font-face` stripped, relative `url()` absolutized. */
   styleText: string;
   /** `@font-face` blocks lifted out of `styleText` — must live in the host
    *  document, since `@font-face` inside a shadow root is ignored. */
@@ -51,6 +52,13 @@ export interface ParsedDeckThumbnails {
   /** Wrapper chain from outermost→innermost (excludes `<html>`/`<body>` and the
    *  slide itself), e.g. `[.deck-shell, .deck-stage]` or `[deck-stage]`. */
   ancestors: DeckThumbnailAncestor[];
+  /** Sanitized attributes restored on inert html/body proxy elements. */
+  rootAttributes: {
+    html: Array<[string, string]>;
+    body: Array<[string, string]>;
+  };
+  /** Active-state classes the deck actually uses for its slide protocol. */
+  stateClasses: string[];
   designWidth: number;
   designHeight: number;
 }
@@ -102,6 +110,8 @@ function unrenderable(reason: DeckThumbnailFallbackReason): ParsedDeckThumbnails
     fontFaces: '',
     fontLinks: [],
     ancestors: [],
+    rootAttributes: { html: [], body: [] },
+    stateClasses: [],
     designWidth: DEFAULT_DESIGN_WIDTH,
     designHeight: DEFAULT_DESIGN_HEIGHT,
   };
@@ -120,6 +130,10 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
 
   const slideEls = collectSlideElements(doc);
   if (slideEls.length === 0) return unrenderable('no-slides');
+  if (slideEls.some((slide) => slide.matches('canvas, video, iframe, object, embed')
+    || slide.querySelector('canvas, video, iframe, object, embed'))) {
+    return unrenderable('runtime-rendered-content');
+  }
 
   // External layout CSS we cannot inline means the static clone would be
   // unstyled. Font stylesheets are the exception — we re-load those in the host
@@ -140,7 +154,7 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
 
   // Strip CSS comments once, up-front. Every downstream rewrite here (viewport
   // units, url() absolutizing, @font-face lifting, and crucially the
-  // `:root`/`html`/`body` → `:host` rewrite) is regex-based and treats a comment
+  // root-selector rewrite) is regex-based and treats a comment
   // as opaque selector text. A banner comment immediately before the custom
   // property block — `/* === VIEWPORT BASE === */\n:root { … }`, which real
   // decks routinely emit — would otherwise leave `:root` unrewritten; `:root`
@@ -169,6 +183,11 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
   const styleText = rewriteRootSelectors(withoutFonts);
 
   const ancestors = collectAncestors(slideEls[0]!);
+  const rootAttributes = {
+    html: sanitizeThumbnailAttributes(doc.documentElement),
+    body: sanitizeThumbnailAttributes(doc.body),
+  };
+  const stateClasses = collectSlideStateClasses(slideEls, rawStyle);
   const slides = slideEls
     .slice(0, MAX_SLIDES)
     .map((el) => processSlideHtml(el, baseHref, designSize.width, designSize.height));
@@ -180,6 +199,8 @@ export function parseDeckThumbnails(html: string, baseHref?: string): ParsedDeck
     fontFaces,
     fontLinks,
     ancestors,
+    rootAttributes,
+    stateClasses,
     designWidth: designSize.width,
     designHeight: designSize.height,
   };
@@ -208,6 +229,20 @@ function collectSlideElements(doc: Document): Element[] {
   const structured = Array.from(doc.querySelectorAll(STRUCTURED_SLIDE_SELECTOR));
   if (structured.length > 0) return structured;
   return Array.from(doc.querySelectorAll(DECK_SLIDE_SELECTOR));
+}
+
+const SLIDE_STATE_CLASSES = ['active', 'is-active', 'current', 'visible'] as const;
+
+function collectSlideStateClasses(slides: Element[], css: string): string[] {
+  const selectors = Array.from(iterateRuleBlocks(css), (block) => block.selector);
+  return SLIDE_STATE_CLASSES.filter((className) => {
+    if (slides.some((slide) => slide.classList.contains(className))) return true;
+    const classToken = new RegExp(`\\.${className}(?![\\w-])`);
+    return selectors.some((selector) =>
+      /(?:\.slide(?![\w-])|\[data-screen-label\b|deck-stage\b)/.test(selector)
+      && classToken.test(selector),
+    );
+  });
 }
 
 // Walk from the slide's parent up to (but excluding) <body>/<html>, so
@@ -318,13 +353,25 @@ function stripCssComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-// Rewrite `:root`, `html`, and `body` (as standalone selectors in a selector
-// list) to `:host`, so the deck's custom properties, base font, and base color
-// land on the shadow host and inherit into the re-parented slide. Compound
-// selectors like `body.dark` are left untouched (they'd match nothing, but
-// forcing them onto `:host` risks unwanted rules).
+// Keep `:root` variables on the shadow host, and redirect html/body selectors
+// to inert proxy elements reconstructed by DeckSlideThumbnail. Rewriting the
+// selector prelude (rather than arbitrary CSS text) preserves compound theme
+// selectors such as `html.dark body[data-theme]` and root pseudo-elements
+// without touching declaration values.
 function rewriteRootSelectors(css: string): string {
-  return css.replace(/(^|[{};,])(\s*)(:root|html|body)(\s*)(?=[,{])/g, '$1$2:host$4');
+  return css.replace(
+    /(^|[{}])(\s*)(?!@)([^{}]+?)(\s*)\{/g,
+    (whole, boundary: string, leading: string, selector: string, trailing: string) => {
+      const rewritten = selector.replace(
+        /(^|[\s>+~,(])(:root|html|body)(?=$|[.#:\[\s>+~,{)])/g,
+        (_token, prefix: string, root: string) => {
+          if (root === ':root') return `${prefix}:host`;
+          return `${prefix}[data-od-thumb-${root}]`;
+        },
+      );
+      return `${boundary}${leading}${rewritten}${trailing}{`;
+    },
+  );
 }
 
 // Lift `@font-face` blocks out; they're ignored inside a shadow root and must be
@@ -385,6 +432,20 @@ function sanitizeThumbnailMarkup(html: string): Element | null {
   }) as unknown as HTMLElement;
   if (body.children.length !== 1) return null;
   return body.firstElementChild;
+}
+
+function sanitizeThumbnailAttributes(node: Element): Array<[string, string]> {
+  const shell = node.ownerDocument.createElement('div');
+  for (const attr of Array.from(node.attributes)) {
+    try {
+      shell.setAttribute(attr.name, attr.value);
+    } catch {
+      // Invalid source attributes are omitted from the inert proxy.
+    }
+  }
+  const clean = sanitizeThumbnailMarkup(shell.outerHTML);
+  if (!clean) return [];
+  return Array.from(clean.attributes).map((attr) => [attr.name, attr.value]);
 }
 
 // Sanitize a single reconstructed wrapper element (tag + attributes only). An
