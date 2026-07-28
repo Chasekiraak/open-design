@@ -1058,7 +1058,7 @@ export function ExtensionsMarketplace({
     }
     setCreateBusy('import');
     try {
-      const outcome = await installPluginSource(url);
+      const outcome = await installPluginSource(url, workspaceContext);
       if (outcome.ok) {
         await refresh();
         setCreateOpen(false);
