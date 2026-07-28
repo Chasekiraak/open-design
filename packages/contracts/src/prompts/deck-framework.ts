@@ -562,9 +562,9 @@ export const DECK_DELIVERY_CONTRACT_DIRECTIVE = `# Deck delivery contract
 
 These rules define the Open Design delivery boundary, not a visual style.
 
-1. **Complete artifact.** Deliver one complete HTML deck under the active execution contract. For ordinary edits, preserve a compatible existing runtime.
+1. **Complete artifact.** Deliver one complete HTML deck under the active execution contract. If the brief requests N slides/pages, emit exactly N top-level \`.slide\` sections, including the closing slide. For ordinary edits, preserve a compatible existing runtime.
 2. **Slide DOM.** Each slide is one top-level \`<section class="slide" data-screen-label="NN Title">\` in order. Labels stay unique and stable; the first slide is visible on load; all slides remain in the DOM for host navigation, thumbnails, annotation, and export.
-3. **Canvas.** Default to fixed 16:9 at 1920×1080. Keep every slide inside its bounds with no scrolling.
+3. **Canvas.** Default to fixed 16:9 at 1920×1080. Keep every slide inside its bounds with no scrolling. Define an explicit background on \`html\`/\`body\` and on every slide, or on a preserved stage ancestor that paints it; never rely on a transparent/default host canvas.
 4. **Navigation.** Put no navigation inside or over the slide canvas and reserve no canvas space for it. Any standalone controls, counter, dots, reset, or keyboard hints belong together in one \`data-deck-nav\` container outside the canvas; Open Design hides it when host navigation is present.
 5. **Settled state.** Essential content is complete, visible, legible, and exportable without hover, clicks, or unfinished entrance animation.
 6. **Explicit exceptions.** Honor a requested aspect ratio, orientation, or interaction; preserve slide discoverability and disclose any remaining preview/export limitation.
@@ -585,6 +585,7 @@ Apply these as result criteria for the deck and for every slide. They constrain 
 
 ## Presentation presence
 
+- **Brief fidelity.** Treat explicit composition constraints—such as full-bleed imagery, text/image alternation, grid system, typographic devices, or density pattern—as acceptance criteria across the deck, not motifs to sample once or omit.
 - **Live-delivery composition.** Use the full canvas, not a narrow document column or dashboard panels. Derive a coherent type character, palette, image treatment, grid, and signature move from the brand, subject, and audience.
 - **Narrative rhythm.** Vary surface, density, and layout only when the story changes mode. Concentrate richness at opening, reveal, proof, transition, and close; use calmer workhorse slides between peaks.
 - **One dominant, fitting medium.** Give each slide one center of gravity. Use product views for product proof, charts for quantities, flows/relationships for mechanisms, comparisons for change, imagery for emotion/context, and expressive type for reveals. Keep supporting elements subordinate; assets must be high-fidelity and composed into the slide.

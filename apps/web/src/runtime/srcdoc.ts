@@ -2682,6 +2682,19 @@ function injectDeckBridge(
     add(document.scrollingElement);
     add(document.documentElement);
     add(document.body);
+    var list = slides();
+    for (var s=0; s<list.length; s++) {
+      var node = list[s] && list[s].parentElement;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (
+          scrollOverflow(node) > 1 &&
+          isScrollableOverflowMode(overflowMode(node))
+        ) {
+          add(node);
+        }
+        node = node.parentElement;
+      }
+    }
     return targets;
   }
   function maxScrollLeft(){

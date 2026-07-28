@@ -624,6 +624,8 @@ describe('composeSystemPrompt — shared slim default', () => {
 
     expect(directive).toContain('# Deck delivery contract');
     expect(directive).toContain('data-deck-nav');
+    expect(directive).toContain('emit exactly N');
+    expect(directive).toContain('explicit background');
     expect(directive).toContain('# Deck outcome quality rules');
     expect(directive).toContain('Every element earns its place');
     expect(directive).not.toContain('persist position to localStorage');
@@ -691,6 +693,8 @@ describe('composeSystemPrompt — shared slim default', () => {
       'Keep supporting elements subordinate',
     );
     expect(directive).toContain('**Shareable payoff.**');
+    expect(directive).toContain('**Brief fidelity.**');
+    expect(directive).toContain('explicit composition constraints');
     expect(directive).not.toContain(
       'If removing it does not reduce comprehension, remove it.',
     );
