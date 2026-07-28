@@ -157,7 +157,7 @@ function resolveByokMediaModel(
 ): string | undefined {
   if (surface === 'image') return defaults?.imageModel?.trim() || undefined;
   if (surface === 'video') return defaults?.videoModel?.trim() || undefined;
-  if (surface === 'audio' && (!audioKind || audioKind === 'speech')) {
+  if (surface === 'audio' && audioKind === 'speech') {
     return defaults?.speechModel?.trim() || undefined;
   }
   return undefined;
@@ -175,7 +175,7 @@ function renderByokMediaDefaults(
   const speechVoice = defaults?.speechVoice?.trim();
   if (surface === 'image' && imageModel) lines.push(`- Image model: \`${imageModel}\``);
   if (surface === 'video' && videoModel) lines.push(`- Video model: \`${videoModel}\``);
-  if (surface === 'audio' && (!audioKind || audioKind === 'speech')) {
+  if (surface === 'audio' && audioKind === 'speech') {
     if (speechModel) lines.push(`- Speech model: \`${speechModel}\``);
     if (speechVoice) lines.push(`- Speech voice: \`${speechVoice}\``);
   }

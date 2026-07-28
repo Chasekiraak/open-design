@@ -745,18 +745,17 @@ describe('composeSystemPrompt', () => {
   it('pins outcome-based quantitative chart integrity into deck runs (#907)', () => {
     const prompt = composeSystemPrompt({ skillMode: 'deck' });
 
-    expect(prompt).toContain('**Quantitative charts:**');
-    expect(prompt).toContain('Derive visual proportions from the actual values');
-    expect(prompt).toContain('show both category and value labels');
-    expect(prompt).toContain('Never eyeball bar lengths, areas, or ratios');
+    expect(prompt).toContain('**Charts/diagrams:**');
+    expect(prompt).toContain('Derive proportions from actual values');
+    expect(prompt).toContain('label categories and values');
   });
 
   it('pins background-aware chart and diagram legibility into deck runs', () => {
     const prompt = composeSystemPrompt({ skillMode: 'deck' });
 
-    expect(prompt).toContain('**Charts and diagrams:**');
-    expect(prompt).toContain("Theme them for the slide's actual background");
-    expect(prompt).toContain('legible at presentation distance');
+    expect(prompt).toContain('**Charts/diagrams:**');
+    expect(prompt).toContain('match the slide background');
+    expect(prompt).toContain('keep every label legible at presentation distance');
   });
 
   it('resolves a non-media primary surface ahead of composed media mentions', () => {
@@ -878,7 +877,9 @@ describe('composeSystemPrompt', () => {
       expect(deckPrompt).not.toMatch(/^7\.\s+Emit single <artifact>\s*$/m);
       expect(deckPrompt).not.toContain('Copy the canonical skeleton below as index.html');
       expect(deckPrompt).toContain('# Deck delivery contract');
-      expect(deckPrompt).toContain('Following the active execution contract');
+      expect(deckPrompt).toContain(
+        'Deliver one complete HTML deck under the active execution contract',
+      );
     });
   });
 

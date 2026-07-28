@@ -607,6 +607,27 @@ describe('composeSystemPrompt — metadata.promptTemplate', () => {
     expect(out).not.toContain('--voice <provider-voice-id>');
   });
 
+  it('does not apply speech BYOK defaults when the audio subtype is omitted', () => {
+    const out = composeSystemPrompt({
+      metadata: {
+        kind: 'audio',
+      },
+      byokMediaDefaults: {
+        speechModel: 'aihubmix-gpt-4o-mini-tts',
+        speechVoice: 'nova',
+      },
+    });
+
+    expect(out).not.toContain('### Run-scoped BYOK media defaults');
+    expect(out).not.toContain('- Speech model: `aihubmix-gpt-4o-mini-tts`');
+    expect(out).not.toContain('- Speech voice: `nova`');
+    expect(out).not.toContain('### Active model');
+    expect(out).toContain('Infer the audio subtype from the requested audible result');
+    expect(out).toContain('**audio · music**');
+    expect(out).toContain('**audio · speech**');
+    expect(out).toContain('**audio · sfx**');
+  });
+
   it('includes the full HyperFrames authoring guide only for the selected model', () => {
     const regularVideo = composeSystemPrompt({
       metadata: { kind: 'video', videoModel: 'seedance-2.0' },
