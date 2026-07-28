@@ -1238,7 +1238,13 @@ export interface HandoffClickProps {
 export interface PresentPopoverClickProps {
   page_name: 'artifact';
   area: 'present_popover';
-  element: 'in_this_tab' | 'fullscreen' | 'new_tab';
+  element:
+    | 'in_this_tab'
+    | 'fullscreen'
+    | 'new_tab'
+    | 'start_from_beginning'
+    | 'start_from_current'
+    | 'presenter_mode';
   artifact_id?: string;
   artifact_kind?: TrackingArtifactKind;
 }

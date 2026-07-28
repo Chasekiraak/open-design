@@ -274,6 +274,8 @@ export type TrackingRunFailureStage =
   | 'prompt_send'
   | 'first_token_wait'
   | 'tool_execution'
+  | 'tool_outstanding'
+  | 'post_tool_resume'
   | 'artifact_write'
   | 'child_close'
   | 'finalize';

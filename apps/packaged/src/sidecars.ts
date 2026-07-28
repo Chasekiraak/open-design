@@ -59,6 +59,30 @@ const PACKAGED_CHILD_ENV_ALLOWLIST = [
   "no_proxy",
 ] as const;
 
+// The daemon owns the historical-outer compatibility handoff. Preserve the
+// updater controls it needs to launch the replacement payload desktop with the
+// same feed/test policy as the outer process, without broadening the packaged
+// child environment allowlist.
+const PACKAGED_DESKTOP_HANDOFF_ENV_KEYS = [
+  "OD_UPDATE_ARCH",
+  "OD_UPDATE_AUTO_CHECK",
+  "OD_UPDATE_AUTO_DOWNLOAD",
+  "OD_UPDATE_AUTO_OPEN",
+  "OD_UPDATE_CHANNEL",
+  "OD_UPDATE_CHECK_BACKOFF_INITIAL_MS",
+  "OD_UPDATE_CHECK_BACKOFF_MAX_MS",
+  "OD_UPDATE_CHECK_INITIAL_DELAY_MS",
+  "OD_UPDATE_CHECK_INTERVAL_MS",
+  "OD_UPDATE_CURRENT_VERSION",
+  "OD_UPDATE_DOWNLOAD_ROOT",
+  "OD_UPDATE_ENABLED",
+  "OD_UPDATE_INSTALLED_VERSION",
+  "OD_UPDATE_METADATA_URL",
+  "OD_UPDATE_MODE",
+  "OD_UPDATE_OPEN_DRY_RUN",
+  "OD_UPDATE_PLATFORM",
+] as const;
+
 function shouldForwardPackagedChildEnv(key: string, includeProviderSecrets = false): boolean {
   return (
     PACKAGED_CHILD_ENV_ALLOWLIST.includes(
@@ -387,6 +411,7 @@ export type PackagedDaemonSpawnEnvOptions = {
   appVersion: string | null;
   amrProfile?: string | null;
   daemonCliEntry: string | null;
+  desktopHandoffEnv?: NodeJS.ProcessEnv;
   nodeCommand?: string | null;
   /**
    * PR #974 round-5 (lefarcen P2): only pin the daemon's import-folder
@@ -437,6 +462,7 @@ export function buildPackagedDaemonSpawnEnv(
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
+    ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
     ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
       ? {}
       : { OPEN_DESIGN_TELEMETRY_RELAY_URL: options.telemetryRelayUrl }),
@@ -461,6 +487,15 @@ export function buildPackagedDaemonSpawnEnv(
       ? {}
       : { POSTHOG_HOST: options.posthogHost }),
   };
+}
+
+function pickPackagedDesktopHandoffEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const selected: NodeJS.ProcessEnv = {};
+  for (const key of PACKAGED_DESKTOP_HANDOFF_ENV_KEYS) {
+    const value = env[key];
+    if (value != null && value.length > 0) selected[key] = value;
+  }
+  return selected;
 }
 
 async function spawnSidecarChild(options: {
@@ -643,6 +678,7 @@ export async function startPackagedSidecars(
         appVersion: options.appVersion,
         amrProfile: options.amrProfile,
         daemonCliEntry: options.daemonCliEntry,
+        desktopHandoffEnv: process.env,
         legacyDataDir: process.env.OD_LEGACY_DATA_DIR ?? null,
         nodeCommand: options.nodeCommand,
         requireDesktopAuth: options.requireDesktopAuth,
