@@ -121,8 +121,13 @@ export async function openSettingsDialog(page: Page) {
   await dismissPrivacyDialog(page);
   await ensureEntryRailOpenIfPresent(page);
   const dialog = settingsSurface(page);
+  // `entry-settings-button` (the rail-footer chip) was cut by #5971; signed
+  // out the entry is the rail's own `entry-nav-settings` item, signed in it is
+  // the account menu. Keep the cut testid in the chain so older skins still
+  // resolve, and fall back to the aria-label last.
   const settingsTrigger = page
     .getByTestId('entry-settings-button')
+    .or(page.getByTestId('entry-nav-settings'))
     .or(page.getByTestId('entry-settings-menu-trigger'))
     .or(page.getByRole('button', { name: OPEN_SETTINGS_LABEL }))
     .first();

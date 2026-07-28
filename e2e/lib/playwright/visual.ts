@@ -687,7 +687,10 @@ export async function openAvatarMenu(page: Page): Promise<Locator> {
 export async function openSettingsDetailsFromHeader(page: Page): Promise<Locator> {
   const dialog = page.locator('.modal-settings[role="dialog"]').first();
   const triggers = [
+    // `entry-settings-button` (the rail-footer chip) was cut by #5971; signed
+    // out the entry is the rail's own `entry-nav-settings` item.
     page.getByTestId('entry-settings-button').first(),
+    page.getByTestId('entry-nav-settings').first(),
     page.getByTestId('entry-settings-menu-trigger').first(),
     page.locator('.settings-icon-btn').first(),
   ];

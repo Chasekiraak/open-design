@@ -1,6 +1,6 @@
 import { expect, test } from '@/playwright/suite';
 import { ensureRailOpen } from '@/playwright/rail';
-import { settingsSurface } from '@/playwright/amr';
+import { openSettingsDialog } from '@/playwright/amr';
 import {
   captureVisual,
   configureVisualPage,
@@ -103,9 +103,13 @@ test('[P2] captures the plugins page surface', async ({ page }) => {
   await page.getByTestId('entry-nav-plugins').click();
   await expect(page).toHaveURL(/\/plugins$/);
   const plugins = page.getByTestId('entry-view-plugins');
-  // #5517 renamed the surface: the view renders `entry.navExtensions`.
-  await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
+  // The view renders `entry.navPlugins`: #5517 briefly called this surface
+  // 扩展/Extensions, then reverted to 插件/Plugins to match the @-mention picker.
+  await expect(plugins.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   await expect(plugins.getByTestId('plugins-tab-installed')).toBeVisible();
+  // The marketplace opens on the 官方 scope, fed by `/api/marketplaces` — empty
+  // in this harness. The fixture plugins are user-installed, so switch to 个人.
+  await plugins.getByTestId('plugins-tab-installed').click();
   await expect(plugins.getByText('Prototype Starter').first()).toBeVisible();
   await waitForVisualFonts(page);
 
@@ -167,14 +171,11 @@ test('[P2] captures the tasks page surface', async ({ page }) => {
 });
 
 async function openSettingsSection(page: import('@playwright/test').Page, testId: string) {
-  // The settings chip moved into the rail footer (#5517); collapsed, the rail
-  // is `inert`, so even a programmatic click is swallowed.
-  await ensureRailOpen(page);
-  const settingsButton = page.getByTestId('entry-settings-button');
-  await expect(settingsButton).toBeVisible();
-  await settingsButton.evaluate((element: HTMLElement) => element.click());
-  const dialog = settingsSurface(page);
-  await expect(dialog).toBeVisible();
+  // #5971 deleted the rail-footer settings chip (`entry-settings-button`).
+  // `openSettingsDialog` owns every remaining entry point — the rail's
+  // `entry-nav-settings` item when signed out, the account menu when signed in
+  // — including the rail-open handling this used to do by hand.
+  const dialog = await openSettingsDialog(page);
   await dialog.getByTestId(testId).click();
   return dialog;
 }

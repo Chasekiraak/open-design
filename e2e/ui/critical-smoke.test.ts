@@ -31,10 +31,11 @@ test('[P0] @critical home loads with the primary entry controls', async ({ page 
 test('[P0] @critical settings dialog is reachable from home', async ({ page }) => {
   await gotoEntryHome(page);
 
-  // Settings moved into the rail footer; collapsed, the rail is `inert` and the
-  // chip cannot be clicked, so expand first.
+  // #5971 cut the rail-footer settings chip; signed out, Settings is the rail's
+  // own nav item. Collapsed, the rail is `inert` and it cannot be clicked, so
+  // expand first.
   await ensureRailOpen(page);
-  await clickVisible(page.getByTestId('entry-settings-button'));
+  await clickVisible(page.getByTestId('entry-nav-settings'));
   // From the entry, settings is now a routed page (`role="region"`), not a
   // modal — `.modal-settings` is the class both presentations share.
   const settingsDialog = settingsSurface(page);

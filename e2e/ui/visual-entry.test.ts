@@ -187,8 +187,9 @@ async function openVisualPluginsCatalog(page: import('@playwright/test').Page) {
   await page.getByTestId('entry-nav-plugins').click();
   await expect(page).toHaveURL(/\/plugins$/);
   const plugins = page.getByTestId('entry-view-plugins');
-  // #5517 renamed the surface: the view renders `entry.navExtensions`.
-  await expect(plugins.getByRole('heading', { name: 'Extensions', exact: true })).toBeVisible();
+  // The view renders `entry.navPlugins`: #5517 briefly called this surface
+  // 扩展/Extensions, then reverted to 插件/Plugins to match the @-mention picker.
+  await expect(plugins.getByRole('heading', { name: 'Plugins', exact: true })).toBeVisible();
   // The marketplace opens on the 官方 scope, which is fed by `/api/marketplaces`
   // — empty in this harness. The visual fixture plugins are user-installed, so
   // switch to 个人; it is also the only scope whose cards carry the per-card
