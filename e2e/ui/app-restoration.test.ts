@@ -32,6 +32,15 @@ function stagedAttachmentName(page: Page, name: string): Locator {
     .getByText(name, { exact: true });
 }
 
+function isDesignFileUploadResponse(response: Response): boolean {
+  const url = new URL(response.url());
+  return (
+    response.request().method() === 'POST'
+    && url.pathname.startsWith('/api/projects/')
+    && url.pathname.endsWith('/upload')
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((key) => {
     window.localStorage.setItem(
@@ -126,12 +135,22 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
     });
   });
 
-  await createEmptyProject(page, 'Workspace active tab restore');
+  const projectId = await createEmptyProject(page, 'Workspace active tab restore');
   await expectWorkspaceReady(page);
 
   await sendPrompt(page, 'Create a workspace persistence artifact');
   await expect(page.getByText('workspace-artifact.html', { exact: true }).first()).toBeVisible();
+  const { conversationId } = await getCurrentProjectContext(page);
+  await expectPersistedArtifactMessage(
+    page,
+    projectId,
+    conversationId,
+    'workspace-artifact.html',
+  );
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'manual-reference.png',
     mimeType: 'image/png',
@@ -140,6 +159,7 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
 
   const artifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
   const manualFileTab = tabBySuffix(page, 'manual-reference.png');
@@ -157,11 +177,17 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
   await expect(restoredManualFileTab).toBeVisible();
   await expect(restoredManualFileTab).toHaveAttribute('aria-selected', 'true');
   const restoredArtifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
-  if ((await restoredArtifactTab.count()) === 0) {
+  const artifactTabRestored = await restoredArtifactTab
+    .waitFor({ state: 'visible', timeout: T.short })
+    .then(() => true, () => false);
+  if (!artifactTabRestored) {
     const turnCard = page.locator('.msg.assistant').filter({ hasText: 'workspace-artifact.html' }).first();
-    const openButton = turnCard.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible();
-    await openButton.click();
+    const artifactButton = turnCard.getByRole('button', {
+      name: 'workspace-artifact.html',
+      exact: true,
+    });
+    await expect(artifactButton).toBeVisible();
+    await artifactButton.click();
 
     await expect(restoredArtifactTab).toBeVisible();
     await expect(restoredArtifactTab).toHaveAttribute('aria-selected', 'true');
@@ -366,6 +392,9 @@ test('[P0] returning from an uploaded design file route to the project root keep
   await createPrototypeProject(page, 'Uploaded file root route restore');
   await expectWorkspaceReady(page);
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'root-design-reference.png',
     mimeType: 'image/png',
@@ -374,6 +403,7 @@ test('[P0] returning from an uploaded design file route to the project root keep
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
   const fileTab = tabBySuffix(page, 'root-design-reference.png');
   await expect(fileTab).toBeVisible();
   const uploadedName = await fileTab.getAttribute('title');
@@ -4006,6 +4036,35 @@ async function listConversationsFromApi(
     conversations: Array<{ id: string; updatedAt: number }>;
   };
   return conversations;
+}
+
+async function expectPersistedArtifactMessage(
+  page: Page,
+  projectId: string,
+  conversationId: string,
+  fileName: string,
+) {
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(
+        `/api/projects/${projectId}/conversations/${conversationId}/messages`,
+      );
+      if (!response.ok()) return false;
+      const { messages } = (await response.json()) as {
+        messages: Array<{
+          role: string;
+          runStatus?: string;
+          producedFiles?: Array<{ name: string }>;
+        }>;
+      };
+      return messages.some(
+        (message) =>
+          message.role === 'assistant'
+          && message.runStatus === 'succeeded'
+          && message.producedFiles?.some((file) => file.name.endsWith(fileName)),
+      );
+    }, { timeout: T.medium })
+    .toBe(true);
 }
 
 async function expectProjectFilesToIncludeSuffixes(
