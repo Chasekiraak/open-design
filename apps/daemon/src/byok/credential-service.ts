@@ -2,12 +2,15 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { spawn as spawnPty } from 'node-pty';
 import type {
   ByokChatProviderConfig,
   ByokCredentialProfile,
   UpsertByokCredentialProfileRequest,
 } from '@open-design/contracts';
+import {
+  isNodePtyUnavailableError,
+  loadNodePty,
+} from '../services/node-pty.js';
 
 const PROFILE_ID_PATTERN = /^byok-[a-z0-9][a-z0-9._-]{2,95}$/u;
 const KEYCHAIN_SERVICE = 'dev.opendesign.byok';
@@ -294,8 +297,14 @@ class MacOsKeychainBackend implements ByokSecretBackend {
         secret,
       );
       this.writable = true;
-    } catch {
+    } catch (error) {
       this.writable = false;
+      if (isNodePtyUnavailableError(error)) {
+        throw new Error(
+          'Secure credential storage is unavailable because its native PTY helper could not be loaded.',
+          { cause: error },
+        );
+      }
       throw new Error('Secure credential backend command failed.');
     }
   }
@@ -428,6 +437,7 @@ async function runInteractiveMacOsSecretCommand(
   args: string[],
   secret: string,
 ): Promise<void> {
+  const { spawn: spawnPty } = await loadNodePty();
   return new Promise((resolve, reject) => {
     let settled = false;
     let promptResponses = 0;
