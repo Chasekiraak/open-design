@@ -7,7 +7,7 @@ import {
   STORAGE_KEY,
   waitForLoadingToClear,
 } from '@/playwright/amr';
-import { fulfillAgentsRoute } from '@/playwright/mock-factory';
+import { fulfillAgentsRoute, routeSuccessfulRuns, successfulRunEventBody } from '@/playwright/mock-factory';
 import { T } from '@/timeouts';
 
 type OnboardingConfig = {
@@ -337,7 +337,6 @@ test('[P0] onboarding cancel during a slow AMR status check does not start login
   await expect
     .poll(() => page.evaluate(() => window.__amrOnboardingSlowStatusResolved ?? false))
     .toBe(true);
-  await page.waitForTimeout(250);
   await expect(page.getByRole('button', { name: /Cancel sign-in/i })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0)).toBe(0);
 });
@@ -418,36 +417,15 @@ test('[P0] onboarding AMR runtime selection carries into the first Home run requ
   await advanceFromAboutYouToBrand(page);
   await expectOnboardingFinished(page);
 
-  let runBody: Record<string, unknown> | null = null;
-  await page.route('**/api/runs', async (route) => {
-    if (route.request().method() !== 'POST') {
-      await route.continue();
-      return;
-    }
-    runBody = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: JSON.stringify({ runId: 'amr-onboarding-first-run' }),
-    });
-  });
-  await page.route('**/api/runs/amr-onboarding-first-run/events', async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      },
-      body: [
-        'event: start',
-        'data: {"bin":"vela"}',
-        '',
-        'event: end',
-        'data: {"code":0,"status":"succeeded"}',
-        '',
-        '',
-      ].join('\n'),
-    });
+  const runBodies: Array<Record<string, unknown>> = [];
+  const runRequests = await routeSuccessfulRuns(page, {
+    bodies: runBodies,
+    runId: 'amr-onboarding-first-run',
+    eventBody: successfulRunEventBody([
+      'event: start',
+      'data: {"bin":"vela"}',
+      '',
+    ]),
   });
 
   const input = page.getByTestId('home-hero-input');
@@ -456,7 +434,8 @@ test('[P0] onboarding AMR runtime selection carries into the first Home run requ
   await expect(page.getByTestId('home-hero-submit')).toBeEnabled();
   await page.getByTestId('home-hero-submit').click();
 
-  await expect.poll(() => runBody, { timeout: 10_000 }).toMatchObject({
+  await runRequests.expectCount(1);
+  expect(runBodies[0]).toMatchObject({
     agentId: 'amr',
   });
 });

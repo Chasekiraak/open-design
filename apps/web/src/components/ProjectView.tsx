@@ -1404,7 +1404,14 @@ export function ProjectView({
   const detailedProject = projectDetail.project?.id === project.id ? projectDetail.project : null;
   const currentProject =
     detailedProject && detailedProject.updatedAt >= project.updatedAt ? detailedProject : project;
-  const projectDesignSystemId = resolveProjectDesignSystemId(currentProject);
+  const resolvedProjectDesignSystemId = resolveProjectDesignSystemId(currentProject);
+  // A project can outlive a Design System being disabled in Settings. Keep the
+  // persisted project value intact for recovery, but do not inject a disabled
+  // system into a new runtime turn.
+  const projectDesignSystemId =
+    resolvedProjectDesignSystemId && (config.disabledDesignSystems ?? []).includes(resolvedProjectDesignSystemId)
+      ? null
+      : resolvedProjectDesignSystemId;
   const projectIsDesignSystemProject = isDesignSystemProject(currentProject);
   // Website-clone turns reproduce a whole multi-page site; auto-open should
   // land on the site entry (index.html), not the last-written subpage. See

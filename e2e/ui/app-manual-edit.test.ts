@@ -1,6 +1,6 @@
 import { expect, test } from '@/playwright/suite';
 import { openNewProjectModal as openNewProjectModalFromProjects } from '@/playwright/rail';
-import { routeAgents } from '@/playwright/mock-factory';
+import { routeAgents, routeSuccessfulRuns } from '@/playwright/mock-factory';
 import { clickDeckNextSlide, clickDeckPreviousSlide, openAllProjectFiles } from '@/playwright/workspace';
 import type { Page } from '@playwright/test';
 import { T } from '@/timeouts';
@@ -548,9 +548,15 @@ test('[P1] first-loop onboarding completes once after a successful artifact expo
   const secondHtmlDownload = page.waitForEvent('download');
   await page.locator('.share-menu-popover[role="menu"]').getByRole('menuitem', { name: /Export as standalone HTML/ }).click();
   await secondHtmlDownload;
-  await page.waitForTimeout(500);
-  const completedCount = analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0;
-  expect(completedCount).toBe(1);
+  await expect
+    .poll(
+      () => analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0,
+      {
+        timeout: 750,
+        message: 're-exporting the same first-loop artifact should not emit a duplicate completion event',
+      },
+    )
+    .toBe(1);
 });
 
 async function selectStyleRowInput(
@@ -1012,17 +1018,9 @@ async function latestConversationId(page: Page, projectId: string): Promise<stri
 }
 
 async function holdNextRunOpen(page: Page) {
-  let runCount = 0;
-  await page.route('**/api/runs', async (route) => {
-    runCount += 1;
-    await route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: JSON.stringify({ runId: `preview-tools-run-${runCount}` }),
-    });
-  });
-  await page.route('**/api/runs/*/events', async () => {
-    await new Promise(() => undefined);
+  await routeSuccessfulRuns(page, {
+    runIdPrefix: 'preview-tools-run',
+    events: 'pending',
   });
 }
 

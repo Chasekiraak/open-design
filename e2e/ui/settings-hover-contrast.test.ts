@@ -124,10 +124,12 @@ async function hoverAndMeasure(page: Page, selector: string) {
   await el.waitFor({ state: 'visible' });
   await el.scrollIntoViewIfNeeded();
   await el.hover();
-  // Let CSS transitions settle so the measurement reflects the steady-state
-  // hover style. The hover rule for .subtab-pill uses a background-only
-  // change with no transition, so 120ms is comfortably enough.
-  await page.waitForTimeout(150);
+  // Wait for the browser to publish the final computed hover color. This is a
+  // condition-based wait: it avoids assuming a fixed CSS timing while still
+  // catching a final contrast value below the WCAG threshold.
+  await expect
+    .poll(async () => (await measureContrast(page, selector)).ratio, { timeout: 2_000 })
+    .toBeGreaterThanOrEqual(WCAG_AA_NORMAL);
   return measureContrast(page, selector);
 }
 
@@ -206,4 +208,49 @@ test.describe('Settings hover contrast (regression guard for #1795)', () => {
       ).toBeGreaterThanOrEqual(WCAG_AA_NORMAL);
     });
   }
+});
+
+test('[P1] system theme follows the OS color scheme without persisting an explicit theme', async ({ page }) => {
+  await page.addInitScript(
+    ({ key }) => {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          theme: 'system',
+          accentColor: '#c96442',
+          mode: 'daemon',
+          onboardingCompleted: true,
+          agentId: null,
+          skillId: null,
+          designSystemId: null,
+          mediaProviders: {},
+          agentModels: {},
+        }),
+      );
+    },
+    { key: STORAGE_KEY },
+  );
+  await page.route('**/api/health', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto('/');
+  await expect
+    .poll(() => page.locator('html').getAttribute('data-theme'))
+    .toBeNull();
+  const lightBg = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+  );
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect
+    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()))
+    .not.toBe(lightBg);
+  await expect
+    .poll(() => page.locator('html').getAttribute('data-theme'))
+    .toBeNull();
+  await expect
+    .poll(() => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) ?? '{}').theme, STORAGE_KEY))
+    .toBe('system');
 });
