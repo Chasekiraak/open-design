@@ -315,14 +315,12 @@ test('[P0] @critical visiting an uploaded design file route restores its tab and
   const uploadedName = await fileTab.getAttribute('title');
   expect(uploadedName).toBeTruthy();
 
+  // Park on the Design Files panel with the uploaded file listed. #5517
+  // deleted the preview pane, so a row click would open the file and leave
+  // the panel — which is the very transition the deep link below must make.
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'deep-linked-reference.png',
-  });
-  await expect(fileRow).toBeVisible();
-  await fileRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
-  await expect(page.getByTestId('design-file-preview').getByText(/deep-linked-reference\.png/i)).toBeVisible();
+  await expectAllProjectFilesActive(page);
+  await expect(page.getByTestId(`design-file-row-${uploadedName}`)).toBeVisible();
 
   const current = new URL(page.url());
   const [, projects, projectId] = current.pathname.split('/');
@@ -373,13 +371,12 @@ test('[P0] returning from an uploaded design file route to the project root keep
   const uploadedName = await fileTab.getAttribute('title');
   expect(uploadedName).toBeTruthy();
 
+  // Park on the Design Files panel with the uploaded file listed. #5517
+  // deleted the preview pane, so a row click would open the file and leave
+  // the panel — which is the very transition the deep link below must make.
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'root-design-reference.png',
-  });
-  await expect(fileRow).toBeVisible();
-  await fileRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
+  await expectAllProjectFilesActive(page);
+  await expect(page.getByTestId(`design-file-row-${uploadedName}`)).toBeVisible();
 
   const current = new URL(page.url());
   const [, projects, projectId] = current.pathname.split('/');
@@ -1751,17 +1748,10 @@ test('[P0] reloading a project keeps the Design Files entry reachable when it wa
   await openAllProjectFiles(page);
   await expectAllProjectFilesActive(page);
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'restore-me.png',
-  });
-  await expect(fileRow).toBeVisible();
-  const rowButton = fileRow.getByRole('button').first();
-  await rowButton.click();
-  await expect(
-    page.locator('[data-testid^="design-file-row-"]', {
-      hasText: 'restore-me.png',
-    }),
-  ).toBeVisible();
+  // #5517 deleted the preview pane, so a row click leaves the panel for the
+  // file's own tab. Making Design Files the last active surface therefore
+  // means listing the uploaded file without opening it.
+  await expect(rowBySuffix(page, 'restore-me.png')).toBeVisible();
 
   await page.reload();
   await expect(page.getByTestId('file-workspace')).toBeVisible({ timeout: 20_000 });
@@ -1841,8 +1831,8 @@ test('[P0] @critical daemon error details persist between failed sends', async (
     hasText: 'error-cross-tab.html',
   });
   await expect(crossFileRow).toBeVisible();
+  // #5517: one click on the row opens the file — no preview card in between.
   await crossFileRow.getByRole('button').first().click();
-  await clickDesignFilePreviewOpen(page);
   await expect(page.getByRole('tab', { name: /error-cross-tab\.html/i })).toHaveAttribute('aria-selected', 'true');
   await expect(artifactPreviewFrame(page).getByRole('heading', { name: 'Error cross tab' })).toBeVisible();
 
@@ -3514,19 +3504,19 @@ async function seedHtmlArtifact(
 }
 
 async function openDesignFile(page: Page, fileName: string) {
-  await page.getByRole('button', { name: new RegExp(fileName.replace('.', '\\.')) }).click();
-  if (await tabBySuffix(page, fileName).isVisible().catch(() => false)) return;
-  await clickDesignFilePreviewOpen(page);
-}
-
-async function clickDesignFilePreviewOpen(page: Page) {
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await expect(async () => {
-    const openButton = preview.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible({ timeout: 1_000 });
-    await openButton.click({ timeout: 1_000 });
-  }).toPass({ timeout: T.medium });
+  const tab = tabBySuffix(page, fileName);
+  if (await tab.isVisible().catch(() => false)) {
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    return;
+  }
+  // #5517 deleted the design-file preview pane: the row's primary target is
+  // the open action, so one click puts the file in a workspace tab. Address
+  // the row by test id — image cards render no filename text to match on.
+  const row = rowBySuffix(page, fileName);
+  await expect(row).toBeVisible();
+  await row.getByRole('button').first().click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
 async function expectFileSource(
@@ -3627,6 +3617,13 @@ function tabBySuffix(page: Page, name: string): Locator {
     .locator('.ws-tab[role="tab"]')
     .filter({ has: page.locator('.ws-tab-label', { hasText: name }) })
     .first();
+}
+
+// Uploaded files can land under a deduplicated name, and #5517 image cards
+// render no filename text, so match Design Files rows on the `data-testid`
+// suffix rather than on rendered text.
+function rowBySuffix(page: Page, name: string): Locator {
+  return page.locator(`[data-testid^="design-file-row-"][data-testid$="${name}"]`).first();
 }
 
 async function ensureFileTabOpen(page: Page, name: string): Promise<Locator> {
@@ -4187,18 +4184,16 @@ async function runDesignFilesUploadFlow(
 
   await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'moodboard.png',
-  });
+  const fileRow = rowBySuffix(page, 'moodboard.png');
   await expect(fileRow).toBeVisible();
-  const nameBtn = fileRow.getByRole('button').first();
-  await nameBtn.click();
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await expect(preview.getByText(/moodboard\.png/i)).toBeVisible();
-
-  await nameBtn.dblclick();
-  await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toBeVisible();
+  // #5517: the card grid IS the preview surface, so a single click on the
+  // row reopens the uploaded file in its workspace tab. The old flow clicked
+  // once for a preview card and then double-clicked to open.
+  await fileRow.getByRole('button').first().click();
+  await expect(page.getByRole('tab', { name: /moodboard\.png/i })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
 }
 
 async function runDesignFilesDeleteFlow(
@@ -4232,9 +4227,7 @@ async function runDesignFilesDeleteFlow(
   await expect(page.getByRole('tab', { name: /trash-me\.png/i })).toBeVisible();
   await openAllProjectFiles(page);
 
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'trash-me.png',
-  });
+  const fileRow = rowBySuffix(page, 'trash-me.png');
   await expect(fileRow).toBeVisible();
   await fileRow.hover();
   await fileRow.locator('[data-testid^="design-file-menu-"]').click();

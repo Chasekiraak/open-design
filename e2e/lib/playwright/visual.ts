@@ -634,11 +634,12 @@ export async function prepareVisualWorkspaceFileList(page: Page): Promise<void> 
 
 export async function prepareVisualWorkspacePreview(page: Page): Promise<void> {
   await prepareVisualWorkspaceFileList(page);
+  // #5517 (023937ef4) deleted the design-file preview pane: the card grid IS
+  // the preview surface now, so a single click on the row's primary open
+  // target lands straight on the rendered artifact — there is no intermediate
+  // preview card with an "Open" button to click through.
   const fileRow = page.getByTestId('design-file-row-index.html');
   await fileRow.getByRole('button').first().click();
-  const preview = page.getByTestId('design-file-preview');
-  await expect(preview).toBeVisible();
-  await preview.getByRole('button', { name: /^Open$/ }).click();
   await expect(
     page.frameLocator('[data-testid="artifact-preview-frame"]').getByRole('heading', {
       name: 'Visual CSS Smoke',

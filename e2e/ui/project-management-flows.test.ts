@@ -1733,7 +1733,9 @@ test('[P1] project detail workspace keeps design file tabs and preview controls 
   const fileTab = tabBySuffix(page, uploadedName);
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('workspace-pages-menu-trigger')).toBeVisible();
+  // #5517 replaced the tab strip's pages dropdown with a plain Design Files
+  // tab; that tab is the file-navigation entry this assertion guards now.
+  await expect(page.getByTestId('design-files-tab')).toBeVisible();
 
   await openUploadedHtmlArtifactPreview(page, uploadedName);
 
@@ -3585,10 +3587,10 @@ async function openUploadedHtmlArtifactPreview(page: Page, uploadedName: string)
   await openAllProjectFiles(page);
   const fileRow = rowByFileName(page, uploadedName);
   await expect(fileRow).toBeVisible();
+  // #5517 deleted the preview card and its Open button: the row's primary
+  // target opens the artifact in a workspace tab on a single click.
   await fileRow.getByRole('button').first().click();
-  const previewCard = page.getByTestId('design-file-preview');
-  await expect(previewCard).toBeVisible();
-  await previewCard.getByRole('button', { name: 'Open' }).click();
+  await expect(tabBySuffix(page, uploadedName)).toHaveAttribute('aria-selected', 'true');
 }
 
 function tabBySuffix(page: Page, name: string): Locator {
