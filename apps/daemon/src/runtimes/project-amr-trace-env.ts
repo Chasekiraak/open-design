@@ -28,6 +28,28 @@ export class ProjectWorkspaceScopeUnavailableError extends Error {
  * spend that team's wallet. If the persisted binding cannot be proven against
  * the current directory, fail closed rather than silently charging the account
  * wallet.
+ *
+ * Two regimes, and the split between them is the point:
+ *
+ * - **Workspace authority is live** (`isWorkspaceTeamConfigured()` true, i.e.
+ *   `OD_WORKSPACE_CONTEXT_SOURCE === 'vela'` in production). Every AMR project
+ *   must prove its binding. An unbound or unprovable project fails closed —
+ *   charging a team's run to the account wallet, or vice versa, is worse than
+ *   refusing it.
+ *
+ * - **Workspace authority is not configured.** There is no directory to prove a
+ *   binding against and no team wallet to mischarge, so the account wallet is
+ *   the only correct answer and the scope lookup is skipped entirely. This is
+ *   not a loosening of the rule above; it is the pre-workspace-team behavior,
+ *   preserved for the callers `resolveCreatedProjectWorkspace` explicitly
+ *   sanctions: "a completely headerless request is a legal legacy/anonymous
+ *   caller and intentionally leaves the new project unbound". Without this
+ *   split, that contract and this one contradict each other and AMR refuses to
+ *   run for precisely the projects the other module calls legitimate — which,
+ *   with workspace transport off in production builds, is every local user.
+ *
+ * Skipping the lookup also keeps an unconfigured daemon off the network, the
+ * same reason `fetchProjectCreationWorkspaceDirectory` is gated in `server.ts`.
  */
 export async function openDesignAmrTraceEnvForProject(
   db: SqliteDb,
@@ -40,6 +62,13 @@ export async function openDesignAmrTraceEnvForProject(
   },
   deps: {
     fetchWorkspaceDirectory: () => Promise<WorkspaceDirectoryFetchResult>;
+    /**
+     * Whether this daemon actually carries workspace authority — see the two
+     * invariants on {@link openDesignAmrTraceEnvForProject}. Defaults to `true`
+     * so a call site that forgets to pass it fails closed rather than silently
+     * billing a team run to the account wallet.
+     */
+    isWorkspaceTeamConfigured?: () => boolean;
   },
 ): Promise<NodeJS.ProcessEnv> {
   const traceInput = {
@@ -57,7 +86,7 @@ export async function openDesignAmrTraceEnvForProject(
 
   const projectId = input.projectId?.trim();
   let workspaceId: string | null = null;
-  if (projectId) {
+  if (projectId && (deps.isWorkspaceTeamConfigured?.() ?? true)) {
     const binding = getWorkspaceProjectByProjectId(db, projectId);
     if (!binding) {
       throw new ProjectWorkspaceScopeUnavailableError(projectId, null);

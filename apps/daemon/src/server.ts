@@ -9095,7 +9095,16 @@ export async function startServer({
           // emits no header, so Vela's NULL-sponsor fallback uses the caller's
           // account wallet. Ambient/current selection never participates.
           projectId,
-        }, { fetchWorkspaceDirectory }),
+        }, {
+          fetchWorkspaceDirectory,
+          // Only a daemon that actually carries workspace authority may hold a
+          // run to the binding requirement. Unconfigured daemons have no
+          // directory to prove a binding against and no team wallet to
+          // mischarge, so they keep the pre-workspace-team account-wallet
+          // behavior instead of refusing every unbound project.
+          isWorkspaceTeamConfigured: () =>
+            process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() === 'vela',
+        }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the
         // daemon-built MCP config wins over a stale value the user

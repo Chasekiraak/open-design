@@ -226,4 +226,68 @@ describe('openDesignAmrTraceEnvForProject', () => {
       workspaceId: 'workspace-missing',
     }));
   });
+
+  // The two regimes of the workspace-authority gate. `resolveCreatedProjectWorkspace`
+  // states that a headerless request is a legal anonymous caller that intentionally
+  // leaves its project unbound; without this split, AMR then refused to run for
+  // exactly the projects that contract says are legitimate.
+  it('runs an unbound AMR project on the account wallet when workspace-team is not configured', async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-unconfigured-scope-'));
+    const db = openDatabase(tempDir);
+    const now = Date.now();
+    insertProject(db, {
+      id: 'project-legacy',
+      name: 'Legacy local project',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const fetchWorkspaceDirectory = vi.fn(async () => ({
+      ok: true as const,
+      items: [],
+    }));
+
+    const env = await openDesignAmrTraceEnvForProject(db, {
+      agentId: 'amr',
+      runId: 'run-legacy',
+      runAttempt: 0,
+      projectId: 'project-legacy',
+    }, {
+      fetchWorkspaceDirectory,
+      isWorkspaceTeamConfigured: () => false,
+    });
+
+    // Account wallet, i.e. exactly what this daemon did before workspace-team.
+    // `OPEN_DESIGN_WORKSPACE_ID` is the key a team binding would have set, so
+    // its absence is what "billed to the account, not a team" means here.
+    expect(env).not.toHaveProperty('OPEN_DESIGN_WORKSPACE_ID');
+    expect(env.OPEN_DESIGN_RUN_ID).toBe('run-legacy');
+    // An unconfigured daemon must not turn a local run into a network call.
+    expect(fetchWorkspaceDirectory).not.toHaveBeenCalled();
+  });
+
+  it('still fails closed for an unbound AMR project when workspace-team is configured', async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-configured-unbound-scope-'));
+    const db = openDatabase(tempDir);
+    const now = Date.now();
+    insertProject(db, {
+      id: 'project-unbound-live',
+      name: 'Unbound project on a live workspace daemon',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(openDesignAmrTraceEnvForProject(db, {
+      agentId: 'amr',
+      runId: 'run-unbound-live',
+      runAttempt: 0,
+      projectId: 'project-unbound-live',
+    }, {
+      fetchWorkspaceDirectory: async () => ({ ok: true, items: [] }),
+      isWorkspaceTeamConfigured: () => true,
+    })).rejects.toEqual(expect.objectContaining({
+      name: ProjectWorkspaceScopeUnavailableError.name,
+      projectId: 'project-unbound-live',
+      workspaceId: null,
+    }));
+  });
 });
