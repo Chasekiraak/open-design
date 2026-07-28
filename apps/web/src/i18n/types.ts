@@ -2851,6 +2851,8 @@ export interface Dict {
   'chat.amrBalanceGate.signedOutMessage': string;
   'chat.amrBalanceGate.signInCta': string;
   'chat.amrBalanceGate.watchingWallet': string;
+  'chat.amrScopeGate.signedOutMessage': string;
+  'chat.amrScopeGate.unresolvedMessage': string;
   'chat.amrLowBalance.title': string;
   'chat.amrLowBalance.message': string;
   'chat.amrLowBalance.rechargeCta': string;
