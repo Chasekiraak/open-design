@@ -195,8 +195,19 @@ export async function openSettingsDialog(page: Page) {
       await fallback.evaluate((element: HTMLElement) => element.click());
     }
 
-    const detailsTrigger = page.getByTestId('entry-settings-open-details').first();
-    if (await detailsTrigger.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    // The first click may only have opened a popover. `AvatarMenu`'s trigger is
+    // labelled 'Account & settings' (`avatar.title`), which OPEN_SETTINGS_LABEL
+    // matches, so on a project surface the chain above lands on the composer's
+    // model popover rather than on Settings — its pinned
+    // `avatar-open-execution-settings` row is the click that actually routes
+    // there. Keep all three follow-throughs in one locator so whichever popover
+    // opened gets finished.
+    const detailsTrigger = page
+      .getByTestId('entry-settings-open-details')
+      .or(page.getByTestId('avatar-open-execution-settings'))
+      .or(page.getByTestId('inline-model-switcher-open-settings'))
+      .first();
+    if (await detailsTrigger.isVisible({ timeout: T.short }).catch(() => false)) {
       await detailsTrigger.click();
     }
 
