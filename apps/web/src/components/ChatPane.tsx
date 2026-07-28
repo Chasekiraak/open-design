@@ -64,6 +64,9 @@ import {
   DESIGN_SYSTEM_NEXT_STEP_ACTIONS,
   type NextStepActionsVariant,
 } from './NextStepActions';
+// Shared pill look for the 扩展 / 设计百宝箱 quick pills, which render above
+// the composer input (moved out of the next-step card).
+import nextStepStyles from './NextStepActions.module.css';
 import { AmrGuidance } from './AmrGuidance';
 import { AmrLoginPill } from './AmrLoginPill';
 import {
@@ -1065,10 +1068,36 @@ export function ChatPane({
   const handleToolboxAction = useCallback((id: DesignToolboxActionId) => {
     composerRef.current?.applyDesignToolboxAction(id);
   }, []);
-  // Next-step quick pills: open the composer "+" menu directly on the 扩展
-  // (plugins) or 设计百宝箱 (toolbox) flyout. Stable for the same memo reason.
+  // Quick pills above the composer input: 插件 and 设计百宝箱 open their own
+  // standalone popovers — the "+" menu no longer carries either row. They
+  // open on hover (with a short intent delay so a pointer merely passing
+  // through to the input doesn't pop a panel) as well as on click; leaving
+  // the pill schedules a close that hovering the popup cancels.
+  const pillHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleNextStepOpenComposerPanel = useCallback((which: 'plugins' | 'toolbox') => {
-    composerRef.current?.openPlusMenu(which);
+    if (pillHoverTimerRef.current) {
+      clearTimeout(pillHoverTimerRef.current);
+      pillHoverTimerRef.current = null;
+    }
+    if (which === 'toolbox') composerRef.current?.openDesignToolbox();
+    else composerRef.current?.openPluginsPanel();
+  }, []);
+  const handleQuickPillHoverEnter = useCallback((which: 'plugins' | 'toolbox') => {
+    if (pillHoverTimerRef.current) clearTimeout(pillHoverTimerRef.current);
+    pillHoverTimerRef.current = setTimeout(() => {
+      pillHoverTimerRef.current = null;
+      handleNextStepOpenComposerPanel(which);
+    }, 140);
+  }, [handleNextStepOpenComposerPanel]);
+  const handleQuickPillHoverLeave = useCallback(() => {
+    if (pillHoverTimerRef.current) {
+      clearTimeout(pillHoverTimerRef.current);
+      pillHoverTimerRef.current = null;
+    }
+    composerRef.current?.scheduleComposerPanelClose();
+  }, []);
+  useEffect(() => () => {
+    if (pillHoverTimerRef.current) clearTimeout(pillHoverTimerRef.current);
   }, []);
   const handleNextStepPromptAction = useCallback((
     prompt: string,
@@ -2112,6 +2141,40 @@ export function ChatPane({
   }, [composerPortalRect, composerPortalTarget, tab]);
 
   const composerNode = (
+    <>
+      {/* 扩展 / 设计百宝箱 quick pills: moved out of the next-step card so
+          they sit directly above the composer input, and travel with the
+          composer into its portaled fixed layer. Hidden for viewer-only
+          panes where the "+" menu they open is off-limits anyway. */}
+      {viewerOnly ? null : (
+        <div
+          className={`${nextStepStyles.quickPills} ${nextStepStyles.composerQuickPills}`}
+          data-testid="composer-quick-pills"
+        >
+          <button
+            type="button"
+            className={nextStepStyles.quickPill}
+            data-testid="next-step-quick-pill-plugins"
+            onClick={() => handleNextStepOpenComposerPanel('plugins')}
+            onMouseEnter={() => handleQuickPillHoverEnter('plugins')}
+            onMouseLeave={handleQuickPillHoverLeave}
+          >
+            <Icon name="sparkles" size={16} />
+            <span>{t('entry.navPlugins')}</span>
+          </button>
+          <button
+            type="button"
+            className={nextStepStyles.quickPill}
+            data-testid="next-step-quick-pill-toolbox"
+            onClick={() => handleNextStepOpenComposerPanel('toolbox')}
+            onMouseEnter={() => handleQuickPillHoverEnter('toolbox')}
+            onMouseLeave={handleQuickPillHoverLeave}
+          >
+            <Icon name="lightbulb" size={16} />
+            <span>{t('chat.designToolbox.tooltip')}</span>
+          </button>
+        </div>
+      )}
     <ChatComposer
       ref={composerRef}
       designSystemPicker={designSystemPicker}
@@ -2197,6 +2260,7 @@ export function ChatPane({
       onActiveDesignSystemChange={onActiveDesignSystemChange}
       onShowToast={onShowToast}
     />
+    </>
   );
   const shouldPortalComposer =
     tab === 'chat'

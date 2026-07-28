@@ -52,6 +52,8 @@ import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useG
 import { PlanWordmark, planBadgeTierForLabel } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
+import { MessageCenter } from './MessageCenter';
+import type { EntrySettingsSection } from './EntrySettingsMenu';
 import { useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import {
@@ -103,8 +105,8 @@ interface Props {
   /** Explicitly scoped balance in USD for `context`. Team callers must pass
    *  only a backend-proven v2 workspace wallet, never account credits. */
   balanceUsd?: string | null;
-  /** Open the app settings dialog. */
-  onOpenSettings?: () => void;
+  /** Open the app settings dialog (optionally on a specific section). */
+  onOpenSettings?: (section?: EntrySettingsSection) => void;
   /** Open the members / invite slot (B's InviteDialog). */
   onInvite?: () => void;
   /** Start the cloud sign-in / team flow from the local-state callout. */
@@ -496,6 +498,10 @@ export function EntryNavRail({
   const planTier = planBadgeTierForLabel(rawTier || tierLabel);
 
   const [accountOpen, setAccountOpen] = useState(false);
+  // Message-center panel (opened from the account menu's 消息中心 row) and its
+  // unread count, which drives the red dot on the account avatar.
+  const [messageCenterOpen, setMessageCenterOpen] = useState(false);
+  const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   // Sign-out confirm gate (recvqgMWpJZqhL): the menu item only ARMS the
   // confirmation dialog; the real logout chain runs on explicit confirm.
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -714,7 +720,12 @@ export function EntryNavRail({
               aria-expanded={accountOpen}
               data-testid="entry-nav-account"
             >
-              <span className="entry-nav-rail__account-avatar" aria-hidden>{accountInitial}</span>
+              <span className="entry-nav-rail__account-avatar" aria-hidden>
+                {accountInitial}
+                {messageUnreadCount > 0 ? (
+                  <span className="entry-nav-rail__account-avatar-dot" data-testid="account-avatar-unread-dot" />
+                ) : null}
+              </span>
               <span className="entry-nav-rail__account-name">{accountName}</span>
               {/* #5517: the plan badge replaces the chevron when a tier is
                   known — the standalone credits chip row is gone; credits
@@ -792,6 +803,21 @@ export function EntryNavRail({
                     }}
                   >
                     <Icon name="settings" size={15} /> {t('entry.accountSettings')}
+                  </button>
+                  <button
+                    type="button"
+                    className="entry-nav-rail__menu-item"
+                    role="menuitem"
+                    data-testid="account-menu-message-center"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setMessageCenterOpen(true);
+                    }}
+                  >
+                    <Icon name="bell" size={15} /> {t('messageCenter.title')}
+                    {messageUnreadCount > 0 ? (
+                      <span className="entry-nav-rail__menu-item-dot" aria-hidden />
+                    ) : null}
                   </button>
                   {/* #5517's account menu goes 设置 → GitHub 帮助 → 功能建议 → 社交行,
                       with no theme row, no language submenu, and no divider in
@@ -1157,6 +1183,16 @@ export function EntryNavRail({
         </div>
       ) : null}
       </div>
+
+      {/* Panel + unread polling live here (outside the hover menu, which
+          unmounts when closed); the 消息中心 menu row above just opens it. */}
+      <MessageCenter
+        hideTrigger
+        open={messageCenterOpen}
+        onOpenChange={setMessageCenterOpen}
+        onUnreadCountChange={setMessageUnreadCount}
+        onOpenNotificationSettings={onOpenSettings ? () => onOpenSettings('notifications') : undefined}
+      />
 
       <InviteDialog
         open={inviteOpen}

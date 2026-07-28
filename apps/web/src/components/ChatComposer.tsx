@@ -376,12 +376,18 @@ export interface ChatComposerHandle {
    * an unknown id.
    */
   applyDesignToolboxSkill: (skillId: string) => void;
-  /** Legacy: open the standalone toolbox popover. Currently unused by callers. */
+  /** Open the standalone toolbox popover (the 设计百宝箱 quick pill above the
+   *  composer input; the "+" menu no longer carries a toolbox row). */
   openDesignToolbox: () => void;
+  /** Open the standalone plugins popover (the 插件 quick pill above the
+   *  composer input; the "+" menu no longer carries a plugins row). */
+  openPluginsPanel: () => void;
+  /** Schedule closing whichever standalone popover is open (hover-leave from
+   *  a quick pill); re-opening or hovering the popup cancels it. */
+  scheduleComposerPanelClose: () => void;
   /**
-   * Open the composer "+" menu from outside (e.g. the next-step card's
-   * quick-access pills), optionally landing on a specific flyout
-   * ('plugins' for 扩展, 'toolbox' for 设计百宝箱, ...).
+   * Open the composer "+" menu from outside, optionally landing on a specific
+   * flyout.
    */
   openPlusMenu: (submenu?: PlusMenuSubmenu) => void;
 }
@@ -529,6 +535,28 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     // its own cascading skill menu, so nothing opens this anymore; kept compiling
     // behind `openDesignToolbox` until the panel subsystem is removed wholesale.
     const [designToolboxOpen, setDesignToolboxOpen] = useState(false);
+    const [pluginsPanelOpen, setPluginsPanelOpen] = useState(false);
+    // Shared close timer for the two hover-opened standalone popovers (插件 /
+    // 设计百宝箱). Leaving a quick pill schedules a close; re-entering the pill
+    // or the popup cancels it, so the pointer can travel pill → popup freely.
+    const panelCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    function cancelComposerPanelClose() {
+      if (panelCloseTimerRef.current) {
+        clearTimeout(panelCloseTimerRef.current);
+        panelCloseTimerRef.current = null;
+      }
+    }
+    function scheduleComposerPanelClose() {
+      cancelComposerPanelClose();
+      panelCloseTimerRef.current = setTimeout(() => {
+        panelCloseTimerRef.current = null;
+        setPluginsPanelOpen(false);
+        setDesignToolboxOpen(false);
+      }, 260);
+    }
+    useEffect(() => () => {
+      if (panelCloseTimerRef.current) clearTimeout(panelCloseTimerRef.current);
+    }, []);
     // External "+"-menu open request (next-step quick pills) — nonce-keyed so
     // every pill click re-opens even after the menu was dismissed.
     const [plusMenuOpenRequest, setPlusMenuOpenRequest] = useState<
@@ -1130,8 +1158,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           applyDesignToolboxSkillByIdRef.current(skillId);
         },
         openDesignToolbox: () => {
+          cancelComposerPanelClose();
           setComposerEngaged(true);
+          // The two popovers share one anchor spot — opening one closes the
+          // other so hover-switching between the pills swaps panels.
+          setPluginsPanelOpen(false);
           setDesignToolboxOpen(true);
+        },
+        openPluginsPanel: () => {
+          cancelComposerPanelClose();
+          setComposerEngaged(true);
+          setDesignToolboxOpen(false);
+          setPluginsPanelOpen(true);
+        },
+        scheduleComposerPanelClose: () => {
+          scheduleComposerPanelClose();
         },
         openPlusMenu: (submenu?: PlusMenuSubmenu) => {
           setComposerEngaged(true);
@@ -2712,6 +2753,101 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         onDragLeave={() => setDragActive(false)}
         onDrop={inputDisabled ? undefined : handleDrop}
       >
+        {designToolboxOpen ? (
+          <div className="composer-toolbox-standalone">
+            {/* Click-catcher backdrop. A <div> (not a <button>) so it never
+                inherits the app's global button:hover fill, which otherwise
+                painted the whole screen when the cursor crossed it. */}
+            <div
+              className="composer-toolbox-standalone-backdrop"
+              aria-hidden="true"
+              onClick={() => setDesignToolboxOpen(false)}
+            />
+            <div
+              className="plus-menu__popup composer-toolbox-standalone-popup"
+              role="menu"
+              onMouseEnter={cancelComposerPanelClose}
+              onMouseLeave={scheduleComposerPanelClose}
+            >
+              <DesignToolboxPanel
+                actions={DESIGN_TOOLBOX_ACTIONS}
+                skills={skills}
+                plugins={pluginsForComposer}
+                mcpServers={enabledMcpServers}
+                mcpTemplates={mcpTemplates}
+                connectors={connectors}
+                projectFiles={projectFiles}
+                activeSkillIds={stagedSkills.map((skill) => skill.id)}
+                activePluginId={activeAppliedPlugin?.pluginId ?? pinnedPluginId ?? null}
+                activeMcpServerIds={stagedMcpServers.map((server) => server.id)}
+                activeConnectorIds={stagedConnectors.map((connector) => connector.id)}
+                activeFilePaths={staged.map((item) => item.path)}
+                onOpened={() => trackDesignToolbox({ element: 'design_toolbox_open' })}
+                onPickAction={(action) => {
+                  trackDesignToolbox({
+                    element: 'design_toolbox_action',
+                    toolbox_action_id: action.id,
+                  });
+                  applyDesignToolboxAction(action);
+                  setDesignToolboxOpen(false);
+                }}
+                onPickSkill={(skill) => {
+                  trackDesignToolbox({
+                    element: 'design_toolbox_resource',
+                    resource_kind: 'skill',
+                    resource_id: skill.id,
+                  });
+                  applyDesignToolboxSkill(skill);
+                  setDesignToolboxOpen(false);
+                }}
+                onPickResource={(resource) => {
+                  trackDesignToolbox({
+                    element: 'design_toolbox_resource',
+                    ...designToolboxResourceTracking(resource),
+                  });
+                  applyDesignToolboxResource(resource);
+                  setDesignToolboxOpen(false);
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+        {/* Standalone plugins popover — the 插件 quick pill's surface, now
+            that the "+" menu no longer carries a plugins row. Same anchor
+            and backdrop pattern as the toolbox popover above. */}
+        {pluginsPanelOpen ? (
+          <div className="composer-toolbox-standalone">
+            <div
+              className="composer-toolbox-standalone-backdrop"
+              aria-hidden="true"
+              onClick={() => setPluginsPanelOpen(false)}
+            />
+            <div
+              className="plus-menu__popup composer-toolbox-standalone-popup composer-plugins-standalone-popup"
+              role="menu"
+              onMouseEnter={cancelComposerPanelClose}
+              onMouseLeave={scheduleComposerPanelClose}
+            >
+              <StandalonePluginsPane
+                plugins={pluginsForComposer}
+                onPick={(record) => {
+                  trackComposerBar({
+                    element: 'plus_pick',
+                    resource_kind: 'plugin',
+                    resource_id: record.id,
+                  });
+                  void insertPluginMention(record);
+                  setPluginsPanelOpen(false);
+                }}
+                onAdd={onBrowsePlugins ? () => {
+                  trackComposerBar({ element: 'plus_add', resource_kind: 'plugin' });
+                  setPluginsPanelOpen(false);
+                  onBrowsePlugins();
+                } : undefined}
+              />
+            </div>
+          </div>
+        ) : null}
         <div
           className={`composer-shell${manualEditorHeight != null ? ' composer-shell--manual-height' : ''}`}
           style={
@@ -3059,110 +3195,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                 trackComposerBar({ element: 'design_system_open' });
                 openDesignSystemPicker();
               } : undefined}
-              toolboxLabel={t('chat.designToolbox.title')}
-              renderToolbox={(close) => (
-                <DesignToolboxPanel
-                  actions={DESIGN_TOOLBOX_ACTIONS}
-                  skills={skills}
-                  plugins={pluginsForComposer}
-                  mcpServers={enabledMcpServers}
-                  mcpTemplates={mcpTemplates}
-                  connectors={connectors}
-                  projectFiles={projectFiles}
-                  activeSkillIds={stagedSkills.map((skill) => skill.id)}
-                  activePluginId={activeAppliedPlugin?.pluginId ?? pinnedPluginId ?? null}
-                  activeMcpServerIds={stagedMcpServers.map((server) => server.id)}
-                  activeConnectorIds={stagedConnectors.map((connector) => connector.id)}
-                  activeFilePaths={staged.map((item) => item.path)}
-                  onOpened={() => trackDesignToolbox({ element: 'design_toolbox_open' })}
-                  onPickAction={(action) => {
-                    trackDesignToolbox({
-                      element: 'design_toolbox_action',
-                      toolbox_action_id: action.id,
-                    });
-                    applyDesignToolboxAction(action);
-                    close();
-                  }}
-                  onPickSkill={(skill) => {
-                    trackDesignToolbox({
-                      element: 'design_toolbox_resource',
-                      resource_kind: 'skill',
-                      resource_id: skill.id,
-                    });
-                    applyDesignToolboxSkill(skill);
-                    close();
-                  }}
-                  onPickResource={(resource) => {
-                    trackDesignToolbox({
-                      element: 'design_toolbox_resource',
-                      ...designToolboxResourceTracking(resource),
-                    });
-                    applyDesignToolboxResource(resource);
-                    close();
-                  }}
-                />
-              )}
+              // No toolboxLabel / renderToolbox, and hidePluginsRow: 插件 and
+              // 设计百宝箱 left this menu — the quick pills above the input
+              // open their standalone popovers instead.
+              hidePluginsRow
             />
             {/* #5517: the design-system picker sits inline in the composer's
                 icon row (palette icon) instead of the staged-context bar. */}
             {designSystemPicker}
-            {designToolboxOpen ? (
-              <div className="composer-toolbox-standalone">
-                {/* Click-catcher backdrop. A <div> (not a <button>) so it never
-                    inherits the app's global button:hover fill, which otherwise
-                    painted the whole screen when the cursor crossed it. */}
-                <div
-                  className="composer-toolbox-standalone-backdrop"
-                  aria-hidden="true"
-                  onClick={() => setDesignToolboxOpen(false)}
-                />
-                <div
-                  className="plus-menu__popup composer-toolbox-standalone-popup"
-                  role="menu"
-                >
-                  <DesignToolboxPanel
-                    actions={DESIGN_TOOLBOX_ACTIONS}
-                    skills={skills}
-                    plugins={pluginsForComposer}
-                    mcpServers={enabledMcpServers}
-                    mcpTemplates={mcpTemplates}
-                    connectors={connectors}
-                    projectFiles={projectFiles}
-                    activeSkillIds={stagedSkills.map((skill) => skill.id)}
-                    activePluginId={activeAppliedPlugin?.pluginId ?? pinnedPluginId ?? null}
-                    activeMcpServerIds={stagedMcpServers.map((server) => server.id)}
-                    activeConnectorIds={stagedConnectors.map((connector) => connector.id)}
-                    activeFilePaths={staged.map((item) => item.path)}
-                    onOpened={() => trackDesignToolbox({ element: 'design_toolbox_open' })}
-                    onPickAction={(action) => {
-                      trackDesignToolbox({
-                        element: 'design_toolbox_action',
-                        toolbox_action_id: action.id,
-                      });
-                      applyDesignToolboxAction(action);
-                      setDesignToolboxOpen(false);
-                    }}
-                    onPickSkill={(skill) => {
-                      trackDesignToolbox({
-                        element: 'design_toolbox_resource',
-                        resource_kind: 'skill',
-                        resource_id: skill.id,
-                      });
-                      applyDesignToolboxSkill(skill);
-                      setDesignToolboxOpen(false);
-                    }}
-                    onPickResource={(resource) => {
-                      trackDesignToolbox({
-                        element: 'design_toolbox_resource',
-                        ...designToolboxResourceTracking(resource),
-                      });
-                      applyDesignToolboxResource(resource);
-                      setDesignToolboxOpen(false);
-                    }}
-                  />
-                </div>
-              </div>
-            ) : null}
             {leadingAccessory}
             <span className="composer-spacer" />
             <ComposerModePicker
@@ -3214,7 +3254,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                 title={t('chat.send')}
                 data-tooltip={t('chat.send')}
               >
-                <Icon name="arrow-up" size={17} />
+                <Icon name="arrow-up" size={18} />
               </button>
             ) : null}
           </div>
@@ -3734,9 +3774,6 @@ function StagedRunContexts({
             title={s.description || s.name}
             aria-label={s.name}
           >
-            <span className="staged-icon" aria-hidden>
-              <Icon name="sparkles" size={12} />
-            </span>
             <span className="staged-name">@{s.name}</span>
           </button>
           <button
@@ -3914,6 +3951,91 @@ function StagedCommentAttachments({
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The 插件 quick pill's standalone popover content. Reuses the "+" menu
+ * plugins-flyout structure verbatim (plus-menu__plugin-pane: search + list
+ * column + hover preview column) so the surface keeps the exact look it had
+ * as a menu flyout — ToolsPluginsPanel's composer-tools-* layout collided
+ * with the plus-menu popup container.
+ */
+function StandalonePluginsPane({
+  plugins,
+  onPick,
+  onAdd,
+}: {
+  plugins: InstalledPluginRecord[];
+  onPick: (record: InstalledPluginRecord) => void;
+  onAdd?: () => void;
+}) {
+  const { locale, t } = useI18n();
+  const [query, setQuery] = useState('');
+  const [hoveredPluginId, setHoveredPluginId] = useState<string | null>(null);
+  const filteredPlugins = useMemo(
+    () => plugins.filter((p) => pluginMatchesQuery(p, query)),
+    [plugins, query],
+  );
+  // Mirror the "+" menu flyout: default the preview to the first filtered row
+  // so the panel is never blank while open.
+  const hoveredPlugin =
+    filteredPlugins.find((p) => p.id === hoveredPluginId) ?? filteredPlugins[0] ?? null;
+
+  return (
+    <div className="plus-menu__plugin-pane">
+      <div className="plus-menu__plugin-main">
+        <div className="plus-menu__search">
+          <Icon name="search" size={14} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('entry.navPlugins')}
+            aria-label={t('entry.navPlugins')}
+          />
+        </div>
+        <div className="plus-menu__list">
+          {filteredPlugins.length === 0 ? (
+            <div className="plus-menu__empty">{t('homeHero.noPlugins')}</div>
+          ) : (
+            filteredPlugins.map((plugin) => (
+              <button
+                key={plugin.id}
+                type="button"
+                role="menuitem"
+                className={`plus-menu__item${
+                  plugin.id === hoveredPlugin?.id ? ' is-previewed' : ''
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHoveredPluginId(plugin.id)}
+                onFocus={() => setHoveredPluginId(plugin.id)}
+                onClick={() => onPick(plugin)}
+              >
+                <Icon name="sparkles" size={15} className="plus-menu__item-icon" />
+                <span>{localizePluginTitle(locale, plugin)}</span>
+              </button>
+            ))
+          )}
+        </div>
+        {onAdd ? (
+          <>
+            <div className="plus-menu__divider" />
+            <button
+              type="button"
+              role="menuitem"
+              className="plus-menu__item"
+              onClick={onAdd}
+            >
+              <Icon name="plus" size={15} className="plus-menu__item-icon" />
+              <span>{t('homeHero.addPlugin')}</span>
+            </button>
+          </>
+        ) : null}
+      </div>
+      {hoveredPlugin ? (
+        <ComposerPluginPreview record={hoveredPlugin} locale={locale} />
+      ) : null}
     </div>
   );
 }

@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import type { Variants } from 'motion/react';
+import { createPortal } from 'react-dom';
 
-import { Icon } from './Icon';
-import { Button } from '@open-design/components';
+import { Button, Dialog } from '@open-design/components';
 import { useI18n } from '../i18n';
 import { fetchWhatsNew, openExternalUrl } from '../providers/registry';
 import {
@@ -14,40 +12,31 @@ import {
 } from '../lib/whats-new';
 import { useAnalytics } from '../analytics/provider';
 import { trackWhatsNewPopupClick, trackWhatsNewPopupSurfaceView } from '../analytics/events';
-import styles from './WhatsNewPopup.module.css';
+// The release-dialog visual language (cover card / title / dotted notes /
+// pill footer) is shared with UpdateReminderDialog — one style source, two
+// content sources. Copy/image/link here stay REAL: the hand-curated
+// highlights document served by /api/whats-new.
+import styles from './UpdateReminderDialog.module.css';
 
-// Post-update highlights card, shown once per highlight on the home surface
+// Post-update highlights dialog, shown once per highlight on the home surface
 // after the app comes back on a new version (desktop update or web reload).
 // Copy/image/link come from a hand-curated highlights document via
-// /api/whats-new; the card shows only when that document has content, and at
+// /api/whats-new; the dialog shows only when that document has content, and at
 // most once per its `id` (see ../lib/whats-new).
 
 // Fallback for the CTA when the highlight document omits an explicit link.
 const RELEASES_INDEX_URL = 'https://github.com/nexu-io/open-design/releases';
-
-const cardIn: Variants = {
-  hidden: { opacity: 0, scale: 0.96, y: 12 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    y: 0,
-    transition: { duration: 0.2, ease: [0.23, 1, 0.32, 1] },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.97,
-    y: 8,
-    transition: { duration: 0.14, ease: [0.23, 1, 0.32, 1] },
-  },
-};
 
 type CardModel = {
   /** Highlight identity — recorded as "seen" so the card shows once per id. */
   id: string;
   /** Running app version, shown as the "Open Design x.y.z" eyebrow. */
   appVersion: string;
-  /** The release headline, rendered as the main serif title. */
+  /** The release headline, rendered as the dialog title. */
   title: string;
+  /** Highlight body, one entry per non-empty line — multi-line bodies render
+   *  as the dotted notes list, a single line as a plain paragraph. */
+  bodyLines: string[];
   imageUrl: string | null;
   linkUrl: string;
 };
@@ -83,6 +72,10 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
         id: info.id,
         appVersion: info.version,
         title: localized.title,
+        bodyLines: localized.body
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean),
         imageUrl: info.content.imageUrl ?? null,
         linkUrl: localized.linkUrl ?? RELEASES_INDEX_URL,
       });
@@ -147,53 +140,61 @@ export function WhatsNewPopup({ active }: { active: boolean }) {
     setCard(null);
   }, [analytics.track, card]);
 
-  return (
-    <AnimatePresence>
-      {active && card != null ? (
-        <motion.section
-          aria-labelledby="whats-new-popup-title"
-          className={styles.card}
-          data-testid="whats-new-popup"
-          role="complementary"
-          variants={cardIn}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-        >
-          <div className={styles.header}>
-            <span className={styles.eyebrow}>Open Design {card.appVersion}</span>
-            <Button
-              aria-label={t('whatsNew.dismissAria')}
-              className={styles.close}
-              data-testid="whats-new-dismiss"
-              size="icon"
-              variant="ghost"
-              onClick={dismiss}
-            >
-              <Icon name="close" size={14} strokeWidth={2} />
-            </Button>
-          </div>
-          <div className={styles.content}>
-            <div className={styles.main}>
-              <h2 className={styles.title} id="whats-new-popup-title">
-                {card.title}
-              </h2>
-              <div className={styles.actions}>
-                <Button
-                  data-testid="whats-new-cta"
-                  variant="subtle"
-                  onClick={openLink}
-                >
-                  {t('whatsNew.cta')}
-                </Button>
-              </div>
-            </div>
-            {card.imageUrl != null ? (
-              <img alt="" className={styles.image} src={card.imageUrl} />
-            ) : null}
-          </div>
-        </motion.section>
+  if (!active || card == null) return null;
+
+  const dialog = (
+    <Dialog
+      ariaLabelledBy="whats-new-popup-title"
+      // Backdrop / Escape are soft hides: the card is once-per-highlight, so a
+      // stray dismissal must not spend it — mark-seen stays reserved for the
+      // explicit buttons (matching the old toast's Escape semantics).
+      onClose={() => setCard(null)}
+      closeOnEscape
+      className={styles.panel}
+      backdropClassName={styles.backdrop}
+      data-testid="whats-new-popup"
+    >
+      {card.imageUrl != null ? (
+        <img className={styles.cover} src={card.imageUrl} alt="" />
       ) : null}
-    </AnimatePresence>
+      <div className={styles.content}>
+        <span className={styles.eyebrow}>Open Design {card.appVersion}</span>
+        <h2 className={styles.title} id="whats-new-popup-title">
+          {card.title}
+        </h2>
+        {card.bodyLines.length > 1 ? (
+          <ul className={styles.notes}>
+            {card.bodyLines.map((line) => (
+              <li key={line} className={styles.note}>
+                <span className={styles.noteDot} aria-hidden />
+                {line}
+              </li>
+            ))}
+          </ul>
+        ) : card.bodyLines.length === 1 ? (
+          <p className={styles.bodyText}>{card.bodyLines[0]}</p>
+        ) : null}
+      </div>
+      <div className={styles.footer}>
+        <Button
+          className={styles.cancel}
+          onClick={dismiss}
+          data-testid="whats-new-dismiss"
+          aria-label={t('whatsNew.dismissAria')}
+        >
+          {t('common.cancel')}
+        </Button>
+        <Button
+          variant="primary"
+          className={styles.confirm}
+          onClick={openLink}
+          data-testid="whats-new-cta"
+        >
+          {t('whatsNew.cta')}
+        </Button>
+      </div>
+    </Dialog>
   );
+  if (typeof document === 'undefined') return dialog;
+  return createPortal(dialog, document.body);
 }

@@ -134,8 +134,6 @@ import { UpdateReminderDialog, UpdateReminderStrip } from './UpdateReminderDialo
 import {
   markUpdateReminderSeen,
   markUpdateReminderUpdated,
-  readSeenUpdateReminderVersion,
-  readUpdatedUpdateReminderVersion,
 } from '../lib/update-reminder';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
@@ -170,6 +168,8 @@ import type { CreateInput, CreateTab, ImportClaudeDesignOutcome } from './NewPro
 import type { PluginLoopSubmit } from './PluginLoopHome';
 import {
   createProject,
+  duplicatePluginAsProject,
+  patchProject,
   type PluginShareAction,
   type PluginShareProjectOutcome,
 } from '../state/projects';
@@ -928,12 +928,19 @@ export function EntryShell({
   const [updateReminderStage, setUpdateReminderStage] =
     useState<'hidden' | 'dialog' | 'strip' | 'updating'>('hidden');
   const [updateReminderProgress, setUpdateReminderProgress] = useState(0);
-  useEffect(() => {
-    if (readUpdatedUpdateReminderVersion() === UPDATE_REMINDER_DEMO.version) return;
-    setUpdateReminderStage(
-      readSeenUpdateReminderVersion() === UPDATE_REMINDER_DEMO.version ? 'strip' : 'dialog',
-    );
-  }, []);
+  // DEMO ENTRY DISABLED: the release-dialog visual now ships on the real
+  // What's-new surface (WhatsNewPopup ← /api/whats-new), and the placeholder
+  // payload must not drive ANY reminder surface (dialog, strip, or the fake
+  // download). The stage machine, strip, and progress ring below stay intact
+  // for the real updater-feed wiring (../lib/updater) — re-enable by deriving
+  // the stage from that feed here instead of UPDATE_REMINDER_DEMO:
+  //
+  //   useEffect(() => {
+  //     if (readUpdatedUpdateReminderVersion() === feed.version) return;
+  //     setUpdateReminderStage(
+  //       readSeenUpdateReminderVersion() === feed.version ? 'strip' : 'dialog',
+  //     );
+  //   }, []);
   const collapseUpdateReminder = useCallback(() => {
     markUpdateReminderSeen(UPDATE_REMINDER_DEMO.version);
     setUpdateReminderStage('strip');
@@ -1668,19 +1675,35 @@ export function EntryShell({
             ) : null}
             {view === 'community' ? (
               <CommunityView
-                onRemixTemplate={({ prompt }) => {
-                  // Remix drops the user straight into a running project
-                  // instead of just prefilling Home's composer: create a
-                  // project seeded with this template's prompt (the same
-                  // auto-send-on-mount path Home's own submit uses) and let
-                  // onCreateProject open it.
-                  void onCreateProject({
-                    name: summarizeProjectNameFromPrompt(prompt) || t('common.untitled'),
-                    skillId: null,
-                    designSystemId: null,
-                    metadata: { kind: 'other', nameSource: 'prompt' },
-                    pendingPrompt: prompt,
-                  });
+                onRemixTemplate={({ templateId, prompt }) => {
+                  // Remix carries the template's PROJECT along, not just its
+                  // prompt: duplicate the plugin's example artifact into a
+                  // fresh project (the same daemon flow as the plugin
+                  // gallery's 创建副本), seed the composer with the template
+                  // prompt for review, then open it on the copied entry file.
+                  // Templates without a duplicable artifact fall back to the
+                  // old prompt-only project.
+                  void (async () => {
+                    const name =
+                      summarizeProjectNameFromPrompt(prompt) || t('common.untitled');
+                    try {
+                      const result = await duplicatePluginAsProject(templateId, { name });
+                      await patchProject(
+                        result.projectId,
+                        { pendingPrompt: prompt },
+                        workspaceContext,
+                      );
+                      await Promise.resolve(onOpenProject(result.projectId, result.relPath));
+                    } catch {
+                      await onCreateProject({
+                        name,
+                        skillId: null,
+                        designSystemId: null,
+                        metadata: { kind: 'other', nameSource: 'prompt' },
+                        pendingPrompt: prompt,
+                      });
+                    }
+                  })();
                 }}
                 onUsePrompt={(prompt) => {
                   // Seed the Home composer with the template's starting prompt,

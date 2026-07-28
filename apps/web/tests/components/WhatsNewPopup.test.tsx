@@ -72,14 +72,12 @@ describe('WhatsNewPopup fetch/show lifecycle', () => {
     await waitFor(() => {
       expect(screen.getByTestId('whats-new-popup')).toBeTruthy();
     });
-    // Version eyebrow + release title as the main serif copy. The long body
-    // is intentionally not rendered on the card.
+    // Version eyebrow + release title as the dialog headline.
     expect(screen.getByText('Open Design 0.12.1')).toBeTruthy();
     expect(screen.getByText('Design system sync')).toBeTruthy();
-    // A non-modal, dismissible toast is a complementary landmark, NOT a dialog —
-    // so it never collides with `getByRole('dialog')` (e.g. the Settings modal).
-    expect(screen.getByRole('complementary', { name: 'Design system sync' })).toBeTruthy();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    // The card now wears the shared release-dialog shell (UpdateReminderDialog
+    // visual language), so it IS a dialog landmark titled by the headline.
+    expect(screen.getByRole('dialog', { name: 'Design system sync' })).toBeTruthy();
   });
 
   it('does not fetch or show while Home is inactive, then shows once it activates', async () => {
