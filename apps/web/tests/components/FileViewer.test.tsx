@@ -2302,6 +2302,52 @@ describe('FileViewer SVG artifacts', () => {
       expect(container.querySelectorAll('.deck-thumbnail-button')).toHaveLength(10);
     });
 
+    it('drops stale slide state when the same deck source shrinks', async () => {
+      const fiveSlideDeck = [
+        '<!doctype html><html><body>',
+        '<div class="deck-wrap"><div class="deck-frame"><main class="deck-stage">',
+        ...Array.from({ length: 5 }, (_, index) => (
+          `<section class="slide${index === 0 ? ' is-active' : ''}" data-screen-label="${String(index + 1).padStart(2, '0')} Slide">${index + 1}</section>`
+        )),
+        '</main></div></div>',
+        '</body></html>',
+      ].join('');
+      const file = deckFile();
+      const { container, rerender } = render(
+        <FileViewer
+          projectId="project-source-shrink"
+          projectKind="prototype"
+          file={file}
+          isDeck
+          liveHtml={nestedStageDeck}
+        />,
+      );
+
+      const counterText = () => (
+        container.querySelector('.deck-floating-count, .deck-nav-counter')?.textContent ?? ''
+      ).replace(/\s+/g, '');
+      const thumbnails = () => (
+        Array.from(container.querySelectorAll<HTMLButtonElement>('.deck-thumbnail-button'))
+      );
+      fireEvent.click(thumbnails()[9]!);
+      expect(counterText()).toBe('10/10');
+
+      rerender(
+        <FileViewer
+          projectId="project-source-shrink"
+          projectKind="prototype"
+          file={file}
+          isDeck
+          liveHtml={fiveSlideDeck}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(counterText()).toBe('5/5');
+        expect(thumbnails()).toHaveLength(5);
+      });
+    });
+
     it('tracks thumbnail rail toggle with expand/collapse action', () => {
       const { container } = render(
         <FileViewer

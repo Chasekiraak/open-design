@@ -324,7 +324,6 @@ function artifactDeliveryRequiredForSend(meta: ProjectChatSendMeta | undefined):
     meta?.entryFrom === 'comment' ||
     meta?.entryFrom === 'mark' ||
     meta?.entryFrom === 'next_step' ||
-    meta?.entryFrom === 'question_answer' ||
     meta?.entryFrom === 'regenerate_from_review' ||
     meta?.entryFrom === 'resume_continue'
   );
@@ -8624,6 +8623,7 @@ export function ProjectView({
                 if (currentConversationActionDisabled) return false;
                 return handleSend(text, attachments, [], {
                   entryFrom: 'question_answer',
+                  artifactDeliveryRequired: activeSessionMode === 'design',
                   ...(context ? { context } : {}),
                 });
               }}

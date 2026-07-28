@@ -3496,7 +3496,15 @@ function injectDeckBridge(
         // The artifact changed its own transform after our fallback ran. Yield
         // ownership permanently so a late native fit runtime is never clobbered.
         odAutoFitDisabled = true;
+        target.style.transformOrigin = odAutoFitOriginalTransformOrigin;
+        target.style.position = odAutoFitOriginalPosition;
+        target.style.left = odAutoFitOriginalLeft;
+        target.style.top = odAutoFitOriginalTop;
+        target.style.right = odAutoFitOriginalRight;
+        target.style.bottom = odAutoFitOriginalBottom;
         target.removeAttribute('data-od-deck-auto-fit');
+        odAutoFitAppliedTransform = '';
+        odAutoFitTarget = null;
         return;
       }
     }

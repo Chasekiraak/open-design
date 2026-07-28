@@ -399,6 +399,78 @@ describe('deck bridge - CSS-only decks', () => {
     win.close();
   });
 
+  it('restores host-owned layout when a late native fit runtime takes over', () => {
+    const bodyHtml = `
+      <style>
+        .stage {
+          width: 1920px;
+          height: 1080px;
+        }
+        .slide { position: absolute; inset: 0; }
+        .slide:not(:first-child) { display: none; }
+      </style>
+      <main
+        class="stage"
+        style="position: relative; left: 12px; top: 8px; right: 4px; bottom: 2px; transform-origin: center center;"
+      >
+        <section class="slide">One</section>
+        <section class="slide">Two</section>
+      </main>
+    `;
+    const script = extractDeckBridgeScript(buildSrcdoc(
+      `<!doctype html><html><body>${bodyHtml}</body></html>`,
+      { deck: true },
+    ));
+    const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: vi.fn() },
+    });
+    Object.defineProperty(win, 'innerWidth', {
+      configurable: true,
+      value: 960,
+    });
+    Object.defineProperty(win, 'innerHeight', {
+      configurable: true,
+      value: 540,
+    });
+    const stage = win.document.querySelector<HTMLElement>('.stage');
+    if (!stage) throw new Error('stage not found');
+    Object.defineProperty(stage, 'offsetWidth', {
+      configurable: true,
+      value: 1920,
+    });
+    Object.defineProperty(stage, 'offsetHeight', {
+      configurable: true,
+      value: 1080,
+    });
+    const flushTimers = installQueuedTimers(win);
+
+    new win.Function(script).call(win);
+    win.dispatchEvent(new win.Event('load'));
+    flushTimers();
+
+    expect(stage.dataset.odDeckAutoFit).toBe('true');
+    expect(stage.style.position).toBe('fixed');
+    stage.style.transform = 'translate(6px, 4px) scale(0.48)';
+    win.dispatchEvent(new win.Event('resize'));
+    flushTimers();
+
+    expect(stage.dataset.odDeckAutoFit).toBeUndefined();
+    expect(stage.style.transform).toBe('translate(6px, 4px) scale(0.48)');
+    expect(stage.style.transformOrigin).toBe('center center');
+    expect(stage.style.position).toBe('relative');
+    expect(stage.style.left).toBe('12px');
+    expect(stage.style.top).toBe('8px');
+    expect(stage.style.right).toBe('4px');
+    expect(stage.style.bottom).toBe('2px');
+    win.close();
+  });
+
   it('does not add fallback fitting to framework decks with their own fit runtime', () => {
     const bodyHtml = `
       <div class="deck-shell">

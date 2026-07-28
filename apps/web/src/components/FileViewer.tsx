@@ -7934,7 +7934,16 @@ function HtmlViewer({
       setSlideState(null);
       return;
     }
-    setSlideState(htmlPreviewSlideState.get(previewStateKey) ?? null);
+    setSlideState((current) => {
+      const cached = htmlPreviewSlideState.get(previewStateKey) ?? current;
+      if (!cached || detectedDeckSlideCount <= 0) return cached;
+      const next = {
+        active: Math.max(0, Math.min(cached.active, detectedDeckSlideCount - 1)),
+        count: detectedDeckSlideCount,
+      };
+      setSlideStateCached(previewStateKey, next);
+      return next;
+    });
     function onMessage(ev: MessageEvent) {
       if (!isOurPreviewIframeSource(ev.source)) return;
       if (!isActivePreviewIframeSource(ev.source)) return;
@@ -7949,7 +7958,13 @@ function HtmlViewer({
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [effectiveDeck, isActivePreviewIframeSource, isOurPreviewIframeSource, previewStateKey]);
+  }, [
+    detectedDeckSlideCount,
+    effectiveDeck,
+    isActivePreviewIframeSource,
+    isOurPreviewIframeSource,
+    previewStateKey,
+  ]);
 
   useEffect(() => {
     const win = iframeRef.current?.contentWindow;
