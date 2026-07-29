@@ -7,6 +7,7 @@ import {
   STORAGE_KEY,
   waitForLoadingToClear,
 } from '@/playwright/amr';
+import { expectStableCount } from '@/playwright/assertions';
 import { fulfillAgentsRoute, routeSuccessfulRuns, successfulRunEventBody } from '@/playwright/mock-factory';
 import { T } from '@/timeouts';
 
@@ -288,7 +289,14 @@ test('[P0] onboarding cancel during a slow AMR status check does not start login
     .poll(() => page.evaluate(() => window.__amrOnboardingSlowStatusResolved ?? false))
     .toBe(true);
   await expect(page.getByRole('button', { name: /Cancel sign-in/i })).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0)).toBe(0);
+  await expectStableCount(
+    () => page.evaluate(() => window.__amrOnboardingLoginCalls ?? 0),
+    0,
+    {
+      timeout: 250,
+      message: 'cancelling onboarding should prevent the delayed status continuation from starting login',
+    },
+  );
 });
 
 // The AMR card + per-runtime model picker on the connect step were removed,

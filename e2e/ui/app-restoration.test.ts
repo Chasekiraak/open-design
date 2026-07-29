@@ -15,6 +15,7 @@ import { T } from '@/timeouts';
 import { expectStableCount } from '../lib/playwright/assertions.js';
 import {
   failedRunEventBody,
+  routeMockAgents,
   routeRunSequence,
   routeSuccessfulRuns,
   successfulRunEventBody,
@@ -152,22 +153,7 @@ function questionFormRunEventBody(required: boolean, followUpChunk: string) {
 }
 
 test('[P0] @critical workspace restores the last manually selected file tab after reload instead of jumping back to the generated artifact', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await page.route('**/api/runs', async (route) => {
     await route.fulfill({
@@ -269,22 +255,7 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
 });
 
 test('[P0] switching between projects restores each project workspace to its last active file tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   const pngBytes = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W6McAAAAASUVORK5CYII=',
@@ -381,22 +352,7 @@ test('[P0] switching between projects restores each project workspace to its las
 });
 
 test('[P0] @critical visiting an uploaded design file route restores its tab and file workspace surface', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await gotoEntryHome(page);
   await createPrototypeProject(page, 'Uploaded file deep link');
@@ -439,22 +395,7 @@ test('[P0] @critical visiting an uploaded design file route restores its tab and
 });
 
 test('[P0] returning from an uploaded design file route to the project root keeps the uploaded file tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await gotoEntryHome(page);
   await createPrototypeProject(page, 'Uploaded file root route restore');
@@ -502,22 +443,7 @@ test('[P0] returning from an uploaded design file route to the project root keep
 });
 
 test('[P0] returning from an artifact file route to the project root keeps the artifact tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSuccessfulRuns(page, {
     runId: 'artifact-root-run',
@@ -548,22 +474,7 @@ test('[P0] returning from an artifact file route to the project root keeps the a
 });
 
 test('[P0] @critical returning from an older conversation route to the project root keeps the composer available while the route is selected', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-root-run');
 
@@ -598,22 +509,7 @@ test('[P0] @critical returning from an older conversation route to the project r
 });
 
 test('[P0] @critical switching between conversations keeps the composer usable while navigating history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-draft-run');
 
@@ -684,22 +580,7 @@ test('[P0] @critical switching between conversations keeps the composer usable w
 });
 
 test('[P0] @critical reloading an older conversation route keeps the composer visible on that route', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-reload-draft-run');
 
@@ -740,22 +621,7 @@ test('[P0] @critical reloading an older conversation route keeps the composer vi
 });
 
 test('[P0] @critical switching between conversations keeps staged attachments UI available', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-attachment-run');
 
@@ -825,22 +691,7 @@ test('[P0] @critical switching between conversations keeps staged attachments UI
 });
 
 test('[P0] @critical reloading an older conversation route keeps the composer available after staging attachments', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-attachment-reload-run');
 
@@ -884,22 +735,7 @@ test('[P0] @critical reloading an older conversation route keeps the composer av
 });
 
 test('[P0] @critical reloading the project keeps the latest conversation selected in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-history-reload-run');
 
@@ -947,22 +783,7 @@ test('[P0] @critical deleting the active conversation selects the remaining conv
     await dialog.accept();
   });
 
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-history-delete-run');
 
@@ -1007,22 +828,7 @@ test('[P0] @critical deleting the active conversation selects the remaining conv
 });
 
 test('[P0] returning from workspace surfaces keeps the older conversation reachable from history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-history-surface-run');
 
@@ -1084,22 +890,7 @@ test('[P0] returning from workspace surfaces keeps the older conversation reacha
 });
 
 test('[P0] reloading the project root keeps conversation history accessible', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-root-reload-run');
 
@@ -1140,22 +931,7 @@ test('[P0] reloading the project root keeps conversation history accessible', as
 });
 
 test('[P0] opening an uploaded file route keeps the older conversation present in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-file-surface-run');
 
@@ -1224,22 +1000,7 @@ test('[P0] opening an uploaded file route keeps the older conversation present i
 });
 
 test('[P0] opening an artifact file route keeps the older conversation present in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSuccessfulRuns(page, {
     runId: 'conversation-artifact-surface-run',
@@ -1311,22 +1072,7 @@ test('[P0] opening an artifact file route keeps the older conversation present i
 });
 
 test('[P0] returning from a file deep-link to the project root keeps the chosen file tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeSimpleSuccessfulRun(page, 'conversation-file-root-run');
 
@@ -1411,22 +1157,7 @@ test('[P0] returning from an artifact deep-link to the project root keeps the ar
 });
 
 test('[P0] a later completed run updates the workspace to the newest artifact tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   let eventCount = 0;
   await routeSuccessfulRuns(page, {
@@ -1504,22 +1235,7 @@ test('[P0] @critical daemon error details persist between failed sends', async (
   const entry = automatedUiScenarios().find((scenario) => scenario.id === 'prototype-basic');
   if (!entry) throw new Error('prototype-basic scenario missing');
 
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeRunSequence(page, {
     runIdPrefix: 'error-run',
@@ -1566,22 +1282,7 @@ test('[P0] @critical daemon error details persist between failed sends', async (
 });
 
 test('[P0] a successful retry after a failed send restores the workspace to a fresh artifact tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await routeRunSequence(page, {
     runIdPrefix: 'retry-run',
@@ -2683,25 +2384,6 @@ test('[P1] project composer working directory rejects stale folder without promo
     .toMatchObject({ linkedDirs: [staleDir] });
   expect(recentDirPutBodies).toHaveLength(0);
 });
-
-async function routeMockAgents(page: Page) {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
-}
 
 async function routeAppConfig(page: Page, override: Record<string, unknown>) {
   await page.route('**/api/app-config', async (route) => {

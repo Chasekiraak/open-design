@@ -320,11 +320,12 @@ test('[P1] typing a draft replacement Composio key does not trigger global autos
   await expect(settingsDialog.getByTestId('connector-grid-wrap')).toBeVisible();
   await expect(settingsDialog.getByText('Saved · ••••1234')).toBeVisible();
 
-  await expectStableCount(() => appConfigPersistBodies.length, appConfigPersistBodies.length, {
-    timeout: 1_200,
-    message: 'opening the saved Composio connector settings should settle global app-config autosave',
-  });
-  const appConfigPersistCountBeforeDraftEdit = appConfigPersistBodies.length;
+  const appConfigPersistCountBeforeDraftEdit = await expectQuietCount(
+    () => appConfigPersistBodies.length,
+    {
+      timeout: 1_200,
+    },
+  );
 
   const replacementInput = settingsDialog.getByPlaceholder('Paste a new key to replace the saved one');
   await replacementInput.fill('cmp-draft-secret-9999');
@@ -341,6 +342,24 @@ test('[P1] typing a draft replacement Composio key does not trigger global autos
     apiKeyTail: '1234',
   });
 });
+
+async function expectQuietCount(
+  readCount: () => number | Promise<number>,
+  options: { timeout: number; interval?: number },
+): Promise<number> {
+  let settledCount = await readCount();
+  const interval = options.interval ?? 100;
+  let quietDeadline = Date.now() + options.timeout;
+  while (Date.now() < quietDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, interval));
+    const currentCount = await readCount();
+    if (currentCount !== settledCount) {
+      settledCount = currentCount;
+      quietDeadline = Date.now() + options.timeout;
+    }
+  }
+  return settledCount;
+}
 
 async function routeConnectors(page: Page, connectors: typeof CONNECTORS) {
   await page.route('**/api/connectors', async (route) => {
