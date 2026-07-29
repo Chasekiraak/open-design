@@ -6,11 +6,11 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 /**
- * `src/server.ts` opts out of type checking with `@ts-nocheck`, so the compiler
- * never reports an identifier that is referenced where its declaration is not in
- * scope. Nothing else in the toolchain does either: the file is bundled, not
- * linted for scope, and a bad reference only surfaces as a runtime
- * `ReferenceError` on whichever request path happens to evaluate it.
+ * `apps/daemon/src/server.ts` opts out of type checking with `@ts-nocheck`, so
+ * the compiler never reports an identifier that is referenced where its
+ * declaration is not in scope. Nothing else in the toolchain does either: the
+ * file is bundled, not linted for scope, and a bad reference only surfaces as a
+ * runtime `ReferenceError` on whichever request path happens to evaluate it.
  *
  * That is how `appVersionForCapture` shipped in 0.16.2-beta.148. The name is a
  * local of `createFinalizedMessageTelemetryReporter`; #6221 called it ~7,500
@@ -27,14 +27,44 @@ import { describe, expect, it } from 'vitest';
  *
  * It is deliberately not a typecheck of `server.ts`. Only unresolvable
  * value-position identifiers fail it.
+ *
+ * ## Why this lives in `e2e/tests/` and not `apps/daemon/tests/`
+ *
+ * A guard is worth exactly the lane that runs it. `ci.yml`'s daemon lane
+ * executes one file — `tests/project-watchers.test.ts` — and that exclusive
+ * invocation is itself pinned by the certain-exempt consumption guard
+ * (`workflowRunsOnlyAllowedDaemonTest` in
+ * `scripts/check-certain-exempt-consumption.ts`), so widening it is a coupled
+ * policy change, not a lane edit. A daemon-hosted guard therefore protects
+ * nothing on the merge gate.
+ *
+ * `e2e/tests/` closes that gap, and the closure is structural rather than
+ * incidental:
+ *
+ * - Any change under `apps/daemon/src/` matches the `certain-daemon-core` rule
+ *   in `scripts/scopes.ts`, whose effects include `ui_p0_validation_required`;
+ *   `run_e2e_vitest` is `isFull || web_tests_required ||
+ *   ui_p0_validation_required`. So a `server.ts`-only change arms the `E2E
+ *   Vitest` lane even at the merge queue's `certain` threshold — the strictest
+ *   context there is. An unresolved file list escalates fail-closed to full,
+ *   which arms it too.
+ * - That wiring cannot rot silently. The `daemon core boundary` guard
+ *   (`scripts/lib/guard/scope.ts`) asserts `ci.yml` still contains both
+ *   `run_e2e_vitest == 'true'` and `pnpm --filter @open-design/e2e test`, and
+ *   it runs in the always-on policy floor.
+ *
+ * The placement also follows the root `AGENTS.md` boundary rule — cross-app and
+ * repository-resource consistency checks belong here, not inside an app package
+ * — for the same reason `e2e/tests/critique-coverage.test.ts` does: the check
+ * reads another app's tree as a repository resource. Nothing here boots a
+ * daemon or needs a fixture; `server.ts` is only ever read as text.
  */
 
 const CANNOT_FIND_NAME = 2304;
 
-const SERVER_TS = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../src/server.ts',
-);
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+const SERVER_TS = path.join(REPO_ROOT, 'apps/daemon/src/server.ts');
 
 /**
  * Names TypeScript cannot resolve here only because the scope check runs without
