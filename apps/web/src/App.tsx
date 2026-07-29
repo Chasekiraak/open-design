@@ -849,6 +849,19 @@ function AppInner() {
   // view picks the right flag for whichever tab the user is currently on.
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [skillsLoading, setSkillsLoading] = useState(true);
+  // Functional skills and design templates are two independent registry reads
+  // that gate ONE loader: the EntryView must not stop spinning until both have
+  // answered, or whichever tab the user is on renders an incomplete catalog as
+  // if it were final. They are now read from two different places (the boot pass
+  // reads templates; the workspace-keyed effect reads skills once the caller's
+  // identity is known), so the pair of flags lives here rather than inside one
+  // effect's closure.
+  const skillRegistriesReadyRef = useRef({ functional: false, templates: false });
+  const markSkillRegistryReady = useCallback((half: 'functional' | 'templates') => {
+    skillRegistriesReadyRef.current[half] = true;
+    const { functional, templates } = skillRegistriesReadyRef.current;
+    if (functional && templates) setSkillsLoading(false);
+  }, []);
   const [dsLoading, setDsLoading] = useState(true);
   const [projectsLoading, setProjectsLoading] = useState(true);
   // A loaded project list describes exactly ONE workspace identity, so leaving
@@ -1435,23 +1448,18 @@ function AppInner() {
       // gate `skillsLoading` together so the EntryView stops rendering
       // its loader once both registries respond — neither tab would have
       // a complete picture if we cleared the flag on the first reply.
-      let functionalReady = false;
-      let templatesReady = false;
-      const maybeClearLoading = () => {
-        if (functionalReady && templatesReady) setSkillsLoading(false);
-      };
-      void fetchSkills().then((list) => {
-        if (cancelled) return;
-        setSkills(list);
-        functionalReady = true;
-        maybeClearLoading();
-      });
-
+      //
+      // Only the TEMPLATE half is read here. Functional skills are
+      // workspace-scoped on the daemon and must carry the caller's identity
+      // headers, which do not exist until `/api/workspace/context` settles —
+      // so that read belongs to the workspace-keyed effect below, which owns
+      // the `functional` half of this gate. Reading it here as well would
+      // spend a second `/api/skills` request per launch, and the first one
+      // would be the headerless (fail-closed) answer.
       void fetchDesignTemplates().then((list) => {
         if (cancelled) return;
         setDesignTemplates(list);
-        templatesReady = true;
-        maybeClearLoading();
+        markSkillRegistryReady('templates');
       });
 
       void fetchDesignSystems().then((list) => {
@@ -1750,9 +1758,36 @@ function AppInner() {
   }, [workspaceContext?.workspaceId, refreshDesignSystems]);
 
   const refreshSkills = useCallback(async () => {
-    const list = await fetchSkills();
+    // Always scoped. `GET /api/skills` is fail-closed on a missing
+    // `x-od-workspace-id` (`skills.ts`: `if (!scopeId) return !ownerId;`), so a
+    // headerless read is not the "unfiltered" list — it is the list with every
+    // workspace-claimed skill removed, including the ones claimed by the
+    // workspace the user is actually in.
+    const list = await fetchSkills(workspaceContextRef.current);
     setSkills(list);
-  }, []);
+    markSkillRegistryReady('functional');
+  }, [markSkillRegistryReady]);
+
+  // The skills catalog is workspace-scoped on the daemon exactly like the
+  // design-system catalog above, and needs the same workspace-keyed refresh for
+  // the same reason: the switcher lives ON the home view, so `route.kind` stays
+  // 'home' and no route change fires.
+  //
+  // It additionally waits for `workspaceContextLoading` to settle, because
+  // unlike design systems (whose scope the daemon resolves from its own vela
+  // session) this read carries the identity in REQUEST HEADERS — there is
+  // nothing correct to send until the context has resolved. Gating on it also
+  // keeps launch at exactly one `/api/skills` request: the boot pass no longer
+  // reads skills, this effect performs the first read, and a switch performs
+  // one more.
+  const skillsReadIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (workspaceContextLoading) return;
+    const identity = workspaceContext?.workspaceId ?? 'none';
+    if (skillsReadIdentityRef.current === identity) return;
+    skillsReadIdentityRef.current = identity;
+    void refreshSkills();
+  }, [workspaceContextLoading, workspaceContext?.workspaceId, refreshSkills]);
 
   const refreshTemplates = useCallback(async () => {
     const list = await listTemplates();
@@ -2873,7 +2908,8 @@ function AppInner() {
 
   const handleSkillsChanged = useCallback(
     (affectedSkillId?: string) => {
-      void fetchSkills().then((list) => setSkills(list));
+      // Scoped, like every other app-level skills read — see `refreshSkills`.
+      void fetchSkills(workspaceContextRef.current).then((list) => setSkills(list));
       void fetchDesignTemplates().then((list) => setDesignTemplates(list));
       iframeKeepAlivePool.evictMatching(
         (entry) => {

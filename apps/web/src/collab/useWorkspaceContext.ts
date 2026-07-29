@@ -143,6 +143,9 @@ function advanceWorkspaceContextRequestToken(sharedToken?: string | null): void 
   const next = sharedToken?.trim() || `local:${++localIdentityChangeSeq}`;
   if (next === workspaceContextRequestToken) return;
   workspaceContextRequestToken = next;
+  // Any seed belonged to the generation just retired; a later generation must
+  // never adopt it (see `seededWorkspaceContext`).
+  seededWorkspaceContext = null;
 }
 
 /** Coalescing key for `GET /api/workspace/context`: this read alone, partitioned
@@ -166,6 +169,7 @@ export function resetWorkspaceContextCache(): void {
   workspaceContextRevision = 0;
   workspaceContextRequestToken = 'initial';
   localIdentityChangeSeq = 0;
+  seededWorkspaceContext = null;
 }
 
 /**
@@ -327,7 +331,20 @@ export function useWorkspaceContext(): WorkspaceContextState {
     // through onboarding or the rail callout) and is telling us so. Focus and
     // visibility are ambient revalidation and stay silent — only the deliberate
     // signal may blank a stale signed-out answer while the re-read runs (#140).
+    //
+    // When the acting caller published the post-change context with the
+    // broadcast, adopt it instead of re-reading: it came from the response that
+    // changed the identity, so a fetch here would only ask the server to repeat
+    // itself. Bumping the request epoch first retires any ambient read still in
+    // flight from BEFORE the change, which could otherwise land later and
+    // overwrite the new identity with the old one.
     const refreshAfterIdentityChange = () => {
+      const seeded = seededContextForCurrentGeneration();
+      if (seeded) {
+        requestEpochRef.current += 1;
+        if (mountedRef.current) setState({ context: seeded, loading: false });
+        return;
+      }
       void loadContext({ markLoading: true });
     };
     const onVisibilityChange = () => {
@@ -367,7 +384,51 @@ const WORKSPACE_CONTEXT_SSE_FLOOR_MS = 120_000;
 export const WORKSPACE_CONTEXT_REFRESH_EVENT = 'od:workspace-context-refresh';
 const WORKSPACE_CONTEXT_REFRESH_STORAGE_KEY = 'od.workspaceContext.refreshAt';
 
-export function notifyWorkspaceContextRefresh(): void {
+/**
+ * A context the ACTING surface already holds, published alongside the identity-
+ * change broadcast so consumers adopt it instead of re-reading it.
+ *
+ * `PUT /api/workspace/active` returns the post-switch context from the very same
+ * `workspaceContext.current()` call `GET /api/workspace/context` serves, and only
+ * after asserting its `workspaceId` matches the workspace that was requested. So
+ * the switch response IS the next context; making every mounted consumer go and
+ * fetch it again spends a round-trip to learn what request #1 already said, and
+ * makes the UI wait for request #2 to show it.
+ *
+ * Stamped with the identity generation it belongs to. Every mounted consumer
+ * handles one broadcast in the same synchronous pass and each must adopt, so this
+ * is peeked rather than consumed; the next `advanceWorkspaceContextRequestToken`
+ * retires it. A passive TAB cannot be seeded (it learns of the change through the
+ * `localStorage` stamp, which carries no payload) and correctly falls back to a
+ * real read.
+ */
+let seededWorkspaceContext: {
+  token: string;
+  context: WorkspaceCollabContext;
+} | null = null;
+
+/** The seed published for the CURRENT identity generation, if any. */
+function seededContextForCurrentGeneration(): WorkspaceCollabContext | null {
+  if (!seededWorkspaceContext) return null;
+  return seededWorkspaceContext.token === workspaceContextRequestToken
+    ? seededWorkspaceContext.context
+    : null;
+}
+
+/**
+ * Announce a deliberate identity change (a workspace switch or a sign-in).
+ *
+ * Pass `seed` when the caller already holds the post-change context — the
+ * response body that CHANGED it. Consumers then adopt that context instead of
+ * issuing a fresh `GET /api/workspace/context`. Omit it for callers that only
+ * know something changed (sign-in), which keeps the re-read.
+ *
+ * The broadcast fires either way: `useProjectWorkspaceScope` listens to it to
+ * revalidate the project scope, and other tabs need the storage stamp.
+ */
+export function notifyWorkspaceContextRefresh(
+  seed?: { context: WorkspaceCollabContext } | null,
+): void {
   if (typeof window === 'undefined') return;
   const stamp = String(Date.now());
   // Advance BEFORE dispatching: this call is the one place that knows a genuine
@@ -375,6 +436,19 @@ export function notifyWorkspaceContextRefresh(): void {
   // read the new generation's key. Doing it per handler instead would turn one
   // change into one request per mounted consumer.
   advanceWorkspaceContextRequestToken();
+  if (seed?.context) {
+    seededWorkspaceContext = { token: workspaceContextRequestToken, context: seed.context };
+    // Redefine the module cache now, so a consumer that mounts after this
+    // dispatch seeds from the new identity rather than the one just left.
+    if (
+      workspaceContextIdentity(cachedWorkspaceContext) !== workspaceContextIdentity(seed.context)
+    ) {
+      workspaceContextRevision += 1;
+    }
+    cachedWorkspaceContext = seed.context;
+  } else {
+    seededWorkspaceContext = null;
+  }
   window.dispatchEvent(new Event(WORKSPACE_CONTEXT_REFRESH_EVENT));
   try {
     window.localStorage.setItem(WORKSPACE_CONTEXT_REFRESH_STORAGE_KEY, stamp);
