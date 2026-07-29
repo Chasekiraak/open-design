@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import {
   archiveFilenameFrom,
   archiveRootFromFilePath,
@@ -716,6 +716,91 @@ describe('exportProjectAsHtml', () => {
     await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
     expect(slides[0]?.classList.contains('active')).toBe(true);
     expect(slides[1]?.classList.contains('active')).toBe(false);
+    dom.window.close();
+  });
+
+  it('hides authored deck chrome and navigates when the authored runtime throws', async () => {
+    const source = `<!doctype html><html><head><style>
+      html, body, .deck-viewport { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      .deck-viewport { position: fixed; inset: 0; }
+      .deck-stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; }
+      .slide { position: absolute; inset: 0; opacity: 0; }
+      .slide.active { opacity: 1; }
+      [data-deck-nav] { position: fixed; bottom: 20px; }
+    </style></head><body>
+      <div class="deck-viewport">
+        <main class="deck-stage" data-od-id="deck-stage">
+          <section class="slide active" data-screen-label="01">A</section>
+          <section class="slide" data-screen-label="02">B</section>
+        </main>
+      </div>
+      <div data-deck-nav>
+        <button data-nav="prev">Back</button>
+        <span class="counter">01 / 02</span>
+        <button data-nav="next">Next</button>
+      </div>
+      <script>
+        (function () {
+          var slides = document.querySelectorAll('.slide');
+          var counter = document.querySelector('[data-nav] .counter');
+          var current = 0;
+          function goTo(index) {
+            slides[current].classList.remove('active');
+            current = Math.max(0, Math.min(slides.length - 1, index));
+            slides[current].classList.add('active');
+            counter.textContent = String(current + 1);
+          }
+          document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowRight') goTo(current + 1);
+            if (event.key === 'ArrowLeft') goTo(current - 1);
+          });
+          goTo(0);
+        })();
+      </script>
+    </body></html>`;
+    const virtualConsole = new VirtualConsole();
+    virtualConsole.on('jsdomError', () => {});
+    const dom = new JSDOM(prepareStandaloneDeckHtml(source), {
+      beforeParse(window) {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+      },
+      pretendToBeVisual: true,
+      runScripts: 'dangerously',
+      url: 'https://example.test/deck.html',
+      virtualConsole,
+    });
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 30));
+
+    const slides = Array.from(dom.window.document.querySelectorAll('.slide'));
+    const active = (): number => slides.findIndex((slide) => slide.classList.contains('active'));
+    const nav = dom.window.document.querySelector<HTMLElement>('[data-deck-nav]');
+    const stage = dom.window.document.querySelector<HTMLElement>('.deck-stage');
+
+    expect(dom.window.getComputedStyle(nav!).display).toBe('none');
+    expect(stage?.getAttribute('data-od-export-fit-owned')).toBe('true');
+    expect(stage?.style.transform).toContain('scale(0.7333333333333333)');
+    expect(active()).toBe(0);
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 1300,
+      clientY: 450,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    expect(active()).toBe(1);
+
+    dom.window.document.dispatchEvent(new dom.window.MouseEvent('click', {
+      bubbles: true,
+      button: 0,
+      cancelable: true,
+      clientX: 720,
+      clientY: 40,
+    }));
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 190));
+    expect(active()).toBe(0);
     dom.window.close();
   });
 

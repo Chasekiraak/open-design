@@ -571,6 +571,28 @@ These rules define the Open Design delivery boundary, not a visual style.
 
 Before handoff, verify count/order, first-slide visibility, bounds, navigation, thumbnail discovery, and multi-page export wherever those capabilities are available. Fix failures in the artifact.`;
 
+export const DECK_FIXED_CANVAS_EXECUTION_DIRECTIVE = `## Fixed-canvas execution baseline
+
+For a new deck without a compatible existing runtime, use one authored coordinate system. Responsive fitting belongs outside the slide canvas.
+
+\`\`\`html
+<div class="deck-viewport">
+  <main class="deck-stage" data-od-id="deck-stage">
+    <section class="slide active" data-screen-label="01 Title">...</section>
+  </main>
+</div>
+\`\`\`
+
+\`\`\`css
+html, body, .deck-viewport { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+.deck-viewport { position: fixed; inset: 0; }
+.deck-stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: top left; }
+.slide { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; display: none; }
+.slide.active { display: block; }
+\`\`\`
+
+Author all slide geometry and typography against that fixed 1920×1080 stage. Do not use \`vw\`, \`vh\`, \`vmin\`, \`vmax\`, or viewport-based \`clamp()\` inside the stage, and do not make each slide responsive independently. Open Design preview and export own the one uniform scale and centering transform for the stage. Keep authored stage transforms and visible navigation out of a new deck. Preserve a compatible seed or existing runtime instead of replacing it with this baseline.`;
+
 export const DECK_OUTCOME_RULES_DIRECTIVE = `# Deck outcome quality rules
 
 Apply these as result criteria for the deck and for every slide. They constrain the outcome, not the implementation technique.
@@ -588,7 +610,8 @@ Apply these as result criteria for the deck and for every slide. They constrain 
 ## Presentation presence
 
 - **Brief fidelity.** Treat explicit composition constraints—such as full-bleed imagery, text/image alternation, grid system, typographic devices, or density pattern—as acceptance criteria across the deck, not motifs to sample once or omit.
-- **Live-delivery composition.** Use the full canvas, not a narrow document column or dashboard panels. Derive a coherent type character, palette, image treatment, grid, and signature move from the brand, subject, and audience.
+- **Deck-wide visual system.** Before composing, establish one coherent grammar: canvas and safe area, grid and alignment, type scale, palette, visual treatment, and only restrained recurring anchors that aid continuity. Reuse it across a small family of content-fit layouts so slides clearly belong together without repeating one composition. Treat a master as a system, not a frame: add no border, logo, header, footer, or control by default; never let repeated chrome compete with content. Preserve an active template or design system.
+- **Live-delivery composition.** Use the full canvas, not a narrow document column or dashboard panels. Vary silhouettes with content roles inside the shared system; repetition is valid for direct comparison or sequence.
 - **Narrative rhythm.** Vary surface, density, and layout only when the story changes mode. Concentrate richness at opening, reveal, proof, transition, and close; use calmer workhorse slides between peaks.
 - **One dominant, fitting medium.** Give each slide one center of gravity. Use product views for product proof, charts for quantities, flows/relationships for mechanisms, comparisons for change, imagery for emotion/context, and expressive type for reveals. Keep supporting elements subordinate; assets must be high-fidelity and composed into the slide.
 - **Every element earns its place.** Lines, borders, containers, icons, imagery, and decoration must aid comprehension, emphasis, pacing, atmosphere, or brand recognition. Remove arbitrary chrome and repeated boundaries.
@@ -614,8 +637,13 @@ export function renderDeckVNextDirective(
   executionProfile: ExecutionProfile = 'filesystem',
 ): string {
   const qualityDirective = renderDeckQualityDirective(executionProfile);
-  const separator = executionProfile === 'filesystem' ? '' : '\n\n---\n\n';
-  return `${DECK_DELIVERY_CONTRACT_DIRECTIVE}${separator}${qualityDirective}`;
+  return `${DECK_DELIVERY_CONTRACT_DIRECTIVE}
+
+${DECK_FIXED_CANVAS_EXECUTION_DIRECTIVE}
+
+---
+
+${qualityDirective}`;
 }
 
 export function renderDeckQualityDirective(

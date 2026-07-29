@@ -630,6 +630,15 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(directive).not.toContain('data-deck-nav');
     expect(directive).toContain('emit exactly N');
     expect(directive).toContain('explicit background');
+    expect(directive).toContain('## Fixed-canvas execution baseline');
+    expect(directive).toContain('data-od-id="deck-stage"');
+    expect(directive).toContain('width: 1920px; height: 1080px');
+    expect(directive).toContain(
+      'Open Design preview and export own the one uniform scale',
+    );
+    expect(directive).toContain(
+      'Do not use `vw`, `vh`, `vmin`, `vmax`, or viewport-based `clamp()` inside the stage',
+    );
     expect(directive).toContain('# Deck outcome quality rules');
     expect(directive).toContain('Every element earns its place');
     expect(directive).toContain('**Local contrast over imagery.**');
@@ -654,6 +663,7 @@ describe('composeSystemPrompt — shared slim default', () => {
 
     expect(prompt).toContain('## Active skill — simple-deck');
     expect(prompt).not.toContain('# Deck delivery contract');
+    expect(prompt).not.toContain('## Fixed-canvas execution baseline');
     expect(prompt).toContain('# Deck outcome quality rules');
     expect(prompt).toContain('## Rendered verification — filesystem decks');
     expect(prompt).toContain('**Local contrast over imagery.**');
@@ -668,9 +678,11 @@ describe('composeSystemPrompt — shared slim default', () => {
     expect(filesystem).toContain('## Rendered verification — filesystem decks');
     expect(filesystem).toContain('# Deck outcome quality rules');
     expect(filesystem).not.toContain('# Deck delivery contract');
+    expect(filesystem).not.toContain('## Fixed-canvas execution baseline');
     expect(textArtifact).not.toContain('## Rendered verification — filesystem decks');
     expect(textArtifact).toContain('# Deck outcome quality rules');
     expect(textArtifact).not.toContain('# Deck delivery contract');
+    expect(textArtifact).not.toContain('## Fixed-canvas execution baseline');
   });
 
   it('requires one real stitched render for filesystem decks without leaking tools into text-artifact runs', () => {
@@ -709,8 +721,19 @@ describe('composeSystemPrompt — shared slim default', () => {
     });
 
     expect(directive.match(/## Presentation presence/g)).toHaveLength(1);
+    expect(directive).toContain('**Deck-wide visual system.**');
+    expect(directive).toContain('establish one coherent grammar');
+    expect(directive).toContain('a small family of content-fit layouts');
+    expect(directive).toContain('Treat a master as a system, not a frame');
+    expect(directive).toContain(
+      'add no border, logo, header, footer, or control by default',
+    );
+    expect(directive).toContain('Preserve an active template or design system');
     expect(directive).toContain('**Live-delivery composition.**');
-    expect(directive).toContain('coherent type character, palette, image treatment, grid');
+    expect(directive).toContain('Vary silhouettes with content roles');
+    expect(directive).toContain(
+      'repetition is valid for direct comparison or sequence',
+    );
     expect(directive).toContain(
       'Vary surface, density, and layout only when the story changes mode',
     );
@@ -740,7 +763,9 @@ describe('composeSystemPrompt — shared slim default', () => {
 
     expect(legacy).not.toContain('## Presentation presence');
     expect(composedDeck).toContain('## Presentation presence');
+    expect(composedDeck).toContain('**Deck-wide visual system.**');
     expect(composedNonDeck).not.toContain('## Presentation presence');
+    expect(composedNonDeck).not.toContain('**Deck-wide visual system.**');
   });
 
   it('does not inject the freeform deck framework without a positive query signal', () => {

@@ -5,6 +5,7 @@ import { composeSystemPrompt, detectDeckIntentSignal } from '../../src/prompts/s
 const MAYBE_DECK_HEADING = '## If this brief is a slide deck / keynote / presentation';
 const DECK_FRAMEWORK_HEADING = '# Slide deck — fixed framework';
 const DECK_DELIVERY_HEADING = '# Deck delivery contract';
+const DECK_FIXED_CANVAS_HEADING = '## Fixed-canvas execution baseline';
 const DECK_OUTCOME_HEADING = '# Deck outcome quality rules';
 
 describe('detectDeckIntentSignal', () => {
@@ -46,6 +47,7 @@ describe('composeSystemPrompt — freeform deck promotion', () => {
     const out = composeSystemPrompt({ ...freeform, freeformDeckSignal: true });
     expect(out).not.toContain(MAYBE_DECK_HEADING);
     expect(out).toContain(DECK_DELIVERY_HEADING);
+    expect(out).toContain(DECK_FIXED_CANVAS_HEADING);
     expect(out).toContain(DECK_OUTCOME_HEADING);
   });
 
@@ -55,6 +57,7 @@ describe('composeSystemPrompt — freeform deck promotion', () => {
       expect(out).not.toContain(MAYBE_DECK_HEADING);
       expect(out).not.toContain(DECK_FRAMEWORK_HEADING);
       expect(out).not.toContain(DECK_DELIVERY_HEADING);
+      expect(out).not.toContain(DECK_FIXED_CANVAS_HEADING);
     }
   });
 
@@ -65,6 +68,7 @@ describe('composeSystemPrompt — freeform deck promotion', () => {
       freeformDeckSignal: false,
     });
     expect(out).toContain(DECK_DELIVERY_HEADING);
+    expect(out).toContain(DECK_FIXED_CANVAS_HEADING);
     expect(out).toContain(DECK_OUTCOME_HEADING);
     expect(out).not.toContain(MAYBE_DECK_HEADING);
   });
@@ -82,6 +86,7 @@ describe('composeSystemPrompt — freeform deck promotion', () => {
     ]) {
       const out = composeSystemPrompt(input);
       expect(out).toContain(DECK_DELIVERY_HEADING);
+      expect(out).toContain(DECK_FIXED_CANVAS_HEADING);
       expect(out).toContain(DECK_OUTCOME_HEADING);
       expect(out).not.toContain(DECK_FRAMEWORK_HEADING);
       expect(out).not.toContain(MAYBE_DECK_HEADING);
