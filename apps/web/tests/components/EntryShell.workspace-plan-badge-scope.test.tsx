@@ -339,8 +339,10 @@ describe('account menu plan nameplate follows the selected workspace', () => {
 
   // The A side of the report: the nameplate answers a WORKSPACE question, so a
   // personal Plus subscription must not name a team workspace's plan. The label
-  // names the plan FAMILY (团队版) while the badge keeps the tier word — #5517's
-  // split, so `team_plus` intentionally pairs 团队版 with the PLUS wordmark.
+  // names the plan FAMILY (团队版) and, per the later product ruling, so does the
+  // badge — a team subscription draws the `team` wordmark at every tier. The
+  // account here pays for a personal PLUS, so the PLUS wordmark is exactly the
+  // regression this asserts against.
   it('names the workspace subscription, not the account subscription', async () => {
     const home = await mountHomeShell(PAID_TEAM);
 
@@ -348,7 +350,7 @@ describe('account menu plan nameplate follows the selected workspace', () => {
     const card = home.card();
     expect(card.queryByText('专业版')).toBeNull();
     expect(card.getByText('团队版')).toBeTruthy();
-    expect(accountRowBadgeViewBox()).toBe(BADGE_VIEWBOX_WIDTH.plus);
+    expect(accountRowBadgeViewBox()).toBe(BADGE_VIEWBOX_WIDTH.team);
   });
 
   // The B side: the exact reported sequence. Switching away from a paid
@@ -366,10 +368,16 @@ describe('account menu plan nameplate follows the selected workspace', () => {
     // The plan half must follow it too. Before the fix this still read
     // 专业版 + the PLUS wordmark, because it came from the account summary
     // that cannot change when the workspace does.
+    //
+    // The LABEL is what carries the switch: it is a subscription question, and
+    // this workspace has no subscription (免费). The badge names the plan FAMILY,
+    // which both workspaces share, so it stays on `team` across the switch —
+    // still a live guard on this bug, since the account's own tier is a personal
+    // PLUS and reverting the projection would put that wordmark back here.
     const card = home.card();
     expect(card.queryByText('专业版')).toBeNull();
     expect(card.queryByText('团队版')).toBeNull();
     expect(card.getByText('免费')).toBeTruthy();
-    expect(accountRowBadgeViewBox()).toBe(BADGE_VIEWBOX_WIDTH.free);
+    expect(accountRowBadgeViewBox()).toBe(BADGE_VIEWBOX_WIDTH.team);
   });
 });

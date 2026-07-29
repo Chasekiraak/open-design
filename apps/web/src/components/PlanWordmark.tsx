@@ -1,17 +1,77 @@
-// Wordmark badges for the account membership tier (free / plus / pro / max /
+// Wordmark badges for the plan a workspace is on (free / plus / pro / max /
 // team), shown at the right end of the nav-rail account row in place of the
 // dropdown chevron. Strokes are normalized to currentColor so the badge
 // follows the surrounding icon color.
 
+import { isTeamPlanTier } from '../collab/team-plan';
+
 export type PlanBadgeTier = 'free' | 'plus' | 'pro' | 'max' | 'team';
 
-/** Maps a CreditsInfo tier label (e.g. "免费" / "Plus" / "团队版") to a badge. */
+/** The tier sources a badge can be derived from; pass whichever are in scope. */
+export interface PlanBadgeSources {
+  /**
+   * The resolved raw plan id (`resolvePlanTier`), or — only when no source
+   * reported an id at all — a display label.
+   */
+  tier: string | null | undefined;
+  /** `GET /api/workspace/context`'s `workspaceType`. */
+  workspaceType?: string | null;
+}
+
+/**
+ * The wordmark a workspace's plan should draw.
+ *
+ * The badge names the plan FAMILY, not the tier inside it. Product ruling
+ * (owner): 「团队版的订阅，这里应该都显示 team 的标识」 …… 「产品期望团队从 free
+ * 到 max，徽标都显示 team 的那个，个人的还是维持现状不要动」 — so every tier of a
+ * team subscription draws the one `team` wordmark, and the personal ladder keeps
+ * its per-tier glyph exactly as it is.
+ *
+ * Two independent facts make this a team plan, and either alone is enough:
+ *
+ *  • a team-namespaced plan id — B namespaces ids by workspace kind
+ *    (`team_basic` … `team_max_yearly`, see `collab/team-plan.ts`), so this is a
+ *    positive statement about the SUBSCRIPTION. It settles every PAID team tier,
+ *    including on a personal workspace that holds a team plan: membership is per
+ *    workspace, and a team subscription is a team subscription wherever the user
+ *    is standing.
+ *  • `workspaceType === 'team'` — the only signal left at the FREE team tier,
+ *    where B reports `billingState: 'free'` with a null `planId` and an empty
+ *    `membershipTier`, making the id byte-identical to a personal free account.
+ *
+ * The workspace kind must NOT leak into the plan LABEL rendered beside this
+ * badge: the label answers a subscription question, every user-created workspace
+ * in B is team-typed, and reading one as the other is what labelled a brand-new
+ * unpaid workspace 团队版 (#146). 免费 paired with the `team` wordmark is the
+ * intended reading — the family is team, the subscription is not paid.
+ */
+export function planBadgeTierForWorkspace(sources: PlanBadgeSources): PlanBadgeTier | null {
+  if (sources.workspaceType === 'team') return 'team';
+  return planBadgeTierForLabel(sources.tier ?? '');
+}
+
+/**
+ * Maps a raw plan id (`team_plus`) or a display label (「免费」/「团队版」) to a
+ * badge.
+ *
+ * TEAM IS MATCHED FIRST and that order is load-bearing: B's team ids EMBED the
+ * personal tier word, so asking `plus` / `pro` / `max` first claimed every paid
+ * team plan for the personal ladder and left this branch reachable only from a
+ * bare `team` id — `team_plus` drew the PLUS wordmark.
+ *
+ * Prefer `planBadgeTierForWorkspace`. This label-shaped path survives only for
+ * the caller whose remaining input is a localized display string: the nav rail
+ * falls back to its `tierLabel` when neither billing nor the workspace context
+ * reported a plan id at all, which is why 团队版 / 免费 must keep matching
+ * alongside the raw ids.
+ */
 export function planBadgeTierForLabel(label: string): PlanBadgeTier | null {
-  const normalized = label.toLowerCase();
+  const normalized = label.trim().toLowerCase();
+  const words = normalized.split(/[^a-z0-9]+/).filter(Boolean);
+  if (isTeamPlanTier(normalized) || words.includes('team') || label.includes('团队')) return 'team';
   if (normalized.includes('plus')) return 'plus';
   if (normalized.includes('pro')) return 'pro';
   if (normalized.includes('max')) return 'max';
-  if (normalized.includes('team') || label.includes('团队')) return 'team';
   if (normalized.includes('free') || label.includes('免费')) return 'free';
   return null;
 }
