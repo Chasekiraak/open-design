@@ -39,6 +39,51 @@ export function projectWorkspaceScopeReady(
   return scope?.kind === 'unbound' || scope?.kind === 'personal' || scope?.kind === 'team';
 }
 
+/**
+ * The workspace identity a run creation asserts to the daemon.
+ *
+ * The project's resolved scope wins: it is the authority for which workspace
+ * the run writes into and which wallet pays. Before the first scope answer,
+ * Home may auto-send, so the caller is a safe temporary witness only when the
+ * project's persisted binding already names that same workspace. That binding
+ * lives on the project read model and survives ProjectView's authorization-key
+ * remount; unlike hook-local "first read" state it therefore cannot turn an
+ * A-bound project into workspace B during a switch.
+ *
+ * Once the endpoint answers `unavailable`, or a scope read settles as failed,
+ * the caller is no longer evidence for the project and the request stays
+ * headerless. In particular, `/workspace-scope` can observe a membership
+ * removal before the mutation gate's deliberately lagging `lastKnown()` cache;
+ * sending stale active caller headers after that fresh answer would add an
+ * assertion the server has already disproved. This does not claim to eliminate
+ * the daemon's existing headerless/lastKnown lag — it merely does not widen it.
+ *
+ * An answered `unbound` scope may name the caller. No workspace has claimed
+ * that resource, and the daemon's mutation gate now deliberately treats an
+ * identified caller the same as a headerless caller without persisting any
+ * retroactive binding.
+ */
+export function runWorkspaceIdentity(
+  state: ProjectWorkspaceScopeState,
+  caller: WorkspaceCollabContext | null,
+  persistedProjectWorkspaceId: string | null | undefined,
+): WorkspaceCollabContext | null {
+  const resolved = projectWorkspaceContext(state.scope);
+  if (resolved) return resolved;
+  if (state.scope?.kind === 'unbound') return caller;
+  if (
+    state.loading &&
+    state.scope === null &&
+    state.failure === undefined &&
+    caller &&
+    typeof persistedProjectWorkspaceId === 'string' &&
+    persistedProjectWorkspaceId.trim() === caller.workspaceId
+  ) {
+    return caller;
+  }
+  return null;
+}
+
 /** AMR must resolve an explicit personal/team billing principal. Unbound,
  * revoked, loading and directory-outage states all fail closed. */
 export function projectWorkspaceScopeAuthorizesAmr(
