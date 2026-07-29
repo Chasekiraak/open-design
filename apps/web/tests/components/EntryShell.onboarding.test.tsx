@@ -824,6 +824,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
 
   it('cancels AMR login and re-enables onboarding after the login timeout', async () => {
     let loginStarted = false;
+    let authAttemptId: string | null = null;
     const fetchMock = vi.fn(async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/integrations/vela/status')) {
@@ -836,10 +837,16 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
         });
       }
       if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { authAttemptId?: string };
+        authAttemptId = body.authAttemptId ?? null;
+        expect(authAttemptId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        );
         loginStarted = true;
-        return jsonResponse({ pid: 123 }, 202);
+        return jsonResponse({ pid: 123, authAttemptId }, 202);
       }
       if (url.endsWith('/api/integrations/vela/login/cancel') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ authAttemptId });
         loginStarted = false;
         return jsonResponse({ canceled: true, pids: [123] });
       }
@@ -870,7 +877,13 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(AMR_LOGIN_TIMEOUT_MS);
     });
-    expect(fetchMock).toHaveBeenCalledWith('/api/integrations/vela/login/cancel', { method: 'POST' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/integrations/vela/login/cancel',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ authAttemptId }),
+      }),
+    );
     expect(screen.getByText('Sign-in failed.')).toBeTruthy();
     expect(screen.queryByText('Signing in…')).toBeNull();
     expect(

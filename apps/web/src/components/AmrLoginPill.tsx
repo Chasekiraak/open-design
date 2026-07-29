@@ -306,6 +306,7 @@ export function AmrLoginPill({
 
   const refresh = useCallback(async () => {
     const next = await fetchVelaLoginStatus();
+    if (next?.authAttemptId) authAttemptIdRef.current = next.authAttemptId;
     const authAttemptId = authAttemptIdRef.current;
     if (next && authAttemptId) {
       observeAmrAuthTracking(analytics.track, next, authAttemptId);
@@ -328,6 +329,9 @@ export function AmrLoginPill({
 
   useEffect(() => {
     setStatus(initialStatus);
+    if (initialStatus?.authAttemptId) {
+      authAttemptIdRef.current = initialStatus.authAttemptId;
+    }
     // A signed-in status pushed in from the host (e.g. the Settings card
     // refetching on window focus after an out-of-band login) is authoritative:
     // clear any stale login error/pending the early-stopped poll left behind so
