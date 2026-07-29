@@ -205,30 +205,23 @@ export function createVelaWorkspaceContextProvider(
   type VelaSession = NonNullable<ReturnType<typeof readVelaControlApiContext>>;
   let lastBootstrapFailureAt = 0;
 
-  async function putCurrentWorkspace(
-    session: VelaSession,
-    workspaceId: string,
-  ): Promise<boolean> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetchImpl(new URL(WORKSPACE_CURRENT_PATH, session.apiUrl), {
-        method: 'PUT',
-        headers: {
-          authorization: `Bearer ${session.controlKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ workspaceId }),
-        signal: controller.signal,
-      });
-      return response.ok;
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
+  /**
+   * Read the context for the workspace THIS daemon is pinned to.
+   *
+   * The workspace travels as `x-vela-workspace-id`, which is the per-request
+   * workspace scope B honours across its resource plane, its billing scope
+   * routes and the Link gateway (and which the vela CLI already sends for
+   * scoped commands). A `?workspaceId=` query hint is NOT sent: B's
+   * `GET /workspaces/current` ignores URL hints by design and asserts that in
+   * its own suite, so a query param was only ever dead weight that made this
+   * look scoped when it was not.
+   *
+   * Without the header B answers from the ACCOUNT-LEVEL active workspace,
+   * which is one row per account (`active_workspace_selections` is keyed by
+   * app user) and therefore cannot describe an account whose clients are in
+   * different workspaces. Sending it is what lets two clients of one account
+   * each read their own workspace.
+   */
   async function fetchCurrent(
     session: VelaSession,
     activeWorkspaceId: string | undefined,
@@ -236,11 +229,12 @@ export function createVelaWorkspaceContextProvider(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const url = new URL(WORKSPACE_CURRENT_PATH, session.apiUrl);
-      if (activeWorkspaceId) url.searchParams.set('workspaceId', activeWorkspaceId);
-      return await fetchImpl(url, {
+      return await fetchImpl(new URL(WORKSPACE_CURRENT_PATH, session.apiUrl), {
         method: 'GET',
-        headers: { authorization: `Bearer ${session.controlKey}` },
+        headers: {
+          authorization: `Bearer ${session.controlKey}`,
+          ...(activeWorkspaceId ? { 'x-vela-workspace-id': activeWorkspaceId } : {}),
+        },
         signal: controller.signal,
       });
     } finally {
@@ -347,11 +341,6 @@ export function createVelaWorkspaceContextProvider(
   }
 
   return {
-    async selectWorkspace(workspaceId: string): Promise<boolean> {
-      const session = readSession();
-      if (!session || !session.controlKey || !session.apiUrl) return false;
-      return putCurrentWorkspace(session, workspaceId);
-    },
     async current(_req: WorkspaceContextRequest): Promise<WorkspaceCollabContext | null> {
       const session = readSession();
       if (!session || !session.controlKey || !session.apiUrl) return null;

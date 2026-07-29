@@ -1,22 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createVelaWorkspaceContextProvider } from '../../src/collab/vela-workspace-context.js';
 
-// Two clients, ONE account. This suite models B (vela) exactly as its source
-// behaves today, so the account-level Active Workspace can be reasoned about
-// without a live backend:
+// Two OD clients, ONE vela account. These suites model B from its source so the
+// account-level Active Workspace can be reasoned about without a live backend:
 //
 //  - `active_workspace_selections` is keyed by app_user_id ALONE
-//    (db/schema/public.hcl:792 `primary_key { columns = [column.app_user_id] }`),
-//    so the account has exactly one selection — there is no client/device axis.
-//  - `GET /api/v1/workspaces/current` DISCARDS a `?workspaceId=` hint. The
-//    handler never reads the query (services/api/src/workspaces/routes.ts:166-176
-//    only sets workspaceId when team workspaces are DISABLED) and vela locks
-//    that in by name: test "ignores URL workspace hints when resolving
-//    server-owned current context" (services/api/test/workspaces-personal.test.ts:480).
-//  - `PUT /api/v1/workspaces/current` moves that single account-level row.
-//  - `GET /api/v1/workspaces` (the membership directory) is scoped by
-//    app_user_id, NOT by the selection (services/api/src/workspaces/routes.ts:460),
-//    so it answers the same for every client of the account.
+//    (db/schema/public.hcl `primary_key { columns = [column.app_user_id] }`),
+//    so an account has exactly one selection — there is no client axis.
+//  - `GET /api/v1/workspaces` (the membership directory) is scoped by app user,
+//    NOT by that selection, so it answers the same for every client.
+//  - `GET /api/v1/workspaces/current` USED to answer only from that selection.
+//    It now also honours `x-vela-workspace-id`, the per-request workspace scope
+//    B already accepted on its resource plane, its billing scope routes and the
+//    Link gateway. URL query hints stay ignored either way — B asserts that in
+//    its own suite ("ignores URL workspace hints...").
 
 const TEAM = 'ws-team-1';
 const PERSONAL = 'ws-personal-1';
@@ -82,29 +79,41 @@ function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-/** One vela account: one selection row, shared by every client that signs in. */
-function createOneAccountVela(initialSelection: string) {
-  const bodies: Record<string, unknown> = {
-    [TEAM]: B_TEAM_CONTEXT,
-    [PERSONAL]: B_PERSONAL_CONTEXT,
-  };
-  let selection = initialSelection;
-  let currentReads = 0;
+const BODIES: Record<string, unknown> = {
+  [TEAM]: B_TEAM_CONTEXT,
+  [PERSONAL]: B_PERSONAL_CONTEXT,
+};
+
+/**
+ * One vela account: one account-level selection row, shared by every client
+ * signed into it. `honoursWorkspaceHeader` is the only difference between B
+ * before and after the current-context scoping change.
+ */
+function createOneAccountVela(options: {
+  selection: string;
+  honoursWorkspaceHeader: boolean;
+}) {
+  let selection = options.selection;
   let directoryReads = 0;
+  let putCount = 0;
 
   const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? 'GET';
     if (u.includes('/workspaces/current') && method === 'PUT') {
+      putCount += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as { workspaceId?: string };
       if (body.workspaceId) selection = body.workspaceId;
-      return jsonResponse(200, bodies[selection]);
+      return jsonResponse(200, BODIES[selection]);
     }
     if (u.includes('/workspaces/current') && method === 'GET') {
-      currentReads += 1;
-      // The `?workspaceId=` hint OD appends is dropped on the floor here,
-      // exactly as vela's handler drops it.
-      return jsonResponse(200, bodies[selection]);
+      // A `?workspaceId=` hint is ignored by B in both eras; only the header
+      // can scope this read, and only after the scoping change.
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const requested = options.honoursWorkspaceHeader
+        ? headers['x-vela-workspace-id']
+        : undefined;
+      return jsonResponse(200, BODIES[requested ?? selection]);
     }
     if (u.endsWith('/api/v1/workspaces') && method === 'GET') {
       directoryReads += 1;
@@ -116,16 +125,16 @@ function createOneAccountVela(initialSelection: string) {
   return {
     fetchImpl,
     selection: () => selection,
-    currentReads: () => currentReads,
     directoryReads: () => directoryReads,
+    putCount: () => putCount,
   };
 }
 
-/** One OD daemon: its own local pin, sharing the account's vela session. */
-function createClient(vela: ReturnType<typeof createOneAccountVela>, pinned: string) {
+/** One OD daemon: its own local pin over the account's shared vela session. */
+function createClient(fetchImpl: typeof fetch, pinned: string) {
   let pin: string | null = pinned;
   const provider = createVelaWorkspaceContextProvider({
-    fetch: vela.fetchImpl,
+    fetch: fetchImpl,
     readSession: () => SESSION,
     getActiveWorkspaceId: () => pin,
     setLocalSelection: (id) => {
@@ -138,115 +147,128 @@ function createClient(vela: ReturnType<typeof createOneAccountVela>, pinned: str
   return {
     pin: () => pin,
     context: () => provider.current({}),
-    /** What OD's PUT /api/workspace/active does: move B, then move the pin. */
-    async switchTo(workspaceId: string) {
-      const switched = await provider.selectWorkspace?.(workspaceId);
-      if (switched) pin = workspaceId;
-      return switched;
+    /**
+     * What `PUT /api/workspace/active` does now: move the LOCAL pin. There is
+     * no backend selection call left to make.
+     */
+    switchTo(workspaceId: string) {
+      pin = workspaceId;
     },
   };
 }
 
-describe('one account, two clients, one account-level Active Workspace', () => {
-  it('does NOT hand a client the other client’s workspace — the local pin holds', async () => {
-    const vela = createOneAccountVela(TEAM);
-    const clientA = createClient(vela, TEAM);
-    const clientB = createClient(vela, PERSONAL);
+describe('one account, two clients, against a B that only knows an account-level workspace', () => {
+  it('holds each client on its own pin rather than following the account row', async () => {
+    const vela = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: false });
+    const clientA = createClient(vela.fetchImpl, TEAM);
 
-    // Client B switches. This moves the ONE account-level row.
-    expect(await clientB.switchTo(PERSONAL)).toBe(true);
-    expect(vela.selection()).toBe(PERSONAL);
-
-    // Client A reads its context next. B's `current` now answers PERSONAL for
-    // the whole account, but A must stay on its own pinned TEAM scope.
+    // The account row names the OTHER client's workspace. This daemon must not
+    // follow it.
     const a = await clientA.context();
     expect(a?.workspaceId).toBe(TEAM);
     expect(clientA.pin()).toBe(TEAM);
   });
 
-  it('DOES degrade the losing client’s billing/seat context to a directory synthesis', async () => {
-    const vela = createOneAccountVela(TEAM);
-    const clientA = createClient(vela, TEAM);
-    const clientB = createClient(vela, PERSONAL);
-
-    // While the account-level row still points at A's workspace, A gets B's
-    // rich context: real plan id and real seat counts.
-    const enriched = await clientA.context();
+  it('degrades the losing client to a directory synthesis, which reads as seats-full', async () => {
+    const winning = createOneAccountVela({ selection: TEAM, honoursWorkspaceHeader: false });
+    const enriched = await createClient(winning.fetchImpl, TEAM).context();
+    // While the account row happens to name THIS client's workspace, B can
+    // describe it fully.
     expect(enriched?.planId).toBe('team-pro');
-    expect(enriched?.seatSummary).toEqual({
-      seatLimit: 5,
-      usedSeats: 2,
-      availableSeats: 3,
-      isSeatFull: false,
-    });
-    const directoryReadsWhileWinning = vela.directoryReads();
+    expect(enriched?.seatSummary.isSeatFull).toBe(false);
 
-    // Client B switches away. Nothing about A's workspace, membership, plan or
-    // seats changed — only which workspace the ACCOUNT row names.
-    await clientB.switchTo(PERSONAL);
-
+    const losing = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: false });
+    const clientA = createClient(losing.fetchImpl, TEAM);
     const degraded = await clientA.context();
-    // Same workspace…
+
+    // Same workspace, same membership, same seats in reality...
     expect(degraded?.workspaceId).toBe(TEAM);
-    // …but the billing plane is gone, because B's `current` can only describe
-    // ONE workspace per account and OD must fall back to synthesizing A's
-    // context from the membership directory, which carries no billing data.
+    // ...but the billing plane is gone, because one row cannot describe two
+    // workspaces and OD has to synthesize this one from the directory.
     expect(degraded?.planId).toBeNull();
-    // Worse than merely blank: a 0/0 seat summary derives `isSeatFull: true`,
-    // so the losing client reads its own healthy 3-free-seat workspace as
-    // full. The seat gate is a client-side check (#115), which makes this a
-    // user-visible block on inviting, not just a cosmetic badge.
+    // Worse than blank: a 0/0 seat summary derives isSeatFull, so a workspace
+    // with three free seats reads as full to this client. The seat gate is a
+    // client-side check, so that is a user-visible block on inviting.
     expect(degraded?.seatSummary).toEqual({
       seatLimit: 0,
       usedSeats: 0,
       availableSeats: 0,
       isSeatFull: true,
     });
-    expect(enriched?.seatSummary.isSeatFull).toBe(false);
-    // And it costs an extra round-trip that the winning client never pays.
-    expect(vela.directoryReads()).toBeGreaterThan(directoryReadsWhileWinning);
+    // And it costs a second round-trip the winning client never makes.
+    expect(losing.directoryReads()).toBeGreaterThan(winning.directoryReads());
   });
 
-  it('makes the losing client’s context read depend on a second, fallible call', async () => {
-    // Same setup, but the directory read fails once — a blip that the winning
-    // client would never even notice, because it never makes that call.
-    const vela = createOneAccountVela(PERSONAL);
-    let failDirectory = false;
+  it('leaves the losing client with no context at all when that extra call blips', async () => {
+    const vela = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: false });
+    let failDirectory = true;
     const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
       if (String(url).endsWith('/api/v1/workspaces') && failDirectory) {
         throw new Error('directory blip');
       }
       return (vela.fetchImpl as unknown as typeof fetch)(url as never, init as never);
     }) as unknown as typeof fetch;
+    const clientA = createClient(fetchImpl, TEAM);
 
-    const clientA = createClient({ ...vela, fetchImpl }, TEAM);
-
-    failDirectory = true;
-    // B's account row says PERSONAL, A is pinned to TEAM, so A can only resolve
-    // its own scope through the directory — and that call just failed.
+    // Pinned to TEAM while the account row says PERSONAL, this client can only
+    // resolve its own scope through the directory — which just failed.
     expect(await clientA.context()).toBeNull();
-    // The pin survives (nothing was confirmed), but this client has NO context
-    // for a full poll tick purely because another client owns the account row.
+    // The pin survives, because nothing was confirmed.
     expect(clientA.pin()).toBe(TEAM);
 
     failDirectory = false;
     expect((await clientA.context())?.workspaceId).toBe(TEAM);
   });
+});
 
-  it('lets each client yank the other’s server-side scope on every switch', async () => {
-    const vela = createOneAccountVela(TEAM);
-    const clientA = createClient(vela, TEAM);
-    const clientB = createClient(vela, PERSONAL);
+describe('one account, two clients, against a B that honours a per-request workspace', () => {
+  it('serves BOTH clients their own workspace, fully enriched', async () => {
+    const vela = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: true });
+    const clientA = createClient(vela.fetchImpl, TEAM);
+    const clientB = createClient(vela.fetchImpl, PERSONAL);
 
-    await clientB.switchTo(PERSONAL);
+    const a = await clientA.context();
+    const b = await clientB.context();
+
+    expect(a?.workspaceId).toBe(TEAM);
+    expect(b?.workspaceId).toBe(PERSONAL);
+    // Neither client is second-class: the billing plane survives for both,
+    // which is the whole point of scoping the read per request.
+    expect(a?.planId).toBe('team-pro');
+    expect(a?.seatSummary).toEqual({
+      seatLimit: 5,
+      usedSeats: 2,
+      availableSeats: 3,
+      isSeatFull: false,
+    });
+    expect(b?.planId).toBe('personal-pro');
+    // No directory synthesis was needed for either of them.
+    expect(vela.directoryReads()).toBe(0);
+  });
+
+  it('never writes the account-level selection, so no client can yank another', async () => {
+    const vela = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: true });
+    const clientA = createClient(vela.fetchImpl, TEAM);
+    const clientB = createClient(vela.fetchImpl, PERSONAL);
+
+    clientA.switchTo(PERSONAL);
+    clientA.switchTo(TEAM);
+    await clientA.context();
+    await clientB.context();
+
+    // The account row is never touched — not on a switch, not on a read. This
+    // is the regression guard: reintroducing a server-side selection write
+    // brings back the cross-client yank.
+    expect(vela.putCount()).toBe(0);
     expect(vela.selection()).toBe(PERSONAL);
-
-    // A switches back to its own workspace — a purely local UI action — and in
-    // doing so re-points the account row out from under client B. Whatever on
-    // the vela side still resolves a workspace from that row (rather than from
-    // an explicit parameter) is now aimed at A's workspace for BOTH clients.
-    await clientA.switchTo(TEAM);
-    expect(vela.selection()).toBe(TEAM);
     expect(clientB.pin()).toBe(PERSONAL);
+  });
+
+  it('still ignores a mismatched account row when the header path is available', async () => {
+    // Defence in depth: even if B answered for the wrong workspace, the pin
+    // stays authoritative.
+    const vela = createOneAccountVela({ selection: PERSONAL, honoursWorkspaceHeader: false });
+    const clientA = createClient(vela.fetchImpl, TEAM);
+    expect((await clientA.context())?.workspaceId).toBe(TEAM);
   });
 });

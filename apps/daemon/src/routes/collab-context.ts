@@ -45,6 +45,7 @@ import {
 } from '../integrations/vela-billing.js';
 import {
   listVelaWorkspaceDirectory,
+  workspaceContextFromDirectoryItem,
   type WorkspaceDirectoryFetchResult,
 } from '../collab/vela-workspace-context.js';
 import {
@@ -323,40 +324,44 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     if (!workspaceId) return res.status(400).json({ error: 'missing_workspace_id' });
 
     const directory = await listWorkspaceDirectory().catch(() => []);
-    if (!directory.some((item) => item.workspaceId === workspaceId)) {
+    const selected = directory.find((item) => item.workspaceId === workspaceId);
+    if (!selected) {
       return res.status(404).json({ error: 'workspace_not_visible' });
     }
 
+    // Choosing a workspace is a LOCAL decision, and this daemon's pin is the
+    // only thing that decides which workspace it operates in. The membership
+    // directory above is the authorization: it answered, and it lists the
+    // caller as holding this workspace. Nothing about that fact lives on the
+    // backend, so there is nothing here that can be "rejected" — the switch
+    // cannot fail once the directory confirms it.
+    //
+    // This used to PUT B's account-level active workspace first and fail the
+    // user's click (502) when that write did not take. That row is keyed by app
+    // user, so it can only ever name ONE workspace for an account whose clients
+    // are in different ones: every switch yanked the other clients' server-side
+    // scope, and the client that did not write it last was answered for someone
+    // else's workspace. Workspace now travels per request on
+    // `x-vela-workspace-id` instead (see `fetchCurrent`), which is what makes
+    // N clients of one account independent.
     const authorization = req.header('authorization') ?? undefined;
-    const previous = deps.activeWorkspace.get();
-    // B moved workspace selection server-side (2026-07-16): the account-level
-    // active workspace must be switched ON THE BACKEND first, or every
-    // follow-up context read and scoped CLI call stays on the old workspace
-    // and the validation below always fails. Local-only providers (dev) have
-    // no selectWorkspace and keep the previous behavior.
-    if (workspaceContext.selectWorkspace) {
-      const switched = await workspaceContext.selectWorkspace(workspaceId).catch(() => false);
-      if (!switched) {
-        return res.status(502).json({ error: 'workspace_switch_rejected' });
-      }
-    }
     await deps.activeWorkspace.set(workspaceId);
     const context = await workspaceContext.current({ authorization }).catch(() => null);
-    if (!context || context.workspaceId !== workspaceId) {
-      if (previous) {
-        await deps.activeWorkspace.set(previous);
-        // Undo the backend-side switch too, or the account stays parked on a
-        // workspace the client just refused.
-        await workspaceContext.selectWorkspace?.(previous).catch(() => false);
-      } else await deps.activeWorkspace.clear();
-      return res.status(404).json({ error: 'workspace_context_unavailable' });
-    }
-    // The switch is confirmed: the backend moved and the context read agrees.
+    // A context read that fails, or that still describes the old workspace, is
+    // an unconfirmed READ — never evidence that the switch was wrong. Answer
+    // from the directory entry already validated above rather than reverting a
+    // choice the user made and the directory allowed. The billing plane is
+    // thinner on that synthesis (no plan id, no seat counts), which the web
+    // closes out on its next context poll.
+    const resolved =
+      context && context.workspaceId === workspaceId
+        ? context
+        : workspaceContextFromDirectoryItem(selected);
     // Warm the now-cold workspace-scoped caches before responding to the
     // browser, but never await them — a slow upstream must not delay the
     // switch, and a failed warm just leaves the old cold-read behavior.
     deps.onWorkspaceSwitched?.(workspaceId);
-    const body: WorkspaceActiveResponse = { activeWorkspaceId: workspaceId, context };
+    const body: WorkspaceActiveResponse = { activeWorkspaceId: workspaceId, context: resolved };
     res.json(body);
   });
 

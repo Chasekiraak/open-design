@@ -64,19 +64,17 @@ function contextFor(workspaceId: string): WorkspaceCollabContext {
 }
 
 /**
- * A switch harness with an in-memory active-workspace pin, so the rollback path
- * is exercised through the same store the route mutates rather than a stub that
- * cannot disagree with itself.
+ * A switch harness with an in-memory active-workspace pin, so the route is
+ * exercised through the same store it mutates rather than a stub that cannot
+ * disagree with itself. There is deliberately no backend-selection seam: the
+ * pin is the only thing a switch moves.
  */
 async function startSwitchServer(options: {
-  /** What the backend `selectWorkspace` answers. Default: accepts. */
-  selectWorkspace?: (workspaceId: string) => boolean;
   /** What the follow-up context read answers. Default: agrees with the pin. */
   currentContext?: (pinned: string | null) => WorkspaceCollabContext | null;
   initial?: string;
 }) {
   let pinned: string | null = options.initial ?? PERSONAL;
-  let backendWorkspace = options.initial ?? PERSONAL;
   const onWorkspaceSwitched = vi.fn<(workspaceId: string) => void>();
 
   const activeWorkspace: NonNullable<RegisterCollabContextRoutesDeps['activeWorkspace']> = {
@@ -91,20 +89,17 @@ async function startSwitchServer(options: {
 
   const app = express();
   app.use(express.json());
+  const workspaceContext = {
+    current: async () =>
+      options.currentContext
+        ? options.currentContext(pinned)
+        : pinned
+          ? contextFor(pinned)
+          : null,
+  };
   registerCollabContextRoutes(app, {
-    workspaceContext: {
-      current: async () =>
-        options.currentContext
-          ? options.currentContext(pinned)
-          : pinned
-            ? contextFor(pinned)
-            : null,
-      selectWorkspace: async (workspaceId: string) => {
-        const accepted = options.selectWorkspace ? options.selectWorkspace(workspaceId) : true;
-        if (accepted) backendWorkspace = workspaceId;
-        return accepted;
-      },
-    } as unknown as RegisterCollabContextRoutesDeps['workspaceContext'],
+    workspaceContext:
+      workspaceContext as unknown as RegisterCollabContextRoutesDeps['workspaceContext'],
     activeWorkspace,
     listWorkspaceDirectory: async () => [directoryItem(PERSONAL), directoryItem(TEAM)],
     onWorkspaceSwitched,
@@ -119,7 +114,8 @@ async function startSwitchServer(options: {
   return {
     onWorkspaceSwitched,
     pinnedWorkspace: () => pinned,
-    backendWorkspace: () => backendWorkspace,
+    /** Proof the route has no backend-selection seam left to call. */
+    hasBackendSelectionSeam: () => 'selectWorkspace' in workspaceContext,
     async switchTo(workspaceId: string) {
       const response = await fetch(`${base}/api/workspace/active`, {
         method: 'PUT',
@@ -147,29 +143,48 @@ describe('PUT /api/workspace/active announces a confirmed switch for cache warmi
     expect(api.onWorkspaceSwitched).toHaveBeenCalledWith(TEAM);
   });
 
-  it('stays silent when the backend rejects the switch', async () => {
-    const api = await startSwitchServer({ selectWorkspace: () => false });
+  // Choosing a workspace is a local decision authorized by the membership
+  // directory, so there is no backend selection to reject and nothing to roll
+  // back. This replaces the old 502 `workspace_switch_rejected` contract: that
+  // gate made a purely local action fail on an account-scoped backend write,
+  // and that write could only ever name ONE workspace per account.
+  it('does not depend on a backend workspace selection at all', async () => {
+    const api = await startSwitchServer({});
 
     const result = await api.switchTo(TEAM);
 
-    expect(result.status).toBe(502);
-    // Nothing moved, so warming here would refill the caches for a workspace
-    // this daemon is not operating in.
-    expect(api.onWorkspaceSwitched).not.toHaveBeenCalled();
+    expect(result.status).toBe(200);
+    expect(api.hasBackendSelectionSeam()).toBe(false);
   });
 
-  it('stays silent when the context read disagrees and the switch is rolled back', async () => {
-    // The backend accepted the move but the follow-up context read still
-    // answers for the old workspace, which is the route's rollback trigger.
-    const api = await startSwitchServer({
-      currentContext: () => contextFor(PERSONAL),
-    });
+  it('keeps the switch when the context read cannot confirm it, answering from the directory', async () => {
+    // An unreadable context is an unconfirmed READ, never evidence that the
+    // user's choice was wrong. Reverting here used to undo a switch the
+    // directory had already authorized, and the user saw their click do nothing.
+    const api = await startSwitchServer({ currentContext: () => null });
 
     const result = await api.switchTo(TEAM);
 
-    expect(result.status).toBe(404);
-    expect(api.pinnedWorkspace()).toBe(PERSONAL);
-    expect(api.onWorkspaceSwitched).not.toHaveBeenCalled();
+    expect(result.status).toBe(200);
+    expect(api.pinnedWorkspace()).toBe(TEAM);
+    expect(result.body.activeWorkspaceId).toBe(TEAM);
+    // Synthesized from the directory entry the route already validated, so the
+    // response still describes the workspace the user picked.
+    expect((result.body.context as { workspaceId?: string }).workspaceId).toBe(TEAM);
+    expect(api.onWorkspaceSwitched).toHaveBeenCalledWith(TEAM);
+  });
+
+  it('keeps the switch when the context read still describes the old workspace', async () => {
+    // A stale/lagging context read is likewise not a refusal. The pin is the
+    // truth; the web closes the billing plane out on its next context poll.
+    const api = await startSwitchServer({ currentContext: () => contextFor(PERSONAL) });
+
+    const result = await api.switchTo(TEAM);
+
+    expect(result.status).toBe(200);
+    expect(api.pinnedWorkspace()).toBe(TEAM);
+    expect((result.body.context as { workspaceId?: string }).workspaceId).toBe(TEAM);
+    expect(api.onWorkspaceSwitched).toHaveBeenCalledWith(TEAM);
   });
 
   it('stays silent for a workspace the directory does not show', async () => {
