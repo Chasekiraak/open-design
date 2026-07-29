@@ -5,7 +5,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EntryShell } from '../../src/components/EntryShell';
-import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
+import {
+  AMR_LOGIN_POLL_INTERVAL_MS,
+  AMR_LOGIN_TIMEOUT_MS,
+} from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
 import type { AgentInfo, AppConfig } from '../../src/types';
 import { setHomeHeroPrompt } from '../helpers/home-hero-lexical';
@@ -820,6 +823,84 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     });
     expect(cloudButton.hasAttribute('disabled')).toBe(false);
     expect(screen.getByRole('button', { name: /Local coding agent/i })).toBeTruthy();
+  });
+
+  it('preserves a pre-start cancel until the canonical AMR login attempt exists', async () => {
+    const canonicalAuthAttemptId = '22222222-2222-4222-8222-222222222222';
+    let releaseLogin!: (response: Response) => void;
+    const heldLoginResponse = new Promise<Response>((resolve) => {
+      releaseLogin = resolve;
+    });
+    let statusCalls = 0;
+    const cancelAttemptIds: string[] = [];
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/integrations/vela/status')) {
+        statusCalls += 1;
+        return jsonResponse({
+          loggedIn: false,
+          loginInFlight: false,
+          profile: 'prod',
+          user: null,
+          configPath: '/x',
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        return heldLoginResponse;
+      }
+      if (url.endsWith('/api/integrations/vela/login/cancel') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { authAttemptId: string };
+        cancelAttemptIds.push(body.authAttemptId);
+        return cancelAttemptIds.length === 1
+          ? jsonResponse({ canceled: false, pids: [] })
+          : jsonResponse({ canceled: true, pids: [123] });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    renderOnboarding();
+
+    const signIn = await findCloudSignInButton();
+    vi.useFakeTimers();
+    fireEvent.click(signIn);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/integrations/vela/login',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel sign-in/i }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(cancelAttemptIds).toHaveLength(1);
+    const statusCallsAfterEarlyCancel = statusCalls;
+
+    releaseLogin(jsonResponse({
+      pid: 123,
+      authAttemptId: canonicalAuthAttemptId,
+    }, 202));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.advanceTimersByTimeAsync(AMR_LOGIN_POLL_INTERVAL_MS);
+
+    expect(cancelAttemptIds).toEqual([
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
+      canonicalAuthAttemptId,
+    ]);
+    expect(statusCalls).toBe(statusCallsAfterEarlyCancel);
+    expect(screen.queryByText('Signing in…')).toBeNull();
   });
 
   it('cancels AMR login and re-enables onboarding after the login timeout', async () => {
