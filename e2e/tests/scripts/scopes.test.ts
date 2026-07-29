@@ -32,12 +32,32 @@ if (process.env.OD_SCOPES_STUB_FAIL === "1") {
   process.exit(1);
 }
 const files = process.env.OD_SCOPES_STUB_FILES ?? "";
-for (const line of files.split("\\n")) {
-  if (line.length > 0) console.log(line);
-}
-const previousFilename = process.env.OD_SCOPES_STUB_RENAMED_FROM ?? "";
+const renameEachFromPrefix = process.env.OD_SCOPES_STUB_RENAME_EACH_FROM_PREFIX ?? "";
 const jqIndex = process.argv.indexOf("--jq");
 const jq = jqIndex >= 0 ? process.argv[jqIndex + 1] ?? "" : "";
+const previousFilename = process.env.OD_SCOPES_STUB_RENAMED_FROM ?? "";
+const fileLines = files.split("\\n").filter((line) => line.length > 0);
+if (jq.length === 0) {
+  console.log(JSON.stringify({
+    files: fileLines.map((filename, index) => ({
+      filename,
+      ...(renameEachFromPrefix.length > 0
+        ? { previous_filename: renameEachFromPrefix + index }
+        : previousFilename.length > 0
+          ? { previous_filename: previousFilename }
+          : {}),
+    })),
+  }));
+  process.exit(0);
+}
+let fileIndex = 0;
+for (const line of fileLines) {
+  console.log(line);
+  if (renameEachFromPrefix.length > 0 && jq.includes("previous_filename")) {
+    console.log(renameEachFromPrefix + fileIndex);
+  }
+  fileIndex += 1;
+}
 if (previousFilename.length > 0 && jq.includes("previous_filename")) {
   console.log(previousFilename);
 }
@@ -525,6 +545,18 @@ test("merge_group compare result at GitHub's 300-file ceiling fails open to the 
   const run = runScopes("print", { eventName: "merge_group" }, files);
   try {
     assertPlan(JSON.parse(run.stdout) as Record<string, unknown>, FULL_PLAN);
+  } finally {
+    run.cleanup();
+  }
+});
+
+test("merge_group counts rename records rather than flattened paths at the 300-file ceiling", () => {
+  const files = Array.from({ length: 150 }, (_, index) => `docs/renamed-${index}.md`);
+  const run = runScopes("print", { eventName: "merge_group" }, files, {
+    OD_SCOPES_STUB_RENAME_EACH_FROM_PREFIX: "docs/original-",
+  });
+  try {
+    assertPlan(JSON.parse(run.stdout) as Record<string, unknown>, expectedPlan({ ciMode: "full" }));
   } finally {
     run.cleanup();
   }
