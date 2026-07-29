@@ -2151,12 +2151,30 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
    *     it, attributed to the DIRECTORY's member id rather than the header's;
    *   - it does NOT verify — foreign, inactive, permissions disagree, last-known
    *     says removed, or the authority is unreadable so it cannot be confirmed —
-   *     -> claim the daemon's own ambient workspace instead, attributed to that
-   *     verified session's member id;
+   *     -> write NOTHING, unless the degraded (ambient) authority happens to name
+   *     the very pair that was asserted;
    *   - neither is available -> write nothing, and let the pre-existing gate
    *     below answer. A caller that cannot prove membership over a project
    *     nothing has ever claimed is exactly who that gate is for; inventing a
    *     binding to keep it happy is what this fix removes.
+   *
+   * CREATION AND RECONCILIATION ARE NOT THE SAME RISK, which is why the degraded
+   * branch is narrower here than in `createdProjectWorkspaceHome`. Putting a
+   * BRAND-NEW project in the ambient workspace takes nothing from anyone. Putting
+   * a PRE-EXISTING orphan there — because someone asserted an identity that could
+   * not be verified — may take it from the workspace it actually belongs to, and
+   * the `getWorkspaceProjectByProjectId` guard above makes that write STICKY: the
+   * rightful verified workspace can never reconcile it afterwards. A forged
+   * request, or a legitimate one during an authority outage after the active
+   * workspace changed, would permanently mis-file the project.
+   *
+   * So the ambient authority is accepted only when it matches the asserted pair
+   * exactly. That is outage continuity for the ordinary legitimate caller — whose
+   * client took its headers from this same daemon, so the two agree — while a
+   * mismatch writes nothing. Not in tension with 「所有 project 都应该能找到
+   * workspace」: the display-side fallback (#6185) already renders an unbound
+   * project inside the caller's current workspace, so nothing reads as "unknown".
+   * The binding row is a separate, durable fact and stays conservative.
    *
    * The `null`/`'missing'` early return is unchanged and load-bearing, and is
    * why this does not simply use `createdProjectWorkspaceHome`'s own third
@@ -2171,6 +2189,15 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     if (getWorkspaceProjectByProjectId(db, projectId)) return;
     const home = await resolveCreatedProjectHome(req);
     if (!home) return;
+    // Verified assertions resolve to the pair that was asserted (the directory
+    // lookup is keyed on it), so this admits them and rejects only a degraded
+    // ambient authority that names something else.
+    if (
+      home.workspaceId !== asserted.workspaceId
+      || home.workspaceMemberId !== asserted.workspaceMemberId
+    ) {
+      return;
+    }
     const now = Date.now();
     ensureWorkspaceProject(db, {
       projectId,

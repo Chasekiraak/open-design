@@ -93,12 +93,18 @@ const FOREIGN = {
 function startDirectoryMock(options: {
   directoryStatus?: number;
   currentStatus: 401 | 403;
-}): Promise<{ url: string; close: () => Promise<void> }> {
+}): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  /** Flip `/current` so a test can move the daemon from "no ambient" to "ambient". */
+  setCurrentStatus: (status: 401 | 403) => void;
+}> {
+  let currentStatus = options.currentStatus;
   const server: Server = createServer((req, res) => {
     const url = req.url ?? '';
     if (url.startsWith('/api/v1/workspaces/current')) {
-      res.writeHead(options.currentStatus, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(options.currentStatus === 403 ? { error: 'missing_principal' } : { error: 'unauthorized' }));
+      res.writeHead(currentStatus, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(currentStatus === 403 ? { error: 'missing_principal' } : { error: 'unauthorized' }));
       return;
     }
     if (url.startsWith('/api/v1/workspaces')) {
@@ -117,6 +123,9 @@ function startDirectoryMock(options: {
       resolve({
         url: `http://127.0.0.1:${address.port}`,
         close: () => new Promise<void>((done) => server.close(() => done())),
+        setCurrentStatus: (status) => {
+          currentStatus = status;
+        },
       });
     });
   });
@@ -185,16 +194,27 @@ const duplicatePath = (id: string) => `/api/projects/${encodeURIComponent(id)}/d
 const designSystemCopyPath = (id: string) =>
   `/api/projects/${encodeURIComponent(id)}/design-system-copy`;
 
-let readableAuthority: { url: string; close: () => Promise<void> };
-let unreadableAuthority: { url: string; close: () => Promise<void> };
+type DirectoryMock = Awaited<ReturnType<typeof startDirectoryMock>>;
+
+let readableAuthority: DirectoryMock;
+let unreadableAuthority: DirectoryMock;
+/** Directory readable, and `/current` flippable so a test can move the daemon
+ *  from "no ambient" to "ambient" between two phases. */
+let ambientAuthority: DirectoryMock;
 
 beforeAll(async () => {
   readableAuthority = await startDirectoryMock({ currentStatus: 401 });
   unreadableAuthority = await startDirectoryMock({ currentStatus: 401, directoryStatus: 500 });
+  // Starts WITHOUT ambient so a true orphan can be created, then flips.
+  ambientAuthority = await startDirectoryMock({ currentStatus: 401 });
 });
 
 afterAll(async () => {
-  await Promise.all([readableAuthority.close(), unreadableAuthority.close()]);
+  await Promise.all([
+    readableAuthority.close(),
+    unreadableAuthority.close(),
+    ambientAuthority.close(),
+  ]);
 });
 
 describe('reconciling an unbound project verifies the asserted workspace first', () => {
@@ -307,6 +327,84 @@ describe('reconciling an unbound project verifies the asserted workspace first',
   );
 
   test(
+    'a populated but DIFFERENT ambient workspace is not written onto an existing orphan',
+    { timeout: 300_000 },
+    async () => {
+      const suite = await createSmokeSuite('collab-reconcile-ambient-mismatch');
+
+      // The state-integrity case. Unlike the fixtures above, this daemon HAS an
+      // ambient workspace (`/current` answers 403 missing_principal, so the
+      // provider bootstraps a default from the directory).
+      //
+      // A pre-existing orphan is not a new project. Binding a NEW project to the
+      // ambient workspace takes nothing from anyone — that is #6201 and it is
+      // right. Binding an EXISTING orphan there, because someone asserted an
+      // identity that could not be verified, may take it from the workspace it
+      // actually belongs to. Worse, it is sticky: this helper's own
+      // `getWorkspaceProjectByProjectId` guard means the rightful verified
+      // workspace can never reconcile it afterwards. Creation and reconciliation
+      // are not the same risk.
+      //
+      // So a degraded (ambient) authority may only be persisted when it names
+      // the very pair that was asserted — outage continuity for a legitimate
+      // caller whose client is on the same workspace the daemon resolved — and
+      // otherwise nothing is written at all.
+      await suite.with.toolsDev(
+        async ({ webUrl }) => {
+          // PHASE 1 — no ambient yet, so a headerless create leaves a true orphan
+          // (#6201's create-side binding has nothing to bind to).
+          ambientAuthority.setCurrentStatus(401);
+          const orphan = await createUnboundProject(webUrl, 'Ambient mismatch orphan');
+          expect(
+            (await readScope(webUrl, orphan)).kind,
+            'precondition: this must be a true orphan',
+          ).toBe('unbound');
+
+          // PHASE 2 — the daemon now resolves an ambient workspace. Reading
+          // `/api/workspace/context` drives `.current()`, which is what populates
+          // the `lastKnown()` cache the resolver degrades to, so this is
+          // deterministic rather than waiting on a poll tick.
+          ambientAuthority.setCurrentStatus(403);
+          const ambientContext = await waitForAmbientWorkspace(webUrl);
+          expect(
+            ambientContext,
+            'precondition: the daemon must now have an ambient workspace to degrade to',
+          ).toBe(MEMBER.workspaceId);
+
+          // Asserts a pair the directory does NOT list. Verification fails, so the
+          // resolver degrades to ambient — which is a REAL workspace here, and a
+          // different one from what was asserted.
+          await mutate(webUrl, duplicatePath(orphan), workspaceHeaders(FOREIGN), {
+            name: 'Duplicate asserting an unverifiable pair',
+          });
+
+          const after = await readScope(webUrl, orphan);
+          expect(
+            after.workspaceId,
+            'the unverifiable assertion must not be persisted',
+          ).not.toBe(FOREIGN.workspaceId);
+          expect(
+            after.workspaceId,
+            'nor may the ambient workspace be written onto a pre-existing orphan it was never asserted for',
+          ).not.toBe(MEMBER.workspaceId);
+          expect(
+            after.kind,
+            'the orphan stays unbound so the rightful workspace can still reconcile it',
+          ).toBe('unbound');
+        },
+        {
+          env: {
+            AMR_HOME: await emptyAmrHome(suite.scratchDir),
+            OD_WORKSPACE_CONTEXT_SOURCE: 'vela',
+            VELA_API_URL: ambientAuthority.url,
+            VELA_CONTROL_KEY: 'e2e-reconcile-control-key',
+          },
+        },
+      );
+    },
+  );
+
+  test(
     'an unreadable membership authority cannot confirm a claim, so none is written',
     { timeout: 300_000 },
     async () => {
@@ -341,6 +439,24 @@ describe('reconciling an unbound project verifies the asserted workspace first',
   );
 
 });
+
+/**
+ * Drive `.current()` until the daemon reports an ambient workspace, and return
+ * its id. `GET /api/workspace/context` calls the provider directly, so this both
+ * observes and populates the `lastKnown()` cache.
+ */
+async function waitForAmbientWorkspace(webUrl: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const body = await requestJson<{ context: { workspaceId?: string } | null }>(
+      webUrl,
+      '/api/workspace/context',
+    );
+    const workspaceId = body.context?.workspaceId;
+    if (typeof workspaceId === 'string' && workspaceId) return workspaceId;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
 
 /**
  * A vela config home guaranteed to hold no session, so the daemon's
