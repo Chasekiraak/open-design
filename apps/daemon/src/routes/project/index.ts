@@ -2129,25 +2129,56 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
    * is; this only ever claims a true orphan, matching `ensureWorkspaceProject`'s
    * own idempotency contract.
    *
-   * Attributes `createdByWorkspaceMemberId: ctx.workspaceMemberId`, same as
-   * `bindDuplicateIntoRequestWorkspace` — deliberately NOT the `null` an
-   * ordinary lazy-read projection uses (`ensureWorkspaceProjection`). A
-   * passive list read must not silently hand out ownership just because it
-   * happened to run first; an explicit mutation request naming this exact
-   * project is the "yes, this is mine" signal a read never had.
+   * Attributes an owner, deliberately NOT the `null` an ordinary lazy-read
+   * projection uses (`ensureWorkspaceProjection`). A passive list read must not
+   * silently hand out ownership just because it happened to run first; an
+   * explicit mutation request naming this exact project is the "yes, this is
+   * mine" signal a read never had.
+   *
+   * But that owner is NOT the request's own claim. `workspaceProjectContextFromRequest`
+   * only PARSES `x-od-workspace-*`, which is an unauthenticated hint any local
+   * caller can forge, and this row's `createdByWorkspaceMemberId` is what
+   * `workspaceResourceAccess` turns into `selfCreated` — the bit that grants a
+   * non-privileged member mutation rights over it. Writing the header value
+   * meant a plain curl could claim someone else's orphaned project into a
+   * workspace it has no membership in and install itself as the author.
+   *
+   * So the workspace and the authorship both come from
+   * `resolveCreatedProjectHome` — the same verify-then-degrade resolver every
+   * created-project path uses (`collab/created-project-workspace.ts`):
+   *
+   *   - the asserted identity VERIFIES against the membership directory -> claim
+   *     it, attributed to the DIRECTORY's member id rather than the header's;
+   *   - it does NOT verify — foreign, inactive, permissions disagree, last-known
+   *     says removed, or the authority is unreadable so it cannot be confirmed —
+   *     -> claim the daemon's own ambient workspace instead, attributed to that
+   *     verified session's member id;
+   *   - neither is available -> write nothing, and let the pre-existing gate
+   *     below answer. A caller that cannot prove membership over a project
+   *     nothing has ever claimed is exactly who that gate is for; inventing a
+   *     binding to keep it happy is what this fix removes.
+   *
+   * The `null`/`'missing'` early return is unchanged and load-bearing, and is
+   * why this does not simply use `createdProjectWorkspaceHome`'s own third
+   * branch. `enforceWorkspaceResourceMutation` runs immediately after this and
+   * its HEADERLESS branch answers 401 WORKSPACE_CONTEXT_REQUIRED as soon as ANY
+   * row exists for the resource. Claiming on a request that asserts nothing
+   * would therefore convert a working headerless mutation into a 401.
    */
-  function reconcileUnboundProjectBeforeMutation(req: any, projectId: string) {
-    const ctx = workspaceProjectContextFromRequest(req);
-    if (ctx === null || ctx === 'missing') return;
+  async function reconcileUnboundProjectBeforeMutation(req: any, projectId: string) {
+    const asserted = workspaceProjectContextFromRequest(req);
+    if (asserted === null || asserted === 'missing') return;
     if (getWorkspaceProjectByProjectId(db, projectId)) return;
+    const home = await resolveCreatedProjectHome(req);
+    if (!home) return;
     const now = Date.now();
     ensureWorkspaceProject(db, {
       projectId,
-      workspaceId: ctx.workspaceId,
+      workspaceId: home.workspaceId,
       visibility: 'personal',
       resourceState: 'active',
-      createdByWorkspaceMemberId: ctx.workspaceMemberId,
-      updatedByWorkspaceMemberId: ctx.workspaceMemberId,
+      createdByWorkspaceMemberId: home.workspaceMemberId,
+      updatedByWorkspaceMemberId: home.workspaceMemberId,
       syncState: 'local_only',
       resourceHubResourceId: null,
       cloudTombstonedAt: null,
@@ -3181,7 +3212,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       // finally comes in for it. Claim it into the caller's own workspace
       // first, exactly like this same route already does for the COPY it is
       // about to create.
-      reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
+      await reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
       if (!enforceWorkspaceProjectMutation(
         req,
         res,
@@ -3290,7 +3321,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       // recvqbhor3pai2 — same reasoning as the sibling /duplicate route just
       // above: a never-bound source project must not be permanently
       // un-copyable once a real, authenticated request finally names it.
-      reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
+      await reconcileUnboundProjectBeforeMutation(req, sourceProject.id);
       if (!enforceWorkspaceProjectMutation(
         req,
         res,
