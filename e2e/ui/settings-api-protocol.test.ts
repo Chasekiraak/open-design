@@ -359,6 +359,7 @@ test('[P1] BYOK Ollama Cloud exposes refreshed model choices and persists select
   await expect(providerPresetCombobox(dialog)).toContainText(/Ollama Cloud \(managed\)/i);
   await expectModelComboboxText(dialog, /gpt-oss:120b/i);
   await expect(dialog.getByLabel('Base URL')).toHaveValue('https://ollama.com');
+  await dialog.getByLabel('API key').fill('ollama-key');
 
   await modelCombobox(dialog).click();
   const popover = page.getByTestId('settings-byok-model-popover');
