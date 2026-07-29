@@ -187,15 +187,15 @@ describe('local Open Design MCP brief app', () => {
       name: 'collect_brief',
       _meta: {
         ui: {
-          resourceUri: 'ui://open-design-cloud/artifact-card-v3.html',
+          resourceUri: 'ui://open-design-cloud/artifact-card-v4.html',
         },
-        'ui/resourceUri': 'ui://open-design-cloud/artifact-card-v3.html',
-        'openai/outputTemplate': 'ui://open-design-cloud/artifact-card-v3.html',
+        'ui/resourceUri': 'ui://open-design-cloud/artifact-card-v4.html',
+        'openai/outputTemplate': 'ui://open-design-cloud/artifact-card-v4.html',
       },
     });
     expect(localMcpResourceDefinitions()).toContainEqual(
       expect.objectContaining({
-        uri: 'ui://open-design-cloud/artifact-card-v3.html',
+        uri: 'ui://open-design-cloud/artifact-card-v4.html',
         mimeType: 'text/html;profile=mcp-app',
       }),
     );
@@ -206,22 +206,19 @@ describe('local Open Design MCP brief app', () => {
     expect(confirmBrief).not.toHaveProperty('_meta');
   });
 
-  it('keeps one brief card and reports every intrinsic height change', () => {
-    expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('ResizeObserver');
+  it('keeps one brief card without a self-triggering resize observer', () => {
+    expect(OPEN_DESIGN_BRIEF_APP_HTML).not.toContain('ResizeObserver');
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain(
       'ui/notifications/size-changed',
     );
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('{ width, height }');
-    expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain(
-      'root.style.height = "max-content"',
-    );
+    expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('document.body.scrollHeight');
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain(
       'width: Math.ceil(window.innerWidth)',
     );
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain(
       'width === lastWidth && height === lastHeight',
     );
-    expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('observer.observe(main)');
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('notifyIntrinsicHeight');
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain('requestAnimationFrame');
     expect(OPEN_DESIGN_BRIEF_APP_HTML).toContain(

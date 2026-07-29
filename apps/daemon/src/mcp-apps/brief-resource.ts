@@ -1,4 +1,4 @@
-export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v3' as const;
+export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v4' as const;
 
 /**
  * Self-contained MCP Apps resource. It intentionally has no remote assets,
@@ -202,14 +202,9 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         }
 
         function intrinsicSize() {
-          const root = document.documentElement;
-          const previousHeight = root.style.height;
-          root.style.height = "max-content";
-          const height = Math.ceil(root.getBoundingClientRect().height);
-          root.style.height = previousHeight;
           return {
             width: Math.ceil(window.innerWidth),
-            height,
+            height: Math.ceil(document.body.scrollHeight),
           };
         }
 
@@ -485,7 +480,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         showLoading();
         request("ui/initialize", {
           protocolVersion: "2026-01-26",
-          appInfo: { name: "open-design-cloud-brief", version: "v3" },
+          appInfo: { name: "open-design-cloud-brief", version: "v4" },
           appCapabilities: {},
         }).then((result) => {
           standardBridgeReady = true;
@@ -502,10 +497,6 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
           status.textContent = copy().bridgeUnavailable;
           scheduleSizeChanged();
         });
-        if (typeof ResizeObserver !== "undefined") {
-          const observer = new ResizeObserver(scheduleSizeChanged);
-          observer.observe(main);
-        }
         window.addEventListener("resize", scheduleSizeChanged);
       })();
     </script>
