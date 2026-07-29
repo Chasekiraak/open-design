@@ -1175,14 +1175,17 @@ async function spawnVelaLoginAttempt(
     );
     throw new Error('vela binary not found; install vela or configure VELA_BIN');
   }
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...spawnEnvForAgent('amr', baseEnv, configuredEnv),
     ...velaLoginAttributionEnv(deps.attribution),
     // The UUID is daemon-owned and written after configured/base env so a
     // child cannot replace the correlation key selected for this attempt.
     OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID: deps.attempt.authAttemptId,
-    OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT: 'jsonl-v1',
   };
+  // The currently bundled Vela CLI does not implement the structured-stage
+  // protocol. Do not let configured/base env opt an unsupported child into
+  // it; add the format back only with the compatible CLI pin.
+  delete env.OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT;
   // Route through createCommandInvocation so an npm/Node-style `vela.cmd` or
   // `vela.bat` shim on Windows gets wrapped under `cmd.exe /d /s /c …` with
   // verbatim args, matching what `execAgentFile` / chat-run spawning do. A
@@ -1248,7 +1251,7 @@ async function spawnVelaLoginAttempt(
           && stage.result === 'failed',
       )
     ) {
-      // Legacy Vela (including packaged 0.0.26) has no structured stage
+      // The currently packaged Vela has no structured stage
       // output. A real child exit after spawn but before activation is the
       // strongest safe boundary we can infer without classifying raw stderr.
       recordVelaAuthStage(

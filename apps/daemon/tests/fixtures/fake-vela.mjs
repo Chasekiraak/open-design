@@ -360,7 +360,6 @@ function loginAndExit() {
     const authAttemptId = env.OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID || '';
     if (
       env.FAKE_VELA_EMIT_AUTH_STAGES !== '1' ||
-      env.OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT !== 'jsonl-v1' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authAttemptId)
     ) return;
     stdout.write(`OPEN_DESIGN_AMR_AUTH_STAGE\t${JSON.stringify({

@@ -1389,7 +1389,7 @@ describe('POST /api/integrations/vela/login', () => {
     }
   });
 
-  it('keeps the browser auth attempt id in daemon status and the Vela env', async () => {
+  it('keeps the browser auth attempt id while deferring structured Vela stages', async () => {
     const authAttemptId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
     const dumpPath = path.join(tmpHome, 'vela-env-auth-attempt.json');
     process.env.FAKE_VELA_ENV_DUMP_PATH = dumpPath;
@@ -1403,10 +1403,8 @@ describe('POST /api/integrations/vela/login', () => {
     await waitForFile(dumpPath);
 
     const env = JSON.parse(readFileSync(dumpPath, 'utf8'));
-    expect(env).toMatchObject({
-      OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID: authAttemptId,
-      OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT: 'jsonl-v1',
-    });
+    expect(env.OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID).toBe(authAttemptId);
+    expect(env.OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT).toBeUndefined();
     const status = await getJson<{
       authAttemptId?: string;
       authRoute?: string;
