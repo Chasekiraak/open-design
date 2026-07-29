@@ -811,7 +811,13 @@ function changedPullRequestFiles(): string[] {
     throw new Error("pull_request event payload did not include pull_request.number");
   }
 
-  const stdout = runGh(["api", "--paginate", `repos/${repository}/pulls/${prNumber}/files`, "--jq", ".[].filename"]);
+  const stdout = runGh([
+    "api",
+    "--paginate",
+    `repos/${repository}/pulls/${prNumber}/files`,
+    "--jq",
+    ".[] | .filename, (.previous_filename // empty)",
+  ]);
   return stdout.split(/\r?\n/).filter(Boolean);
 }
 
@@ -825,7 +831,7 @@ function changedManualFiles(): string[] {
     "--paginate",
     `repos/${repository}/compare/main...${sha}`,
     "--jq",
-    "(.files // [])[] | .filename",
+    "(.files // [])[] | .filename, (.previous_filename // empty)",
   ]);
   return stdout.split(/\r?\n/).filter(Boolean);
 }
@@ -844,7 +850,7 @@ function changedMergeGroupFiles(): string[] {
     "--paginate",
     `repos/${repository}/compare/${baseSha}...${headSha}`,
     "--jq",
-    "(.files // [])[] | .filename",
+    "(.files // [])[] | .filename, (.previous_filename // empty)",
   ]);
   const files = stdout.split(/\r?\n/).filter(Boolean);
   // The compare API caps the complete comparison at 300 files, and only the

@@ -35,6 +35,12 @@ const files = process.env.OD_SCOPES_STUB_FILES ?? "";
 for (const line of files.split("\\n")) {
   if (line.length > 0) console.log(line);
 }
+const previousFilename = process.env.OD_SCOPES_STUB_RENAMED_FROM ?? "";
+const jqIndex = process.argv.indexOf("--jq");
+const jq = jqIndex >= 0 ? process.argv[jqIndex + 1] ?? "" : "";
+if (previousFilename.length > 0 && jq.includes("previous_filename")) {
+  console.log(previousFilename);
+}
 `;
 
 const UI_P0_MATRIX_JSON = JSON.stringify(uiP0CiMatrix);
@@ -530,6 +536,45 @@ test("pull_request changed-file resolution failure still fails the run", () => {
     run.cleanup();
   });
 });
+
+for (const renameCase of [
+  { name: "pull_request", context: PR, filename: "e2e/tests/server-identifier-scope.test.ts", ciMode: "hot" },
+  {
+    name: "workflow_dispatch hot",
+    context: { eventName: "workflow_dispatch", ciMode: "hot" } as const,
+    filename: "e2e/tests/server-identifier-scope.test.ts",
+    ciMode: "hot",
+  },
+  {
+    name: "merge_group",
+    context: { eventName: "merge_group" } as const,
+    filename: "docs/server-identifier-scope.md",
+    ciMode: "full",
+  },
+] as const) {
+  test(`${renameCase.name} rename keeps validation scopes from the previous filename`, () => {
+    const run = runScopes("print", renameCase.context, [renameCase.filename], {
+      OD_SCOPES_STUB_RENAMED_FROM: "apps/daemon/tests/server-identifier-scope.test.ts",
+    });
+    try {
+      assertPlan(
+        JSON.parse(run.stdout) as Record<string, unknown>,
+        expectedPlan({
+          ciMode: renameCase.ciMode,
+          scopes: [
+            "daemon_tests_required",
+            "ui_critical_validation_required",
+            "ui_p0_validation_required",
+            "workspace_validation_required",
+          ],
+          runs: ["run_e2e_vitest", "run_ui_p0"],
+        }),
+      );
+    } finally {
+      run.cleanup();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Unit layer: rule-table invariants and evaluator semantics, imported directly.
