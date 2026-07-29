@@ -373,8 +373,8 @@
   padding: 0 16px;
   border: 0;
   border-radius: 999px;
-  background: var(--coral);
-  color: var(--ink);
+  background: var(--ink);
+  color: #fff;
   font-family: var(--sans);
   font-size: 12px;
   font-weight: 720;
@@ -383,7 +383,7 @@
 }
 
 .odp-step-command-footer button:hover {
-  background: var(--coral-soft);
+  background: #434343;
 }
 
 .odp-step-command-footer button:active {
