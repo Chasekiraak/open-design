@@ -206,8 +206,13 @@ async function runScopesPrint(eventName: string, eventPayload: unknown, changedF
   const ghCmdPath = join(tempDir, "gh.cmd");
   await writeFile(eventPath, JSON.stringify(eventPayload));
   const script = `#!/usr/bin/env node
-process.stdout.write(${JSON.stringify(changedFiles.join("\n"))});
-if (${JSON.stringify(changedFiles.length > 0)}) process.stdout.write("\\n");
+const changedFiles = ${JSON.stringify(changedFiles)};
+if (process.argv.includes("--jq")) {
+  process.stdout.write(changedFiles.join("\\n"));
+  if (changedFiles.length > 0) process.stdout.write("\\n");
+} else {
+  process.stdout.write(JSON.stringify({ files: changedFiles.map((filename) => ({ filename })) }));
+}
 `;
   await writeFile(ghPath, script);
   await chmod(ghPath, 0o755);
