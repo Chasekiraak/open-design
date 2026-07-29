@@ -7068,6 +7068,11 @@ export async function startServer({
       typeof projectId === 'string' && projectId
         ? getProject(db, projectId)
         : null;
+    const effectiveRunSkillId = resolveSkillId(
+      typeof skillId === 'string' && skillId
+        ? skillId
+        : projectRecord?.skillId,
+    );
     const runContextPrompt = renderRunContextPrompt(context, projectRecord?.metadata);
     const linkedDirs = (() => {
       if (!Array.isArray(projectRecord?.metadata?.linkedDirs)) return [];
@@ -9654,17 +9659,10 @@ export async function startServer({
             artifactId: critiqueRunId,
             artifactDir: critiqueArtifactDir,
             adapter: typeof agentId === 'string' ? agentId : 'unknown',
-            // Codex P2 on PR #1485: thread the resolved skill id into the
-            // orchestrator so the Phase 12 metrics carry the real label
-            // instead of falling through to 'unknown' for every live run.
-            // This read `effectiveSkillId`, which is a local of
-            // `composeDaemonSystemPrompt` and has never been in scope here — a
-            // `typeof` guard on an undeclared name does not throw, so the label
-            // silently stayed `undefined` for every run instead. `run.skillId`
-            // is the same request skill id recorded onto the run above, and is
-            // the binding this scope actually has.
-            skill: typeof run.skillId === 'string' && run.skillId
-              ? run.skillId
+            // startChatRun resolves this once after loading the project:
+            // request-level skill first, persisted project skill second.
+            skill: typeof effectiveRunSkillId === 'string' && effectiveRunSkillId
+              ? effectiveRunSkillId
               : undefined,
             cfg: critiqueCfg,
             db,
