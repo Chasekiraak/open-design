@@ -364,6 +364,33 @@ export type TrackingRunCloseReason =
   | 'fatal_rpc_error'
   | 'empty_output'
   | 'unknown';
+export type TrackingAmrOpenCodeErrorPhase =
+  | 'timeout'
+  | 'event_stream_start'
+  | 'event_stream'
+  | 'prompt_async'
+  | 'other';
+export type TrackingAmrOpenCodeLastEventType =
+  | 'tool_call'
+  | 'tool_call_update'
+  | 'agent_message_chunk'
+  | 'agent_thought_chunk'
+  | 'done'
+  | 'other';
+export type TrackingAmrOpenCodeLastToolStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'other';
+export type TrackingAmrOpenCodeLastToolKind =
+  | 'read'
+  | 'write'
+  | 'edit'
+  | 'search'
+  | 'execute'
+  | 'fetch'
+  | 'other';
 export type TrackingLangfuseDeliveryStatus =
   | 'not_expected'
   | 'queued'
