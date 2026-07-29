@@ -324,7 +324,18 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     if (!workspaceId) return res.status(400).json({ error: 'missing_workspace_id' });
 
     const directory = await listWorkspaceDirectory().catch(() => []);
-    const selected = directory.find((item) => item.workspaceId === workspaceId);
+    // A directory row only authorizes a switch while it is a LIVE membership.
+    // Matching on the id alone would let a listed-but-removed membership (or a
+    // deleted workspace) through, and this entry is also what gets synthesized
+    // into the response below — so an unfiltered match could describe a
+    // workspace the caller no longer holds. Same predicate the provider's own
+    // `resolvePinnedWorkspace` uses.
+    const selected = directory.find(
+      (item) =>
+        item.workspaceId === workspaceId &&
+        item.memberStatus === 'active' &&
+        item.lifecycleState !== 'deleted',
+    );
     if (!selected) {
       return res.status(404).json({ error: 'workspace_not_visible' });
     }
@@ -347,12 +358,35 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
     const authorization = req.header('authorization') ?? undefined;
     await deps.activeWorkspace.set(workspaceId);
     const context = await workspaceContext.current({ authorization }).catch(() => null);
-    // A context read that fails, or that still describes the old workspace, is
-    // an unconfirmed READ — never evidence that the switch was wrong. Answer
-    // from the directory entry already validated above rather than reverting a
-    // choice the user made and the directory allowed. The billing plane is
-    // thinner on that synthesis (no plan id, no seat counts), which the web
-    // closes out on its next context poll.
+
+    // `current()` is NOT a passive read. The vela provider's
+    // `resolvePinnedWorkspace` does its own FRESH directory lookup, and when
+    // that confirms the pinned workspace is gone (membership removed, workspace
+    // deleted) it clears the pin and re-pins a recovery workspace so a removed
+    // member is not left signed out of everything. The directory read above can
+    // meanwhile have been served from its 5s cache and still list the workspace.
+    //
+    // So the pin — re-read here, after `current()` has had its chance to move
+    // it — is the only thing that can say which workspace this daemon actually
+    // ended up on. Trusting the pre-call snapshot instead would let this route
+    // answer 200 naming a workspace the pin no longer holds: the UI would show
+    // the switch succeeding and then snap back on the next context poll.
+    const pinnedAfterRead = deps.activeWorkspace.get();
+    if (pinnedAfterRead !== workspaceId) {
+      // The provider confirmed the requested workspace is not available to this
+      // member and recovered elsewhere. Report that the requested switch did not
+      // happen, and leave its recovery pin alone — undoing it would restore the
+      // very "signed out of every workspace" state it exists to prevent. The web
+      // picks the recovery workspace up from its next context read.
+      return res.status(404).json({ error: 'workspace_no_longer_available' });
+    }
+
+    // The pin held. A context read that failed, or that still describes the old
+    // workspace, is an unconfirmed READ — never evidence that the switch was
+    // wrong. Answer from the directory entry already validated above rather than
+    // reverting a choice the user made and the directory allowed. The billing
+    // plane is thinner on that synthesis (no plan id, no seat counts), which the
+    // web closes out on its next context poll.
     const resolved =
       context && context.workspaceId === workspaceId
         ? context
