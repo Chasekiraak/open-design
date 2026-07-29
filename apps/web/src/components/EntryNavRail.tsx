@@ -50,7 +50,7 @@ import { SignOutConfirmDialog } from './SignOutConfirmDialog';
 import { notifyAmrLoginStatusChanged } from './amrLoginPolling';
 import { Icon } from './Icon';
 import { GITHUB_STARS_FALLBACK_LABEL, formatStars, useGithubStars } from './useGithubStars';
-import { PlanWordmark, planBadgeTierForLabel } from './PlanWordmark';
+import { PlanWordmark, planBadgeTierForWorkspace } from './PlanWordmark';
 import { RemixIcon } from './RemixIcon';
 import { InviteDialog } from './InviteDialog';
 import { MessageCenter } from './MessageCenter';
@@ -523,13 +523,23 @@ export function EntryNavRail({
       : t('entry.billingTierFree');
   const balanceLabel = formatVelaBalanceUsd(balanceUsd);
   // #5517: wordmark badge on the account row (replaces the chevron) and a
-  // small twin inside the menu's billing card. Derive from the raw tier id
-  // first so "team_plus" maps to the plus badge regardless of display label.
-  // Feed the RAW id first: the display label is now a plan-family name
-  // (团队版), which carries no tier word, so deriving the badge from it would
-  // drop the PLUS/PRO/MAX distinction. `rawTier` already prefers billing over
-  // the context hint and is empty only when neither reported one.
-  const planTier = planBadgeTierForLabel(rawTier || tierLabel);
+  // small twin inside the menu's billing card.
+  //
+  // The badge names the plan FAMILY, so a TEAM workspace draws the one `team`
+  // wordmark at every tier — free through max — while the personal ladder keeps
+  // its per-tier glyph (product ruling, see `planBadgeTierForWorkspace`). The
+  // workspace kind is passed because it is the only thing that can name the FREE
+  // team tier: B reports it with a null `planId` and an empty `membershipTier`,
+  // an id no different from a personal free account.
+  //
+  // The tier still leads with the RAW id: `rawTier` prefers billing over the
+  // context hint and is empty only when neither reported one, and the display
+  // label is a plan-family name (团队版) that carries no tier word — so the label
+  // is the last resort, never the first read.
+  const planTier = planBadgeTierForWorkspace({
+    tier: rawTier || tierLabel,
+    workspaceType: context?.workspaceType,
+  });
 
   const [accountOpen, setAccountOpen] = useState(false);
   // Message-center panel (opened from the account menu's 消息中心 row) and its

@@ -160,7 +160,7 @@ import {
   workspaceBillingSummaryForContext,
 } from '../collab/useWorkspaceContext';
 import { canUpgradeFromPlanTier, resolvePlanTier } from '../collab/team-plan';
-import { planBadgeTierForLabel } from './PlanWordmark';
+import { planBadgeTierForWorkspace } from './PlanWordmark';
 import { workspaceUpgradeUrl } from './EntryNavRail';
 import { canShowWorkspaceSettings } from '../collab/settings-access';
 import { ConnectorsBrowser } from './ConnectorsBrowser';
@@ -4629,11 +4629,15 @@ export function SettingsDialog({
                               : null;
                           // vela's `account.plan` is ACCOUNT-scoped, so a member
                           // whose plan is held by the team workspace reads
-                          // `free` there — the workspace context wins. The badge
-                          // is a tier nameplate (free/plus/pro/max), so the
-                          // resolved id maps onto its tier word (`team_plus` →
-                          // Plus) through the same helper the nav-rail account
-                          // row uses; an id outside that set renders verbatim.
+                          // `free` there — the workspace context wins.
+                          //
+                          // The badge names the plan FAMILY, so a TEAM workspace
+                          // reads `team` at every tier — free through max —
+                          // while the personal ladder keeps its tier word
+                          // (product ruling; 「设置中的这里应该一样的逻辑」, so
+                          // this goes through the SAME helper as the nav-rail
+                          // account row and cannot drift from it). An id outside
+                          // the badge set still renders verbatim.
                           const amrCardResolvedPlan =
                             isAmrAgent && active && amrCardStatus?.loggedIn
                               ? resolvePlanTier({
@@ -4643,7 +4647,10 @@ export function SettingsDialog({
                                 })
                               : null;
                           const amrCardPlanLabel = amrCardResolvedPlan
-                            ? planBadgeTierForLabel(amrCardResolvedPlan) ?? amrCardResolvedPlan
+                            ? planBadgeTierForWorkspace({
+                                tier: amrCardResolvedPlan,
+                                workspaceType: workspaceContext?.workspaceType,
+                              }) ?? amrCardResolvedPlan
                             : null;
                           // recvqfYKutwWlQ: a team member without billing
                           // permission (owner-only) can't act on an upgrade
