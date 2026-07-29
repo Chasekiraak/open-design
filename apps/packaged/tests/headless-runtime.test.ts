@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  acquirePackagedHeadlessStartup,
   parsePackagedHeadlessRequest,
   resolvePackagedMcpBootstrapLaunch,
 } from "../src/headless-runtime.js";
@@ -54,5 +55,72 @@ describe("resolvePackagedMcpBootstrapLaunch", () => {
       command: "/opt/open-design/open-design",
       args: ["--headless"],
     });
+  });
+});
+
+describe("acquirePackagedHeadlessStartup", () => {
+  function createDependencies(failAt: "mcp" | "web-identity") {
+    const closed: string[] = [];
+    const exit = vi.fn();
+    return {
+      closed,
+      dependencies: {
+        confirmRuntime: vi.fn(async () => undefined),
+        createIpcServer: vi.fn(async () => ({
+          close: async () => {
+            closed.push("ipc");
+          },
+        })),
+        exit,
+        installMcp: vi.fn(async () => {
+          if (failAt === "mcp") throw new Error("MCP install failed");
+        }),
+        startSidecars: vi.fn(async () => ({
+          close: async () => {
+            closed.push("sidecars");
+          },
+          daemon: {
+            desktopAuthGateActive: false,
+            state: "running" as const,
+            url: "http://127.0.0.1:7457",
+          },
+          web: { state: "running" as const, url: "http://127.0.0.1:7456" },
+        })),
+        writeIdentity: vi.fn(async () => ({
+          close: async () => {
+            closed.push("identity");
+          },
+          identity: {} as never,
+        })),
+        writeWebIdentity: vi.fn(async () => {
+          if (failAt === "web-identity") {
+            throw new Error("web identity write failed");
+          }
+        }),
+      },
+      exit,
+    };
+  }
+
+  it("closes identity and sidecars when MCP installation fails", async () => {
+    const { closed, dependencies, exit } = createDependencies("mcp");
+
+    await expect(acquirePackagedHeadlessStartup(dependencies)).rejects.toThrow(
+      "MCP install failed",
+    );
+
+    expect(closed).toEqual(["sidecars", "identity"]);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("closes IPC, sidecars, and identity when identity publication fails", async () => {
+    const { closed, dependencies, exit } = createDependencies("web-identity");
+
+    await expect(acquirePackagedHeadlessStartup(dependencies)).rejects.toThrow(
+      "web identity write failed",
+    );
+
+    expect(closed).toEqual(["ipc", "sidecars", "identity"]);
+    expect(exit).not.toHaveBeenCalled();
   });
 });
