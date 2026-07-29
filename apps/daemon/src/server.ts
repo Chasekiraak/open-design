@@ -9258,7 +9258,14 @@ export async function startServer({
             design.analytics.capture({
               eventName: 'amr_workspace_scope_resolved',
               context,
-              appVersion: appVersionForCapture(),
+              // `design.getAppVersion` is the only app-version accessor this
+              // scope can see; the identically-named helper inside
+              // `createFinalizedMessageTelemetryReporter` is a different
+              // function's local and resolving it here threw a ReferenceError
+              // out of the spawn path, failing 100% of AMR runs. That helper's
+              // own last resort is this same accessor, so the value is
+              // unchanged.
+              appVersion: design.getAppVersion?.() ?? 'unknown',
               properties: {
                 page_name: 'chat_panel',
                 area: 'chat_panel',
@@ -9650,12 +9657,14 @@ export async function startServer({
             // Codex P2 on PR #1485: thread the resolved skill id into the
             // orchestrator so the Phase 12 metrics carry the real label
             // instead of falling through to 'unknown' for every live run.
-            // `effectiveSkillId` was already computed above (line ~2951) as
-            // the request skillId with a project-row fallback; pass it
-            // through verbatim, and leave the orchestrator's own default
-            // of 'unknown' for runs that genuinely have no skill assigned.
-            skill: typeof effectiveSkillId === 'string' && effectiveSkillId
-              ? effectiveSkillId
+            // This read `effectiveSkillId`, which is a local of
+            // `composeDaemonSystemPrompt` and has never been in scope here — a
+            // `typeof` guard on an undeclared name does not throw, so the label
+            // silently stayed `undefined` for every run instead. `run.skillId`
+            // is the same request skill id recorded onto the run above, and is
+            // the binding this scope actually has.
+            skill: typeof run.skillId === 'string' && run.skillId
+              ? run.skillId
               : undefined,
             cfg: critiqueCfg,
             db,
