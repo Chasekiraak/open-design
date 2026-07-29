@@ -166,6 +166,7 @@ export function createChatRunService({
       retryOriginFailure: null,
       retryOriginErrorCode: null,
       retryStrategy: null,
+      retryMaxAttempts: null,
       nativeSessionContinueAttemptCount: 0,
       nativeSessionContinuePending: null,
       stdinOpen: false,

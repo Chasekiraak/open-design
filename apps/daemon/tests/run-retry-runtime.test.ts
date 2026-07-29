@@ -393,6 +393,13 @@ describe('same-run retry runtime', () => {
         stage: 'post_tool_resume',
       },
     ]);
+    expect(events.find((event) => event.event === 'run_retry_finished')?.data)
+      .toMatchObject({
+        retry_attempt_index: 2,
+        retry_max_attempts: 2,
+        retry_strategy: 'native_session_continue',
+        retry_result: 'success',
+      });
 
     const attemptArgs = (await readClaudeAttemptArgs(argsLogPath)).filter(
       (args) => args.includes('--session-id') || args.includes('--resume'),

@@ -5498,6 +5498,8 @@ export async function startServer({
           ? {
               ...decision,
               retryAttemptIndex: attemptCount,
+              retryMaxAttempts:
+                run.retryMaxAttempts ?? decision.retryMaxAttempts,
               retryStrategy: run.retryStrategy ?? decision.retryStrategy,
             }
           : decision;
@@ -5602,6 +5604,7 @@ export async function startServer({
         run.retryAttemptCount = postToolResumeDecision.retryAttemptIndex;
         run.nativeSessionContinueAttemptCount =
           (run.nativeSessionContinueAttemptCount ?? 0) + 1;
+        run.retryMaxAttempts = postToolResumeDecision.retryMaxAttempts;
         run.retryStrategy = postToolResumeDecision.retryStrategy;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;
@@ -5653,6 +5656,7 @@ export async function startServer({
           run.retryOriginErrorCode = errorCode ?? null;
         }
         run.retryAttemptCount = decision.retryAttemptIndex;
+        run.retryMaxAttempts = decision.retryMaxAttempts;
         run.retryStrategy = decision.retryStrategy;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;
