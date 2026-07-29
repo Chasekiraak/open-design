@@ -3660,6 +3660,13 @@ describe('chat prompt helpers', () => {
     })).toEqual({ id: 'project-ds', source: 'project' });
 
     expect(resolveEffectiveDesignSystemSelection({
+      requestDesignSystemId: null,
+      projectDesignSystemId: 'project-ds',
+      disabledDesignSystemIds: ['project-ds'],
+      allowAppDefault: false,
+    })).toEqual({ id: null, source: 'none' });
+
+    expect(resolveEffectiveDesignSystemSelection({
       appDefaultDesignSystemId: 'default-ds',
     })).toEqual({ id: 'default-ds', source: 'app-default' });
 

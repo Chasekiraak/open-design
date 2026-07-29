@@ -3623,6 +3623,7 @@ export async function startServer({
           pluginDesignSystemId,
           projectDesignSystemId: project?.designSystemId,
           appDefaultDesignSystemId: appConfigForPrompt?.designSystemId,
+          disabledDesignSystemIds: appConfigForPrompt?.disabledDesignSystems,
           // A project row with designSystemId=null can mean the user picked
           // "No design system"; do not reapply the global default behind their back.
           allowAppDefault: project === null,

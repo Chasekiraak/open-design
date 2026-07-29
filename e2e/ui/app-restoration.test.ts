@@ -1003,7 +1003,7 @@ test('[P0] opening an artifact file route keeps the older conversation present i
   await routeMockAgents(page);
 
   await routeSuccessfulRuns(page, {
-    runId: 'conversation-artifact-surface-run',
+    runIdPrefix: 'conversation-artifact-surface-run',
     eventBody: artifactRunEventBody(
       'conversation-surface-artifact',
       'Conversation Surface Artifact',
