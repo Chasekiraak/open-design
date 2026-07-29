@@ -37,7 +37,6 @@ export interface TeamPricingContent {
   perSeatMonth: string;
   monthlyTotal: string;
   yearlyTotal: string;
-  yearlySummary: string;
   checkout: string;
   teamFeatures: string[];
   enterpriseTitle: string;
@@ -66,9 +65,8 @@ const EN: TeamPricingContent = {
   increaseSeats: 'Increase seats',
   minSeatsNote: 'Team plans require at least {count} seats.',
   perSeatMonth: '/ seat / month',
-  monthlyTotal: '{count} seats · {amount}/month',
-  yearlyTotal: '{count} seats · {amount}/year',
-  yearlySummary: 'Billed annually · {amount}/year (save {savings})',
+  monthlyTotal: 'First month only {amount}',
+  yearlyTotal: 'First year only {amount}',
   checkout: 'Upgrade team',
   teamFeatures: [
     'Share and manage projects, design systems, and plugins as a team',
@@ -111,9 +109,8 @@ const ZH: TeamPricingContent = {
   increaseSeats: '增加席位',
   minSeatsNote: '团队版最少需要 {count} 个席位。',
   perSeatMonth: '/ 席 / 月',
-  monthlyTotal: '共 {count} 席 · 每月 {amount}',
-  yearlyTotal: '共 {count} 席 · 每年 {amount}',
-  yearlySummary: '按年计费 · {amount}/年（省 {savings}）',
+  monthlyTotal: '首月仅需 {amount}',
+  yearlyTotal: '首年仅需 {amount}',
   checkout: '升级团队版',
   teamFeatures: [
     '项目、设计系统与插件，团队统一共享与管理',
@@ -156,9 +153,8 @@ const JA: TeamPricingContent = {
   increaseSeats: '席数を増やす',
   minSeatsNote: 'Team プランは最低 {count} 席から利用できます。',
   perSeatMonth: '/ 席 / 月',
-  monthlyTotal: '{count} 席 · 月額 {amount}',
-  yearlyTotal: '{count} 席 · 年額 {amount}',
-  yearlySummary: '年額請求 · {amount}/年（{savings} 節約）',
+  monthlyTotal: '初月は {amount} のみ',
+  yearlyTotal: '初年度は {amount} のみ',
   checkout: 'Team にアップグレード',
   teamFeatures: [
     'プロジェクト、Design Systems、プラグインをチームで共有・管理',
@@ -201,9 +197,8 @@ const KO: TeamPricingContent = {
   increaseSeats: '좌석 늘리기',
   minSeatsNote: 'Team 요금제는 최소 {count}개 좌석이 필요합니다.',
   perSeatMonth: '/ 좌석 / 월',
-  monthlyTotal: '{count}개 좌석 · 월 {amount}',
-  yearlyTotal: '{count}개 좌석 · 연 {amount}',
-  yearlySummary: '연간 결제 · 연 {amount} ({savings} 절약)',
+  monthlyTotal: '첫 달은 {amount}',
+  yearlyTotal: '첫해는 {amount}',
   checkout: 'Team으로 업그레이드',
   teamFeatures: [
     '프로젝트, Design Systems, 플러그인을 팀에서 공유하고 관리',
@@ -246,9 +241,8 @@ const DE: TeamPricingContent = {
   increaseSeats: 'Sitz hinzufügen',
   minSeatsNote: 'Team-Pläne erfordern mindestens {count} Sitze.',
   perSeatMonth: '/ Sitz / Monat',
-  monthlyTotal: '{count} Sitze · {amount}/Monat',
-  yearlyTotal: '{count} Sitze · {amount}/Jahr',
-  yearlySummary: 'Jährliche Abrechnung · {amount}/Jahr ({savings} sparen)',
+  monthlyTotal: 'Im ersten Monat nur {amount}',
+  yearlyTotal: 'Im ersten Jahr nur {amount}',
   checkout: 'Auf Team upgraden',
   teamFeatures: [
     'Projekte, Design Systems und Plugins gemeinsam teilen und verwalten',
@@ -291,9 +285,8 @@ const FR: TeamPricingContent = {
   increaseSeats: 'Ajouter un siège',
   minSeatsNote: 'Les offres Team nécessitent au moins {count} sièges.',
   perSeatMonth: '/ siège / mois',
-  monthlyTotal: '{count} sièges · {amount}/mois',
-  yearlyTotal: '{count} sièges · {amount}/an',
-  yearlySummary: 'Facturé annuellement · {amount}/an (économisez {savings})',
+  monthlyTotal: 'Premier mois à seulement {amount}',
+  yearlyTotal: 'Première année à seulement {amount}',
   checkout: 'Passer à Team',
   teamFeatures: [
     'Partager et gérer en équipe projets, Design Systems et plugins',
@@ -336,9 +329,8 @@ const RU: TeamPricingContent = {
   increaseSeats: 'Увеличить число мест',
   minSeatsNote: 'Для командного тарифа нужно минимум {count} места.',
   perSeatMonth: '/ место / месяц',
-  monthlyTotal: '{count} места · {amount}/месяц',
-  yearlyTotal: '{count} места · {amount}/год',
-  yearlySummary: 'Оплата за год · {amount}/год (экономия {savings})',
+  monthlyTotal: 'Первый месяц — всего {amount}',
+  yearlyTotal: 'Первый год — всего {amount}',
   checkout: 'Перейти на Team',
   teamFeatures: [
     'Общие проекты, Design Systems и плагины с управлением для команды',
@@ -381,9 +373,8 @@ const ES: TeamPricingContent = {
   increaseSeats: 'Añadir un asiento',
   minSeatsNote: 'Los planes Team requieren al menos {count} asientos.',
   perSeatMonth: '/ asiento / mes',
-  monthlyTotal: '{count} asientos · {amount}/mes',
-  yearlyTotal: '{count} asientos · {amount}/año',
-  yearlySummary: 'Facturación anual · {amount}/año (ahorra {savings})',
+  monthlyTotal: 'Primer mes por solo {amount}',
+  yearlyTotal: 'Primer año por solo {amount}',
   checkout: 'Mejorar a Team',
   teamFeatures: [
     'Compartir y gestionar proyectos, Design Systems y plugins en equipo',
@@ -426,9 +417,8 @@ const PT_BR: TeamPricingContent = {
   increaseSeats: 'Aumentar assentos',
   minSeatsNote: 'Os planos Team exigem pelo menos {count} assentos.',
   perSeatMonth: '/ assento / mês',
-  monthlyTotal: '{count} assentos · {amount}/mês',
-  yearlyTotal: '{count} assentos · {amount}/ano',
-  yearlySummary: 'Cobrado anualmente · {amount}/ano (economize {savings})',
+  monthlyTotal: 'Primeiro mês por apenas {amount}',
+  yearlyTotal: 'Primeiro ano por apenas {amount}',
   checkout: 'Fazer upgrade para Team',
   teamFeatures: [
     'Compartilhe e gerencie projetos, Design Systems e plugins em equipe',
@@ -471,9 +461,8 @@ const IT: TeamPricingContent = {
   increaseSeats: 'Aumenta le postazioni',
   minSeatsNote: 'I piani Team richiedono almeno {count} postazioni.',
   perSeatMonth: '/ postazione / mese',
-  monthlyTotal: '{count} postazioni · {amount}/mese',
-  yearlyTotal: '{count} postazioni · {amount}/anno',
-  yearlySummary: 'Fatturazione annuale · {amount}/anno (risparmia {savings})',
+  monthlyTotal: 'Primo mese a soli {amount}',
+  yearlyTotal: 'Primo anno a soli {amount}',
   checkout: 'Passa a Team',
   teamFeatures: [
     'Condividi e gestisci progetti, Design Systems e plugin come team',
@@ -516,9 +505,8 @@ const TR: TeamPricingContent = {
   increaseSeats: 'Koltuk sayısını artır',
   minSeatsNote: 'Team planları en az {count} koltuk gerektirir.',
   perSeatMonth: '/ koltuk / ay',
-  monthlyTotal: '{count} koltuk · aylık {amount}',
-  yearlyTotal: '{count} koltuk · yıllık {amount}',
-  yearlySummary: 'Yıllık faturalandırılır · {amount}/yıl ({savings} tasarruf)',
+  monthlyTotal: 'İlk ay yalnızca {amount}',
+  yearlyTotal: 'İlk yıl yalnızca {amount}',
   checkout: 'Team’e yükselt',
   teamFeatures: [
     'Projeleri, Design Systems öğelerini ve eklentileri ekipçe paylaşın ve yönetin',

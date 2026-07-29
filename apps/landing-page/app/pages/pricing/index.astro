@@ -15,6 +15,7 @@ import {
   PLANS_JSON_URL,
   CLOUD_CONSOLE_URL,
   cloudSubscribeUrl,
+  teamIntroTotalUsd,
   type PlanTierConfig,
   type TeamPlanTierConfig,
 } from '../../_lib/pricing';
@@ -98,17 +99,12 @@ function teamView(tier: TeamPlanTierConfig, interval: 'monthly' | 'yearly') {
   const discountPct = Math.round(
     (1 - introSeatMonth / regularSeatMonth) * 100,
   );
-  const intervalTotal = selected.introPriceUsd * initialTeamSeats;
-  const regularTotal =
-    (interval === 'yearly'
-      ? tier.monthly.priceUsd * 12
-      : tier.monthly.priceUsd) * initialTeamSeats;
+  const intervalTotal = teamIntroTotalUsd(tier, interval, initialTeamSeats);
   return {
     amount: usd(introSeatMonth),
     strike: usd(regularSeatMonth),
     discountPct,
     intervalTotal: usd(intervalTotal),
-    savings: usd(regularTotal - intervalTotal),
   };
 }
 
@@ -450,9 +446,8 @@ const jsonLd = [
             </span>
           </div>
           <p class="pr-team-yearly-summary" data-team-summary>
-            {fillTemplate(teamContent.yearlySummary, {
+            {fillTemplate(teamContent.yearlyTotal, {
               amount: initialTeamView.intervalTotal,
-              savings: initialTeamView.savings,
             })}
           </p>
 
@@ -800,13 +795,11 @@ const jsonLd = [
         const listSeatMonth = tier.monthly.priceUsd;
         const discountPct = Math.round((1 - introSeatMonth / listSeatMonth) * 100);
         const intervalTotal = selected.introPriceUsd * teamSeats;
-        const regularTotal =
-          (interval === 'yearly' ? tier.monthly.priceUsd * 12 : tier.monthly.priceUsd) *
-          teamSeats;
         const amount = '$' + introSeatMonth.toLocaleString('en-US');
         const strike = '$' + listSeatMonth.toLocaleString('en-US');
         const total = '$' + intervalTotal.toLocaleString('en-US');
-        const savings = '$' + (regularTotal - intervalTotal).toLocaleString('en-US');
+        const introTotalTemplate =
+          interval === 'yearly' ? teamCopy.yearlyTotal : teamCopy.monthlyTotal;
 
         set('[data-audience-panel="team"]', '[data-team-amount]', amount);
         set('[data-audience-panel="team"]', '[data-team-strike]', strike);
@@ -821,11 +814,7 @@ const jsonLd = [
         set(
           '[data-audience-panel="team"]',
           '[data-team-summary]',
-          interval === 'yearly'
-            ? fillTeam(teamCopy.yearlySummary, { amount: total, savings })
-            : fill(labels.monthlyRenewal, {
-                amountUsd: '$' + regularTotal.toLocaleString('en-US'),
-              }),
+          fillTeam(introTotalTemplate, { amount: total }),
         );
         set(
           '[data-audience-panel="team"]',

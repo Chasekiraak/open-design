@@ -201,3 +201,12 @@ export function formatUsd(amount: number): string {
 export function yearlyMonthlyEquivalent(yearlyPriceUsd: number): number {
   return Math.round(yearlyPriceUsd / 12);
 }
+
+/** Introductory Team charge for the selected billing period and seat count. */
+export function teamIntroTotalUsd(
+  tier: TeamPlanTierConfig,
+  interval: BillingInterval,
+  seats: number,
+): number {
+  return tier[interval].introPriceUsd * seats;
+}

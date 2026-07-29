@@ -7,7 +7,9 @@ import {
   PLANS_JSON_URL,
   PRICING_SNAPSHOT,
   cloudSubscribeUrl,
+  formatUsd,
   scopedBillingPlanUrl,
+  teamIntroTotalUsd,
   type PricingContract,
 } from "../app/_lib/pricing.ts";
 import {
@@ -22,6 +24,10 @@ const HEADERS_PATH = new URL("../public/_headers", import.meta.url);
 const PRICING_MD_PATH = new URL("../public/pricing.md", import.meta.url);
 const PRICING_PAGE_PATH = new URL(
   "../app/pages/pricing/index.astro",
+  import.meta.url,
+);
+const TEAM_CONTENT_PATH = new URL(
+  "../app/_lib/pricing-team-content.ts",
   import.meta.url,
 );
 
@@ -198,6 +204,57 @@ describe("pricing contract", () => {
     );
   });
 
+  it("renders all 16 introductory Team totals for interval, tier, and seat changes", () => {
+    const expected = {
+      team_basic: {
+        monthly: { 3: "First month only $48", 4: "First month only $64" },
+        yearly: { 3: "First year only $504", 4: "First year only $672" },
+      },
+      team_plus: {
+        monthly: { 3: "First month only $96", 4: "First month only $128" },
+        yearly: {
+          3: "First year only $1,008",
+          4: "First year only $1,344",
+        },
+      },
+      team_pro: {
+        monthly: { 3: "First month only $252", 4: "First month only $336" },
+        yearly: {
+          3: "First year only $2,592",
+          4: "First year only $3,456",
+        },
+      },
+      team_max: {
+        monthly: { 3: "First month only $396", 4: "First month only $528" },
+        yearly: {
+          3: "First year only $3,888",
+          4: "First year only $5,184",
+        },
+      },
+    } as const;
+    const english = TEAM_PRICING_CONTENT_BY_LOCALE.en;
+
+    for (const tier of PRICING_SNAPSHOT.teamTiers) {
+      for (const interval of ["monthly", "yearly"] as const) {
+        for (const seats of [3, 4] as const) {
+          const template =
+            interval === "monthly"
+              ? english.monthlyTotal
+              : english.yearlyTotal;
+          const rendered = template.replace(
+            "{amount}",
+            formatUsd(teamIntroTotalUsd(tier, interval, seats)),
+          );
+          assert.equal(
+            rendered,
+            expected[tier.tier][interval][seats],
+            `${tier.tier} ${interval} ${seats} seats`,
+          );
+        }
+      }
+    }
+  });
+
   it("removes the obsolete Team-coming-soon banner", async () => {
     const page = await readFile(PRICING_PAGE_PATH, "utf8");
 
@@ -249,7 +306,94 @@ describe("pricing contract", () => {
         TEAM_PRICING_CONTENT_BY_LOCALE.en?.metaDescription,
         `${locale} silently reused the English metadata`,
       );
+      assert.match(copy.monthlyTotal, /\{amount\}/);
+      assert.match(copy.yearlyTotal, /\{amount\}/);
+      assert.doesNotMatch(copy.monthlyTotal, /\{count\}|\{savings\}/);
+      assert.doesNotMatch(copy.yearlyTotal, /\{count\}|\{savings\}/);
+      assert.equal("yearlySummary" in copy, false);
     }
+
+    assert.equal(
+      TEAM_PRICING_CONTENT_BY_LOCALE.zh.monthlyTotal,
+      "首月仅需 {amount}",
+    );
+    assert.equal(
+      TEAM_PRICING_CONTENT_BY_LOCALE.zh.yearlyTotal,
+      "首年仅需 {amount}",
+    );
+    assert.equal(
+      TEAM_PRICING_CONTENT_BY_LOCALE.en.monthlyTotal,
+      "First month only {amount}",
+    );
+    assert.equal(
+      TEAM_PRICING_CONTENT_BY_LOCALE.en.yearlyTotal,
+      "First year only {amount}",
+    );
+  });
+
+  it("updates the Team intro-period total for period, tier, and seat controls", async () => {
+    const page = await readFile(PRICING_PAGE_PATH, "utf8");
+    const updateStart = page.indexOf("const updateTeamPlan = () =>");
+    const updateEnd = page.indexOf(
+      "teamTierTrigger?.addEventListener",
+      updateStart,
+    );
+    assert.notEqual(updateStart, -1);
+    assert.notEqual(updateEnd, -1);
+    const updateTeamPlan = page.slice(updateStart, updateEnd);
+
+    assert.match(
+      page,
+      /fillTemplate\(teamContent\.yearlyTotal,\s*\{\s*amount:\s*initialTeamView\.intervalTotal,\s*\}\)/s,
+    );
+    assert.match(
+      updateTeamPlan,
+      /interval === 'yearly'\s*\?\s*teamCopy\.yearlyTotal\s*:\s*teamCopy\.monthlyTotal/,
+    );
+    assert.match(
+      updateTeamPlan,
+      /const intervalTotal = selected\.introPriceUsd \* teamSeats/,
+    );
+    assert.match(page, /const activateInterval = \(interval, via\) => \{[\s\S]*?updateTeamPlan\(\)/);
+    assert.match(page, /const selectTeamTier = \(option\) => \{[\s\S]*?updateTeamPlan\(\)/);
+    assert.match(
+      page,
+      /teamSeatsDec\?\.addEventListener\('click',[\s\S]*?updateTeamPlan\(\)/,
+    );
+    assert.match(
+      page,
+      /teamSeatsInc\?\.addEventListener\('click',[\s\S]*?updateTeamPlan\(\)/,
+    );
+    assert.doesNotMatch(updateTeamPlan, /teamCopy\.yearlySummary/);
+    assert.doesNotMatch(updateTeamPlan, /labels\.monthlyRenewal/);
+    assert.doesNotMatch(updateTeamPlan, /savings|regularTotal/);
+  });
+
+  it("removes the superseded Team total and annual-savings copy", async () => {
+    const content = await readFile(TEAM_CONTENT_PATH, "utf8");
+
+    assert.doesNotMatch(content, /yearlySummary/);
+    assert.doesNotMatch(content, /\{count\} seats · \{amount\}\/month/);
+    assert.doesNotMatch(content, /\{count\} seats · \{amount\}\/year/);
+    assert.doesNotMatch(content, /Billed annually · \{amount\}\/year \(save \{savings\}\)/);
+  });
+
+  it("keeps the Enterprise CTA on the shared production contact-sales form", async () => {
+    const page = await readFile(PRICING_PAGE_PATH, "utf8");
+    const form = await readFile(
+      new URL(
+        "../app/_components/enterprise-lead-form.astro",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    assert.match(page, /data-open-lead-modal/);
+    assert.match(
+      page,
+      /<EnterpriseLeadForm locale=\{locale\} source="pricing_team" pageName="pricing" \/>/,
+    );
+    assert.match(form, /fetch\('\/contact-sales'/);
   });
 
   // The machine-readable /pricing.md is quoted verbatim by AI agents, so its
