@@ -72,13 +72,19 @@ body::before {
   background: var(--app-wash);
 }
 
+/* Windows desktop windows are opaque, so blend the existing neutral surfaces
+   instead of painting the web-only pastel wash. Keep this scoped to the
+   native win32 host: browser and macOS surfaces retain their materials. */
+html:has(.workspace-shell--desktop[data-host-platform='win32']) {
+  --app-wash: color-mix(in srgb, var(--bg-panel) 50%, var(--bg-subtle));
+}
+
 /* Desktop shell (Electron on macOS with window vibrancy): the REAL desktop
    wallpaper blurs through the window, so the painted pastel blobs step aside.
    html/body go fully transparent and the wash collapses to a translucent
    cream scrim that keeps content readable over arbitrary wallpapers — the
    Craft look. The desktop and darwin markers come from the host bridge
-   (App.tsx data-client-type/data-host-platform). Windows desktop windows are
-   opaque, so they intentionally keep the normal pastel wash. */
+   (App.tsx data-client-type/data-host-platform). */
 html:has(.workspace-shell--desktop[data-host-platform='darwin']) {
   /* Focused window: a firm scrim so content sits on a mostly solid ground.
      The unfocused state below thins this back to ~21% (0.34 × 62%), which
