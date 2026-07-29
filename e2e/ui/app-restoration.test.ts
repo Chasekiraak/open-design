@@ -1371,12 +1371,13 @@ test('[P1] stopping an active run sends cancel, persists canceled state, and lea
   const stopButton = page.getByTestId('chat-composer').getByRole('button', { name: 'Stop' });
   await expect(stopButton).toBeVisible();
 
-  await stopButton.click();
-  await expect(stopButton).toHaveCount(0);
-  await expectStableCount(() => cancelRequests, 1, {
-    timeout: T.medium,
-    message: 'stopping a run should send exactly one cancel request during the settled window',
+  const cancelResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === 'POST' && url.pathname.endsWith('/cancel');
   });
+  await stopButton.click();
+  expect((await cancelResponse).ok()).toBe(true);
+  await expect(stopButton).toHaveCount(0);
 
   await expect
     .poll(async () => {
@@ -1397,6 +1398,9 @@ test('[P1] stopping an active run sends cancel, persists canceled state, and lea
     .toBe('canceled');
 
   expect(await listProjectFilesFromApi(page, projectId)).toEqual([]);
+  await expectStableCount(() => cancelRequests, 1, {
+    message: 'stopping a run should send exactly one cancel request during the settled window',
+  });
 });
 
 test('[P1] chat file links open project files in workspace tabs and keep trailing punctuation out of hrefs', async ({ page }) => {
