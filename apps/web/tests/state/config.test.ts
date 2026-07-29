@@ -10,6 +10,7 @@ import {
   isStoredMediaProviderEntryPresent,
   KNOWN_PROVIDERS,
   loadConfig,
+  migrateLegacyByokCredentialsToDaemon,
   mergeDaemonConfig,
   mergeByokCredentialProfiles,
   mergeDaemonMediaProviders,
@@ -1109,8 +1110,8 @@ describe('loadConfig', () => {
     expect(config.baseUrl).toBe('https://proxy.example.com/bedrock-runtime/v1');
     expect(config.model).toBe('gpt-4o');
     const migrated = JSON.parse(store.get('open-design:config') ?? '{}');
-    expect(migrated.apiKey).toBe('');
-    expect(store.get('open-design:config')).not.toContain('sk-proxy');
+    expect(migrated.apiKey).toBe('sk-proxy');
+    expect(store.get('open-design:config')).toContain('sk-proxy');
   });
 
   it('migrates legacy Anthropic API configs to an explicit apiProtocol', () => {
@@ -1199,13 +1200,17 @@ describe('loadConfig', () => {
     const persisted = JSON.parse(
       store.get('open-design:config') ?? '{}',
     ) as Partial<AppConfig>;
-    expect(persisted.apiProtocol).toBe('anthropic');
-    expect(persisted.apiKey).toBe('');
-    expect(persisted.apiVersion).toBe('');
-    expect(persisted.baseUrl).toBe(DEFAULT_CONFIG.baseUrl);
-    expect(persisted.apiProtocolConfigs?.bedrock).toBeUndefined();
+    expect(persisted.apiProtocol).toBe('bedrock');
+    expect(persisted.apiKey).toBe('bedrock-secret');
+    expect(persisted.apiVersion).toBe('bedrock-2023-05-31');
+    expect(persisted.baseUrl).toBe(
+      'https://bedrock-runtime.us-east-1.amazonaws.com',
+    );
+    expect(persisted.apiProtocolConfigs?.bedrock?.apiKey).toBe(
+      'nested-bedrock-secret',
+    );
     expect(persisted.apiProtocolConfigs?.openai).toEqual({
-      apiKey: '',
+      apiKey: 'sk-openai',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o',
     });
@@ -1509,6 +1514,92 @@ describe('secure BYOK profiles', () => {
     );
     expect(profile).not.toHaveProperty('apiKey');
     expect(profile.id).toBe('byok-openrouter-1');
+  });
+
+  it('removes legacy browser credentials only after secure profile migration succeeds', async () => {
+    const persisted: Partial<AppConfig> = {
+      ...DEFAULT_CONFIG,
+      mode: 'api',
+      apiKey: 'legacy-secret',
+      apiProtocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: 'openai/gpt-5.4',
+      apiProtocolConfigs: {
+        openai: {
+          apiKey: 'legacy-secret',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: 'openai/gpt-5.4',
+        },
+      },
+    };
+    store.set('open-design:config', JSON.stringify(persisted));
+    const loaded = loadConfig();
+    const persistProfile = vi.fn(async (input) => ({
+      id: input.id ?? 'missing',
+      label: input.label,
+      protocol: input.protocol,
+      baseUrl: input.baseUrl,
+      model: input.model,
+      apiVersion: input.apiVersion,
+      requiresApiKey: true,
+      configured: true,
+      keyTail: 'cret',
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+
+    expect(loaded.apiKey).toBe('');
+    expect(store.get('open-design:config')).toContain('legacy-secret');
+
+    const result = await migrateLegacyByokCredentialsToDaemon(
+      loaded,
+      persistProfile,
+    );
+
+    expect(result.status).toBe('migrated');
+    expect(persistProfile).toHaveBeenCalledTimes(1);
+    expect(persistProfile).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^byok-legacy-/),
+      apiKey: 'legacy-secret',
+      protocol: 'openai',
+    }));
+    expect(result.config.apiKey).toBe('');
+    expect(result.config.byokProfileId).toMatch(/^byok-legacy-/);
+    expect(store.get('open-design:config')).not.toContain('legacy-secret');
+  });
+
+  it('preserves legacy browser credentials when secure profile migration fails', async () => {
+    const persisted: Partial<AppConfig> = {
+      ...DEFAULT_CONFIG,
+      mode: 'api',
+      apiKey: 'legacy-secret',
+      apiProtocol: 'openai',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: 'openai/gpt-5.4',
+    };
+    store.set('open-design:config', JSON.stringify(persisted));
+    const loaded = loadConfig();
+
+    const result = await migrateLegacyByokCredentialsToDaemon(
+      loaded,
+      async () => {
+        throw new Error('secure backend unavailable');
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { message: 'secure backend unavailable' },
+    });
+    expect(result.config.apiKey).toBe('');
+    expect(result.config.byokProfileId).toBeUndefined();
+    expect(store.get('open-design:config')).toContain('legacy-secret');
+
+    saveConfig({
+      ...result.config,
+      theme: 'dark',
+    });
+    expect(store.get('open-design:config')).toContain('legacy-secret');
   });
 
   it('hydrates only an explicitly selected secure profile reference', async () => {

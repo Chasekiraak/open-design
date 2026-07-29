@@ -83,6 +83,7 @@ import {
   hasAnyConfiguredProvider,
   fetchComposioConfigFromDaemon,
   loadConfig,
+  migrateLegacyByokCredentialsToDaemon,
   mergeDaemonConfig,
   mergeByokCredentialProfiles,
   mergeDaemonMediaProviders,
@@ -452,6 +453,8 @@ function AppInner() {
   // effect while the project actually stayed in the managed root.
   const [workingDirError, setWorkingDirError] = useState<string | null>(null);
   const [projectOpenError, setProjectOpenError] = useState<string | null>(null);
+  const [legacyByokMigrationError, setLegacyByokMigrationError] =
+    useState<string | null>(null);
   const [settingsWelcome, setSettingsWelcome] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>('execution');
   const [settingsHighlight, setSettingsHighlight] = useState<SettingsHighlight>(null);
@@ -1003,6 +1006,18 @@ function AppInner() {
         setAppVersionInfo(info);
       });
 
+      const legacyByokMigration =
+        await migrateLegacyByokCredentialsToDaemon(
+          latestPersistedConfigRef.current,
+        );
+      if (cancelled) return;
+      setLegacyByokMigrationError(
+        legacyByokMigration.status === 'failed'
+          ? legacyByokMigration.error.message
+          : null,
+      );
+      const baseConfig = legacyByokMigration.config;
+
       // Daemon-persisted config + composio config + media provider config land
       // together so the welcome-modal decision and daemon-backed settings
       // apply in one merge, avoiding a flash where local-only state is shown
@@ -1011,7 +1026,7 @@ function AppInner() {
         fetchDaemonConfig(),
         fetchComposioConfigFromDaemon(),
         fetchMediaProvidersFromDaemon(),
-        latestPersistedConfigRef.current.byokProfileId
+        baseConfig.byokProfileId
           ? fetchByokCredentialProfilesFromDaemon()
           : Promise.resolve(null),
       ]).then(([
@@ -1032,14 +1047,6 @@ function AppInner() {
             ? t('settings.mediaProviderLoadError')
             : null,
         );
-        // Compute the next config outside the setConfig updater so we can
-        // both (a) call navigate() after setConfig returns — calling it
-        // inside the updater would trigger a Router setState during React's
-        // render phase — and (b) read next.onboardingCompleted synchronously,
-        // since React batches setConfig and the updater doesn't run until
-        // the next render. latestPersistedConfigRef is kept in sync with
-        // the rendered config and is safe to read here.
-        const baseConfig = latestPersistedConfigRef.current;
         const migratedLocalMediaProviders = shouldSyncLocalMediaProvidersToDaemon(
           baseConfig.mediaProviders,
           daemonMediaProvidersLoaded,
@@ -1058,11 +1065,13 @@ function AppInner() {
         if (!hasLocalComposioKey && daemonComposioConfig) {
           next.composio = daemonComposioConfig;
         }
-        saveConfig(next);
+        if (legacyByokMigration.status !== 'failed') {
+          saveConfig(next);
+        }
         if (
-          daemonMediaProvidersResult.status === 'ok' &&
-          migratedLocalMediaProviders &&
-          hasAnyConfiguredProvider(next.mediaProviders)
+          daemonMediaProvidersResult.status === 'ok'
+          && migratedLocalMediaProviders
+          && hasAnyConfiguredProvider(next.mediaProviders)
         ) {
           void syncMediaProvidersToDaemon(next.mediaProviders, {
             daemonProviders: daemonMediaProvidersLoaded,
@@ -2721,6 +2730,21 @@ function AppInner() {
           role="alert"
           tone="error"
           onDismiss={() => setProjectOpenError(null)}
+        />
+      ) : null}
+      {legacyByokMigrationError ? (
+        <Toast
+          message={t('settings.autosaveError')}
+          details={legacyByokMigrationError}
+          actionLabel={t('settings.title')}
+          onAction={() => {
+            setLegacyByokMigrationError(null);
+            openSettings('execution');
+          }}
+          role="alert"
+          tone="error"
+          ttlMs={0}
+          onDismiss={() => setLegacyByokMigrationError(null)}
         />
       ) : null}
       {/* First-run privacy consent banner. It waits for daemon config
