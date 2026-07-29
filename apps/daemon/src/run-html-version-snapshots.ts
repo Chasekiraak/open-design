@@ -8,6 +8,7 @@ import type {
 } from '@open-design/contracts';
 
 import { ensureCurrentProjectFileVersion } from './project-file-versions.js';
+import { OPEN_DESIGN_PLUGIN_ID } from './mcp-observability.js';
 import type { RunArtifactDiff } from './run-artifact-fs.js';
 
 export interface AiHtmlVersionSnapshotInput {
@@ -42,7 +43,7 @@ export function artifactOriginForRun(input: {
   const analytics = input.externalPluginAnalytics;
   if (
     analytics?.entrySurface !== 'external_mcp'
-    || analytics.externalPluginId !== 'open-design-cloud'
+    || analytics.externalPluginId !== OPEN_DESIGN_PLUGIN_ID
     || typeof analytics.pluginWorkflowId !== 'string'
     || !analytics.pluginWorkflowId
   ) {
@@ -50,7 +51,7 @@ export function artifactOriginForRun(input: {
   }
   return {
     entrySurface: 'external_mcp',
-    externalPluginId: 'open-design-cloud',
+    externalPluginId: OPEN_DESIGN_PLUGIN_ID,
     pluginWorkflowId: analytics.pluginWorkflowId,
     runId: input.runId,
   };

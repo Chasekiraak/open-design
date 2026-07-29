@@ -20,8 +20,8 @@ import {
 describe('local MCP plugin observability contract', () => {
   const originalFetch = globalThis.fetch;
   const pluginContext = {
-    id: 'open-design-cloud',
-    version: '0.4.0',
+    id: 'open-design',
+    version: '0.5.0',
     distributionMechanism: 'git_marketplace',
     publisherClass: 'open_design_first_party',
   } as const;
@@ -31,8 +31,13 @@ describe('local MCP plugin observability contract', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('accepts the bounded Open Design Cloud context and rejects extra or secret fields', () => {
+  it('accepts the bounded Open Design context and rejects extra or secret fields', () => {
     expect(validateExternalPluginContext(pluginContext)).toEqual(pluginContext);
+
+    expect(() => validateExternalPluginContext({
+      ...pluginContext,
+      id: 'open-design-cloud',
+    })).toThrow(/PLUGIN_CONTRACT_REJECTED/u);
 
     expect(() =>
       validateExternalPluginContext({
@@ -103,8 +108,8 @@ describe('local MCP plugin observability contract', () => {
     const input = {
       entrySurface: 'external_mcp',
       hostProduct: 'codex_unknown',
-      externalPluginId: 'open-design-cloud',
-      externalPluginVersion: '0.4.0',
+      externalPluginId: 'open-design',
+      externalPluginVersion: '0.5.0',
       distributionMechanism: 'git_marketplace',
       publisherClass: 'open_design_first_party',
       attributionQuality: 'session_correlated',
@@ -124,8 +129,8 @@ describe('local MCP plugin observability contract', () => {
         requestId,
         entrySurface: 'external_mcp',
         hostProduct: 'codex_unknown',
-        externalPluginId: 'open-design-cloud',
-        externalPluginVersion: '0.4.0',
+        externalPluginId: 'open-design',
+        externalPluginVersion: '0.5.0',
         distributionMechanism: 'git_marketplace',
         publisherClass: 'open_design_first_party',
         attributionQuality: 'self_reported',
@@ -468,8 +473,8 @@ describe('local MCP plugin observability contract', () => {
     expect(body.analyticsHints).toMatchObject({
       entrySurface: 'external_mcp',
       hostProduct: 'codex_cli',
-      externalPluginId: 'open-design-cloud',
-      externalPluginVersion: '0.4.0',
+      externalPluginId: 'open-design',
+      externalPluginVersion: '0.5.0',
       pluginWorkflowId: '018f6f2e-4444-7444-8444-444444444444',
       logicalRequestDigestVersion: 1,
       briefState: 'confirmed',

@@ -32,7 +32,7 @@ describe('artifact export version origin', () => {
       contentDigest,
       origin: {
         entrySurface: 'external_mcp',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId: 'workflow-1',
         runId: 'run-1',
       },
@@ -41,7 +41,7 @@ describe('artifact export version origin', () => {
       artifact_origin_status: 'matched',
       artifact_version_id: 'version-1',
       origin_entry_surface: 'external_mcp',
-      origin_external_plugin_id: 'open-design-cloud',
+      origin_external_plugin_id: 'open-design',
       origin_plugin_workflow_id: 'workflow-1',
       origin_run_id: 'run-1',
     });
@@ -53,7 +53,7 @@ describe('artifact export version origin', () => {
       contentDigest,
       origin: {
         entrySurface: 'external_mcp',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId: 'workflow-1',
         runId: 'run-1',
       },

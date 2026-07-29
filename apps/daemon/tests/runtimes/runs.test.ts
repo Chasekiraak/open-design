@@ -111,7 +111,7 @@ describe('chat run service shutdown', () => {
       analyticsHints: {
         entrySurface: 'external_mcp',
         hostProduct: 'codex_cli',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         externalPluginVersion: '0.4.0',
         distributionMechanism: 'git_marketplace',
         publisherClass: 'open_design_first_party',
@@ -887,7 +887,7 @@ describe('run event log persistence', () => {
       analyticsHints: {
         entrySurface: 'external_mcp',
         hostProduct: 'codex_unknown',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         externalPluginVersion: '0.4.0',
         distributionMechanism: 'git_marketplace',
         publisherClass: 'open_design_first_party',
@@ -905,7 +905,7 @@ describe('run event log persistence', () => {
       id: run.id,
       projectId: 'p1',
       externalPluginAnalytics: {
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId,
         logicalRequestDigest: 'a'.repeat(64),
       },

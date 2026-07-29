@@ -16,6 +16,9 @@ import type { readAppConfig, writeAppConfig } from '../app-config.js';
 import { readCurrentAppVersionInfo } from '../app-version.js';
 import { reportRunFeedbackFromDaemon } from '../langfuse-bridge.js';
 import { observePendingInstallerApplyAttempts } from '../migration/index.js';
+import {
+  OPEN_DESIGN_PLUGIN_ID,
+} from '../mcp-observability.js';
 
 export interface DaemonTelemetry {
   analyticsService: ReturnType<typeof createAnalyticsService>;
@@ -461,7 +464,7 @@ export function validateMcpAnalyticsEventProperties(
     MCP_PUBLISHER_CLASSES,
   );
   if (properties.external_plugin_id !== undefined) {
-    if (properties.external_plugin_id !== 'open-design-cloud') {
+    if (properties.external_plugin_id !== OPEN_DESIGN_PLUGIN_ID) {
       invalidMcpAnalytics('external_plugin_id is invalid');
     }
     if (properties.external_plugin_version !== undefined) {

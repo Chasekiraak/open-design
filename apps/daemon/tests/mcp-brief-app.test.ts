@@ -187,15 +187,15 @@ describe('local Open Design MCP brief app', () => {
       name: 'collect_brief',
       _meta: {
         ui: {
-          resourceUri: 'ui://open-design-cloud/artifact-card-v4.html',
+          resourceUri: 'ui://open-design/artifact-card-v5.html',
         },
-        'ui/resourceUri': 'ui://open-design-cloud/artifact-card-v4.html',
-        'openai/outputTemplate': 'ui://open-design-cloud/artifact-card-v4.html',
+        'ui/resourceUri': 'ui://open-design/artifact-card-v5.html',
+        'openai/outputTemplate': 'ui://open-design/artifact-card-v5.html',
       },
     });
     expect(localMcpResourceDefinitions()).toContainEqual(
       expect.objectContaining({
-        uri: 'ui://open-design-cloud/artifact-card-v4.html',
+        uri: 'ui://open-design/artifact-card-v5.html',
         mimeType: 'text/html;profile=mcp-app',
       }),
     );

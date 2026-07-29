@@ -10,6 +10,7 @@ import {
 } from '../run-tool-bundle.js';
 import { createRunLifecycleTracer } from '../run-lifecycle-tracer.js';
 import { projectWorkspaceProvenance } from '../workspace-contract.js';
+import { OPEN_DESIGN_PLUGIN_ID } from '../mcp-observability.js';
 
 export const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 
@@ -186,7 +187,8 @@ export function createChatRunService({
           runIdsByClientRequestId.set(state.clientRequestId, state.id);
         }
         const pluginWorkflowId =
-          state?.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+          state?.externalPluginAnalytics?.externalPluginId
+            === OPEN_DESIGN_PLUGIN_ID
           && typeof state.externalPluginAnalytics.pluginWorkflowId === 'string'
             ? state.externalPluginAnalytics.pluginWorkflowId
             : null;
@@ -283,11 +285,11 @@ export function createChatRunService({
         meta.analyticsHints
         && typeof meta.analyticsHints === 'object'
         && !Array.isArray(meta.analyticsHints)
-        && meta.analyticsHints.externalPluginId === 'open-design-cloud'
+        && meta.analyticsHints.externalPluginId === OPEN_DESIGN_PLUGIN_ID
           ? {
               entrySurface: meta.analyticsHints.entrySurface,
               hostProduct: meta.analyticsHints.hostProduct,
-              externalPluginId: meta.analyticsHints.externalPluginId,
+              externalPluginId: OPEN_DESIGN_PLUGIN_ID,
               externalPluginVersion: meta.analyticsHints.externalPluginVersion,
               distributionMechanism:
                 meta.analyticsHints.distributionMechanism,
@@ -358,7 +360,7 @@ export function createChatRunService({
     runs.set(run.id, run);
     if (run.clientRequestId) runIdsByClientRequestId.set(run.clientRequestId, run.id);
     if (
-      run.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+      run.externalPluginAnalytics?.externalPluginId === OPEN_DESIGN_PLUGIN_ID
       && typeof run.externalPluginAnalytics.pluginWorkflowId === 'string'
     ) {
       runIdsByPluginWorkflowId.set(
@@ -986,7 +988,7 @@ export function createChatRunService({
       runIdsByClientRequestId.delete(run.clientRequestId);
     }
     const pluginWorkflowId =
-      run.externalPluginAnalytics?.externalPluginId === 'open-design-cloud'
+      run.externalPluginAnalytics?.externalPluginId === OPEN_DESIGN_PLUGIN_ID
       && typeof run.externalPluginAnalytics.pluginWorkflowId === 'string'
         ? run.externalPluginAnalytics.pluginWorkflowId
         : null;

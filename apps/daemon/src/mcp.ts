@@ -53,6 +53,7 @@ import {
   logicalPluginRequestDigest,
   mapMcpHostProduct,
   normalizeExternalPluginRunAnalyticsHints,
+  OPEN_DESIGN_PLUGIN_ID,
   pluginContractError,
   resolvePluginGenerationSloWindowMs,
   validateExternalPluginContext,
@@ -63,7 +64,7 @@ const SERVER_NAME = 'open-design';
 const SERVER_VERSION = '0.2.0';
 const MCP_STDIO_IDLE_EXIT_MS = 30 * 60 * 1000;
 const OPEN_DESIGN_BRIEF_APP_RESOURCE =
-  'ui://open-design-cloud/artifact-card-v4.html';
+  'ui://open-design/artifact-card-v5.html';
 
 export const MCP_SERVER_INSTRUCTIONS = [
   'Use only these product names in user-facing replies: Open Design Cloud, Local Codex, and Secure BYOK.',
@@ -229,7 +230,7 @@ const PLUGIN_WORKFLOW_ID_ARG = {
 const EXTERNAL_PLUGIN_CONTEXT_ARG = {
   type: 'object',
   properties: {
-    id: { type: 'string', const: 'open-design-cloud' },
+    id: { type: 'string', const: OPEN_DESIGN_PLUGIN_ID },
     version: { type: 'string' },
     distributionMechanism: {
       type: 'string',
@@ -1334,14 +1335,14 @@ async function observeMcpToolCall(
       args.externalPluginContext
       && typeof args.externalPluginContext === 'object'
       && !Array.isArray(args.externalPluginContext)
-      && (args.externalPluginContext as JsonObject).id ===
-        'open-design-cloud';
+      && (args.externalPluginContext as JsonObject).id
+        === OPEN_DESIGN_PLUGIN_ID;
     const rejected = errorResult(errorMessage(error));
     const common = {
       ...mcpSourceProperties(session, null),
       ...(rawPlugin
         ? {
-            external_plugin_id: 'open-design-cloud',
+            external_plugin_id: OPEN_DESIGN_PLUGIN_ID,
             attribution_quality: 'self_reported',
           }
         : {}),

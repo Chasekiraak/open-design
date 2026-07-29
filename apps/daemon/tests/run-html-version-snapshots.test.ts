@@ -21,20 +21,28 @@ describe('AI HTML version snapshots', () => {
       runId: 'run-1',
       externalPluginAnalytics: {
         entrySurface: 'external_mcp',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId: 'workflow-1',
       },
     })).toEqual({
       entrySurface: 'external_mcp',
-      externalPluginId: 'open-design-cloud',
+      externalPluginId: 'open-design',
       pluginWorkflowId: 'workflow-1',
       runId: 'run-1',
     });
     expect(artifactOriginForRun({
+      runId: 'run-old-id',
+      externalPluginAnalytics: {
+        entrySurface: 'external_mcp',
+        externalPluginId: 'open-design-cloud',
+        pluginWorkflowId: 'workflow-old-id',
+      },
+    })).toBeUndefined();
+    expect(artifactOriginForRun({
       runId: 'run-2',
       externalPluginAnalytics: {
         entrySurface: 'open_design_ui',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId: 'workflow-2',
       },
     })).toBeUndefined();
@@ -91,7 +99,7 @@ describe('AI HTML version snapshots', () => {
       promptSource: 'message',
       origin: {
         entrySurface: 'external_mcp',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         pluginWorkflowId: 'workflow-1',
         runId: 'run-1',
       },
@@ -114,7 +122,7 @@ describe('AI HTML version snapshots', () => {
         contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
         origin: {
           entrySurface: 'external_mcp',
-          externalPluginId: 'open-design-cloud',
+          externalPluginId: 'open-design',
           pluginWorkflowId: 'workflow-1',
           runId: 'run-1',
         },
@@ -137,7 +145,7 @@ describe('AI HTML version snapshots', () => {
         promptSource: 'message',
         origin: {
           entrySurface: 'external_mcp',
-          externalPluginId: 'open-design-cloud',
+          externalPluginId: 'open-design',
           pluginWorkflowId: `workflow-${run}`,
           runId: run,
         },

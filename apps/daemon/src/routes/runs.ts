@@ -50,6 +50,7 @@ import { parseMediaExecutionPolicyInput } from '../media/policy.js';
 import { isManagedProjectCwd } from '../mcp-config.js';
 import {
   normalizeExternalPluginRunAnalyticsHints,
+  OPEN_DESIGN_PLUGIN_ID,
   resolvePluginGenerationSloWindowMs,
   validatePluginWorkflowId,
 } from '../mcp-observability.js';
@@ -640,8 +641,9 @@ function externalPluginAttributionMismatch(
     incoming && typeof incoming === 'object' && !Array.isArray(incoming)
       ? (incoming as Record<string, unknown>)
       : null;
-  const existingIsPlugin = existing?.externalPluginId === 'open-design-cloud';
-  const nextIsPlugin = next?.externalPluginId === 'open-design-cloud';
+  const existingIsPlugin =
+    existing?.externalPluginId === OPEN_DESIGN_PLUGIN_ID;
+  const nextIsPlugin = next?.externalPluginId === OPEN_DESIGN_PLUGIN_ID;
   if (!existingIsPlugin && !nextIsPlugin) return false;
   if (!existingIsPlugin || !nextIsPlugin) return true;
   return EXTERNAL_PLUGIN_ANALYTICS_KEYS.some(
@@ -1857,7 +1859,8 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
     const run = design.runs.findByPluginWorkflowId(pluginWorkflowId);
     const analytics =
       run?.externalPluginAnalytics
-      && run.externalPluginAnalytics.externalPluginId === 'open-design-cloud'
+      && run.externalPluginAnalytics.externalPluginId
+        === OPEN_DESIGN_PLUGIN_ID
         ? run.externalPluginAnalytics
         : null;
     if (!run || !analytics) {

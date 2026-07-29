@@ -1089,7 +1089,7 @@ describe('POST /api/integrations/vela/login', () => {
           'x-od-analytics-device-id': 'od-install-plugin',
           'x-od-analytics-client-type': 'external_mcp',
           'x-od-analytics-entry-surface': 'external_mcp',
-          'x-od-analytics-external-plugin-id': 'open-design-cloud',
+          'x-od-analytics-external-plugin-id': 'open-design',
           'x-od-analytics-external-plugin-version': '0.4.0',
           'x-od-analytics-distribution-mechanism': 'git_marketplace',
           'x-od-analytics-publisher-class': 'open_design_first_party',
@@ -1103,7 +1103,7 @@ describe('POST /api/integrations/vela/login', () => {
       expect(env.OPEN_DESIGN_PLUGIN_WORKFLOW_ID).toBe(
         '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
       );
-      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID).toBe('open-design-cloud');
+      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID).toBe('open-design');
       expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_VERSION).toBe('0.4.0');
       expect(env.OPEN_DESIGN_DISTRIBUTION_MECHANISM).toBe('git_marketplace');
       expect(env.OPEN_DESIGN_PUBLISHER_CLASS).toBe('open_design_first_party');
@@ -1132,7 +1132,7 @@ describe('POST /api/integrations/vela/login', () => {
           'x-od-analytics-device-id': 'od-install-plugin',
           'x-od-analytics-client-type': 'external_mcp',
           'x-od-analytics-entry-surface': 'external_mcp',
-          'x-od-analytics-external-plugin-id': 'open-design-cloud',
+          'x-od-analytics-external-plugin-id': 'open-design',
           'x-od-analytics-external-plugin-version': '0.4.0',
           'x-od-analytics-distribution-mechanism': 'git_marketplace',
           'x-od-analytics-publisher-class': 'open_design_first_party',

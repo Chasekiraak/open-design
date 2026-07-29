@@ -17,7 +17,7 @@ const VERSION_MANIFEST = 'manifest.json';
 const VERSION_ID_RE = /^[A-Za-z0-9_-]+$/u;
 const CONTENT_DIGEST_RE = /^[a-f0-9]{64}$/u;
 const ORIGIN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-const EXTERNAL_PLUGIN_IDS = new Set(['open-design-cloud']);
+const EXTERNAL_PLUGIN_IDS = new Set(['open-design']);
 const versionFileLocks = new Map<string, Promise<void>>();
 
 type VersionPromptSource = ProjectFileVersionPromptSource;

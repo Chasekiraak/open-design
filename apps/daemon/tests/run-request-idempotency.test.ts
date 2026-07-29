@@ -167,7 +167,7 @@ describe('run request idempotency', () => {
       analyticsHints: {
         entrySurface: 'external_mcp',
         hostProduct: 'codex_unknown',
-        externalPluginId: 'open-design-cloud',
+        externalPluginId: 'open-design',
         externalPluginVersion: '0.4.0',
         distributionMechanism: 'git_marketplace',
         publisherClass: 'open_design_first_party',
@@ -208,7 +208,7 @@ describe('run request idempotency', () => {
       pluginWorkflowId,
       logicalRequestDigest: logical.digest,
       externalPluginContext: {
-        id: 'open-design-cloud',
+        id: 'open-design',
         version: '0.4.0',
         distributionMechanism: 'git_marketplace',
         publisherClass: 'open_design_first_party',
@@ -269,7 +269,7 @@ describe('run request idempotency', () => {
         analyticsHints: {
           entrySurface: 'external_mcp',
           hostProduct: 'codex_unknown',
-          externalPluginId: 'open-design-cloud',
+          externalPluginId: 'open-design',
           externalPluginVersion: '0.4.0',
           distributionMechanism: 'git_marketplace',
           publisherClass: 'open_design_first_party',

@@ -75,7 +75,7 @@ test('openDesignAmrTraceEnv forwards only bounded plugin correlation to Vela', (
       pluginWorkflowId: '018f6f2e-4444-7444-8444-444444444444',
       logicalRequestDigest: 'a'.repeat(64),
       logicalRequestDigestVersion: 1,
-      externalPluginId: 'open-design-cloud',
+      externalPluginId: 'open-design',
       externalPluginVersion: '0.4.0',
       distributionMechanism: 'git_marketplace',
       publisherClass: 'open_design_first_party',
@@ -90,7 +90,7 @@ test('openDesignAmrTraceEnv forwards only bounded plugin correlation to Vela', (
   );
   assert.equal(env.OPEN_DESIGN_LOGICAL_REQUEST_DIGEST, 'a'.repeat(64));
   assert.equal(env.OPEN_DESIGN_LOGICAL_REQUEST_DIGEST_VERSION, '1');
-  assert.equal(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID, 'open-design-cloud');
+  assert.equal(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID, 'open-design');
   assert.equal(env.OPEN_DESIGN_EXTERNAL_PLUGIN_VERSION, '0.4.0');
   assert.equal(env.OPEN_DESIGN_DISTRIBUTION_MECHANISM, 'git_marketplace');
   assert.equal(
