@@ -2281,9 +2281,14 @@ function OnboardingView({
     const authAttemptId = amrAuthAttemptIdRef.current;
     setAmrLoginError(null);
     setAmrLoginCancelPending(true);
-    const result = authAttemptId
-      ? await cancelVelaLogin(authAttemptId)
-      : { ok: false, canceled: false };
+    if (!authAttemptId) {
+      amrLoginPollCancelledRef.current = true;
+      amrLoginCancelRequestedRef.current = false;
+      setAmrLoginCancelPending(false);
+      setAmrLoginPending(false);
+      return;
+    }
+    const result = await cancelVelaLogin(authAttemptId);
     if (!result.ok) {
       setAmrLoginCancelPending(false);
       setAmrLoginPending(false);
