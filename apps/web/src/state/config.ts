@@ -876,10 +876,34 @@ export function mergeByokCredentialProfiles(
       byokCredentialTail: undefined,
     };
   }
+  const protocol = profile.protocol as ApiProtocol;
+  const knownProvider = KNOWN_PROVIDERS.find(
+    (candidate) =>
+      candidate.protocol === protocol
+      && candidate.baseUrl === profile.baseUrl,
+  );
+  const previousProtocolConfig = config.apiProtocolConfigs?.[protocol];
   return {
     ...config,
+    apiKey: '',
+    apiProtocol: protocol,
+    apiProviderBaseUrl: knownProvider?.baseUrl ?? null,
+    apiProtocolConfigs: {
+      ...(config.apiProtocolConfigs ?? {}),
+      [protocol]: {
+        ...(previousProtocolConfig ?? {}),
+        apiKey: '',
+        apiProviderBaseUrl: knownProvider?.baseUrl ?? null,
+        apiVersion: profile.apiVersion ?? '',
+        baseUrl: profile.baseUrl,
+        model: profile.model,
+      },
+    },
+    apiVersion: profile.apiVersion ?? '',
+    baseUrl: profile.baseUrl,
     byokCredentialConfigured: true,
     byokCredentialTail: profile.keyTail,
+    model: profile.model,
   };
 }
 

@@ -1542,4 +1542,59 @@ describe('secure BYOK profiles', () => {
     });
     expect(merged.apiKey).toBe('');
   });
+
+  it('uses daemon profile metadata as authoritative after a CLI update', () => {
+    const merged = mergeByokCredentialProfiles({
+      ...DEFAULT_CONFIG,
+      apiKey: '',
+      apiProtocol: 'anthropic',
+      apiVersion: 'stale-version',
+      baseUrl: 'https://stale.example/v1',
+      model: 'stale-model',
+      byokProfileId: 'byok-openrouter-1',
+      apiProtocolConfigs: {
+        openai: {
+          apiKey: '',
+          apiVersion: 'stale-version',
+          baseUrl: 'https://stale.example/v1',
+          model: 'stale-model',
+        },
+      },
+    }, {
+      available: true,
+      backend: 'macos-keychain',
+      profiles: [{
+        id: 'byok-openrouter-1',
+        label: 'OpenRouter',
+        protocol: 'openai',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model: 'openai/gpt-5.4',
+        apiVersion: '2026-07-01',
+        requiresApiKey: true,
+        configured: true,
+        keyTail: '1234',
+        createdAt: 1,
+        updatedAt: 2,
+      }],
+    });
+
+    expect(merged).toMatchObject({
+      apiProtocol: 'openai',
+      apiProviderBaseUrl: 'https://openrouter.ai/api/v1',
+      apiVersion: '2026-07-01',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: 'openai/gpt-5.4',
+      byokCredentialConfigured: true,
+      byokCredentialTail: '1234',
+      apiProtocolConfigs: {
+        openai: {
+          apiKey: '',
+          apiProviderBaseUrl: 'https://openrouter.ai/api/v1',
+          apiVersion: '2026-07-01',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: 'openai/gpt-5.4',
+        },
+      },
+    });
+  });
 });
