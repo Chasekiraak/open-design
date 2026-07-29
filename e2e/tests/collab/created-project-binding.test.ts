@@ -303,30 +303,47 @@ describe('an asserted workspace identity is verified before it is persisted', ()
           // Duplicate is one of the paths with no authorization gate of its own,
           // so it is where an unverified header claim used to be written
           // straight into `workspace_projects`.
-          const copy = await requestJson<CreatedProject>(
-            webUrl,
-            `/api/projects/${encodeURIComponent(source)}/duplicate`,
+          //
+          // Deliberately status-agnostic. Once `reconcileUnboundProjectBeforeMutation`
+          // also stopped conjuring a binding from unverified headers, the
+          // pre-existing mutation gate began refusing this forged caller outright
+          // (`workspaceResourceMutationAllowed`'s `!row -> false`) instead of
+          // letting it through on a binding it had just invented for itself. Both
+          // outcomes satisfy the property under test; what must never happen is a
+          // persisted claim to the asserted workspace.
+          const response = await fetch(
+            new URL(`/api/projects/${encodeURIComponent(source)}/duplicate`, webUrl),
             {
-              body: { name: 'Claim copy' },
-              headers: workspaceHeaders({
-                workspaceId: 'ws-bind-foreign',
-                workspaceMemberId: 'mem-bind-foreign',
-                workspaceType: 'team',
-              }),
+              body: JSON.stringify({ name: 'Claim copy' }),
+              headers: {
+                'content-type': 'application/json',
+                ...workspaceHeaders({
+                  workspaceId: 'ws-bind-foreign',
+                  workspaceMemberId: 'mem-bind-foreign',
+                  workspaceType: 'team',
+                }),
+              },
               method: 'POST',
             },
           );
+          const copyId = response.ok
+            ? ((await response.json()) as CreatedProject).project.id
+            : null;
 
-          const copyScope = await readScope(webUrl, copy.project.id);
-          // The claim is never persisted...
+          // The source is never re-homed into the asserted workspace...
+          const sourceScope = await readScope(webUrl, source);
           expect(
-            copyScope.workspaceId,
+            sourceScope.workspaceId,
             'an unverifiable header claim must not be written as a binding',
           ).not.toBe('ws-bind-foreign');
-          // ...and with no ambient workspace behind this daemon there is nothing
-          // to degrade to, so `unbound` is the honest answer. Creation still
-          // returned 200 — the point is that it degrades, never refuses.
-          expect(copyScope.kind).toBe('unbound');
+          expect(sourceScope.kind).toBe('unbound');
+
+          // ...and neither is the copy, when one was produced at all.
+          if (copyId) {
+            const copyScope = await readScope(webUrl, copyId);
+            expect(copyScope.workspaceId).not.toBe('ws-bind-foreign');
+            expect(copyScope.kind).toBe('unbound');
+          }
         },
         {
           env: {
