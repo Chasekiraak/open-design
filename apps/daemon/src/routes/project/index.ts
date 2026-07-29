@@ -292,6 +292,9 @@ export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
   const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
+  /** The daemon's own signed-in identity, for a request that asserts none —
+   *  see `headerlessMutationAllowed` in collab/workspace-resource-mutation.ts. */
+  const getAmbientWorkspace: GetAmbientWorkspace = () => workspaceContext?.lastKnown?.() ?? null;
   return function enforceWorkspaceProjectMutation(
     req: any,
     res: Response,
@@ -313,6 +316,7 @@ export function createEnforceWorkspaceProjectMutation(
       projectId,
       capability,
       getLastKnownWorkspaceMembership,
+      getAmbientWorkspace,
     );
   };
 }

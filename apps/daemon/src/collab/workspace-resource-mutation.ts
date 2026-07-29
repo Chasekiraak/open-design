@@ -59,6 +59,60 @@ export type WorkspaceMembershipSnapshot = {
 export type GetLastKnownWorkspaceMembership = () => WorkspaceMembershipSnapshot | null;
 
 /**
+ * The daemon's OWN signed-in workspace identity, narrowed to the fields a
+ * resource decision needs. Structurally a subset of `WorkspaceCollabContext`, so
+ * a caller passes `() => workspaceContext.lastKnown?.() ?? null` directly.
+ *
+ * Deliberately a plain closure rather than the provider type, same rule as
+ * `GetLastKnownWorkspaceMembership` above: this module must stay free of the
+ * async B integration that every resource type depends on.
+ *
+ * Populated with NO network I/O and no UI involvement — `lastKnown()` caches
+ * whatever the provider last resolved from the vela session on disk, so a
+ * daemon-only process that has never served a browser still has it (verified
+ * end to end with `od daemon start --headless`).
+ */
+export type AmbientWorkspaceSnapshot = {
+  workspaceId: string;
+  workspaceType: 'personal' | 'team';
+  workspaceMemberId: string;
+  role: WorkspaceResourceContext['role'];
+  memberStatus: WorkspaceResourceContext['memberStatus'];
+  lifecycleState: WorkspaceResourceContext['lifecycleState'];
+  permissions: { canShareProjects: boolean; canWriteSyncedFiles: boolean };
+};
+
+export type GetAmbientWorkspace = () => AmbientWorkspaceSnapshot | null | undefined;
+
+/**
+ * The daemon's ambient identity as a resource context, or null when it has none.
+ *
+ * `workspaceTypeAsserted` is null and `appUserId` empty on purpose: both record
+ * what a CALLER claimed, and nobody claimed anything here.
+ */
+export function ambientWorkspaceResourceContext(
+  getAmbientWorkspace: GetAmbientWorkspace | undefined,
+): WorkspaceResourceContext | null {
+  const ambient = getAmbientWorkspace?.();
+  if (!ambient) return null;
+  const workspaceId = ambient.workspaceId?.trim();
+  const workspaceMemberId = ambient.workspaceMemberId?.trim();
+  if (!workspaceId || !workspaceMemberId) return null;
+  return {
+    workspaceId,
+    workspaceType: ambient.workspaceType === 'team' ? 'team' : 'personal',
+    workspaceTypeAsserted: null,
+    appUserId: '',
+    workspaceMemberId,
+    role: ambient.role,
+    memberStatus: ambient.memberStatus,
+    lifecycleState: ambient.lifecycleState,
+    canShareProjects: ambient.permissions.canShareProjects,
+    canWriteSyncedFiles: ambient.permissions.canWriteSyncedFiles,
+  };
+}
+
+/**
  * Cross-check the client-asserted `memberStatus` against the daemon's own
  * last-known-good workspace context.
  *
@@ -326,6 +380,84 @@ export function requestCanMutateWorkspaceResource(
   return workspaceResourceAccess(row, ctx).canMutate;
 }
 
+/**
+ * Decide a mutation whose request carries NO workspace identity at all.
+ *
+ * INVARIANT: every mutation resolves to a workspace identity. A request that
+ * ASSERTS one is judged on that assertion; a request that asserts NOTHING is the
+ * local daemon's own signed-in user, and is judged as that identity. Being
+ * unable to name a workspace is not the same as having no standing in one.
+ *
+ * Headerless is the `od` CLI's normal shape, not an anomaly: nothing in
+ * `apps/daemon/src/cli.ts` attaches `x-od-workspace-*` outside `od workspace …`,
+ * and `AGENTS.md` makes the CLI the embeddability contract that external agents
+ * drive Open Design through. This branch used to answer 401 for ANY bound
+ * resource, which was survivable only while headerless creates left projects
+ * unbound. Once every created project got a workspace home (#6201), the two
+ * rules combined into a project its own creator could not touch:
+ * `od project create` then `od project duplicate` -> 401.
+ *
+ * Resolving to the daemon's ambient identity — rather than to the request's
+ * claim, of which there is none — is the same fallback the create path already
+ * applies ("nothing asserted -> ambient"), so the gate and the creation paths
+ * now agree about what a headerless caller is. It does NOT weaken the two
+ * contracts that look adjacent: `authorizeCreatedProjectWorkspace` still refuses
+ * to let ambient stand in for a pair someone explicitly CLAIMED, and
+ * `resolveProjectWorkspaceScope` still resolves a PERSISTED binding without
+ * consulting ambient. Both govern cases where something was asserted; this is
+ * the third case.
+ *
+ * What stays refused, because the original branch protected something real
+ * (recvqbeDjAsejl / recvqbklNGDqYY, spec 04 §10):
+ *
+ *   - a resource bound to a workspace the daemon is NOT currently in — a
+ *     teammate's shared project, or one left behind by a previous identity. A
+ *     headerless caller has no standing there and still gets 401.
+ *   - a resource in the daemon's own workspace that the daemon's own identity
+ *     may not mutate anyway. The SAME `workspaceResourceMutationAllowed`
+ *     computation runs, so a plain member still cannot rename a teammate's
+ *     project that happens to be shared into this workspace.
+ *   - everything, when the daemon has no signed-in identity to resolve. Nothing
+ *     can vouch for the caller, so the pre-existing answer stands.
+ *
+ * An unbound resource stays allowed, exactly as before.
+ */
+function headerlessMutationAllowed(
+  resourceType: string,
+  res: Response,
+  sendApiError: (res: Response, status: number, code: string, message: string) => unknown,
+  getWorkspaceResource: (db: unknown, workspaceId: string, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  getWorkspaceResourceByResourceId: (db: unknown, resourceId: string) => WorkspaceResourceAccessInput | null | undefined,
+  db: unknown,
+  resourceId: string,
+  capability: WorkspaceResourceMutationCapability,
+  getAmbientWorkspace: GetAmbientWorkspace | undefined,
+): boolean {
+  const anyRow = getWorkspaceResourceByResourceId(db, resourceId);
+  // Never bound anywhere: nothing to have standing in.
+  if (!anyRow) return true;
+
+  const ambient = ambientWorkspaceResourceContext(getAmbientWorkspace);
+  if (!ambient) {
+    sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
+    return false;
+  }
+  const ownRow = getWorkspaceResource(db, ambient.workspaceId, resourceId);
+  if (!ownRow) {
+    // Bound, but to some other workspace. This is the case the 401 exists for.
+    sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
+    return false;
+  }
+  if (!workspaceResourceMutationAllowed(ownRow, ambient, capability)) {
+    const code = isWorkspaceResourceLocked(ambient)
+      ? 'WORKSPACE_LOCKED'
+      : `WORKSPACE_${resourceType.toUpperCase()}_PERMISSION_DENIED`;
+    sendApiError(res, 403, code, `workspace ${resourceType} mutation is not allowed`);
+    return false;
+  }
+  return true;
+}
+
 export function enforceWorkspaceResourceMutation(
   resourceType: string,
   req: any,
@@ -337,27 +469,21 @@ export function enforceWorkspaceResourceMutation(
   resourceId: string,
   capability: WorkspaceResourceMutationCapability,
   getLastKnownMembership?: GetLastKnownWorkspaceMembership,
+  getAmbientWorkspace?: GetAmbientWorkspace,
 ): boolean {
   const requestCtx = workspaceResourceContextFromRequest(req);
   if (requestCtx === null) {
-    // No workspace headers at all — a legacy pre-workspace caller, or a
-    // client that just logged out (the frontend only attaches these headers
-    // while `workspaceContext` is non-null). Either way there is no identity
-    // to check against a team. That's fine for a resource this daemon has
-    // never bound to a workspace at all (`row` is null/undefined) — but ANY
-    // bound resource, personal OR team, requires proof of membership the
-    // request doesn't carry. A `personal` binding is not "safe to trust a
-    // headerless caller with" — it just means the resource isn't SHARED, not
-    // that it isn't OWNED; a signed-out / different-workspace caller has no
-    // more standing over someone else's personal draft than over a team
-    // resource (recvqbeDjAsejl / recvqbklNGDqYY, spec 04 §10). Treat both the
-    // same as `'missing'` rather than granting the mutation.
-    const row = getWorkspaceResourceByResourceId(db, resourceId);
-    if (row) {
-      sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
-      return false;
-    }
-    return true;
+    return headerlessMutationAllowed(
+      resourceType,
+      res,
+      sendApiError,
+      getWorkspaceResource,
+      getWorkspaceResourceByResourceId,
+      db,
+      resourceId,
+      capability,
+      getAmbientWorkspace,
+    );
   }
   if (requestCtx === 'missing') {
     sendApiError(res, 401, 'WORKSPACE_CONTEXT_REQUIRED', 'workspace context is required');
