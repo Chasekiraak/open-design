@@ -12,9 +12,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntryNavRail, resetWorkspaceDirectoryCache } from '../../src/components/EntryNavRail';
 import { I18nProvider } from '../../src/i18n';
 
+// `workspaceMemberId` is required on `WorkspaceDirectoryItem` and every real
+// daemon response carries it. It matters here because the module-level cache is
+// only served to the account it was filled under, and a membership id is what
+// identifies that account (see `workspaceDirectoryBelongsTo`) — so a fixture
+// without it cannot be attributed to `teamContext()` and would never be reused.
 const DIRECTORY = [
-  { workspaceId: 'ws-team', workspaceName: 'OD Feature Team', workspaceType: 'team', role: 'owner' },
-  { workspaceId: 'ws-personal', workspaceName: 'My Workspace2', workspaceType: 'personal', role: 'owner' },
+  {
+    workspaceId: 'ws-team',
+    workspaceName: 'OD Feature Team',
+    workspaceType: 'team',
+    workspaceMemberId: 'wm-1',
+    role: 'owner',
+  },
+  {
+    workspaceId: 'ws-personal',
+    workspaceName: 'My Workspace2',
+    workspaceType: 'personal',
+    workspaceMemberId: 'wm-1-personal',
+    role: 'owner',
+  },
 ];
 
 function teamContext(): WorkspaceCollabContext {

@@ -58,9 +58,11 @@ import type { EntrySettingsSection } from './EntrySettingsMenu';
 import { useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import {
+  beginWorkspaceScopedRead,
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
+  workspaceIdentityCacheKey,
 } from '../collab/useWorkspaceContext';
 import { canUpgradeFromPlanTier, hasTeamPlan, resolvePlanLabelTier } from '../collab/team-plan';
 import { AMR_CONSOLE_UPGRADE_INTENT, amrPlansUrlForProfile } from '../runtime/amr-guidance';
@@ -78,11 +80,68 @@ const externalLinkProps = { target: '_blank', rel: 'noreferrer noopener' } as co
 // CONCURRENT reads, so without this every open of the switcher started from an
 // empty list and showed a loading row before the same names reappeared. Kept at
 // module scope so it survives the rail unmounting (returning from a project).
+//
+// Read it through `attributableWorkspaceDirectory` — never directly. The cache is
+// deliberately long-lived, which is also what made it outlive the ACCOUNT it was
+// filled under.
 let cachedWorkspaceDirectory: WorkspaceDirectoryItem[] | null = null;
 
 /** Test seam: clear the module-level directory cache between tests. */
 export function resetWorkspaceDirectoryCache(): void {
   cachedWorkspaceDirectory = null;
+}
+
+/**
+ * Whether a directory list may be shown to `context`.
+ *
+ * `GET /api/workspace/directory` answers "which workspaces can the SIGNED-IN
+ * ACCOUNT see", so it is exactly the read `workspaceIdentityCacheKey` warns
+ * about: a cache kept across an identity change answers the next identity with
+ * the previous one's data. Nothing invalidated this one — the only caller of
+ * `resetWorkspaceDirectoryCache` has ever been tests — so signing in as a
+ * different account kept the previous account's workspace names on screen, and
+ * kept them CONFIDENTLY, because a non-empty cache also suppresses the loading
+ * row.
+ *
+ * The context carries no account id to key on. What every directory item DOES
+ * carry is the `workspaceMemberId` of the membership that produced it, and a
+ * membership id names exactly one (account, workspace) pair. So a list is
+ * attributable to `context` precisely when it contains the caller's OWN
+ * membership:
+ *
+ *   • A different account — even one sharing the same team workspace — holds a
+ *     different member id for it, so this returns false. The switcher then falls
+ *     back to the single entry it can still attribute — the active workspace,
+ *     named from the caller's OWN context — until its own read lands. (Not the
+ *     `role="status"` loading row: that only renders when there is no entry at
+ *     all, which cannot happen while a context exists.)
+ *   • The same account moving between its own workspaces still returns true:
+ *     the membership it switched into was already in the list. That is the
+ *     flash-free reopen the cache exists for, and it survives this fix.
+ *
+ * A false positive would require the list to already contain this caller's own
+ * membership — that is, to have been read by this very account.
+ */
+function workspaceDirectoryBelongsTo(
+  items: WorkspaceDirectoryItem[] | null,
+  context: WorkspaceCollabContext | null,
+): boolean {
+  if (!items || items.length === 0 || !context) return false;
+  const memberId = context.workspaceMemberId?.trim();
+  if (!memberId) return false;
+  return items.some(
+    (item) =>
+      item.workspaceId === context.workspaceId && item.workspaceMemberId?.trim() === memberId,
+  );
+}
+
+/** The cached switcher list, or null when it cannot be attributed to `context`. */
+function attributableWorkspaceDirectory(
+  context: WorkspaceCollabContext | null,
+): WorkspaceDirectoryItem[] | null {
+  return workspaceDirectoryBelongsTo(cachedWorkspaceDirectory, context)
+    ? cachedWorkspaceDirectory
+    : null;
 }
 
 // The rail's destination ids are the entry-shell home views (kept in sync with
@@ -623,8 +682,13 @@ export function EntryNavRail({
     setAccountOpen(false);
   });
   const [teamOpen, setTeamOpen] = useState(false);
+  // The LATEST context, for async work to compare against. `loadWorkspaceDirectory`
+  // closes over the render's `context` prop, which is the identity its read was
+  // issued for — so only a ref can answer "has the identity moved since?".
+  const contextRef = useRef(context);
+  contextRef.current = context;
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>(
-    () => cachedWorkspaceDirectory ?? [],
+    () => attributableWorkspaceDirectory(context) ?? [],
   );
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
@@ -690,22 +754,40 @@ export function EntryNavRail({
         : [];
 
   async function loadWorkspaceDirectory() {
+    // Capture the identity this read is FOR, and compare against `contextRef`
+    // (not the closed-over `context`, which is by definition the identity we are
+    // reading for) before committing anything — see `beginWorkspaceScopedRead`.
+    const read = beginWorkspaceScopedRead(contextRef.current);
     // Only show the loading row when there is nothing to show yet. With a warm
-    // cache the list is already on screen and this read just revalidates it.
-    if (cachedWorkspaceDirectory === null) setWorkspaceDirectoryLoading(true);
+    // cache the list is already on screen and this read just revalidates it —
+    // but a cache belonging to another account counts as nothing to show.
+    if (attributableWorkspaceDirectory(read.context) === null) {
+      setWorkspaceDirectoryLoading(true);
+    }
     try {
-      const items = await coalescedGet('workspace-directory', async () => {
+      // The coalescing key carries the caller's identity for the same reason the
+      // module cache does: `coalescedGet` shares a settled result for a second,
+      // and this read's answer depends on WHO asked.
+      const cacheKey = `workspace-directory:${workspaceIdentityCacheKey(read.context)}`;
+      const items = await coalescedGet(cacheKey, async () => {
         const response = await fetch('/api/workspace/directory', { cache: 'no-store' });
         if (!response.ok) throw new Error(`directory ${response.status}`);
         const body = (await response.json()) as WorkspaceDirectoryResponse;
         return body.items ?? [];
       });
+      // The account may have changed while this was in flight. Writing here
+      // would repopulate BOTH the module cache and the visible list with the
+      // previous account's names, after the identity-change effect below had
+      // already cleared them — so an abandoned read must leave no trace.
+      if (!read.isStillCurrent(contextRef.current)) return;
       cachedWorkspaceDirectory = items;
       setWorkspaceItems(items);
     } catch {
       // A failed revalidation must not blank a list the user is looking at —
-      // keep the last known names and let the next open try again.
-      if (cachedWorkspaceDirectory === null) setWorkspaceItems([]);
+      // keep the last known names and let the next open try again. A list this
+      // caller has no claim to is not "a list the user is looking at".
+      if (!read.isStillCurrent(contextRef.current)) return;
+      if (attributableWorkspaceDirectory(read.context) === null) setWorkspaceItems([]);
     } finally {
       setWorkspaceDirectoryLoading(false);
     }
@@ -723,7 +805,13 @@ export function EntryNavRail({
       if (!response.ok) return;
       const body = (await response.json()) as WorkspaceActiveResponse;
       setTeamOpen(false);
-      notifyWorkspaceContextRefresh();
+      // Seed the shell from the switch response rather than making every
+      // consumer re-read it: the daemon builds this `context` from the same
+      // `workspaceContext.current()` call `GET /api/workspace/context` serves,
+      // and only answers 200 once it agrees the active workspace really moved.
+      notifyWorkspaceContextRefresh(
+        body?.context ? { context: body.context } : null,
+      );
       notifyWorkspaceBillingRefresh();
       notifyTeamProjectsChanged();
       selectView('home');
@@ -764,6 +852,28 @@ export function EntryNavRail({
     if (!teamOpen) return;
     void loadWorkspaceDirectory();
   }, [teamOpen]);
+
+  // This rail can outlive the identity that filled its list: an account swap
+  // (sign out, sign in as someone else) does not necessarily unmount it, and
+  // then component state would keep the previous account's names even though the
+  // module cache is re-attributed on every read.
+  //
+  // So on each identity change, re-derive the list from the cache UNDER THE
+  // INCOMING IDENTITY. A list the new identity can claim survives (the common
+  // case: the same account moving between its own workspaces); one it cannot is
+  // dropped, and the next open refetches. Re-deriving on the identity edge — not
+  // on every render where attribution happens to fail — is what keeps a freshly
+  // read list stable afterwards instead of being cleared again on the next pass.
+  const railIdentity = workspaceIdentityCacheKey(context);
+  const lastRailIdentityRef = useRef(railIdentity);
+  useEffect(() => {
+    if (lastRailIdentityRef.current === railIdentity) return;
+    lastRailIdentityRef.current = railIdentity;
+    setWorkspaceItems(attributableWorkspaceDirectory(context) ?? []);
+    // `context` is read only to re-attribute the cache for `railIdentity`, which
+    // is its digest — depending on the object would re-run this on every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [railIdentity]);
 
   return (
     <nav
