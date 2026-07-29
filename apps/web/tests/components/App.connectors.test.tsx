@@ -300,7 +300,10 @@ describe('App connectors settings flows', () => {
       expect(mockedSyncConfigToDaemon).toHaveBeenCalled();
     });
     mockedSyncConfigToDaemon.mockClear();
-    fireEvent.click(await screen.findByRole('button', { name: 'Share' }));
+    await screen.findByRole('button', { name: 'Share' });
+    // Bootstrap can re-render the banner after the async query resolves.
+    // Re-query synchronously so the click targets the currently mounted node.
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
 
     await waitFor(() => {
       expect(mockedSyncConfigToDaemon).toHaveBeenCalledWith(
