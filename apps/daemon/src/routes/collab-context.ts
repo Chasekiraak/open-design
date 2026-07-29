@@ -98,6 +98,18 @@ export interface RegisterCollabContextRoutesDeps {
     set(workspaceId: string): Promise<void>;
     clear(): Promise<void>;
   };
+  /**
+   * Announce that the active workspace just changed to `workspaceId`, after the
+   * switch is confirmed by a matching context read (never for a rejected or
+   * rolled-back switch).
+   *
+   * Every workspace-scoped cache in the daemon is keyed on the active workspace,
+   * so a switch leaves all of them cold and the first consumer pays the refill
+   * on its own request path. This seam lets the owner of those caches warm them
+   * while the user is still looking at the freshly switched view. It is
+   * deliberately fire-and-forget: the switch response must not wait on warming.
+   */
+  onWorkspaceSwitched?: (workspaceId: string) => void;
   /** Injectable for tests; defaults to the Vela workspace directory API. */
   listWorkspaceDirectory?: () => Promise<WorkspaceDirectoryItem[]>;
   /**
@@ -339,6 +351,11 @@ export function registerCollabContextRoutes(app: Express, deps: RegisterCollabCo
       } else await deps.activeWorkspace.clear();
       return res.status(404).json({ error: 'workspace_context_unavailable' });
     }
+    // The switch is confirmed: the backend moved and the context read agrees.
+    // Warm the now-cold workspace-scoped caches before responding to the
+    // browser, but never await them — a slow upstream must not delay the
+    // switch, and a failed warm just leaves the old cold-read behavior.
+    deps.onWorkspaceSwitched?.(workspaceId);
     const body: WorkspaceActiveResponse = { activeWorkspaceId: workspaceId, context };
     res.json(body);
   });
