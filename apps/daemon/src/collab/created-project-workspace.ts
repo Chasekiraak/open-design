@@ -1,9 +1,12 @@
 import type { ApiErrorResponse } from '@open-design/contracts';
 import type { Response } from 'express';
 import {
+  ambientWorkspaceResourceContext,
   isWorkspaceResourceLocked,
   withLastKnownMembership,
   workspaceResourceContextFromRequest,
+  type AmbientWorkspaceSnapshot,
+  type GetAmbientWorkspace,
   type GetLastKnownWorkspaceMembership,
   type WorkspaceResourceContext,
 } from './workspace-resource-mutation.js';
@@ -13,34 +16,12 @@ import {
 } from './vela-workspace-context.js';
 import { sendApiError } from '../http/api-errors.js';
 
-/**
- * The daemon's own last-verified workspace identity, narrowed to the fields a
- * created project's binding needs.
- *
- * Structurally a subset of `WorkspaceCollabContext`, so a caller passes
- * `() => workspaceContext.lastKnown?.() ?? null` directly. Deliberately NOT the
- * `WorkspaceContextProvider` type — same reason `workspace-resource-mutation.ts`
- * takes a plain `GetLastKnownWorkspaceMembership` closure: a create path must not
- * drag the async B integration into a module every resource type depends on.
- */
-export type AmbientWorkspaceSnapshot = {
-  workspaceId: string;
-  workspaceType: 'personal' | 'team';
-  workspaceMemberId: string;
-  role: WorkspaceResourceContext['role'];
-  memberStatus: WorkspaceResourceContext['memberStatus'];
-  lifecycleState: WorkspaceResourceContext['lifecycleState'];
-  permissions: { canShareProjects: boolean; canWriteSyncedFiles: boolean };
-};
-
-/**
- * Read the daemon's ambient workspace with NO network I/O and no failure mode.
- * Backed by `collab/workspace-context.ts`'s `lastKnown()`, which is populated as
- * a side effect of the `.current()` traffic the daemon already serves (the web
- * client's periodic `GET /api/workspace/context` poll, the collab-cloud poller's
- * 5s tick, the dev/demo `PUT /api/workspace/context` seam).
- */
-export type GetAmbientWorkspace = () => AmbientWorkspaceSnapshot | null | undefined;
+// The ambient-identity types live in `workspace-resource-mutation.ts` (the lower
+// module every resource type already depends on) so the mutation gate and the
+// creation paths cannot drift into two different notions of "the daemon's own
+// workspace". Re-exported here because the creation-path callers import them
+// from this module.
+export type { AmbientWorkspaceSnapshot, GetAmbientWorkspace };
 
 export type CreatedProjectWorkspaceResolution =
   | { ok: true; context: WorkspaceResourceContext | null }
@@ -206,23 +187,8 @@ export async function authorizeCreatedProjectWorkspace(
 function ambientWorkspaceHome(
   getAmbientWorkspace?: GetAmbientWorkspace,
 ): WorkspaceResourceContext | null {
-  const ambient = getAmbientWorkspace?.();
-  if (!ambient) return null;
-  const workspaceId = ambient.workspaceId?.trim();
-  const workspaceMemberId = ambient.workspaceMemberId?.trim();
-  if (!workspaceId || !workspaceMemberId) return null;
-  const context: WorkspaceResourceContext = {
-    workspaceId,
-    workspaceType: ambient.workspaceType === 'team' ? 'team' : 'personal',
-    workspaceTypeAsserted: null,
-    appUserId: '',
-    workspaceMemberId,
-    role: ambient.role,
-    memberStatus: ambient.memberStatus,
-    lifecycleState: ambient.lifecycleState,
-    canShareProjects: ambient.permissions.canShareProjects,
-    canWriteSyncedFiles: ambient.permissions.canWriteSyncedFiles,
-  };
+  const context = ambientWorkspaceResourceContext(getAmbientWorkspace);
+  if (!context) return null;
   if (
     context.memberStatus !== 'active'
     || !context.canWriteSyncedFiles

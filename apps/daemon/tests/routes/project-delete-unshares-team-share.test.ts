@@ -110,7 +110,23 @@ function fakeHub() {
   return { adapter, teamProjectCatalog, published, catalog, publishCalls, unpublishCalls, catalogRemoveCalls, key };
 }
 
-async function startServer(hub: ReturnType<typeof fakeHub>) {
+/** The daemon's own signed-in identity, as `workspaceContext.lastKnown()` reports it. */
+function ambientOwner() {
+  return {
+    workspaceId: WORKSPACE_ID,
+    workspaceType: 'personal' as const,
+    workspaceMemberId: OWNER_MEMBER_ID,
+    role: 'owner' as const,
+    memberStatus: 'active' as const,
+    lifecycleState: 'active' as const,
+    permissions: { canShareProjects: true, canWriteSyncedFiles: true },
+  };
+}
+
+async function startServer(
+  hub: ReturnType<typeof fakeHub>,
+  options: { ambient?: ReturnType<typeof ambientOwner> | null } = {},
+) {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-'));
   projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-project-delete-unshare-dir-'));
   const db = openDatabase(tempDir);
@@ -145,6 +161,9 @@ async function startServer(hub: ReturnType<typeof fakeHub>) {
     appConfig: {},
     agents: {},
     validation: {},
+    ...(options.ambient === undefined
+      ? {}
+      : { workspaceContext: { lastKnown: () => options.ambient } }),
     collabSync: {
       requestTeamShare: (projectId: string, share?: string | ResourceHubPrincipal) =>
         collab.requestTeamShare(projectId, share),
@@ -357,5 +376,91 @@ describe('member-side convergence after an owner unshare (spec 04 §11, known ga
     } finally {
       fs.rmSync(memberTempDir, { recursive: true, force: true });
     }
+  });
+
+  // Review regression (mrcfps, #6216). Once a headerless caller was allowed to
+  // mutate a project the daemon's own identity owns, this handler's side effect
+  // still re-derived its context from REQUEST HEADERS — which are absent — so
+  // `requestTeamVisibility` was skipped and `dbDeleteProject` ran anyway. The
+  // owner's local row and directory disappeared while the hub kept serving the
+  // resource, so teammates went on seeing a project that no longer existed.
+  //
+  // Drives the real route with NO request headers and `workspaceContext.lastKnown()`
+  // populated — the `od project delete` shape on a signed-in daemon — and asserts
+  // the hub transition, not a spy call count. Ordering matters as much as
+  // occurrence: a local delete that lands while the hub call is skipped leaves
+  // exactly the inconsistency this guards, so the hub state is asserted to be
+  // clean at the same moment the project is gone locally.
+  it('unshares from the hub for a HEADERLESS caller whose ambient identity owns the row', async () => {
+    const hub = fakeHub();
+    const { baseUrl, db } = await startServer(hub, { ambient: ambientOwner() });
+    const now = Date.now();
+    const projectId = 'p-team-shared-headerless';
+    insertProject(db, { id: projectId, name: 'Team shared headerless', createdAt: now, updatedAt: now });
+    ensureWorkspaceProject(db, {
+      projectId,
+      workspaceId: WORKSPACE_ID,
+      visibility: 'team',
+      createdByWorkspaceMemberId: OWNER_MEMBER_ID,
+      resourceState: 'active',
+      syncState: 'synced',
+    });
+
+    const principal: ResourceHubPrincipal = {
+      memberId: OWNER_MEMBER_ID,
+      teamId: WORKSPACE_ID,
+      role: 'owner',
+      lifecycleState: 'active',
+    };
+    hub.published.set(hub.key(projectId, principal), { version: 1 });
+    hub.catalog.set(hub.key(projectId, principal), { projectId });
+
+    // No `ownerHeaders()` — this is the bare DELETE `od project delete` sends.
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+
+    // The hub learned about it...
+    expect(
+      hub.unpublishCalls.length,
+      'a headerless delete must still unpublish the shared resource',
+    ).toBeGreaterThan(0);
+    expect(hub.published.has(hub.key(projectId, principal))).toBe(false);
+    expect(
+      hub.catalogRemoveCalls.map((call) => call.projectId),
+      'the catalog entry must be removed too',
+    ).toContain(projectId);
+    expect(hub.catalog.has(hub.key(projectId, principal))).toBe(false);
+
+    // ...and the unshare was attributed to the ambient identity, not to nothing.
+    expect(hub.unpublishCalls[0]?.principal?.teamId).toBe(WORKSPACE_ID);
+    expect(hub.unpublishCalls[0]?.principal?.memberId).toBe(OWNER_MEMBER_ID);
+
+    // Only then is it gone locally.
+    expect(getProject(db, projectId)).toBeFalsy();
+    expect(getWorkspaceProjectByProjectId(db, projectId)).toBeFalsy();
+  });
+
+  // The other half of the same invariant: with NO ambient identity either, the
+  // gate refuses before anything is destroyed. A team-bound project must never be
+  // deletable by a caller nothing can vouch for.
+  it('refuses a headerless delete of a team-bound project when the daemon has no identity', async () => {
+    const hub = fakeHub();
+    const { baseUrl, db } = await startServer(hub, { ambient: null });
+    const now = Date.now();
+    const projectId = 'p-team-shared-no-identity';
+    insertProject(db, { id: projectId, name: 'Team shared no identity', createdAt: now, updatedAt: now });
+    ensureWorkspaceProject(db, {
+      projectId,
+      workspaceId: WORKSPACE_ID,
+      visibility: 'team',
+      createdByWorkspaceMemberId: OWNER_MEMBER_ID,
+      resourceState: 'active',
+      syncState: 'synced',
+    });
+
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}`, { method: 'DELETE' });
+    expect(res.status).toBe(401);
+    expect(hub.unpublishCalls.length).toBe(0);
+    expect(getProject(db, projectId), 'nothing may be destroyed locally either').toBeTruthy();
   });
 });

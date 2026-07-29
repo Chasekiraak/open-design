@@ -88,6 +88,7 @@ import {
   type WorkspaceResourceMutationCapability,
 } from '../../collab/workspace-resource-mutation.js';
 import type { WorkspaceContextProvider } from '../../collab/workspace-context.js';
+import { ambientWorkspaceResourceContext } from '../../collab/workspace-resource-mutation.js';
 import { resolveProjectWorkspaceScopeForCaller } from '../../collab/project-workspace-scope.js';
 import {
   authorizeCreatedProjectWorkspace,
@@ -292,6 +293,9 @@ export function createEnforceWorkspaceProjectMutation(
   workspaceContext: Pick<WorkspaceContextProvider, 'lastKnown'> | undefined,
 ) {
   const getLastKnownWorkspaceMembership = lastKnownWorkspaceMembership(workspaceContext);
+  /** The daemon's own signed-in identity, for a request that asserts none —
+   *  see `headerlessMutationAllowed` in collab/workspace-resource-mutation.ts. */
+  const getAmbientWorkspace: GetAmbientWorkspace = () => workspaceContext?.lastKnown?.() ?? null;
   return function enforceWorkspaceProjectMutation(
     req: any,
     res: Response,
@@ -313,6 +317,7 @@ export function createEnforceWorkspaceProjectMutation(
       projectId,
       capability,
       getLastKnownWorkspaceMembership,
+      getAmbientWorkspace,
     );
   };
 }
@@ -1615,6 +1620,27 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
    * rather than becoming an orphan.
    */
   const getAmbientWorkspace: GetAmbientWorkspace = () => ctx.workspaceContext?.lastKnown?.() ?? null;
+  /**
+   * The workspace identity a mutation on this request ACTUALLY acts under.
+   *
+   * INVARIANT: this is the same resolution `enforceWorkspaceProjectMutation` used
+   * to allow the request — the caller's asserted identity when it has one, the
+   * daemon's own signed-in identity when it does not. Any SIDE EFFECT a mutation
+   * performs must read the context from here rather than re-deriving it from
+   * headers, or the effect silently disagrees with the gate that permitted it.
+   *
+   * That disagreement was a real cross-client data-consistency bug: `DELETE
+   * /api/projects/:id` re-derived `workspaceProjectContextFromRequest(req)`, which
+   * is null for a headerless caller, so once headerless mutation was allowed the
+   * hub unpublish and catalog removal were skipped while the local delete still
+   * ran — teammates kept seeing a project whose owner had already destroyed it.
+   */
+  function effectiveWorkspaceProjectContext(req: any): WorkspaceProjectContext | null {
+    const asserted = workspaceProjectContextFromRequest(req);
+    if (asserted === 'missing') return null;
+    if (asserted !== null) return asserted;
+    return ambientWorkspaceResourceContext(getAmbientWorkspace);
+  }
   /**
    * Where a created project belongs when the request has no authorization gate
    * of its own — the duplicate / design-system-copy pair and the
@@ -3788,10 +3814,23 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       // whole project is about to stop existing regardless.
       const workspaceRow = getWorkspaceProjectByProjectId(db, project.id);
       if (workspaceRow?.visibility === 'team') {
-        const teamCtx = workspaceProjectContextFromRequest(req);
-        if (teamCtx && teamCtx !== 'missing') {
-          await requestTeamVisibility([project.id], teamCtx, 'personal');
+        // Same context the gate above allowed this delete under — NOT a fresh
+        // header read, which is null for a headerless caller and would skip the
+        // hub work while still deleting locally.
+        const teamCtx = effectiveWorkspaceProjectContext(req);
+        if (!teamCtx) {
+          // Unreachable while the gate is intact: it admits a team-bound row only
+          // for an asserted identity or a matching ambient one. Refuse rather than
+          // fall through, so a future gate change cannot quietly reintroduce a
+          // local-only delete of a still-shared project.
+          return sendApiError(
+            res,
+            401,
+            'WORKSPACE_CONTEXT_REQUIRED',
+            'workspace context is required to unshare this project before deleting it',
+          );
         }
+        await requestTeamVisibility([project.id], teamCtx, 'personal');
       }
       // Stop any live agent run in this project before its row and directory
       // are removed, otherwise the CLI subprocess is orphaned — it keeps
