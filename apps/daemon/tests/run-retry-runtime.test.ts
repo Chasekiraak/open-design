@@ -399,6 +399,7 @@ describe('same-run retry runtime', () => {
         retry_max_attempts: 2,
         retry_strategy: 'native_session_continue',
         retry_result: 'success',
+        failure_stage: 'post_tool_resume',
       });
 
     const attemptArgs = (await readClaudeAttemptArgs(argsLogPath)).filter(

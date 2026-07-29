@@ -5597,10 +5597,8 @@ export async function startServer({
         liveSessionId
       ) {
         run.retryOriginalFailure ??= failure ?? undefined;
-        if ((run.retryAttemptCount ?? 0) === 0) {
-          run.retryOriginFailure = failure ? { ...failure } : null;
-          run.retryOriginErrorCode = errorCode ?? null;
-        }
+        run.retryOriginFailure = failure ? { ...failure } : null;
+        run.retryOriginErrorCode = errorCode ?? null;
         run.retryAttemptCount = postToolResumeDecision.retryAttemptIndex;
         run.nativeSessionContinueAttemptCount =
           (run.nativeSessionContinueAttemptCount ?? 0) + 1;
