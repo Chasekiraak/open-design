@@ -3998,9 +3998,51 @@ export async function startServer({
       );
     },
   });
+  /**
+   * Hold the invariant that the two workspace-scoped digest faces — `catalog`
+   * and `members` — have a usable value for the workspace this daemon is
+   * ACTUALLY operating in, rather than only for whichever workspace happened to
+   * be active when a consumer last asked.
+   *
+   * Both caches key on `activeWorkspace.get()`, so the moment the active
+   * workspace changes every entry is a miss and the next consumer refills it
+   * inline on its own request path (`createPersistentSyncCache` fetches
+   * synchronously on a miss). That cost is identical either way — the only
+   * question is who waits for it. A switch is a user action followed by idle
+   * time, so paying it here is free; paying it inside the first project load or
+   * agent run is not.
+   *
+   * Warming MUST go through the cache functions and never their underlying
+   * fetchers: `createSwrCache`'s read returns `entry.inflight ?? refresh(key)`,
+   * so a warm that races the very consumer it is protecting joins that
+   * consumer's request instead of issuing a second one. This adds no request
+   * that would not otherwise have been made.
+   *
+   * `revalidate` is for the reconnect case, where the workspace has NOT changed:
+   * the key is unchanged and a still-fresh entry would make the warm a no-op
+   * handing back exactly the value the disconnect made untrustworthy. Dropping
+   * the entry first is what turns the warm into a real read.
+   */
+  const warmActiveWorkspaceDigestFaces = (
+    workspaceId: string,
+    options: { revalidate?: boolean } = {},
+  ) => {
+    if (!workspaceId || workspaceId !== activeWorkspace.get()?.trim()) return;
+    if (options.revalidate) {
+      teamProjectsDisplayCache.invalidate();
+      teamMembersCache?.invalidate();
+    }
+    void teamProjectsDisplayCache().catch(() => undefined);
+    void teamMembersCache?.().catch(() => undefined);
+  };
   registerCollabContextRoutes(app, {
     workspaceContext: collab.workspaceContext,
     activeWorkspace,
+    // A confirmed switch leaves every workspace-scoped cache cold. Warm the two
+    // digest faces now so the first project load / agent run in the new
+    // workspace does not pay the refill — see
+    // `warmActiveWorkspaceDigestFaces` for why this cannot double-fetch.
+    onWorkspaceSwitched: (workspaceId) => warmActiveWorkspaceDigestFaces(workspaceId),
     billingRuntime: workspaceBillingRuntime,
     // Same directory read the route would have made on its own, wrapped so every
     // workspace type it carries is memoized for the team-share invariant.
@@ -4328,6 +4370,15 @@ export async function startServer({
       // Close the disconnect gap: one catch-up cycle over the same reads the
       // pollers watch, plus a comment pull for open projects.
       if (subscribedWorkspaceId === activeWorkspace.get()?.trim()) {
+        // The catch-up below reads the team-project and member lists THROUGH
+        // the SWR caches, so an entry that settled just before (or during) the
+        // disconnect still counts as fresh and makes the diff conclude "nothing
+        // changed" — the one cycle meant to close the gap then emits nothing and
+        // the client stays stale until an unrelated read happens to miss. Drop
+        // those two entries first so the catch-up compares against the hub's
+        // current truth. `pollOnce` joins the in-flight refresh this starts, so
+        // the pair still costs one fetch per face, exactly as before.
+        warmActiveWorkspaceDigestFaces(subscribedWorkspaceId, { revalidate: true });
         void workspaceInvalidationPoller.pollOnce().catch(() => undefined);
         void collabCloud?.pollOnce().catch(() => undefined);
       }
