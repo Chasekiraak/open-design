@@ -64,7 +64,7 @@ const SERVER_NAME = 'open-design';
 const SERVER_VERSION = '0.2.0';
 const MCP_STDIO_IDLE_EXIT_MS = 30 * 60 * 1000;
 const OPEN_DESIGN_BRIEF_APP_RESOURCE =
-  'ui://open-design/artifact-card-v5.html';
+  'ui://open-design/artifact-card-v6.html';
 
 export const MCP_SERVER_INSTRUCTIONS = [
   'Use only these product names in user-facing replies: Open Design Cloud, Local Codex, and Secure BYOK.',
@@ -636,7 +636,11 @@ export const TOOL_DEFS = [
       properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
       additionalProperties: false,
     },
-    annotations: { ...WRITE_ANNOTATIONS, title: 'Sign in to Open Design Cloud' },
+    annotations: {
+      ...WRITE_ANNOTATIONS,
+      openWorldHint: true,
+      title: 'Sign in to Open Design Cloud',
+    },
   },
   {
     name: 'get_vela_login_status',
@@ -647,7 +651,11 @@ export const TOOL_DEFS = [
       properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
       additionalProperties: false,
     },
-    annotations: { ...READ_ANNOTATIONS, title: 'Check Open Design Cloud sign-in' },
+    annotations: {
+      ...READ_ANNOTATIONS,
+      openWorldHint: true,
+      title: 'Check Open Design Cloud sign-in',
+    },
   },
   {
     name: 'start_run',
@@ -2338,10 +2346,18 @@ async function startRun(
   }
   const { id, resolved, active } = await resolveProjectArg(baseUrl, args.project);
   if (args.requestId !== undefined) requireString(args.requestId, 'requestId');
+  if (
+    options.pluginAttribution
+    && (typeof args.requestId !== 'string' || args.requestId.length === 0)
+  ) {
+    throw pluginContractError(
+      'requestId is required for attributed start_run calls so a lost response can be retried without starting a second logical run',
+    );
+  }
   const requestId =
     typeof args.requestId === 'string' && args.requestId.length > 0
       ? args.requestId
-      : `mcp-${randomUUID()}`;
+      : randomUUID();
   const body: JsonObject = { projectId: id, clientRequestId: requestId };
   if (options.pluginAttribution) {
     validatePluginWorkflowId(requestId);

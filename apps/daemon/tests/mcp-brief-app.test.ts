@@ -76,10 +76,13 @@ async function eventually(assertion: () => void, timeoutMs = 2_000): Promise<voi
 }
 
 function createBriefAppHarness(options: {
+  hostCapabilities?: Record<string, unknown>;
   initialPayload?: typeof WEBSITE_BRIEF_PAYLOAD;
   failFirstMessage?: boolean;
+  legacyFollowUp?: boolean;
 } = {}) {
   const requests: JsonRpcMessage[] = [];
+  const legacyFollowUps: Array<{ prompt: string; scrollToBottom?: boolean }> = [];
   let failNextMessage = options.failFirstMessage === true;
   let widgetWindow: any;
   const parent = {
@@ -98,6 +101,11 @@ function createBriefAppHarness(options: {
         if (message.method === 'ui/initialize') {
           respond(message.id!, {
             hostContext: { locale: 'en' },
+            hostCapabilities: options.hostCapabilities ?? {
+              message: { text: true },
+              serverTools: {},
+              updateModelContext: { text: true },
+            },
             ...(options.initialPayload
               ? { structuredContent: options.initialPayload }
               : {}),
@@ -143,6 +151,18 @@ function createBriefAppHarness(options: {
   const dom = new JSDOM(OPEN_DESIGN_BRIEF_APP_HTML, {
     beforeParse(window) {
       widgetWindow = window;
+      if (options.legacyFollowUp) {
+        Object.defineProperty(window, 'openai', {
+          configurable: true,
+          value: {
+            sendFollowUpMessage: async (
+              input: { prompt: string; scrollToBottom?: boolean },
+            ) => {
+              legacyFollowUps.push(input);
+            },
+          },
+        });
+      }
       Object.defineProperty(window, 'parent', {
         configurable: true,
         value: parent,
@@ -164,6 +184,7 @@ function createBriefAppHarness(options: {
 
   return {
     dom,
+    legacyFollowUps,
     requests,
     notifyToolResult(payload: typeof WEBSITE_BRIEF_PAYLOAD): void {
       dispatch({
@@ -187,15 +208,15 @@ describe('local Open Design MCP brief app', () => {
       name: 'collect_brief',
       _meta: {
         ui: {
-          resourceUri: 'ui://open-design/artifact-card-v5.html',
+          resourceUri: 'ui://open-design/artifact-card-v6.html',
         },
-        'ui/resourceUri': 'ui://open-design/artifact-card-v5.html',
-        'openai/outputTemplate': 'ui://open-design/artifact-card-v5.html',
+        'ui/resourceUri': 'ui://open-design/artifact-card-v6.html',
+        'openai/outputTemplate': 'ui://open-design/artifact-card-v6.html',
       },
     });
     expect(localMcpResourceDefinitions()).toContainEqual(
       expect.objectContaining({
-        uri: 'ui://open-design/artifact-card-v5.html',
+        uri: 'ui://open-design/artifact-card-v6.html',
         mimeType: 'text/html;profile=mcp-app',
       }),
     );
@@ -296,6 +317,76 @@ describe('local Open Design MCP brief app', () => {
     });
     expect(harness.requests.filter((request) => request.method === 'tools/call'))
       .toHaveLength(1);
+
+    harness.dom.window.close();
+  });
+
+  it('publishes a readable message when the Host omits optional context updates', async () => {
+    const harness = createBriefAppHarness({
+      hostCapabilities: {
+        message: { text: true },
+        serverTools: {},
+      },
+      initialPayload: WEBSITE_BRIEF_PAYLOAD,
+    });
+    const { document } = harness.dom.window;
+
+    await eventually(() => {
+      expect(document.querySelector('form')?.hidden).toBe(false);
+    });
+    document.querySelector('form')?.dispatchEvent(
+      new harness.dom.window.Event('submit', {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    await eventually(() => {
+      expect(document.querySelector('#status')?.textContent).toContain('sent');
+    });
+    expect(
+      harness.requests.filter(
+        (request) => request.method === 'ui/update-model-context',
+      ),
+    ).toHaveLength(0);
+    expect(
+      harness.requests.filter((request) => request.method === 'ui/message'),
+    ).toHaveLength(1);
+
+    harness.dom.window.close();
+  });
+
+  it('prefers the Codex host follow-up bridge so the user turn has visible text', async () => {
+    const harness = createBriefAppHarness({
+      initialPayload: WEBSITE_BRIEF_PAYLOAD,
+      legacyFollowUp: true,
+    });
+    const { document } = harness.dom.window;
+
+    await eventually(() => {
+      expect(document.querySelector('form')?.hidden).toBe(false);
+    });
+    document.querySelector('form')?.dispatchEvent(
+      new harness.dom.window.Event('submit', {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    await eventually(() => {
+      expect(harness.legacyFollowUps).toHaveLength(1);
+    });
+    expect(harness.legacyFollowUps[0]?.prompt).toContain(
+      'What should this website do?: Launch a product',
+    );
+    expect(
+      harness.requests.filter((request) => request.method === 'ui/message'),
+    ).toHaveLength(0);
+    expect(
+      harness.requests.filter(
+        (request) => request.method === 'ui/update-model-context',
+      ),
+    ).toHaveLength(0);
 
     harness.dom.window.close();
   });

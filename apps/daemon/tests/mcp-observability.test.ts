@@ -438,6 +438,14 @@ describe('local MCP plugin observability contract', () => {
     expect(missingRequest.content[0]?.text).toContain(
       'PLUGIN_CONTRACT_REJECTED',
     );
+    expect(missingRequest.content[0]?.text).toContain(
+      'requestId is required for attributed start_run calls',
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => String(url).endsWith('/api/runs'),
+      ),
+    ).toBe(false);
 
     const requestId = '018f6f2e-5555-7555-8555-555555555555';
     const result = await handleMcpToolCall(

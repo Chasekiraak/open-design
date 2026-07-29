@@ -20,6 +20,20 @@ describe('local MCP Vela login tools', () => {
     const names = TOOL_DEFS.map((tool) => tool.name);
     expect(names).toContain('start_vela_login');
     expect(names).toContain('get_vela_login_status');
+    expect(
+      TOOL_DEFS.find((tool) => tool.name === 'start_vela_login')?.annotations,
+    ).toMatchObject({
+      readOnlyHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+    expect(
+      TOOL_DEFS.find((tool) => tool.name === 'get_vela_login_status')?.annotations,
+    ).toMatchObject({
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
   });
 
   it('starts login through the local daemon, then returns a sanitized activation state', async () => {

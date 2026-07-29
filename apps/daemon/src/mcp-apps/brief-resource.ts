@@ -1,4 +1,4 @@
-export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v5' as const;
+export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v6' as const;
 
 /**
  * Self-contained MCP Apps resource. It intentionally has no remote assets,
@@ -67,6 +67,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         let phase = "loading";
         let confirmedPayload = null;
         let standardBridgeReady = false;
+        let hostCapabilities = null;
         let sizeFrame = 0;
         let lastWidth = -1;
         let lastHeight = -1;
@@ -161,6 +162,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
 
         function notify(method, params) {
           post({ jsonrpc: "2.0", method, params });
+        }
+
+        function hostSupports(capability) {
+          return Boolean(
+            hostCapabilities
+            && typeof hostCapabilities === "object"
+            && hostCapabilities[capability],
+          );
         }
 
         function localeOf(value) {
@@ -360,10 +369,13 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         }
 
         async function callConfirm(argumentsValue) {
-          if (!standardBridgeReady && window.openai && typeof window.openai.callTool === "function") {
+          if (standardBridgeReady && hostSupports("serverTools")) {
+            return request("tools/call", { name: "confirm_brief", arguments: argumentsValue });
+          }
+          if (window.openai && typeof window.openai.callTool === "function") {
             return window.openai.callTool("confirm_brief", argumentsValue);
           }
-          return request("tools/call", { name: "confirm_brief", arguments: argumentsValue });
+          throw new Error(copy().bridgeUnavailable);
         }
 
         async function publishConfirmation(payload) {
@@ -376,19 +388,24 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
                 : activeLocale === "ja"
                   ? "このブリーフに沿って続行してください。"
                   : "Continue with this brief.");
-          if (standardBridgeReady) {
-            await request("ui/update-model-context", {
-              content: [{ type: "text", text: payload.summary }],
-              structuredContent: payload,
-            });
+          // Codex exposes its host-native follow-up bridge alongside MCP Apps.
+          // Prefer it when present so the confirmed brief becomes readable user
+          // text instead of a context-only turn rendered as "(No content)".
+          if (window.openai && typeof window.openai.sendFollowUpMessage === "function") {
+            await window.openai.sendFollowUpMessage({ prompt, scrollToBottom: true });
+            return;
+          }
+          if (standardBridgeReady && hostSupports("message")) {
+            if (hostSupports("updateModelContext")) {
+              await request("ui/update-model-context", {
+                content: [{ type: "text", text: payload.summary }],
+                structuredContent: payload,
+              });
+            }
             await request("ui/message", {
               role: "user",
               content: [{ type: "text", text: prompt }],
             });
-            return;
-          }
-          if (window.openai && typeof window.openai.sendFollowUpMessage === "function") {
-            await window.openai.sendFollowUpMessage({ prompt, scrollToBottom: true });
             return;
           }
           throw new Error(copy().publishUnavailable);
@@ -400,7 +417,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             artifactType: draft.artifactType,
             answers: selections(),
           };
-          if (!standardBridgeReady) {
+          if (!standardBridgeReady || !hostSupports("updateModelContext")) {
             return;
           }
           void request("ui/update-model-context", {
@@ -480,10 +497,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         showLoading();
         request("ui/initialize", {
           protocolVersion: "2026-01-26",
-          appInfo: { name: "open-design-brief", version: "v5" },
+          appInfo: { name: "open-design-brief", version: "v6" },
           appCapabilities: {},
         }).then((result) => {
           standardBridgeReady = true;
+          hostCapabilities =
+            result && result.hostCapabilities && typeof result.hostCapabilities === "object"
+              ? result.hostCapabilities
+              : null;
           updateHostLocale(result && result.hostContext);
           notify("ui/notifications/initialized", {});
           render(toolPayload(result));
