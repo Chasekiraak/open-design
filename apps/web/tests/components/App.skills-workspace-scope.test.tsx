@@ -142,12 +142,12 @@ const baseConfig: AppConfig = {
   agentCliEnv: {},
 };
 
-function workspaceContextPayload(workspaceId: string) {
+function workspaceContextPayload(workspaceId: string, workspaceMemberId?: string) {
   return {
     context: {
       workspaceId,
       workspaceType: 'team',
-      workspaceMemberId: `member-${workspaceId}`,
+      workspaceMemberId: workspaceMemberId ?? `member-${workspaceId}`,
       role: 'member',
       memberStatus: 'active',
       lifecycleState: 'active',
@@ -321,6 +321,78 @@ describe('App skills list — workspace scope', () => {
     });
 
     expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy();
+    expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
+  });
+
+  // A guard that discards without guaranteeing a successor is worse than the
+  // staleness it replaces: the list can be left loading forever.
+  //
+  // The commit guard compares `workspaceIdentityCacheKey`, which includes the
+  // MEMBER id — so two accounts active in the same shared team workspace are two
+  // identities even though `workspaceId` never changes. A trigger keyed only on
+  // `workspaceId` would discard account A's pending response and then suppress
+  // account B's replacement read, because the workspace id it watched did not
+  // move.
+  it('starts and completes a successor read when only the member id changes', async () => {
+    let memberId = 'member-a';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        return {
+          ok: true,
+          json: async () =>
+            pathname.endsWith('/workspace/context')
+              ? workspaceContextPayload('ws-shared-team', memberId)
+              : {},
+        } as Response;
+      }),
+    );
+
+    const readA = deferred<SkillSummary[]>();
+    const readB = deferred<SkillSummary[]>();
+    vi.mocked(fetchSkills).mockImplementation((context) =>
+      context?.workspaceMemberId === 'member-b' ? readB.promise : readA.promise,
+    );
+
+    render(<App />);
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetchSkills).mock.calls.some(
+          ([c]) => c?.workspaceMemberId === 'member-a',
+        ),
+      ).toBe(true),
+    );
+
+    // Same workspace, different account. A's read is still in flight.
+    memberId = 'member-b';
+    await act(async () => {
+      notifyWorkspaceContextRefresh();
+      await Promise.resolve();
+    });
+
+    // A successor read must START for B…
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetchSkills).mock.calls.some(
+          ([c]) => c?.workspaceMemberId === 'member-b',
+        ),
+      ).toBe(true),
+    );
+
+    // …A's late answer is discarded…
+    await act(async () => {
+      readA.resolve([skill('skill-from-a')]);
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
+
+    // …and B's answer COMPLETES, so the registry is not left loading forever.
+    await act(async () => {
+      readB.resolve([skill('skill-from-b')]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy());
     expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
   });
 });

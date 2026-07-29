@@ -109,8 +109,16 @@ export function workspaceIdentityCacheKey(
     context.role,
     context.memberStatus,
     context.lifecycleState,
-    String(context.permissions.canShareProjects),
-    String(context.permissions.canWriteSyncedFiles),
+    // Optional-chained deliberately. `permissions` is REQUIRED on the contract,
+    // so an absent one means a partial/malformed context — and this function is
+    // now called on async continuations (see `beginWorkspaceScopedRead`), where
+    // throwing does not surface as a handled error but as an unhandled rejection
+    // from whatever late promise happened to be settling. Computing an identity
+    // must be total: a partial context is simply its own cache partition, never
+    // an exception. `String(undefined)` is `'undefined'`, which is stable and
+    // distinct from both `'true'` and `'false'`.
+    String(context.permissions?.canShareProjects),
+    String(context.permissions?.canWriteSyncedFiles),
   ].join(':');
 }
 

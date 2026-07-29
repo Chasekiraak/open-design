@@ -91,6 +91,7 @@ import {
   beginWorkspaceScopedRead,
   useWorkspaceBilling,
   useWorkspaceContext,
+  workspaceIdentityCacheKey,
 } from './collab/useWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
 import { deriveTabIdentityScope, UNSET_ACCOUNT_BUCKET } from './collab/tab-scope';
@@ -1790,14 +1791,25 @@ function AppInner() {
   // keeps launch at exactly one `/api/skills` request: the boot pass no longer
   // reads skills, this effect performs the first read, and a switch performs
   // one more.
+  // Keyed on the SAME digest the commit guard compares, not just `workspaceId`.
+  // The guard discards a response whenever `workspaceIdentityCacheKey` moves —
+  // which includes member id, role, status, lifecycle and the two permission
+  // bits. A trigger that only watched `workspaceId` would therefore discard a
+  // response without starting its successor: two accounts active in the same
+  // shared team workspace differ only by membership, so A's pending read would
+  // be dropped for B while the workspace id, being unchanged, suppressed B's
+  // replacement read — leaving the functional registry loading forever on
+  // startup, or holding A's list later. "Discarded and never replaced" is a
+  // worse outcome than the staleness it replaced, so every transition that
+  // invalidates a response must also start its successor.
+  const skillsReadIdentity = workspaceIdentityCacheKey(workspaceContext);
   const skillsReadIdentityRef = useRef<string | null>(null);
   useEffect(() => {
     if (workspaceContextLoading) return;
-    const identity = workspaceContext?.workspaceId ?? 'none';
-    if (skillsReadIdentityRef.current === identity) return;
-    skillsReadIdentityRef.current = identity;
+    if (skillsReadIdentityRef.current === skillsReadIdentity) return;
+    skillsReadIdentityRef.current = skillsReadIdentity;
     void refreshSkills();
-  }, [workspaceContextLoading, workspaceContext?.workspaceId, refreshSkills]);
+  }, [workspaceContextLoading, skillsReadIdentity, refreshSkills]);
 
   const refreshTemplates = useCallback(async () => {
     const list = await listTemplates();
