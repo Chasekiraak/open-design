@@ -1,5 +1,4 @@
 import { expect, type Page, type Request, type Route } from '@playwright/test';
-import { expectStableCount } from './assertions.js';
 
 export const STORAGE_KEY = 'open-design:config';
 
@@ -287,7 +286,7 @@ function makeRunRequestTracker(bodies: RunRequestBody[]): RunRequestTracker {
     bodies,
     expectCount,
     async expectNone(options = {}) {
-      await expectStableCount(() => bodies.length, 0, {
+      await expectCount(0, {
         timeout: options.timeout ?? 750,
         message: options.message ?? 'expected no POST /api/runs requests during the settled observation window',
       });

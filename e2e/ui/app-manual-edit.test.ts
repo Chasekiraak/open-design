@@ -1,5 +1,4 @@
 import { expect, test } from '@/playwright/suite';
-import { expectStableCount } from '@/playwright/assertions';
 import { openNewProjectModal as openNewProjectModalFromProjects } from '@/playwright/rail';
 import { routeAgents, routeSuccessfulRuns } from '@/playwright/mock-factory';
 import { clickDeckNextSlide, openAllProjectFiles } from '@/playwright/workspace';
@@ -138,6 +137,36 @@ test('[P0] manual edit inspector previews and persists page and selected element
   await expect(page.getByRole('button', { name: /^Comment$/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Share$/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Download$/ })).toBeVisible();
+});
+
+test('[P0] manual edit undo and redo restore a saved style without reloading the preview', async ({ page }) => {
+  await routeMockAgents(page);
+  const projectId = await createEmptyProject(page, 'Manual edit history smoke');
+  await seedHtmlArtifact(page, projectId, 'manual-edit-history.html', manualEditHtml());
+  await page.goto(`/projects/${projectId}/files/manual-edit-history.html`);
+  await openDesignFile(page, 'manual-edit-history.html');
+
+  await page.getByTestId('manual-edit-mode-toggle').click();
+  const frame = artifactPreviewFrame(page);
+  await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY');
+
+  const fontSizeInput = inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Size' }).locator('input');
+  await fontSizeInput.fill('42');
+  await inspectSaveButton(page).click({ force: true });
+  await expectFileSource(page, projectId, 'manual-edit-history.html', ['font-size: 42px']);
+
+  const undo = page.getByTestId('manual-edit-undo');
+  const redo = page.getByTestId('manual-edit-redo');
+  await expect(undo).toBeVisible();
+  await expect(redo).toBeVisible();
+
+  await undo.click();
+  await expectFileSourceExcludes(page, projectId, 'manual-edit-history.html', ['font-size: 42px']);
+  await expect(frame.getByRole('heading', { name: 'Original Hero' })).toBeVisible();
+
+  await redo.click();
+  await expectFileSource(page, projectId, 'manual-edit-history.html', ['font-size: 42px']);
+  await expect(frame.getByRole('heading', { name: 'Original Hero' })).toBeVisible();
 });
 
 async function selectPreviewElementThroughBridge(
@@ -530,14 +559,15 @@ test('[P1] first-loop onboarding completes once after a successful artifact expo
   const secondHtmlDownload = page.waitForEvent('download');
   await page.locator('.share-menu-popover[role="menu"]').getByRole('menuitem', { name: /Export as standalone HTML/ }).click();
   await secondHtmlDownload;
-  await expectStableCount(
-    () => analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0,
-    1,
-    {
-      timeout: 750,
-      message: 're-exporting the same first-loop artifact should not emit a duplicate completion event',
-    },
-  );
+  await expect
+    .poll(
+      () => analyticsBodies.join('\n').match(/onboarding_completed/g)?.length ?? 0,
+      {
+        timeout: 750,
+        message: 're-exporting the same first-loop artifact should not emit a duplicate completion event',
+      },
+    )
+    .toBe(1);
 });
 
 test('[P0] manual edit mode keeps deck navigation available for deck-shaped HTML', async ({ page }) => {
