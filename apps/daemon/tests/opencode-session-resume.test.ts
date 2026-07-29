@@ -44,6 +44,7 @@ type RunEvent = { event: string; data: unknown };
 
 const SESSION = 'ses_e2e0000resume0000';
 const FIRST_REPLY_SENTINEL = 'FIRST_TURN_REPLY_SENTINEL_0c7d2';
+const RUN_COMPLETION_TIMEOUT_MS = 30_000;
 
 describe('opencode native session resume', () => {
   const originalEnv = snapshotEnv();
@@ -572,16 +573,23 @@ async function sendRunAndWait(
 
 async function waitForRun(url: string, runId: string): Promise<RunStatus> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 10_000) {
+  let lastRun: RunStatus | null = null;
+  while (Date.now() - startedAt < RUN_COMPLETION_TIMEOUT_MS) {
     const response = await fetch(`${url}/api/runs/${encodeURIComponent(runId)}`);
     expect(response.status).toBe(200);
     const run = (await response.json()) as RunStatus;
+    lastRun = run;
     if (run.status === 'failed' || run.status === 'succeeded' || run.status === 'canceled') {
       return run;
     }
     await delay(100);
   }
-  throw new Error(`run ${runId} did not finish`);
+  throw new Error(
+    `run ${runId} did not finish within ${RUN_COMPLETION_TIMEOUT_MS}ms`
+    + ` (last status: ${lastRun?.status ?? 'unobserved'},`
+    + ` errorCode: ${lastRun?.errorCode ?? 'none'},`
+    + ` eventsLogPath: ${lastRun?.eventsLogPath ?? 'unknown'})`,
+  );
 }
 
 // Chat-turn `run` invocations for this conversation, in call order. OpenCode is

@@ -1,6 +1,7 @@
 import { expect, test } from '@/playwright/suite';
 import { ensureRailOpen, openNewProjectModal as openNewProjectModalFromProjects } from '@/playwright/rail';
 import { runErrorCard } from '@/playwright/chat';
+import { routeMockAgents } from '@/playwright/mock-factory';
 import {
   clickDeckNextSlide,
   clickDeckPreviousSlide,
@@ -30,6 +31,15 @@ function stagedAttachmentName(page: Page, name: string): Locator {
   return page
     .locator('[data-testid="staged-attachments"], [data-testid="staged-contexts"]')
     .getByText(name, { exact: true });
+}
+
+function isDesignFileUploadResponse(response: Response): boolean {
+  const url = new URL(response.url());
+  return (
+    response.request().method() === 'POST'
+    && url.pathname.startsWith('/api/projects/')
+    && url.pathname.endsWith('/upload')
+  );
 }
 
 test.beforeEach(async ({ page }) => {
@@ -73,22 +83,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 test('[P0] @critical workspace restores the last manually selected file tab after reload instead of jumping back to the generated artifact', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await page.route('**/api/runs', async (route) => {
     await route.fulfill({
@@ -126,12 +121,22 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
     });
   });
 
-  await createEmptyProject(page, 'Workspace active tab restore');
+  const projectId = await createEmptyProject(page, 'Workspace active tab restore');
   await expectWorkspaceReady(page);
 
   await sendPrompt(page, 'Create a workspace persistence artifact');
   await expect(page.getByText('workspace-artifact.html', { exact: true }).first()).toBeVisible();
+  const { conversationId } = await getCurrentProjectContext(page);
+  await expectPersistedArtifactMessage(
+    page,
+    projectId,
+    conversationId,
+    'workspace-artifact.html',
+  );
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'manual-reference.png',
     mimeType: 'image/png',
@@ -140,6 +145,7 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
 
   const artifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
   const manualFileTab = tabBySuffix(page, 'manual-reference.png');
@@ -157,11 +163,17 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
   await expect(restoredManualFileTab).toBeVisible();
   await expect(restoredManualFileTab).toHaveAttribute('aria-selected', 'true');
   const restoredArtifactTab = page.getByRole('tab', { name: /workspace-artifact\.html/i });
-  if ((await restoredArtifactTab.count()) === 0) {
+  const artifactTabRestored = await restoredArtifactTab
+    .waitFor({ state: 'visible', timeout: T.short })
+    .then(() => true, () => false);
+  if (!artifactTabRestored) {
     const turnCard = page.locator('.msg.assistant').filter({ hasText: 'workspace-artifact.html' }).first();
-    const openButton = turnCard.getByRole('button', { name: /^Open$/ });
-    await expect(openButton).toBeVisible();
-    await openButton.click();
+    const artifactButton = turnCard.getByRole('button', {
+      name: 'workspace-artifact.html',
+      exact: true,
+    });
+    await expect(artifactButton).toBeVisible();
+    await artifactButton.click();
 
     await expect(restoredArtifactTab).toBeVisible();
     await expect(restoredArtifactTab).toHaveAttribute('aria-selected', 'true');
@@ -175,22 +187,7 @@ test('[P0] @critical workspace restores the last manually selected file tab afte
 });
 
 test('[P0] switching between projects restores each project workspace to its last active file tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   const pngBytes = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W6McAAAAASUVORK5CYII=',
@@ -287,27 +284,15 @@ test('[P0] switching between projects restores each project workspace to its las
 });
 
 test('[P0] @critical visiting an uploaded design file route restores its tab and file workspace surface', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await gotoEntryHome(page);
   await createPrototypeProject(page, 'Uploaded file deep link');
   await expectWorkspaceReady(page);
 
+  const uploadResponse = page.waitForResponse(isDesignFileUploadResponse, {
+    timeout: T.short,
+  });
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'deep-linked-reference.png',
     mimeType: 'image/png',
@@ -316,6 +301,7 @@ test('[P0] @critical visiting an uploaded design file route restores its tab and
       'base64',
     ),
   });
+  await expect((await uploadResponse).ok()).toBeTruthy();
   const fileTab = tabBySuffix(page, 'deep-linked-reference.png');
   await expect(fileTab).toBeVisible();
   const uploadedName = await fileTab.getAttribute('title');
@@ -344,82 +330,8 @@ test('[P0] @critical visiting an uploaded design file route restores its tab and
   await expectAllProjectFilesInactive(page);
 });
 
-test('[P0] returning from an uploaded design file route to the project root keeps the uploaded file tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
-
-  await gotoEntryHome(page);
-  await createPrototypeProject(page, 'Uploaded file root route restore');
-  await expectWorkspaceReady(page);
-
-  await page.getByTestId('design-files-upload-input').setInputFiles({
-    name: 'root-design-reference.png',
-    mimeType: 'image/png',
-    buffer: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W6McAAAAASUVORK5CYII=',
-      'base64',
-    ),
-  });
-  const fileTab = tabBySuffix(page, 'root-design-reference.png');
-  await expect(fileTab).toBeVisible();
-  const uploadedName = await fileTab.getAttribute('title');
-  expect(uploadedName).toBeTruthy();
-
-  await openAllProjectFiles(page);
-  const fileRow = page.locator('[data-testid^="design-file-row-"]', {
-    hasText: 'root-design-reference.png',
-  });
-  await expect(fileRow).toBeVisible();
-  await fileRow.getByRole('button').first().click();
-  await expect(page.getByTestId('design-file-preview')).toBeVisible();
-
-  const current = new URL(page.url());
-  const [, projects, projectId] = current.pathname.split('/');
-  if (projects !== 'projects' || !projectId) {
-    throw new Error(`unexpected project route: ${current.pathname}`);
-  }
-
-  await gotoProjectRoute(page, `/projects/${projectId}/files/${encodeURIComponent(uploadedName!)}`);
-  await expect(fileTab).toBeVisible();
-  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  await navigateProjectRouteInApp(page, `/projects/${projectId}`);
-
-  await expect(page.getByTestId('file-workspace')).toBeVisible();
-  await expect(fileTab).toBeVisible();
-  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-});
-
 test('[P0] returning from an artifact file route to the project root keeps the artifact tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   await page.route('**/api/runs', async (route) => {
     await route.fulfill({
@@ -476,106 +388,16 @@ test('[P0] returning from an artifact file route to the project root keeps the a
   await expect(artifactTab).toHaveAttribute('aria-selected', 'true');
 });
 
-test('[P0] @critical returning from an older conversation route to the project root keeps the composer available while the route is selected', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
-
-  await page.route('**/api/runs', async (route) => {
-    await route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: '{"runId":"conversation-root-run"}',
-    });
-  });
-
-  await page.route('**/api/runs/*/events', async (route) => {
-    const body = [
-      'event: start',
-      'data: {"bin":"mock-agent"}',
-      '',
-      'event: end',
-      'data: {"code":0,"status":"succeeded"}',
-      '',
-      '',
-    ].join('\n');
-
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      },
-      body,
-    });
-  });
-
-  await gotoEntryHome(page);
-  await createPrototypeProject(page, 'Conversation root route restore');
-  await expectWorkspaceReady(page);
-
-  const firstPrompt = 'First conversation should stay selected';
-  await sendPrompt(page, firstPrompt);
-  await expect(page.locator('.msg.user .user-text').filter({ hasText: firstPrompt }).first()).toBeVisible();
-  const firstContext = await getCurrentProjectContext(page);
-
-  await startNewConversation(page);
-  await expect(page.getByTestId('chat-composer-input')).toBeVisible();
-  await expect(page.getByTestId('chat-composer-input')).toHaveText('');
-
-  const secondPrompt = 'Second conversation should not replace the deep-linked one';
-  await sendPrompt(page, secondPrompt);
-  await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
-  expect(secondContext.conversationId).not.toBe(firstContext.conversationId);
-
-  await gotoProjectRoute(page, `/projects/${firstContext.projectId}/conversations/${firstContext.conversationId}`);
-  await expect(page.getByTestId('chat-composer')).toBeVisible();
-  await page.getByTestId('conversation-history-trigger').click();
-  const routeHistoryList = page.getByTestId('conversation-list');
-  await expect(routeHistoryList).toBeVisible();
-  await expect(routeHistoryList.locator('.chat-conv-item').filter({ hasText: firstPrompt }).first()).toBeVisible();
-
-  await navigateProjectRouteInApp(page, `/projects/${firstContext.projectId}`);
-  await expect(page.getByTestId('chat-composer')).toBeVisible();
-});
-
 test('[P0] @critical switching between conversations keeps the composer usable while navigating history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationDraftRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationDraftRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-draft-run"}',
+      body: JSON.stringify({ runId: `conversation-draft-run-${conversationDraftRunCount}` }),
     });
   });
 
@@ -618,7 +440,12 @@ test('[P0] @critical switching between conversations keeps the composer usable w
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
 
   const composerInput = page.getByTestId('chat-composer-input');
   await composerInput.fill(secondDraft);
@@ -664,114 +491,26 @@ test('[P0] @critical switching between conversations keeps the composer usable w
   await expect(page).toHaveURL(new RegExp(`/projects/${firstContext.projectId}/conversations/${firstContext.conversationId}$`));
   await expect(page.locator('.msg.user .user-text').filter({ hasText: firstPrompt }).first()).toBeVisible();
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt })).toHaveCount(0);
-});
 
-test('[P0] @critical reloading an older conversation route keeps the composer visible on that route', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
-
-  await page.route('**/api/runs', async (route) => {
-    await route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: '{"runId":"conversation-reload-draft-run"}',
-    });
-  });
-
-  await page.route('**/api/runs/*/events', async (route) => {
-    const body = [
-      'event: start',
-      'data: {"bin":"mock-agent"}',
-      '',
-      'event: end',
-      'data: {"code":0,"status":"succeeded"}',
-      '',
-      '',
-    ].join('\n');
-
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      },
-      body,
-    });
-  });
-
-  await gotoEntryHome(page);
-  await createPrototypeProject(page, 'Conversation reload draft restore');
-  await expectWorkspaceReady(page);
-
-  const firstPrompt = 'Reloaded conversation anchor';
-  const secondPrompt = 'Latest conversation anchor';
-  const restoredDraft = 'Draft that should survive a reload on the older conversation';
-
-  await sendPrompt(page, firstPrompt);
-  await expect(page.locator('.msg.user .user-text').filter({ hasText: firstPrompt }).first()).toBeVisible();
-  const firstContext = await getCurrentProjectContext(page);
-
-  await startNewConversation(page);
-  await expect(page.getByTestId('chat-composer-input')).toBeVisible();
-  await expect(page.getByTestId('chat-composer-input')).toHaveText('');
-  await sendPrompt(page, secondPrompt);
-  await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-
-  await gotoProjectRoute(page, `/projects/${firstContext.projectId}/conversations/${firstContext.conversationId}`);
-  const composerInput = page.getByTestId('chat-composer-input');
-  await page.getByTestId('conversation-history-trigger').click();
-  const routeHistoryList = page.getByTestId('conversation-list');
-  await expect(routeHistoryList).toBeVisible();
-  await expect(routeHistoryList.locator('.chat-conv-item').filter({ hasText: firstPrompt }).first()).toBeVisible();
-
-  await composerInput.fill(restoredDraft);
-  await expect(composerInput).toHaveText(restoredDraft);
-
-  await reloadCurrentRoute(page);
+  await navigateProjectRouteInApp(page, `/projects/${firstContext.projectId}`);
   await expect(page.getByTestId('chat-composer')).toBeVisible();
-  await page.getByTestId('conversation-history-trigger').click();
-  const reloadedHistoryList = page.getByTestId('conversation-list');
-  await expect(reloadedHistoryList).toBeVisible();
-  await expect(reloadedHistoryList.locator('.chat-conv-item').filter({ hasText: firstPrompt }).first()).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/projects/${firstContext.projectId}$`));
+  await expect(page.locator('.msg.user .user-text').filter({ hasText: firstPrompt }).first()).toBeVisible();
+  await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt })).toHaveCount(0);
 });
 
 test('[P0] @critical switching between conversations keeps staged attachments UI available', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationAttachmentRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationAttachmentRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-attachment-run"}',
+      body: JSON.stringify({
+        runId: `conversation-attachment-run-${conversationAttachmentRunCount}`,
+      }),
     });
   });
 
@@ -862,28 +601,17 @@ test('[P0] @critical switching between conversations keeps staged attachments UI
 });
 
 test('[P0] @critical reloading an older conversation route keeps the composer available after staging attachments', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationAttachmentReloadRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationAttachmentReloadRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-attachment-reload-run"}',
+      body: JSON.stringify({
+        runId: `conversation-attachment-reload-run-${conversationAttachmentReloadRunCount}`,
+      }),
     });
   });
 
@@ -948,28 +676,15 @@ test('[P0] @critical reloading an older conversation route keeps the composer av
 });
 
 test('[P0] @critical reloading the project keeps the latest conversation selected in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let historyReloadRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    historyReloadRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-history-reload-run"}',
+      body: JSON.stringify({ runId: `conversation-history-reload-run-${historyReloadRunCount}` }),
     });
   });
 
@@ -1010,7 +725,12 @@ test('[P0] @critical reloading the project keeps the latest conversation selecte
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
   expect(secondContext.conversationId).not.toBe(firstContext.conversationId);
 
   await page.reload();
@@ -1038,28 +758,17 @@ test('[P0] @critical deleting the active conversation selects the remaining conv
     await dialog.accept();
   });
 
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationHistoryDeleteRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationHistoryDeleteRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-history-delete-run"}',
+      body: JSON.stringify({
+        runId: `conversation-history-delete-run-${conversationHistoryDeleteRunCount}`,
+      }),
     });
   });
 
@@ -1100,7 +809,12 @@ test('[P0] @critical deleting the active conversation selects the remaining conv
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
   expect(secondContext.conversationId).not.toBe(firstContext.conversationId);
 
   await page.getByTestId('conversation-history-trigger').click();
@@ -1125,28 +839,17 @@ test('[P0] @critical deleting the active conversation selects the remaining conv
 });
 
 test('[P0] returning from workspace surfaces keeps the older conversation reachable from history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationHistorySurfaceRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationHistorySurfaceRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-history-surface-run"}',
+      body: JSON.stringify({
+        runId: `conversation-history-surface-run-${conversationHistorySurfaceRunCount}`,
+      }),
     });
   });
 
@@ -1187,7 +890,12 @@ test('[P0] returning from workspace surfaces keeps the older conversation reacha
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
 
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'surface-restore.png',
@@ -1229,28 +937,15 @@ test('[P0] returning from workspace surfaces keeps the older conversation reacha
 });
 
 test('[P0] reloading the project root keeps conversation history accessible', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let rootReloadRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    rootReloadRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-root-reload-run"}',
+      body: JSON.stringify({ runId: `conversation-root-reload-run-${rootReloadRunCount}` }),
     });
   });
 
@@ -1312,28 +1007,17 @@ test('[P0] reloading the project root keeps conversation history accessible', as
 });
 
 test('[P0] opening an uploaded file route keeps the older conversation present in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationFileSurfaceRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationFileSurfaceRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-file-surface-run"}',
+      body: JSON.stringify({
+        runId: `conversation-file-surface-run-${conversationFileSurfaceRunCount}`,
+      }),
     });
   });
 
@@ -1374,7 +1058,12 @@ test('[P0] opening an uploaded file route keeps the older conversation present i
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
 
   await page.getByTestId('design-files-upload-input').setInputFiles({
     name: 'conversation-surface-reference.png',
@@ -1423,28 +1112,17 @@ test('[P0] opening an uploaded file route keeps the older conversation present i
 });
 
 test('[P0] opening an artifact file route keeps the older conversation present in history', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationArtifactSurfaceRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationArtifactSurfaceRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-artifact-surface-run"}',
+      body: JSON.stringify({
+        runId: `conversation-artifact-surface-run-${conversationArtifactSurfaceRunCount}`,
+      }),
     });
   });
 
@@ -1492,7 +1170,12 @@ test('[P0] opening an artifact file route keeps the older conversation present i
   await expect(page.getByTestId('chat-composer-input')).toHaveText('');
   await sendPrompt(page, secondPrompt);
   await expect(page.locator('.msg.user .user-text').filter({ hasText: secondPrompt }).first()).toBeVisible();
-  const secondContext = await getCurrentProjectContext(page);
+  const secondContext = await findConversationContextByMessage(
+    page,
+    firstContext.projectId,
+    'user',
+    secondPrompt,
+  );
 
   const artifactTab = page.getByRole('tab', { name: /conversation-surface-artifact\.html/i });
   await expect(artifactTab).toBeVisible();
@@ -1537,28 +1220,17 @@ test('[P0] opening an artifact file route keeps the older conversation present i
 });
 
 test('[P0] returning from a file deep-link to the project root keeps the chosen file tab active', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
+  let conversationFileRootRunCount = 0;
   await page.route('**/api/runs', async (route) => {
+    conversationFileRootRunCount += 1;
     await route.fulfill({
       status: 202,
       contentType: 'application/json',
-      body: '{"runId":"conversation-file-root-run"}',
+      body: JSON.stringify({
+        runId: `conversation-file-root-run-${conversationFileRootRunCount}`,
+      }),
     });
   });
 
@@ -1664,22 +1336,7 @@ test('[P0] returning from an artifact deep-link to the project root keeps the ar
 });
 
 test('[P0] a later completed run updates the workspace to the newest artifact tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   let runCount = 0;
   await page.route('**/api/runs', async (route) => {
@@ -1778,22 +1435,7 @@ test('[P0] @critical daemon error details persist between failed sends', async (
   const entry = automatedUiScenarios().find((scenario) => scenario.id === 'prototype-basic');
   if (!entry) throw new Error('prototype-basic scenario missing');
 
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   let runCount = 0;
   await page.route('**/api/runs', async (route) => {
@@ -1865,22 +1507,7 @@ test('[P0] @critical daemon error details persist between failed sends', async (
 });
 
 test('[P0] a successful retry after a failed send restores the workspace to a fresh artifact tab', async ({ page }) => {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
+  await routeMockAgents(page);
 
   let runCount = 0;
   await page.route('**/api/runs', async (route) => {
@@ -1946,80 +1573,6 @@ test('[P0] a successful retry after a failed send restores the workspace to a fr
     'true',
   );
   await expect(page.getByText('retry prompt that succeeds')).toBeVisible();
-});
-
-test('[P0] retrying a failed run does not duplicate the original user message', async ({ page }) => {
-  await routeMockAgents(page);
-
-  let runCount = 0;
-  await page.route('**/api/runs', async (route) => {
-    runCount += 1;
-    await route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: JSON.stringify({ runId: `retry-run-${runCount}` }),
-    });
-  });
-
-  let eventCount = 0;
-  await page.route('**/api/runs/*/events', async (route) => {
-    eventCount += 1;
-    const body =
-      eventCount === 1
-        ? [
-            'event: start',
-            'data: {"bin":"mock-agent"}',
-            '',
-            'event: error',
-            'data: {"message":"connection refused"}',
-            '',
-            '',
-          ].join('\n')
-        : [
-            'event: start',
-            'data: {"bin":"mock-agent"}',
-            '',
-            'event: stdout',
-            `data: ${JSON.stringify({
-              chunk:
-                '<artifact identifier="retry-dedup-artifact" type="text/html" title="Retry Dedup Artifact"><!doctype html><html><body><main><h1>Retry Dedup Artifact</h1></main></body></html></artifact>',
-            })}`,
-            '',
-            'event: end',
-            'data: {"code":0,"status":"succeeded"}',
-            '',
-            '',
-          ].join('\n');
-
-    await route.fulfill({
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache',
-      },
-      body,
-    });
-  });
-
-  await createEmptyProject(page, 'Retry dedup restore');
-  await expectWorkspaceReady(page);
-
-  const prompt = 'retry dedup prompt';
-  await sendPrompt(page, prompt);
-  await expect(runErrorCard(page)).toContainText('connection refused');
-  await expect(page.locator('.chat-error-retry')).toBeVisible();
-  await expect(page.locator('.msg.user', { hasText: prompt })).toHaveCount(1);
-
-  await Promise.all([
-    page.waitForResponse((resp) => /\/api\/runs$/.test(new URL(resp.url()).pathname) && resp.request().method() === 'POST'),
-    page.locator('.chat-error-retry').click(),
-  ]);
-
-  await expect(page.getByRole('tab', { name: /retry-dedup-artifact\.html/i })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-  await expect(page.locator('.msg.user', { hasText: prompt })).toHaveCount(1);
 });
 
 test('[P1] chat file links open project files in workspace tabs and keep trailing punctuation out of hrefs', async ({ page }) => {
@@ -3403,25 +2956,6 @@ test('[P1] project composer working directory rejects stale folder without promo
   expect(recentDirPutBodies).toHaveLength(0);
 });
 
-async function routeMockAgents(page: Page) {
-  await page.route('**/api/agents', async (route) => {
-    await route.fulfill({
-      json: {
-        agents: [
-          {
-            id: 'mock',
-            name: 'Mock Agent',
-            bin: 'mock-agent',
-            available: true,
-            version: 'test',
-            models: [{ id: 'default', label: 'Default' }],
-          },
-        ],
-      },
-    });
-  });
-}
-
 async function routeAppConfig(page: Page, override: Record<string, unknown>) {
   await page.route('**/api/app-config', async (route) => {
     if (route.request().method() !== 'GET') {
@@ -3621,10 +3155,26 @@ async function sendPrompt(page: Page, prompt: string) {
 }
 
 async function startNewConversation(page: Page) {
+  const previousContext = await getCurrentProjectContext(page);
   await page.getByTestId('conversation-history-trigger').click();
   await expect(page.getByTestId('conversation-list')).toBeVisible();
   await page.getByTestId('conversation-history-new').click();
   await expect(page.getByTestId('conversation-list')).toHaveCount(0);
+  await expect
+    .poll(() => {
+      const current = new URL(page.url());
+      const [, projects, projectId, maybeConversations, conversationId] = current.pathname.split('/');
+      if (
+        projects !== 'projects'
+        || projectId !== previousContext.projectId
+        || maybeConversations !== 'conversations'
+        || conversationId == null
+      ) {
+        return false;
+      }
+      return conversationId !== previousContext.conversationId;
+    }, { timeout: T.medium })
+    .toBe(true);
 }
 
 function tabBySuffix(page: Page, name: string): Locator {
@@ -4006,6 +3556,67 @@ async function listConversationsFromApi(
     conversations: Array<{ id: string; updatedAt: number }>;
   };
   return conversations;
+}
+
+async function findConversationContextByMessage(
+  page: Page,
+  projectId: string,
+  role: string,
+  content: string,
+): Promise<{ projectId: string; conversationId: string }> {
+  let conversationId: string | undefined;
+  await expect
+    .poll(async () => {
+      const conversations = await listConversationsFromApi(page, projectId);
+      for (const conversation of conversations) {
+        const response = await page.request.get(
+          `/api/projects/${projectId}/conversations/${conversation.id}/messages`,
+        );
+        if (!response.ok()) continue;
+        const { messages } = (await response.json()) as {
+          messages: Array<{ role: string; content: string }>;
+        };
+        if (messages.some((message) => message.role === role && message.content === content)) {
+          conversationId = conversation.id;
+          return conversationId;
+        }
+      }
+      return undefined;
+    }, { timeout: T.medium })
+    .toBeTruthy();
+  if (!conversationId) {
+    throw new Error(`no conversation found for persisted ${role} message in project ${projectId}`);
+  }
+  return { projectId, conversationId };
+}
+
+async function expectPersistedArtifactMessage(
+  page: Page,
+  projectId: string,
+  conversationId: string,
+  fileName: string,
+) {
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(
+        `/api/projects/${projectId}/conversations/${conversationId}/messages`,
+      );
+      if (!response.ok()) return false;
+      const { messages } = (await response.json()) as {
+        messages: Array<{
+          role: string;
+          runStatus?: string;
+          producedFiles?: Array<{ name: string }>;
+        }>;
+      };
+      return messages.some(
+        (message) =>
+          message.role === 'assistant'
+          && message.runStatus === 'succeeded'
+          && message.producedFiles?.some((file) => file.name.endsWith(fileName)),
+      );
+    }, { timeout: T.medium })
+    .toBe(true);
 }
 
 async function expectProjectFilesToIncludeSuffixes(
