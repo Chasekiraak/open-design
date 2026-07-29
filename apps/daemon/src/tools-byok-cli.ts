@@ -30,13 +30,15 @@ export interface ByokCliResult {
 const USAGE = `Usage:
   od byok list [--json] [--daemon-url <url>]
   od byok save --label <name> --protocol <protocol> --base-url <url> \\
-    --model <id> --api-key-stdin [--id <profile-id>] [--api-version <version>] [--json]
+    --model <id> (--api-key-stdin | --no-api-key) [--id <profile-id>] \\
+    [--api-version <version>] [--json]
   od byok test <profile-id> [--json] [--daemon-url <url>]
   od byok delete <profile-id> [--json] [--daemon-url <url>]
 
 Security:
   API keys are accepted only from stdin via --api-key-stdin. Never put a key
   in command arguments, chat, environment variables, manifests, or files.
+  Use --no-api-key only for local/self-hosted endpoints that need no credential.
 `;
 
 const VALUE_FLAGS = new Set([
@@ -48,7 +50,7 @@ const VALUE_FLAGS = new Set([
   'model',
   'api-version',
 ]);
-const BOOLEAN_FLAGS = new Set(['api-key-stdin', 'json', 'help', 'h']);
+const BOOLEAN_FLAGS = new Set(['api-key-stdin', 'no-api-key', 'json', 'help', 'h']);
 const BYOK_PROTOCOLS = new Set([
   'anthropic',
   'openai',
@@ -313,12 +315,17 @@ export async function runByokToolCli(
       if (!providerBaseUrl) {
         return fail('--base-url must be an HTTP(S) URL without credentials, query, or fragment');
       }
-      if (!parsed.booleans.has('api-key-stdin')) {
-        return fail('--api-key-stdin is required; API keys are never accepted in command arguments');
+      const readsApiKey = parsed.booleans.has('api-key-stdin');
+      const isKeyless = parsed.booleans.has('no-api-key');
+      if (readsApiKey === isKeyless) {
+        return fail('choose exactly one of --api-key-stdin or --no-api-key');
       }
-      const readStdin = dependencies.readStdin ?? defaultReadStdin;
-      const apiKey = (await readStdin()).replace(/[\r\n]+$/u, '');
-      if (!apiKey) return fail('stdin did not contain an API key');
+      let apiKey = '';
+      if (readsApiKey) {
+        const readStdin = dependencies.readStdin ?? defaultReadStdin;
+        apiKey = (await readStdin()).replace(/[\r\n]+$/u, '');
+        if (!apiKey) return fail('stdin did not contain an API key');
+      }
       const request: UpsertByokCredentialProfileRequest = {
         ...(parsed.values.id ? { id: parsed.values.id } : {}),
         label: parsed.values.label!,
@@ -328,8 +335,8 @@ export async function runByokToolCli(
         ...(parsed.values['api-version']
           ? { apiVersion: parsed.values['api-version'] }
           : {}),
-        requiresApiKey: true,
-        apiKey,
+        requiresApiKey: readsApiKey,
+        ...(readsApiKey ? { apiKey } : {}),
       };
       const payload = await requestJson(
         fetchImpl,

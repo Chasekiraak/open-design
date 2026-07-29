@@ -96,6 +96,73 @@ describe('secure BYOK CLI', () => {
     expect(`${stdout.join('')}${stderr.join('')}`).not.toContain(secret);
   });
 
+  it('saves an explicit keyless profile without reading stdin', async () => {
+    const keylessProfile = {
+      ...PROFILE,
+      id: 'byok-ollama-local',
+      label: 'Local Ollama',
+      baseUrl: 'http://127.0.0.1:11434',
+      model: 'llama3.2',
+      protocol: 'ollama',
+      requiresApiKey: false,
+      configured: true,
+      keyTail: undefined,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        label: 'Local Ollama',
+        protocol: 'ollama',
+        baseUrl: 'http://127.0.0.1:11434',
+        model: 'llama3.2',
+        requiresApiKey: false,
+      });
+      return new Response(JSON.stringify({ profile: keylessProfile }), {
+        status: 201,
+      });
+    });
+    const { deps, stdout } = dependencies(fetchMock, 'must-not-be-read');
+
+    const result = await runByokToolCli([
+      'save',
+      '--label', 'Local Ollama',
+      '--protocol', 'ollama',
+      '--base-url', 'http://127.0.0.1:11434',
+      '--model', 'llama3.2',
+      '--no-api-key',
+      '--json',
+    ], deps);
+
+    expect(result.exitCode).toBe(0);
+    expect(deps.readStdin).not.toHaveBeenCalled();
+    expect(JSON.parse(stdout.join(''))).toEqual({ profile: keylessProfile });
+  });
+
+  it('rejects conflicting or missing credential mode flags', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const shared = [
+      'save',
+      '--label', 'Local Ollama',
+      '--protocol', 'ollama',
+      '--base-url', 'http://127.0.0.1:11434',
+      '--model', 'llama3.2',
+    ];
+
+    const conflicting = dependencies(fetchMock, 'must-not-be-read');
+    expect((await runByokToolCli([
+      ...shared,
+      '--api-key-stdin',
+      '--no-api-key',
+    ], conflicting.deps)).exitCode).toBe(1);
+    expect(conflicting.stderr.join('')).toContain('exactly one');
+    expect(conflicting.deps.readStdin).not.toHaveBeenCalled();
+
+    const missing = dependencies(fetchMock, 'must-not-be-read');
+    expect((await runByokToolCli(shared, missing.deps)).exitCode).toBe(1);
+    expect(missing.stderr.join('')).toContain('exactly one');
+    expect(missing.deps.readStdin).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('lists, tests, and deletes a profile without exposing extra fields', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
       if (String(url).endsWith('/test')) {
