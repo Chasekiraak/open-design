@@ -162,7 +162,11 @@ const jsonLd = [
       <div class="odp-install-cluster">
         <div class="odp-command-card" aria-label={copy.hero.installAria}>
           <pre><code id="odp-install-instruction">{INSTALL_INSTRUCTION}</code></pre>
+        </div>
+
+        <div class="odp-install-actions">
           <button
+            class="btn btn-primary odp-install-copy"
             type="button"
             data-copy-target="#odp-install-instruction"
             data-idle-label={copy.hero.copy}
@@ -173,11 +177,11 @@ const jsonLd = [
           >
             {copy.hero.copy}
           </button>
-        </div>
 
-        <a class="odp-github-link" href={REPO} target="_blank" rel="noreferrer noopener">
-          {copy.hero.github}
-        </a>
+          <a class="odp-github-link" href={REPO} target="_blank" rel="noreferrer noopener">
+            {copy.hero.github}
+          </a>
+        </div>
       </div>
     </div>
   </section>
