@@ -50,7 +50,7 @@ function asMember(memberId: string): { authorization: string } {
   return { authorization: `member:${memberId}` };
 }
 
-async function startServer() {
+async function startServer({ shared = true }: { shared?: boolean } = {}) {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-comment-perms-'));
   const db = openDatabase(tempDir);
   insertProject(db, { id: PROJECT, name: 'Project', createdAt: 1, updatedAt: 1 });
@@ -81,6 +81,7 @@ async function startServer() {
       authorization?.startsWith('member:') ? authorization.slice('member:'.length) : undefined,
     // p1 is owned by OWNER.
     resolveProjectOwnerMemberId: async () => OWNER,
+    isSharedProject: async () => shared,
     shouldSyncProjectComments: async () => syncComments,
     onCommentCreated: (c) => created.push(c.id),
     onCommentUpdated: (c) => updated.push(c.id),
@@ -157,6 +158,48 @@ async function startServer() {
 }
 
 describe('preview comment permission gating', () => {
+  it('legacy comments in a shared project are owner-only', async () => {
+    const api = await startServer();
+    const legacy = upsertPreviewComment(
+      api.db,
+      PROJECT,
+      CONVERSATION,
+      { target: api.commentTarget, note: 'legacy note' },
+    );
+    expect(legacy?.authorMemberId).toBeUndefined();
+
+    const memberDelete = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${legacy!.id}`,
+      { method: 'DELETE', member: 'm-member' },
+    );
+    expect(memberDelete.status).toBe(403);
+    expect(api.listComments()).toHaveLength(1);
+
+    const ownerDelete = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${legacy!.id}`,
+      { method: 'DELETE', member: OWNER },
+    );
+    expect(ownerDelete.status).toBe(200);
+    expect(api.listComments()).toHaveLength(0);
+  });
+
+  it('legacy comments in an unshared project keep single-user mutation behavior', async () => {
+    const api = await startServer({ shared: false });
+    const legacy = upsertPreviewComment(
+      api.db,
+      PROJECT,
+      CONVERSATION,
+      { target: api.commentTarget, note: 'personal legacy note' },
+    );
+
+    const memberDelete = await api.json(
+      `/api/projects/${PROJECT}/conversations/${CONVERSATION}/comments/${legacy!.id}`,
+      { method: 'DELETE', member: 'm-member' },
+    );
+    expect(memberDelete.status).toBe(200);
+    expect(api.listComments()).toHaveLength(0);
+  });
+
   it('a non-author non-owner member cannot change status or delete', async () => {
     const api = await startServer();
     const comment = await api.createComment('m-author');

@@ -460,7 +460,7 @@ export function BoardComposerPopover({
   onSendBatch: () => void | Promise<void>;
   onRemoveMember: (elementId: string) => void;
   onHoverMember?: (elementId: string | null) => void;
-  onDeleteComment?: (commentId: string) => void | Promise<void>;
+  onDeleteComment?: (commentId: string) => void | Promise<boolean | void>;
   /** Object-URL thumbnails for images the user attached to this comment. */
   images?: { file: File; url: string }[];
   /** Already-saved attachment thumbnails (read-only) for a re-opened comment. */

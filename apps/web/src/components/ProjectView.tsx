@@ -302,6 +302,7 @@ import {
   buildFinalizeCredentialsMissingToast,
   buildFinalizeRequest,
 } from '../lib/resolve-finalize-request';
+import type { CommentSendResult } from './comment-send-result';
 
 type BrandBrowserSnapshot =
   | { status: 'ready'; html: string; css: string; baseUrl: string }
@@ -3867,14 +3868,28 @@ export function ProjectView({
   );
 
   const removePreviewComment = useCallback(
-    async (commentId: string) => {
-      if (!activeConversationId) return;
-      const ok = await deletePreviewComment(project.id, activeConversationId, commentId);
-      if (!ok) return;
+    async (commentId: string): Promise<boolean> => {
+      if (!activeConversationId) return false;
+      const ok = await deletePreviewComment(
+        project.id,
+        activeConversationId,
+        commentId,
+        workspaceContext,
+      );
+      if (!ok) {
+        setProjectActionsToast({
+          message: t('project.previewCommentSaveFailed'),
+          details: null,
+          tone: 'error',
+          ttlMs: 5000,
+        });
+        return false;
+      }
       setPreviewComments((current) => current.filter((comment) => comment.id !== commentId));
       setAttachedComments((current) => removeAttachedComment(current, commentId));
+      return true;
     },
-    [project.id, activeConversationId],
+    [project.id, activeConversationId, workspaceContext, t],
   );
 
   /**
@@ -3940,12 +3955,18 @@ export function ProjectView({
       );
       await Promise.all(
         persistedAttachments.map((attachment) =>
-          patchPreviewCommentStatus(project.id, activeConversationId, attachment.id, status),
+          patchPreviewCommentStatus(
+            project.id,
+            activeConversationId,
+            attachment.id,
+            status,
+            workspaceContext,
+          ),
         ),
       );
       void refreshPreviewComments();
     },
-    [project.id, activeConversationId, refreshPreviewComments],
+    [project.id, activeConversationId, refreshPreviewComments, workspaceContext],
   );
 
   // Maximum number of times we will retry fetching a null status for a
@@ -5285,12 +5306,18 @@ export function ProjectView({
         );
         void Promise.all(
           Array.from(reservedCommentIds, (commentId) =>
-            patchPreviewCommentStatus(project.id, input.conversationId, commentId, 'applying'),
+            patchPreviewCommentStatus(
+              project.id,
+              input.conversationId,
+              commentId,
+              'applying',
+              workspaceContext,
+            ),
           ),
         ).catch(() => {});
       }
     }
-  }, [enqueueChatSend, project.id]);
+  }, [enqueueChatSend, project.id, workspaceContext]);
 
   const handleSend = useCallback(
     async (
@@ -5349,7 +5376,10 @@ export function ProjectView({
           commentAttachments,
           meta: { ...(meta ?? {}), sessionMode: runSessionMode },
         });
-        return false;
+        // `true` means the send has been durably accepted by this view's
+        // queue. Callers that own persisted annotations may only remove them
+        // after this acknowledgement; preflight rejection remains `false`.
+        return true;
       }
       if (currentConversationBusy) {
         queueChatSendForCurrentConversation({
@@ -6843,7 +6873,13 @@ export function ProjectView({
         );
         void Promise.all(
           stuckApplying.map((comment) =>
-            patchPreviewCommentStatus(project.id, comment.conversationId, comment.id, 'open'),
+            patchPreviewCommentStatus(
+              project.id,
+              comment.conversationId,
+              comment.id,
+              'open',
+              workspaceContext,
+            ),
           ),
         ).catch(() => {});
       }
@@ -6861,7 +6897,7 @@ export function ProjectView({
       );
       if (started) removeQueuedChatSend(id);
     })();
-  }, [armSlideNavForQueuedSend, currentConversationBusy, handleSend, handleStop, prioritizeQueuedChatSend, project.id, removeQueuedChatSend]);
+  }, [armSlideNavForQueuedSend, currentConversationBusy, handleSend, handleStop, prioritizeQueuedChatSend, project.id, removeQueuedChatSend, workspaceContext]);
 
   useEffect(() => {
     if (currentConversationBusy) {
@@ -7030,9 +7066,14 @@ export function ProjectView({
   ]);
 
   const handleSendBoardCommentAttachments = useCallback(
-    async (commentAttachments: ChatCommentAttachment[], images: File[] = []) => {
-      if (currentConversationQueueDisabled) return false;
-      if (commentAttachments.length === 0 && images.length === 0) return false;
+    async (
+      commentAttachments: ChatCommentAttachment[],
+      images: File[] = [],
+    ): Promise<CommentSendResult> => {
+      if (currentConversationQueueDisabled) return { status: 'rejected' };
+      if (commentAttachments.length === 0 && images.length === 0) {
+        return { status: 'rejected' };
+      }
       setWorkspaceFocused(false);
       setCommentInspectorActive(false);
       // Upload any attached images once, then queue. Each comment becomes its
@@ -7041,11 +7082,14 @@ export function ProjectView({
       let uploaded: ChatAttachment[] = [];
       if (images.length > 0) {
         const result = await uploadProjectFiles(project.id, images, undefined, workspaceContext);
+        if (result.uploaded.length !== images.length) return { status: 'rejected' };
         uploaded = result.uploaded;
       }
       if (commentAttachments.length === 0) {
-        if (uploaded.length > 0) await handleSend('', uploaded, [], { queueOnly: true, entryFrom: 'comment' });
-        return true;
+        const queued = uploaded.length > 0
+          ? await handleSend('', uploaded, [], { queueOnly: true, entryFrom: 'comment' })
+          : false;
+        return { status: queued ? 'queued' : 'rejected' };
       }
       for (let i = 0; i < commentAttachments.length; i++) {
         const commentAttachment = commentAttachments[i]!;
@@ -7053,16 +7097,17 @@ export function ProjectView({
         const prompt = commentTaskQuery(commentAttachment);
         // Comment/board pin → run: tag entry_from='comment' so the dashboard
         // separates annotation-driven runs from plain composer sends.
-        await handleSend(
+        const queued = await handleSend(
           prompt,
           mergeChatAttachments(i === 0 ? uploaded : [], savedImages),
           [commentTaskContextAttachment(commentAttachment)],
           { queueOnly: true, entryFrom: 'comment' },
         );
+        if (!queued) return { status: 'rejected' };
       }
-      return true;
+      return { status: 'queued' };
     },
-    [handleSend, project.id, currentConversationQueueDisabled],
+    [handleSend, project.id, currentConversationQueueDisabled, workspaceContext],
   );
   const commentQueueOnSend = currentConversationBusy && !currentConversationQueueDisabled;
 

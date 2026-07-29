@@ -4,6 +4,10 @@ import { Button, Input, Select } from '@open-design/components';
 import { CenteredLoader } from './Loading';
 import { APP_CHROME_FILE_ACTIONS_ID, APP_CHROME_FILE_ACTIONS_SELECTOR } from './AppChromeHeader';
 import {
+  commentSendSucceeded,
+  type CommentSendResult,
+} from './comment-send-result';
+import {
   buildSocialSharePayload,
   OPEN_DESIGN_GITHUB_REPO_URL,
   workspaceContextHasTeamIdentity,
@@ -1463,7 +1467,7 @@ interface Props {
   commentSendDisabled?: boolean;
   previewComments?: PreviewComment[];
   onSavePreviewComment?: (target: PreviewCommentTarget, note: string, attachAfterSave: boolean, images?: File[], commentId?: string) => Promise<PreviewComment | null>;
-  onRemovePreviewComment?: (commentId: string) => Promise<void>;
+  onRemovePreviewComment?: (commentId: string) => Promise<boolean>;
   /**
    * Persist a drag-reorder of the sidebar's display order (recvq5BVsolIxi
    * Phase 2): `sortKey` is the value the caller computed for `commentId`
@@ -1471,7 +1475,7 @@ interface Props {
    * canvas pin number stays whatever it already was.
    */
   onReorderPreviewComment?: (commentId: string, sortKey: number) => Promise<void>;
-  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<boolean | void> | boolean | void;
+  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<CommentSendResult> | CommentSendResult;
   onFileSaved?: () => Promise<void> | void;
   onBrandExtractionStopRequest?: () => void;
   // Open `openName` as a tab (focusing it) and close `closeName` in one
@@ -6746,9 +6750,9 @@ function HtmlViewer({
   commentSendDisabled?: boolean;
   previewComments?: PreviewComment[];
   onSavePreviewComment?: (target: PreviewCommentTarget, note: string, attachAfterSave: boolean, images?: File[], commentId?: string) => Promise<PreviewComment | null>;
-  onRemovePreviewComment?: (commentId: string) => Promise<void>;
+  onRemovePreviewComment?: (commentId: string) => Promise<boolean>;
   onReorderPreviewComment?: (commentId: string, sortKey: number) => Promise<void>;
-  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<boolean | void> | boolean | void;
+  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<CommentSendResult> | CommentSendResult;
   onFileSaved?: () => Promise<void> | void;
   onBrandExtractionStopRequest?: () => void;
   onOpenFileReplacing?: (openName: string, closeName: string) => void;
@@ -11519,21 +11523,33 @@ function HtmlViewer({
 
   async function sendBoardBatch() {
     if (!activeCommentTarget || !onSendBoardCommentAttachments) return;
-    const nextNotes = [...queuedBoardNotes];
-    if (commentDraft.trim()) nextNotes.push(commentDraft.trim());
-    if (nextNotes.length === 0 && boardImages.length === 0) {
-      const existingComment = currentActiveComposerComment();
-      if (existingComment) {
-        setSendingBoardBatch(true);
-        try {
-          await onSendBoardCommentAttachments(commentsToAttachments([existingComment]));
-          clearBoardComposer();
-        } finally {
-          setSendingBoardBatch(false);
+    const existingComment = currentActiveComposerComment();
+    const sendingUnchangedSavedComment = Boolean(
+      existingComment
+      && queuedBoardNotes.length === 0
+      && boardImages.length === 0
+      && commentDraft.trim() === existingComment.note.trim(),
+    );
+    if (existingComment && sendingUnchangedSavedComment) {
+      setSendingBoardBatch(true);
+      try {
+        const result = await onSendBoardCommentAttachments(
+          commentsToAttachments([existingComment]),
+        );
+        if (!commentSendSucceeded(result)) return;
+        if (onRemovePreviewComment) {
+          const removed = await onRemovePreviewComment(existingComment.id);
+          if (!removed) return;
         }
+        clearBoardComposer();
+      } finally {
+        setSendingBoardBatch(false);
       }
       return;
     }
+    const nextNotes = [...queuedBoardNotes];
+    if (commentDraft.trim()) nextNotes.push(commentDraft.trim());
+    if (nextNotes.length === 0 && boardImages.length === 0) return;
     setSendingBoardBatch(true);
     try {
       const existingAttachments = currentActiveComposerAttachments();
@@ -11547,11 +11563,11 @@ function HtmlViewer({
           ? { ...attachment, imageAttachments: existingAttachments }
           : attachment
       ));
-      const accepted = await onSendBoardCommentAttachments(
+      const result = await onSendBoardCommentAttachments(
         attachments,
         boardImages,
       );
-      if (accepted === false) return;
+      if (!commentSendSucceeded(result)) return;
       clearBoardComposer();
     } finally {
       setSendingBoardBatch(false);
@@ -12528,7 +12544,12 @@ function HtmlViewer({
   const iAmProjectOwner = collab.isOwner;
   const commentAuthoredByMe = (comment: PreviewComment | null | undefined): boolean => {
     const authorId = comment?.authorMemberId ?? null;
-    return authorId == null || authorId === myMemberId;
+    // A legacy shared comment without an author is deliberately owner-only.
+    // Treating it as "mine" for every member made the client advertise a
+    // destructive action the daemon must reject. Personal/unshared comments
+    // retain their historical single-user behavior.
+    if (authorId == null) return !collab.enabled || iAmProjectOwner;
+    return authorId === myMemberId;
   };
   const canSendCommentToAgent = (comment: PreviewComment | null | undefined): boolean =>
     commentAuthoredByMe(comment) || iAmProjectOwner;
@@ -12600,7 +12621,8 @@ function HtmlViewer({
       }}
       onHoverMember={setHoveredPodMemberId}
       onDeleteComment={onRemovePreviewComment ? async (commentId) => {
-        await onRemovePreviewComment(commentId);
+        const removed = await onRemovePreviewComment(commentId);
+        if (!removed) return;
         clearBoardComposer();
         setSelectedSideCommentIds((current) => {
           if (!current.has(commentId)) return current;
@@ -12728,18 +12750,45 @@ function HtmlViewer({
       onSendSelected={async () => {
         if (!onSendBoardCommentAttachments) return;
         const selected = visibleSideComments.filter(
-          (comment) => selectedSideCommentIds.has(comment.id),
+          (comment) => (
+            selectedSideCommentIds.has(comment.id)
+            && canSendCommentToAgent(comment)
+          ),
         );
         if (selected.length === 0) return;
         fireCommentPopoverClick('send_to_chat');
         const sentIds = new Set(selected.map((comment) => comment.id));
         setSendingBoardBatch(true);
         try {
-          const accepted = await onSendBoardCommentAttachments(commentsToAttachments(selected));
-          if (accepted !== false) {
-            setSelectedSideCommentIds(new Set());
-            setActivePreviewCommentId((current) => current && sentIds.has(current) ? null : current);
+          const result = await onSendBoardCommentAttachments(
+            commentsToAttachments(selected),
+          );
+          if (!commentSendSucceeded(result)) return;
+          const removedIds = new Set<string>();
+          if (onRemovePreviewComment) {
+            const removals = await Promise.all(
+              selected.map(async (comment) => ({
+                id: comment.id,
+                removed: await onRemovePreviewComment(comment.id),
+              })),
+            );
+            for (const removal of removals) {
+              if (removal.removed) removedIds.add(removal.id);
+            }
+            if (removedIds.size !== selected.length) {
+              setSelectedSideCommentIds((current) => {
+                const next = new Set(current);
+                for (const id of removedIds) next.delete(id);
+                return next;
+              });
+              setActivePreviewCommentId((current) => (
+                current && removedIds.has(current) ? null : current
+              ));
+              return;
+            }
           }
+          setSelectedSideCommentIds(new Set());
+          setActivePreviewCommentId((current) => current && sentIds.has(current) ? null : current);
         } finally {
           setSendingBoardBatch(false);
         }

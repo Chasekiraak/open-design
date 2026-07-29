@@ -42,6 +42,13 @@ export interface RegisterProjectCommentRoutesDeps extends RouteDeps<'db' | 'proj
    */
   resolveProjectOwnerMemberId?: (projectId: string) => Promise<string | null>;
   /**
+   * Server-authoritative shared-project test. Legacy comments without an
+   * author remain mutable in personal/unshared projects, but in a shared
+   * project they are owner-only. Resolution failure must deny rather than
+   * degrading open.
+   */
+  isSharedProject?: (projectId: string) => Promise<boolean>;
+  /**
    * Whether this project should still sync comment mutations to the team relay.
    * Local comments are allowed to save regardless; this gate only prevents stale
    * pulled copies from continuing to publish into a project after it leaves the
@@ -147,13 +154,31 @@ export function registerProjectCommentRoutes(app: Express, ctx: RegisterProjectC
     comment: PreviewComment,
   ): Promise<boolean> {
     const author = comment.authorMemberId;
-    if (!author) return true;
-    const me = await resolveCaller(req);
+    if (!author) {
+      if (!ctx.isSharedProject) return true;
+      let shared: boolean;
+      try {
+        shared = await ctx.isSharedProject(projectId);
+      } catch {
+        return false;
+      }
+      if (!shared) return true;
+    }
+    let me: string | undefined;
+    try {
+      me = await resolveCaller(req);
+    } catch {
+      return false;
+    }
     if (!me) return false;
-    if (me === author) return true;
+    if (author && me === author) return true;
     if (ctx.resolveProjectOwnerMemberId) {
-      const owner = await ctx.resolveProjectOwnerMemberId(projectId);
-      if (owner && owner === me) return true;
+      try {
+        const owner = await ctx.resolveProjectOwnerMemberId(projectId);
+        if (owner && owner === me) return true;
+      } catch {
+        return false;
+      }
     }
     return false;
   }

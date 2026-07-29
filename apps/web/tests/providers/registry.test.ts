@@ -11,6 +11,7 @@ import {
   CLOUDFLARE_PAGES_PROVIDER_ID,
   connectConnector,
   DEFAULT_DEPLOY_PROVIDER_ID,
+  deletePreviewComment,
   deployProjectFile,
   fetchAgentsStream,
   fetchCloudflarePagesZones,
@@ -28,6 +29,7 @@ import {
   isDeployProviderId,
   openFolderDialog,
   patchPreviewCommentSortKey,
+  patchPreviewCommentStatus,
   updateDeployConfig,
   uploadProjectFiles,
   upsertPreviewComment,
@@ -374,6 +376,64 @@ describe('upsertPreviewComment', () => {
 
     const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+  });
+});
+
+describe('preview comment scoped mutations', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches workspace identity headers to status updates', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => previewCommentResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchPreviewCommentStatus(
+      'project-1',
+      'conv-1',
+      'cmt_1',
+      'applying',
+      personalWorkspaceContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments/cmt_1',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
+  });
+
+  it('attaches workspace identity headers to deletes', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ ok: true }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deletePreviewComment(
+      'project-1',
+      'conv-1',
+      'cmt_1',
+      personalWorkspaceContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/conversations/conv-1/comments/cmt_1',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'x-od-workspace-id': 'ws-personal',
+          'x-od-workspace-member-id': 'wm-1',
+        }),
+      }),
+    );
   });
 });
 

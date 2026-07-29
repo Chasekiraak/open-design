@@ -5478,6 +5478,7 @@ export async function startServer({
     resolveAuthorMemberId: async (authorization) =>
       (await collab.workspaceContext.current({ authorization }))?.workspaceMemberId,
     resolveProjectOwnerMemberId: resolveSharedProjectOwner,
+    isSharedProject: isSharedTeamProject,
     shouldSyncProjectComments: async (_authorization, projectId) => isSharedTeamProject(projectId),
     ...(collabCloud
       ? {

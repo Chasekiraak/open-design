@@ -2164,13 +2164,17 @@ export async function patchPreviewCommentStatus(
   conversationId: string,
   commentId: string,
   status: PreviewCommentStatus,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<PreviewComment | null> {
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}),
+        },
         body: JSON.stringify({ status }),
       },
     );
@@ -2226,11 +2230,15 @@ export async function deletePreviewComment(
   projectId: string,
   conversationId: string,
   commentId: string,
+  workspaceContext?: WorkspaceCollabContext | null,
 ): Promise<boolean> {
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/comments/${encodeURIComponent(commentId)}`,
-      { method: 'DELETE' },
+      {
+        method: 'DELETE',
+        headers: workspaceContext ? workspaceProjectHeaders(workspaceContext) : undefined,
+      },
     );
     return resp.ok;
   } catch {

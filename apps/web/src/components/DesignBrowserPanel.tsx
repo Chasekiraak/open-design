@@ -29,6 +29,10 @@ import {
 import { useT } from '../i18n';
 import type { Dict } from '../i18n/types';
 import {
+  commentSendSucceeded,
+  type CommentSendResult,
+} from './comment-send-result';
+import {
   registerBrandBrowser,
   type BrandBrowserHandle,
   type BrandBrowserPageSnapshotResult,
@@ -262,8 +266,8 @@ interface DesignBrowserPanelProps {
   onPageInfoChange?: (info: BrowserPageInfo) => void;
   previewComments?: PreviewComment[];
   onSavePreviewComment?: (target: PreviewCommentTarget, note: string, attachAfterSave: boolean, images?: File[], commentId?: string) => Promise<PreviewComment | null>;
-  onRemovePreviewComment?: (commentId: string) => Promise<void>;
-  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<boolean | void> | boolean | void;
+  onRemovePreviewComment?: (commentId: string) => Promise<boolean>;
+  onSendBoardCommentAttachments?: (attachments: ChatCommentAttachment[], images?: File[]) => Promise<CommentSendResult> | CommentSendResult;
   onAddImageToChat?: (attachment: ChatAttachment) => void;
   onRequestBrowserUsePrompt?: (prompt: string) => void;
   onPageSnapshotToast?: (event: BrowserPageSnapshotToastEvent) => void;
@@ -2276,18 +2280,31 @@ export function DesignBrowserPanel({
       setStatusMessage(t('designBrowser.status.commentSendingUnavailable'));
       return;
     }
-    const notes = [...queuedCommentNotes];
-    if (commentDraft.trim()) notes.push(commentDraft.trim());
-    if (notes.length === 0 && browserImages.length === 0 && activeSavedComment) {
+    const sendingUnchangedSavedComment = Boolean(
+      activeSavedComment
+      && queuedCommentNotes.length === 0
+      && browserImages.length === 0
+      && commentDraft.trim() === activeSavedComment.note.trim(),
+    );
+    if (activeSavedComment && sendingUnchangedSavedComment) {
       setSendingComment(true);
       try {
-        await onSendBoardCommentAttachments(commentsToAttachments([activeSavedComment]));
+        const result = await onSendBoardCommentAttachments(
+          commentsToAttachments([activeSavedComment]),
+        );
+        if (!commentSendSucceeded(result)) return;
+        if (onRemovePreviewComment) {
+          const removed = await onRemovePreviewComment(activeSavedComment.id);
+          if (!removed) return;
+        }
         clearBrowserTool();
       } finally {
         setSendingComment(false);
       }
       return;
     }
+    const notes = [...queuedCommentNotes];
+    if (commentDraft.trim()) notes.push(commentDraft.trim());
     if (notes.length === 0 && browserImages.length === 0) return;
     setSendingComment(true);
     try {
@@ -2302,11 +2319,11 @@ export function DesignBrowserPanel({
           ? { ...attachment, imageAttachments: existingAttachments }
           : attachment
       ));
-      const accepted = await onSendBoardCommentAttachments(
+      const result = await onSendBoardCommentAttachments(
         attachments,
         browserImages,
       );
-      if (accepted === false) return;
+      if (!commentSendSucceeded(result)) return;
       clearBrowserTool();
     } finally {
       setSendingComment(false);
@@ -2881,7 +2898,7 @@ function BrowserCommentComposer({
   notes: string[];
   onAddDraft: () => void;
   onClose: () => void;
-  onDeleteComment?: (commentId: string) => Promise<void> | void;
+  onDeleteComment?: (commentId: string) => Promise<boolean | void> | void;
   onDraft: (value: string) => void;
   onRemoveQueuedNote: (index: number) => void;
   onSaveComment: () => void;

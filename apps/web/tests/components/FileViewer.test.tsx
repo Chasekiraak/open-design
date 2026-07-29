@@ -6704,7 +6704,9 @@ describe('FileViewer tweaks toolbar', () => {
   });
 
   it('lets element comments queue to chat while a task is running', async () => {
-    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue(undefined);
+    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
+      status: 'queued',
+    });
     render(
       <FileViewer
         projectId="project-1"
@@ -6749,7 +6751,9 @@ describe('FileViewer tweaks toolbar', () => {
   });
 
   it('keeps the comment draft when chat queueing declines the send', async () => {
-    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue(false);
+    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
+      status: 'rejected',
+    });
     render(
       <FileViewer
         projectId="project-1"
@@ -7058,6 +7062,100 @@ describe('FileViewer tweaks toolbar', () => {
     });
     expect(screen.queryByTestId('comment-saved-marker-pin-transition')).toBeNull();
     expect(screen.queryByText('Do not recreate this stale comment')).toBeNull();
+  });
+
+  it('keeps a saved comment open when deletion is rejected', async () => {
+    const comment: PreviewComment = {
+      id: 'comment-delete-rejected',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-delete-rejected',
+      selector: '[data-od-pin="pin-delete-rejected"]',
+      label: 'pin-delete-rejected',
+      text: '',
+      htmlHint: '',
+      position: { x: 40, y: 52, width: 18, height: 18 },
+      note: 'Retain me',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const onRemovePreviewComment = vi.fn().mockResolvedValue(false);
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[comment]}
+        onRemovePreviewComment={onRemovePreviewComment}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open comment for pin-delete-rejected',
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(onRemovePreviewComment).toHaveBeenCalledWith(comment.id));
+    expect(screen.getByTestId('comment-popover-input')).toBeTruthy();
+    expect(screen.getByTestId('comment-saved-marker-pin-delete-rejected')).toBeTruthy();
+  });
+
+  it('keeps a saved comment when send is rejected and removes it only after queue acceptance', async () => {
+    const comment: PreviewComment = {
+      id: 'comment-send-result',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-send-result',
+      selector: '[data-od-pin="pin-send-result"]',
+      label: 'pin-send-result',
+      text: '',
+      htmlHint: '',
+      position: { x: 40, y: 52, width: 18, height: 18 },
+      note: 'Send me safely',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const onSendBoardCommentAttachments = vi.fn()
+      .mockResolvedValueOnce({ status: 'rejected' })
+      .mockResolvedValueOnce({ status: 'queued' });
+    const onRemovePreviewComment = vi.fn().mockResolvedValue(true);
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[comment]}
+        onSendBoardCommentAttachments={onSendBoardCommentAttachments}
+        onRemovePreviewComment={onRemovePreviewComment}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open comment for pin-send-result',
+    }));
+    fireEvent.click(screen.getByTestId('comment-add-send'));
+
+    await waitFor(() => expect(onSendBoardCommentAttachments).toHaveBeenCalledTimes(1));
+    expect(onRemovePreviewComment).not.toHaveBeenCalled();
+    expect(screen.getByTestId('comment-popover-input')).toBeTruthy();
+
+    await waitFor(() => {
+      expect((screen.getByTestId('comment-add-send') as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId('comment-add-send'));
+    await waitFor(() => expect(onSendBoardCommentAttachments).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onRemovePreviewComment).toHaveBeenCalledWith(comment.id));
+    await waitFor(() => expect(screen.queryByTestId('comment-popover')).toBeNull());
   });
 
   it('moves focus between comment side panel toggles when collapsing and expanding without a pre-focused click target', async () => {
@@ -7609,6 +7707,7 @@ describe('FileViewer tweaks toolbar', () => {
           onRemovePreviewComment={async (commentId) => {
             removed.push(commentId);
             setComments((current) => current.filter((comment) => comment.id !== commentId));
+            return true;
           }}
         />
       );

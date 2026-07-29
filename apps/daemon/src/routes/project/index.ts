@@ -136,6 +136,7 @@ export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | '
    */
   resolveAuthorMemberId?: (authorization: string | undefined) => Promise<string | undefined>;
   resolveProjectOwnerMemberId?: (projectId: string) => Promise<string | null>;
+  isSharedProject?: (projectId: string) => Promise<boolean>;
   onCommentCreated?: (comment: PreviewComment) => void;
   onCommentUpdated?: (comment: PreviewComment) => void;
   onCommentDeleted?: (comment: PreviewComment) => void;
