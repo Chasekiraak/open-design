@@ -187,7 +187,13 @@ export async function runPackagedHeadless(
       const request = normalizeDesktopSidecarMessage(message);
       switch (request.type) {
         case SIDECAR_MESSAGES.STATUS:
-          return { pid: process.pid, state: "running", url: webUrl, updatedAt: new Date().toISOString() };
+          return {
+            pid: process.pid,
+            state: "running",
+            updatedAt: new Date().toISOString(),
+            url: webUrl,
+            windowVisible: false,
+          };
         case SIDECAR_MESSAGES.SHUTDOWN:
           setImmediate(() => {
             void shutdown().finally(() => process.exit(0));
