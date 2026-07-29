@@ -87,7 +87,11 @@ import {
 } from './providers/daemon';
 import { AMR_LOGIN_STATUS_EVENT } from './components/amrLoginPolling';
 import { CollabDemoView } from './collab/CollabDemoView';
-import { useWorkspaceBilling, useWorkspaceContext } from './collab/useWorkspaceContext';
+import {
+  beginWorkspaceScopedRead,
+  useWorkspaceBilling,
+  useWorkspaceContext,
+} from './collab/useWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
 import { deriveTabIdentityScope, UNSET_ACCOUNT_BUCKET } from './collab/tab-scope';
 import { CommunityView } from './components/CommunityView';
@@ -1763,7 +1767,13 @@ function AppInner() {
     // headerless read is not the "unfiltered" list — it is the list with every
     // workspace-claimed skill removed, including the ones claimed by the
     // workspace the user is actually in.
-    const list = await fetchSkills(workspaceContextRef.current);
+    const read = beginWorkspaceScopedRead(workspaceContextRef.current);
+    const list = await fetchSkills(read.context);
+    // A read for the workspace the user has since LEFT must not restore that
+    // workspace's catalog over the current one — see `beginWorkspaceScopedRead`.
+    // Skipping the gate too is deliberate: this response is not an answer about
+    // the current identity, and the newer read that replaced it will mark it.
+    if (!read.isStillCurrent(workspaceContextRef.current)) return;
     setSkills(list);
     markSkillRegistryReady('functional');
   }, [markSkillRegistryReady]);
@@ -2908,8 +2918,13 @@ function AppInner() {
 
   const handleSkillsChanged = useCallback(
     (affectedSkillId?: string) => {
-      // Scoped, like every other app-level skills read — see `refreshSkills`.
-      void fetchSkills(workspaceContextRef.current).then((list) => setSkills(list));
+      // Scoped AND guarded on commit, like every other app-level skills read —
+      // see `refreshSkills` and `beginWorkspaceScopedRead`.
+      const skillsRead = beginWorkspaceScopedRead(workspaceContextRef.current);
+      void fetchSkills(skillsRead.context).then((list) => {
+        if (!skillsRead.isStillCurrent(workspaceContextRef.current)) return;
+        setSkills(list);
+      });
       void fetchDesignTemplates().then((list) => setDesignTemplates(list));
       iframeKeepAlivePool.evictMatching(
         (entry) => {

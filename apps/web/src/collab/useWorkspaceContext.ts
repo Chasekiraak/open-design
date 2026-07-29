@@ -115,6 +115,55 @@ export function workspaceIdentityCacheKey(
 }
 
 /**
+ * One workspace-scoped read: the identity it was issued for, plus the check that
+ * must pass before its response may be committed.
+ *
+ * Keying a request (or its `coalescedGet` entry) by identity stops the WRONG
+ * IDENTITY BEING SERVED an answer fetched for someone else. It does nothing
+ * about the other direction: a read issued for identity A resolves later, and by
+ * then the caller may be identity B. Committing that late answer restores A's
+ * data under B — the exact staleness the identity keys exist to prevent,
+ * arriving through the back door. Reverse-order completion is not exotic here;
+ * a workspace switch is precisely when one read is in flight and another starts.
+ *
+ * So every workspace-scoped read follows the same four steps:
+ *
+ *   const read = beginWorkspaceScopedRead(contextRef.current);
+ *   const data = await fetchSomething(read.context);
+ *   if (!read.isStillCurrent(contextRef.current)) return;   // ← the invariant
+ *   commit(data);
+ *
+ * Two rules make it actually hold:
+ *
+ *  1. Request with `read.context`, never with the caller's own variable, so the
+ *     request and the guard can never disagree about whose data was asked for.
+ *  2. Compare against a REF, never a closed-over prop or state value. A closure
+ *     captures the identity the read was issued for, so comparing against it
+ *     always succeeds and guards nothing.
+ *
+ * This is the cross-component form of the `requestEpochRef` ordering guard
+ * `useWorkspaceContext` already applies to its own read; identity is the right
+ * discriminator for reads that are scoped BY identity.
+ */
+export interface WorkspaceScopedRead {
+  /** The context to send with the request — see rule 1 above. */
+  readonly context: WorkspaceCollabContext | null;
+  /** Whether `current` is still the identity this read was issued for. */
+  isStillCurrent(current: WorkspaceCollabContext | null | undefined): boolean;
+}
+
+export function beginWorkspaceScopedRead(
+  context: WorkspaceCollabContext | null | undefined,
+): WorkspaceScopedRead {
+  const issuedFor = context ?? null;
+  const identity = workspaceIdentityCacheKey(issuedFor);
+  return {
+    context: issuedFor,
+    isStillCurrent: (current) => workspaceIdentityCacheKey(current ?? null) === identity,
+  };
+}
+
+/**
  * `GET /api/workspace/context` is the read that ESTABLISHES the caller's
  * identity, so — unlike every other workspace read — it cannot be keyed on the
  * identity it is fetching, and it takes no workspace argument the key could

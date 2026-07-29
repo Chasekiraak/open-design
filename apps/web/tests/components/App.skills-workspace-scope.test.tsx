@@ -17,6 +17,7 @@
 // so `route.kind` stays 'home' and no route change fires. Skills never did.
 
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import type { SkillSummary } from '@open-design/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../../src/App';
@@ -45,7 +46,14 @@ import {
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 
 vi.mock('../../src/components/EntryView', () => ({
-  EntryView: () => <main><div data-testid="entry-home-surface" /></main>,
+  EntryView: ({ skills }: { skills: Array<{ id: string }> }) => (
+    <main>
+      <div data-testid="entry-home-surface" />
+      {skills.map((skill) => (
+        <div key={skill.id} data-testid={`entry-skill-${skill.id}`} />
+      ))}
+    </main>
+  ),
 }));
 
 vi.mock('../../src/components/ProjectView', () => ({
@@ -172,6 +180,25 @@ function skillsReadScopes(): Array<string | undefined> {
 
 const projects: Project[] = [];
 
+function skill(id: string): SkillSummary {
+  return {
+    id,
+    name: id,
+    description: id,
+    triggers: [],
+    mode: 'prototype',
+    source: 'user',
+  } as unknown as SkillSummary;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('App skills list — workspace scope', () => {
   beforeEach(() => {
     resetWorkspaceContextCache();
@@ -240,5 +267,60 @@ describe('App skills list — workspace scope', () => {
 
     await waitFor(() => expect(skillsReadScopes()).toContain('ws-b'));
     expect(skillsReadScopes()).toEqual(['ws-a', 'ws-b']);
+  });
+
+  // Issuing the right request is only half the guarantee. Each read resolves
+  // later, and nothing stopped a read issued FOR the workspace the user has
+  // since left from committing when it finally landed — restoring that
+  // workspace's catalog over the current one, which is the very staleness this
+  // change exists to remove, arriving through the back door.
+  it("discards a slow read belonging to the workspace the user has left", async () => {
+    let activeWorkspaceId = 'ws-a';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        return {
+          ok: true,
+          json: async () =>
+            pathname.endsWith('/workspace/context')
+              ? workspaceContextPayload(activeWorkspaceId)
+              : {},
+        } as Response;
+      }),
+    );
+
+    const readA = deferred<SkillSummary[]>();
+    const readB = deferred<SkillSummary[]>();
+    vi.mocked(fetchSkills).mockImplementation((context) =>
+      context?.workspaceId === 'ws-b' ? readB.promise : readA.promise,
+    );
+
+    render(<App />);
+    await waitFor(() => expect(skillsReadScopes()).toContain('ws-a'));
+
+    // Switch while ws-a's read is still in flight.
+    activeWorkspaceId = 'ws-b';
+    await act(async () => {
+      notifyWorkspaceContextRefresh();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(skillsReadScopes()).toContain('ws-b'));
+
+    // Reverse order: the workspace the user is actually IN answers first…
+    await act(async () => {
+      readB.resolve([skill('skill-from-b')]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy());
+
+    // …and the abandoned workspace answers second. It must change nothing.
+    await act(async () => {
+      readA.resolve([skill('skill-from-a')]);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy();
+    expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
   });
 });

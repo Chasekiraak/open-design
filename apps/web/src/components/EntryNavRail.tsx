@@ -58,6 +58,7 @@ import type { EntrySettingsSection } from './EntrySettingsMenu';
 import { useI18n } from '../i18n';
 import { useDismissOnOutsideInteraction } from '../hooks/useDismissOnOutsideInteraction';
 import {
+  beginWorkspaceScopedRead,
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
   notifyWorkspaceContextRefresh,
@@ -681,6 +682,11 @@ export function EntryNavRail({
     setAccountOpen(false);
   });
   const [teamOpen, setTeamOpen] = useState(false);
+  // The LATEST context, for async work to compare against. `loadWorkspaceDirectory`
+  // closes over the render's `context` prop, which is the identity its read was
+  // issued for — so only a ref can answer "has the identity moved since?".
+  const contextRef = useRef(context);
+  contextRef.current = context;
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>(
     () => attributableWorkspaceDirectory(context) ?? [],
   );
@@ -748,28 +754,40 @@ export function EntryNavRail({
         : [];
 
   async function loadWorkspaceDirectory() {
+    // Capture the identity this read is FOR, and compare against `contextRef`
+    // (not the closed-over `context`, which is by definition the identity we are
+    // reading for) before committing anything — see `beginWorkspaceScopedRead`.
+    const read = beginWorkspaceScopedRead(contextRef.current);
     // Only show the loading row when there is nothing to show yet. With a warm
     // cache the list is already on screen and this read just revalidates it —
     // but a cache belonging to another account counts as nothing to show.
-    if (attributableWorkspaceDirectory(context) === null) setWorkspaceDirectoryLoading(true);
+    if (attributableWorkspaceDirectory(read.context) === null) {
+      setWorkspaceDirectoryLoading(true);
+    }
     try {
       // The coalescing key carries the caller's identity for the same reason the
       // module cache does: `coalescedGet` shares a settled result for a second,
       // and this read's answer depends on WHO asked.
-      const cacheKey = `workspace-directory:${workspaceIdentityCacheKey(context)}`;
+      const cacheKey = `workspace-directory:${workspaceIdentityCacheKey(read.context)}`;
       const items = await coalescedGet(cacheKey, async () => {
         const response = await fetch('/api/workspace/directory', { cache: 'no-store' });
         if (!response.ok) throw new Error(`directory ${response.status}`);
         const body = (await response.json()) as WorkspaceDirectoryResponse;
         return body.items ?? [];
       });
+      // The account may have changed while this was in flight. Writing here
+      // would repopulate BOTH the module cache and the visible list with the
+      // previous account's names, after the identity-change effect below had
+      // already cleared them — so an abandoned read must leave no trace.
+      if (!read.isStillCurrent(contextRef.current)) return;
       cachedWorkspaceDirectory = items;
       setWorkspaceItems(items);
     } catch {
       // A failed revalidation must not blank a list the user is looking at —
       // keep the last known names and let the next open try again. A list this
       // caller has no claim to is not "a list the user is looking at".
-      if (attributableWorkspaceDirectory(context) === null) setWorkspaceItems([]);
+      if (!read.isStillCurrent(contextRef.current)) return;
+      if (attributableWorkspaceDirectory(read.context) === null) setWorkspaceItems([]);
     } finally {
       setWorkspaceDirectoryLoading(false);
     }

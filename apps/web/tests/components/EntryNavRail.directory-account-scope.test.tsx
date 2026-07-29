@@ -16,7 +16,7 @@
 // ACCOUNT see", so it is exactly the class of read `workspaceIdentityCacheKey`
 // warns about: a cache coarser than the identity of the request it holds.
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -173,6 +173,51 @@ describe('workspace switcher directory — account scope', () => {
     // Once B's read lands, B's own workspaces appear.
     gate.releaseAll();
     await waitFor(() => expect(menu().getByText('Bruno private workspace')).toBeTruthy());
+    expect(menu().queryByText('Ada private workspace')).toBeNull();
+  });
+
+  // The identity-scoped cache key stops a cached answer being SERVED to the
+  // wrong identity. It does nothing about a request already in flight when the
+  // identity moves: that response lands afterwards and used to be written
+  // straight into both the module cache and component state, repopulating
+  // account A's names after the identity-change effect had cleared them.
+  it("discards an in-flight read that lands after the account changed", async () => {
+    const gate = installGatedFetch(() => ACCOUNT_A_DIRECTORY);
+
+    const view = renderRail(contextFor('wm-a-team'));
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
+
+    // A's read is in flight and deliberately NOT released yet. Swap the account
+    // underneath the mounted rail (sign out, sign in as someone else) — no
+    // unmount, which is what leaves the pending request pointing at A.
+    view.rerender(
+      <I18nProvider initial="en">
+        <EntryNavRail
+          view="home"
+          onViewChange={() => {}}
+          onNewProject={() => {}}
+          open
+          context={contextFor('wm-b-team')}
+        />
+      </I18nProvider>,
+    );
+
+    // Now let A's request answer, after the identity has already moved.
+    await act(async () => {
+      gate.releaseAll();
+      await Promise.resolve();
+    });
+
+    // Component state must not have taken A's names.
+    expect(menu().queryByText('Ada private workspace')).toBeNull();
+
+    // …and the module cache must not have taken them either. Observed by
+    // remounting as A with a read that never answers: an abandoned response
+    // leaves no trace, so there is no warm list to serve even to A.
+    view.unmount();
+    installGatedFetch(() => ACCOUNT_A_DIRECTORY);
+    renderRail(contextFor('wm-a-team'));
+    fireEvent.click(screen.getByTestId('workspace-switcher'));
     expect(menu().queryByText('Ada private workspace')).toBeNull();
   });
 
