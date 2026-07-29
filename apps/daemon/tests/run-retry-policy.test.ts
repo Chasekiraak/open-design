@@ -18,7 +18,8 @@ function decidePostToolResume(
 ) {
   return decidePostToolResumeRecovery({
     result: 'failed',
-    attemptCount: 0,
+    continuationAttemptCount: 0,
+    totalRetryAttemptCount: 0,
     failure: {
       failure_category: 'timeout',
       failure_detail: 'inactivity_timeout',
@@ -426,7 +427,16 @@ describe('decidePostToolResumeRecovery', () => {
   });
 
   it('does not loop after the single continuation attempt', () => {
-    expect(decidePostToolResume({ attemptCount: 1 })).toBeNull();
+    expect(decidePostToolResume({ continuationAttemptCount: 1 })).toBeNull();
+  });
+
+  it('keeps the continuation budget independent from prior safe retries', () => {
+    expect(decidePostToolResume({ totalRetryAttemptCount: 1 })).toMatchObject({
+      shouldRetry: true,
+      retryAttemptIndex: 2,
+      retryMaxAttempts: 2,
+      retryStrategy: NATIVE_SESSION_CONTINUE_STRATEGY,
+    });
   });
 });
 

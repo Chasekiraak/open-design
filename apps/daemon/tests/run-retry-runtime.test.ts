@@ -332,6 +332,86 @@ describe('same-run retry runtime', () => {
     expect(prompts.get(1)).not.toContain(originalPrompt);
   });
 
+  it('continues a post-tool stall after a first-token retry used the safe retry budget', async () => {
+    binDir = await mkdtemp(path.join(os.tmpdir(), 'od-run-retry-mixed-stall-bin-'));
+    const {
+      bin: fakeClaude,
+      argsLogPath,
+      promptLogPath,
+    } = await writePostToolStallingClaude(
+      binDir,
+      'claude-first-token-then-post-tool-stall',
+      true,
+    );
+
+    delete process.env.POSTHOG_KEY;
+    delete process.env.POSTHOG_HOST;
+    delete process.env.LANGFUSE_PUBLIC_KEY;
+    delete process.env.LANGFUSE_SECRET_KEY;
+    delete process.env.LANGFUSE_BASE_URL;
+    delete process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL;
+    process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = STALL_WATCHDOG_TIMEOUT_MS;
+
+    started = await startServer({ port: 0, returnServer: true }) as StartedServer;
+    await putConfig(started.url, {
+      agentId: 'claude',
+      agentCliEnv: { claude: { CLAUDE_BIN: fakeClaude } },
+      telemetry: { metrics: true, content: false, artifactManifest: false },
+      privacyDecisionAt: Date.now(),
+    });
+
+    const originalPrompt = 'retry before tools, then continue the committed session';
+    const run = await createAndWaitForRun(started.url, 'claude', originalPrompt);
+    expect(run.status).toBe('succeeded');
+
+    const events = await readRunEvents(run.eventsLogPath);
+    expect(events.filter((event) => event.event === 'start')).toHaveLength(3);
+    expect(events.filter((event) => event.event === 'agent' && event.data.type === 'tool_use'))
+      .toHaveLength(1);
+    expect(events.filter((event) => event.event === 'agent' && event.data.type === 'tool_result'))
+      .toHaveLength(1);
+    expect(
+      events
+        .filter((event) => event.event === 'run_retry_attempted')
+        .map((event) => ({
+          index: event.data.retry_attempt_index,
+          strategy: event.data.retry_strategy,
+          reason: event.data.retry_reason,
+          stage: event.data.failure_stage,
+        })),
+    ).toEqual([
+      {
+        index: 1,
+        strategy: 'same_run_transient',
+        reason: 'transient_failure',
+        stage: 'first_token_wait',
+      },
+      {
+        index: 2,
+        strategy: 'native_session_continue',
+        reason: 'post_tool_resume',
+        stage: 'post_tool_resume',
+      },
+    ]);
+
+    const attemptArgs = (await readClaudeAttemptArgs(argsLogPath)).filter(
+      (args) => args.includes('--session-id') || args.includes('--resume'),
+    );
+    expect(attemptArgs).toHaveLength(3);
+    const firstSessionId = sessionIdArg(attemptArgs[0] ?? []);
+    const secondSessionId = sessionIdArg(attemptArgs[1] ?? []);
+    expect(firstSessionId).toBeTruthy();
+    expect(secondSessionId).toBeTruthy();
+    expect(secondSessionId).not.toBe(firstSessionId);
+    expect(resumeSessionIdArg(attemptArgs[2] ?? [])).toBe(secondSessionId);
+
+    const prompts = await readAttemptPrompts(promptLogPath);
+    expect(prompts.get(0)).toContain(originalPrompt);
+    expect(prompts.get(1)).toContain(originalPrompt);
+    expect(prompts.get(2)).toContain('Continue the interrupted turn');
+    expect(prompts.get(2)).not.toContain(originalPrompt);
+  });
+
   it('does not let a stalled attempt’s forced-shutdown timers kill the healthy retry', async () => {
     binDir = await mkdtemp(path.join(os.tmpdir(), 'od-run-retry-crossgen-bin-'));
     const { bin: fakeClaude } = await writeCrossGenKillClaude(binDir, 'claude-crossgen');
@@ -594,6 +674,7 @@ if (attempts === 0) {
 async function writePostToolStallingClaude(
   dir: string,
   name: string,
+  firstTokenStall = false,
 ): Promise<{ bin: string; argsLogPath: string; promptLogPath: string }> {
   const bin = path.join(dir, name);
   const counterPath = path.join(dir, `${name}-attempts`);
@@ -604,6 +685,7 @@ const fs = require('node:fs');
 const counterPath = ${JSON.stringify(counterPath)};
 const argsLogPath = ${JSON.stringify(argsLogPath)};
 const promptLogPath = ${JSON.stringify(promptLogPath)};
+const firstTokenStall = ${JSON.stringify(firstTokenStall)};
 if (process.argv.includes('--version')) {
   console.log('claude-code 1.0.0-post-tool-stall');
   process.exit(0);
@@ -622,7 +704,10 @@ fs.appendFileSync(argsLogPath, JSON.stringify(process.argv.slice(2)) + '\\n');
 process.stdin.on('data', (chunk) => {
   fs.appendFileSync(promptLogPath, JSON.stringify({ attempt: attempts, chunk: String(chunk) }) + '\\n');
 });
-if (attempts === 0) {
+const postToolAttempt = firstTokenStall ? 1 : 0;
+if (firstTokenStall && attempts === 0) {
+  setTimeout(() => process.exit(0), 60000);
+} else if (attempts === postToolAttempt) {
   console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-post-tool-stall' }));
   console.log(JSON.stringify({
     type: 'assistant',

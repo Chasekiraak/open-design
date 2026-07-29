@@ -5581,7 +5581,9 @@ export async function startServer({
       const postToolResumeDecision = decidePostToolResumeRecovery({
         result,
         failure,
-        attemptCount: run.retryAttemptCount ?? 0,
+        continuationAttemptCount:
+          run.nativeSessionContinueAttemptCount ?? 0,
+        totalRetryAttemptCount: run.retryAttemptCount ?? 0,
         sideEffects,
         supportsNativeSessionContinue: def.resumesSessionViaCli === true,
         hasNativeSession: !!run.conversationId && !!liveSessionId,
@@ -5598,6 +5600,8 @@ export async function startServer({
           run.retryOriginErrorCode = errorCode ?? null;
         }
         run.retryAttemptCount = postToolResumeDecision.retryAttemptIndex;
+        run.nativeSessionContinueAttemptCount =
+          (run.nativeSessionContinueAttemptCount ?? 0) + 1;
         run.retryStrategy = postToolResumeDecision.retryStrategy;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;

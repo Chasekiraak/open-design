@@ -101,7 +101,8 @@ export type RunRetryPolicyDecision =
 export interface PostToolResumeRecoveryInput {
   result: TrackingRunResult;
   failure?: RunRetryFailureSignal;
-  attemptCount: number;
+  continuationAttemptCount: number;
+  totalRetryAttemptCount: number;
   maxAttempts?: number;
   sideEffects?: RunRetrySideEffectState;
   supportsNativeSessionContinue: boolean;
@@ -111,14 +112,19 @@ export interface PostToolResumeRecoveryInput {
 export function decidePostToolResumeRecovery(
   input: PostToolResumeRecoveryInput,
 ): Extract<RunRetryPolicyDecision, { shouldRetry: true }> | null {
-  const attemptCount = normalizeAttemptCount(input.attemptCount);
+  const continuationAttemptCount = normalizeAttemptCount(
+    input.continuationAttemptCount,
+  );
+  const totalRetryAttemptCount = normalizeAttemptCount(
+    input.totalRetryAttemptCount,
+  );
   const retryMaxAttempts = normalizeMaxAttempts(input.maxAttempts);
   const failure = input.failure;
   const sideEffects = input.sideEffects ?? {};
   if (
     input.result !== 'failed' ||
     sideEffects.cancelRequested ||
-    attemptCount >= retryMaxAttempts ||
+    continuationAttemptCount >= retryMaxAttempts ||
     !input.supportsNativeSessionContinue ||
     !input.hasNativeSession ||
     !sideEffects.toolCallSeen ||
@@ -131,8 +137,9 @@ export function decidePostToolResumeRecovery(
   }
   return {
     shouldRetry: true,
-    retryAttemptIndex: attemptCount + 1,
-    retryMaxAttempts,
+    retryAttemptIndex: totalRetryAttemptCount + 1,
+    retryMaxAttempts:
+      totalRetryAttemptCount + retryMaxAttempts - continuationAttemptCount,
     retryStrategy: NATIVE_SESSION_CONTINUE_STRATEGY,
     retryReason: 'post_tool_resume',
     retryDelayMs: 0,
