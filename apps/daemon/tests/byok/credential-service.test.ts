@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -118,6 +118,113 @@ describe('BYOK credential service', () => {
       'byok-provider-one',
       'byok-provider-two',
     ]);
+  });
+
+  it('removes a newly created secret when metadata persistence fails', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'od-byok-credentials-'));
+    roots.push(dataDir);
+    const backend = new MemorySecretBackend();
+    const service = new ByokCredentialService({
+      dataDir,
+      backend,
+      persistMetadata: async () => {
+        throw new Error('metadata unavailable');
+      },
+    });
+
+    await expect(service.upsert({
+      id: 'byok-create-failure',
+      label: 'Create failure',
+      protocol: 'openai',
+      baseUrl: 'https://example.test/v1',
+      model: 'model',
+      apiKey: 'new-secret',
+    })).rejects.toThrow('metadata unavailable');
+
+    expect(backend.secrets.has('byok-create-failure')).toBe(false);
+  });
+
+  it('restores the previous secret when profile metadata update fails', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'od-byok-credentials-'));
+    roots.push(dataDir);
+    const backend = new MemorySecretBackend();
+    let rejectMetadata = false;
+    const service = new ByokCredentialService({
+      dataDir,
+      backend,
+      persistMetadata: async (metadataPath, document) => {
+        if (rejectMetadata) throw new Error('metadata unavailable');
+        await writeFile(
+          metadataPath,
+          `${JSON.stringify(document)}\n`,
+          'utf8',
+        );
+      },
+    });
+    await mkdir(path.join(dataDir, 'byok'), { recursive: true });
+    await service.upsert({
+      id: 'byok-update-failure',
+      label: 'Before',
+      protocol: 'openai',
+      baseUrl: 'https://example.test/v1',
+      model: 'model-before',
+      apiKey: 'old-secret',
+    });
+    rejectMetadata = true;
+
+    await expect(service.upsert({
+      id: 'byok-update-failure',
+      label: 'After',
+      protocol: 'openai',
+      baseUrl: 'https://example.test/v1',
+      model: 'model-after',
+      apiKey: 'new-secret',
+    })).rejects.toThrow('metadata unavailable');
+
+    expect(backend.secrets.get('byok-update-failure')).toBe('old-secret');
+    expect(await service.get('byok-update-failure')).toMatchObject({
+      label: 'Before',
+      model: 'model-before',
+    });
+  });
+
+  it('restores a deleted secret when profile metadata deletion fails', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'od-byok-credentials-'));
+    roots.push(dataDir);
+    const backend = new MemorySecretBackend();
+    let rejectMetadata = false;
+    const service = new ByokCredentialService({
+      dataDir,
+      backend,
+      persistMetadata: async (metadataPath, document) => {
+        if (rejectMetadata) throw new Error('metadata unavailable');
+        await writeFile(
+          metadataPath,
+          `${JSON.stringify(document)}\n`,
+          'utf8',
+        );
+      },
+    });
+    await mkdir(path.join(dataDir, 'byok'), { recursive: true });
+    await service.upsert({
+      id: 'byok-delete-failure',
+      label: 'Delete failure',
+      protocol: 'openai',
+      baseUrl: 'https://example.test/v1',
+      model: 'model',
+      apiKey: 'keep-secret',
+    });
+    rejectMetadata = true;
+
+    await expect(service.delete('byok-delete-failure')).rejects.toThrow(
+      'metadata unavailable',
+    );
+
+    expect(backend.secrets.get('byok-delete-failure')).toBe('keep-secret');
+    expect(await service.get('byok-delete-failure')).toMatchObject({
+      id: 'byok-delete-failure',
+      configured: true,
+    });
   });
 
   it.each([

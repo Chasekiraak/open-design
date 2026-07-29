@@ -37,14 +37,27 @@ export interface ResolvedByokCredentialProfile {
   apiKey: string;
 }
 
+export interface ByokCredentialServiceOptions {
+  backend?: ByokSecretBackend;
+  dataDir: string;
+  persistMetadata?: (
+    metadataPath: string,
+    document: { version: 1; profiles: readonly unknown[] },
+  ) => Promise<void>;
+}
+
 export class ByokCredentialService {
   readonly backend: ByokSecretBackend;
   readonly metadataPath: string;
   private mutationQueue: Promise<void> = Promise.resolve();
+  private readonly persistMetadata: NonNullable<
+    ByokCredentialServiceOptions['persistMetadata']
+  >;
 
-  constructor(options: { dataDir: string; backend?: ByokSecretBackend }) {
+  constructor(options: ByokCredentialServiceOptions) {
     this.backend = options.backend ?? createPlatformByokSecretBackend();
     this.metadataPath = path.join(options.dataDir, 'byok', 'profiles.json');
+    this.persistMetadata = options.persistMetadata ?? writeMetadataDocument;
   }
 
   async status(): Promise<{ available: boolean; backend: string }> {
@@ -99,6 +112,7 @@ export class ByokCredentialService {
     if (normalized.requiresApiKey && !apiKey && !existing) {
       throw new Error('An API key is required when creating this BYOK profile.');
     }
+    const previousSecret = apiKey ? await this.backend.get(id) : null;
     if (apiKey) {
       await this.backend.set(id, apiKey);
     } else if (normalized.requiresApiKey && !(await this.backend.get(id))) {
@@ -112,7 +126,18 @@ export class ByokCredentialService {
     };
     if (existingIndex >= 0) document.profiles[existingIndex] = stored;
     else document.profiles.push(stored);
-    await this.writeDocument(document);
+    try {
+      await this.writeDocument(document);
+    } catch (error) {
+      if (apiKey) {
+        await this.restoreSecretAfterMetadataFailure(
+          id,
+          previousSecret,
+          error,
+        );
+      }
+      throw error;
+    }
     return this.toPublicProfile(stored);
   }
 
@@ -146,10 +171,22 @@ export class ByokCredentialService {
     const document = await this.readDocument();
     const next = document.profiles.filter((profile) => profile.id !== profileId);
     const existed = next.length !== document.profiles.length;
+    const previousSecret = await this.backend.get(profileId);
     const secretDeleted = await this.backend.delete(profileId);
     if (existed) {
       document.profiles = next;
-      await this.writeDocument(document);
+      try {
+        await this.writeDocument(document);
+      } catch (error) {
+        if (secretDeleted && previousSecret !== null) {
+          await this.restoreSecretAfterMetadataFailure(
+            profileId,
+            previousSecret,
+            error,
+          );
+        }
+        throw error;
+      }
     }
     return existed || secretDeleted;
   }
@@ -196,14 +233,40 @@ export class ByokCredentialService {
   }
 
   private async writeDocument(document: StoredDocument): Promise<void> {
-    await mkdir(path.dirname(this.metadataPath), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${this.metadataPath}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    await rename(temporaryPath, this.metadataPath);
+    await this.persistMetadata(this.metadataPath, document);
   }
+
+  private async restoreSecretAfterMetadataFailure(
+    profileId: string,
+    previousSecret: string | null,
+    metadataError: unknown,
+  ): Promise<void> {
+    try {
+      if (previousSecret === null) {
+        await this.backend.delete(profileId);
+      } else {
+        await this.backend.set(profileId, previousSecret);
+      }
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [metadataError, rollbackError],
+        'BYOK metadata persistence failed and the secure credential rollback also failed.',
+      );
+    }
+  }
+}
+
+async function writeMetadataDocument(
+  metadataPath: string,
+  document: { version: 1; profiles: readonly unknown[] },
+): Promise<void> {
+  await mkdir(path.dirname(metadataPath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  await rename(temporaryPath, metadataPath);
 }
 
 function normalizeProfileInput(
