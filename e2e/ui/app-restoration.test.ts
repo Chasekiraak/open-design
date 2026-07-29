@@ -91,7 +91,7 @@ test.beforeEach(async ({ page }) => {
 
 async function routeSimpleSuccessfulRun(page: Page, runIdPrefix: string): Promise<void> {
   await routeSuccessfulRuns(page, {
-    runId: runIdPrefix,
+    runIdPrefix,
     eventBody: successfulRunEventBody([
       'event: start',
       'data: {"bin":"mock-agent"}',
