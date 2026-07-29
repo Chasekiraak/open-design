@@ -295,6 +295,8 @@ export function AmrLoginPill({
   const pollRef = useRef<number | null>(null);
   const loginStartedAtRef = useRef<number | null>(null);
   const loginPendingRef = useRef(false);
+  const loginStartPendingRef = useRef(false);
+  const loginCancelRequestedRef = useRef(false);
   const authAttemptIdRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -490,6 +492,7 @@ export function AmrLoginPill({
       event.stopPropagation();
       if (loginPendingRef.current) return;
       loginPendingRef.current = true;
+      loginCancelRequestedRef.current = false;
       const startedAt = Date.now();
       loginStartedAtRef.current = startedAt;
       setErrorMessage(null);
@@ -511,11 +514,14 @@ export function AmrLoginPill({
         resolvedDeviceId: getResolvedDeviceId(),
         installationId,
       });
+      loginStartPendingRef.current = true;
       const result = await startVelaLogin(
         attribution,
         odDeviceId,
         provisionalAuthAttemptId,
-      );
+      ).finally(() => {
+        loginStartPendingRef.current = false;
+      });
       const authAttemptId = reconcileAmrAuthAttemptId(
         provisionalAuthAttemptId,
         result.authAttemptId,
@@ -528,6 +534,57 @@ export function AmrLoginPill({
         });
       }
       observeAmrAuthTracking(analytics.track, result, authAttemptId);
+      if (loginCancelRequestedRef.current) {
+        if (result.ok || result.alreadyRunning) {
+          const cancelResult = await cancelVelaLogin(authAttemptId);
+          if (!cancelResult.ok) {
+            loginCancelRequestedRef.current = false;
+            loginStartedAtRef.current = null;
+            loginPendingRef.current = false;
+            setPending(null);
+            setErrorMessage(t('settings.amrLoginErrorCompact'));
+            return;
+          }
+          if (cancelResult.canceled !== true) {
+            const next = await refresh();
+            loginCancelRequestedRef.current = false;
+            if (next?.loginInFlight) {
+              loginPendingRef.current = true;
+              setPending('login');
+              startPolling(startedAt, next.authAttemptId ?? authAttemptId);
+            } else {
+              loginStartedAtRef.current = null;
+              loginPendingRef.current = false;
+              setPending(null);
+            }
+            return;
+          }
+          resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+            authAttemptId,
+          });
+          closeAmrActivationWindowBestEffort();
+          loginCancelRequestedRef.current = false;
+          loginStartedAtRef.current = null;
+          loginPendingRef.current = false;
+          setStatus((current) => (
+            current
+              ? { ...current, loggedIn: false, loginInFlight: false, user: null }
+              : current
+          ));
+          setPending(null);
+          setCanceledVisible(true);
+          notifyAmrLoginStatusChanged('login-canceled');
+          return;
+        }
+        resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+          authAttemptId,
+        });
+        loginCancelRequestedRef.current = false;
+        loginStartedAtRef.current = null;
+        loginPendingRef.current = false;
+        setPending(null);
+        return;
+      }
       if (!result.ok && !result.alreadyRunning) {
         resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed', {
           authAttemptId,
@@ -547,6 +604,7 @@ export function AmrLoginPill({
       installationId,
       metricsConsent,
       onSignInStarted,
+      refresh,
       startPolling,
       t,
     ],
@@ -555,6 +613,7 @@ export function AmrLoginPill({
   const handleCancelLogin = useCallback(
     async (event: MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
+      const loginStartPending = loginStartPendingRef.current;
       const authAttemptId = authAttemptIdRef.current;
       stopPolling();
       setErrorMessage(null);
@@ -572,6 +631,11 @@ export function AmrLoginPill({
       if (result.canceled !== true) {
         setPending(null);
         const next = await refresh();
+        if (loginStartPending && next && !next.loginInFlight) {
+          loginCancelRequestedRef.current = true;
+          setPending('cancel');
+          return;
+        }
         if (next?.loginInFlight) {
           const startedAt = loginStartedAtRef.current ?? Date.now();
           loginPendingRef.current = true;
