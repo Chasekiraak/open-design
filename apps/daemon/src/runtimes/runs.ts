@@ -165,6 +165,8 @@ export function createChatRunService({
       // compact analytics snapshot on the shared run until terminal telemetry.
       retryOriginFailure: null,
       retryOriginErrorCode: null,
+      retryStrategy: null,
+      nativeSessionContinuePending: null,
       stdinOpen: false,
       // E-lite root-cause telemetry. `stdinBackpressure` records whether the
       // prompt write to the child's stdin was queued (pipe buffer full — a

@@ -389,7 +389,11 @@ import {
 } from './run-lifecycle-tracer.js';
 import { deriveRunErrorCode, runResultFromStatus } from './run-result.js';
 import { classifyRunFailure, isResumableFailure } from './run-failure-classification.js';
-import { decideSafeRunRetry } from './run-retry-policy.js';
+import {
+  POST_TOOL_RESUME_CONTINUATION_PROMPT,
+  decidePostToolResumeRecovery,
+  decideSafeRunRetry,
+} from './run-retry-policy.js';
 import {
   amrUserIdForRunAnalytics,
   scanRunEventsForUsageAnalytics,
@@ -4276,6 +4280,12 @@ export async function startServer({
   const startChatRun = async (chatBody, run) => {
     const lifecycle = createRunLifecycleTracer(run);
     lifecycle.mark('chat_run_started');
+    const pendingNativeSessionContinue =
+      run.nativeSessionContinuePending &&
+      typeof run.nativeSessionContinuePending.sessionId === 'string'
+        ? run.nativeSessionContinuePending
+        : null;
+    run.nativeSessionContinuePending = null;
     /** @type {Partial<ChatRequest> & { imagePaths?: string[] }} */
     chatBody = chatBody || {};
     const {
@@ -4318,7 +4328,12 @@ export async function startServer({
     // into chatBody across the createChatRunService boundary. Each field
     // is optional and only set when the chat body actually carried it.
     const telemetryPrompt = telemetryPromptFromRunRequest(message, currentPrompt);
-    if (typeof telemetryPrompt === 'string') run.userPrompt = telemetryPrompt;
+    if (
+      !pendingNativeSessionContinue &&
+      typeof telemetryPrompt === 'string'
+    ) {
+      run.userPrompt = telemetryPrompt;
+    }
     if (typeof model === 'string' && model) run.model = model;
     if (typeof reasoning === 'string' && reasoning) run.reasoning = reasoning;
     if (typeof serviceTier === 'string' && serviceTier) run.serviceTier = serviceTier;
@@ -4999,7 +5014,7 @@ export async function startServer({
         // the probe failure and applies the identical fallback.
       }
     }
-    const agentResumeCtx =
+    const resolvedAgentResumeCtx =
       agentSupportsSessionResume && run.conversationId
         ? resolveAgentResumeContext(db, {
             conversationId: run.conversationId,
@@ -5009,6 +5024,28 @@ export async function startServer({
             currentAssistantMessageId: run.assistantMessageId ?? null,
           })
         : { storedSessionId: null as string | null, resumeSessionId: null as string | null, newSessionId: undefined as string | undefined, isResuming: false, storedStablePromptHash: null as string | null, storedStableSections: null as StableSectionHashes | null, invalidationReason: null };
+    // A same-run post-tool recovery resumes the exact session id captured from
+    // the interrupted attempt. The ordinary cross-turn cursor guard cannot
+    // admit it yet because the current assistant placeholder is still in
+    // flight, so this daemon-only path supplies the already-validated handle
+    // directly. Public chat requests cannot reach this branch.
+    const forceInternalResume =
+      pendingNativeSessionContinue != null &&
+      def.resumesSessionViaCli === true &&
+      pendingNativeSessionContinue.sessionId.length > 0;
+    const agentResumeCtx = forceInternalResume
+      ? {
+          ...resolvedAgentResumeCtx,
+          storedSessionId: pendingNativeSessionContinue.sessionId,
+          resumeSessionId: pendingNativeSessionContinue.sessionId,
+          isResuming: true,
+          storedStablePromptHash:
+            pendingNativeSessionContinue.stablePromptHash ?? null,
+          storedStableSections:
+            pendingNativeSessionContinue.stablePromptSections ?? null,
+          invalidationReason: null,
+        }
+      : resolvedAgentResumeCtx;
     const publishNativeSessionRecoveryMetadata = () => {
       if (!run.nativeSessionRecovery) return;
       design.runs.emit(run, 'diagnostic', {
@@ -5398,8 +5435,8 @@ export async function startServer({
         startRequestedAt: run.analyticsTelemetry?.startRequestedAt ?? run.createdAt,
       };
     };
-    const spawnRetryAttempt = () => {
-      void startChatRun(chatBody, run).catch((err) => {
+    const spawnRetryAttempt = (retryChatBody = chatBody) => {
+      void startChatRun(retryChatBody, run).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         design.runs.emit(
           run,
@@ -5421,17 +5458,17 @@ export async function startServer({
     // or shutdown during the backoff window clears the timer (runtimes/runs.ts)
     // and finalizes the queued run, and the callback re-checks cancel/terminal
     // state in case it fires first.
-    const scheduleRetryRestart = (delayMs) => {
+    const scheduleRetryRestart = (delayMs, retryChatBody = chatBody) => {
       tearDownAttemptForRetry();
       const wait = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : 0;
       if (wait <= 0) {
-        spawnRetryAttempt();
+        spawnRetryAttempt(retryChatBody);
         return;
       }
       run.retryRestartTimer = setTimeout(() => {
         run.retryRestartTimer = null;
         if (run.cancelRequested || design.runs.isTerminal(run.status)) return;
-        spawnRetryAttempt();
+        spawnRetryAttempt(retryChatBody);
       }, wait);
     };
     const finalizeRetryTelemetry = (status, decision, failure, errorCode) => {
@@ -5458,7 +5495,11 @@ export async function startServer({
           : undefined;
       const eventDecision =
         attemptCount > 0
-          ? { ...decision, retryAttemptIndex: attemptCount }
+          ? {
+              ...decision,
+              retryAttemptIndex: attemptCount,
+              retryStrategy: run.retryStrategy ?? decision.retryStrategy,
+            }
           : decision;
       // A successful retry has no current failure classification or error code.
       // Fall back to the failure that caused attempt 0 to be retried so success
@@ -5532,6 +5573,69 @@ export async function startServer({
         ...runSideEffectsForRun(run),
         cancelRequested: !!run.cancelRequested,
       };
+      const liveSessionId = agentResumeCtx.isResuming
+        ? agentResumeCtx.resumeSessionId
+        : agentCapturesSessionId
+          ? capturedSessionId
+          : agentResumeCtx.newSessionId;
+      const postToolResumeDecision = decidePostToolResumeRecovery({
+        result,
+        failure,
+        attemptCount: run.retryAttemptCount ?? 0,
+        sideEffects,
+        supportsNativeSessionContinue: def.resumesSessionViaCli === true,
+        hasNativeSession: !!run.conversationId && !!liveSessionId,
+      });
+      if (
+        postToolResumeDecision?.shouldRetry &&
+        !design.runs.isTerminal(run.status) &&
+        run.conversationId &&
+        liveSessionId
+      ) {
+        run.retryOriginalFailure ??= failure ?? undefined;
+        if ((run.retryAttemptCount ?? 0) === 0) {
+          run.retryOriginFailure = failure ? { ...failure } : null;
+          run.retryOriginErrorCode = errorCode ?? null;
+        }
+        run.retryAttemptCount = postToolResumeDecision.retryAttemptIndex;
+        run.retryStrategy = postToolResumeDecision.retryStrategy;
+        run.retryFinalResult = undefined;
+        run.retrySuppressedReason = undefined;
+        upsertAgentSession(db, {
+          conversationId: run.conversationId,
+          agentId: def.id,
+          sessionId: liveSessionId,
+          stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSectionsJson,
+          model: safeModel ?? null,
+          cwd: effectiveCwd,
+          lastMessageId: run.assistantMessageId ?? null,
+        });
+        run.nativeSessionRecovery = markNativeSessionCaptured({
+          previous: run.nativeSessionRecovery,
+          agentId: def.id,
+          sessionId: liveSessionId,
+          resumed: agentResumeCtx.isResuming,
+        });
+        publishNativeSessionRecoveryMetadata();
+        design.runs.emit(run, 'run_retry_attempted', {
+          ...retryAnalyticsBase(postToolResumeDecision, failure, errorCode),
+          retry_reason: postToolResumeDecision.retryReason,
+          retry_delay_ms: postToolResumeDecision.retryDelayMs,
+        });
+        run.nativeSessionContinuePending = {
+          sessionId: liveSessionId,
+          stablePromptHash: currentStableHash,
+          stablePromptSections: currentStableSections,
+        };
+        scheduleRetryRestart(postToolResumeDecision.retryDelayMs, {
+          ...chatBody,
+          message: POST_TOOL_RESUME_CONTINUATION_PROMPT,
+          currentPrompt: POST_TOOL_RESUME_CONTINUATION_PROMPT,
+          titleGeneration: undefined,
+        });
+        return true;
+      }
       const decision = decideSafeRunRetry({
         result,
         failure,
@@ -5545,6 +5649,7 @@ export async function startServer({
           run.retryOriginErrorCode = errorCode ?? null;
         }
         run.retryAttemptCount = decision.retryAttemptIndex;
+        run.retryStrategy = decision.retryStrategy;
         run.retryFinalResult = undefined;
         run.retrySuppressedReason = undefined;
         design.runs.emit(run, 'run_retry_attempted', {
@@ -5584,11 +5689,6 @@ export async function startServer({
         sideEffects.artifactWriteSeen ||
         sideEffects.liveArtifactSeen
       );
-      const liveSessionId = agentResumeCtx.isResuming
-        ? agentResumeCtx.resumeSessionId
-        : agentCapturesSessionId
-          ? capturedSessionId
-          : agentResumeCtx.newSessionId;
       const resumableFailure =
         result === 'failed' &&
         def.resumesSessionViaCli === true &&
