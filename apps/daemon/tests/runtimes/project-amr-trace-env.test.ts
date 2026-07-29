@@ -11,7 +11,7 @@ import {
 } from '../../src/db.js';
 import {
   openDesignAmrTraceEnvForProject,
-  ProjectWorkspaceScopeUnavailableError,
+  ProjectWorkspaceScopeRefusedError,
 } from '../../src/runtimes/project-amr-trace-env.js';
 
 let tempDir: string | null = null;
@@ -64,7 +64,7 @@ describe('openDesignAmrTraceEnvForProject', () => {
     }, {
       fetchWorkspaceDirectory,
     })).rejects.toEqual(expect.objectContaining({
-      name: ProjectWorkspaceScopeUnavailableError.name,
+      name: ProjectWorkspaceScopeRefusedError.name,
       projectId: 'project-unbound',
       workspaceId: null,
     }));
@@ -196,7 +196,12 @@ describe('openDesignAmrTraceEnvForProject', () => {
     expect(env).not.toHaveProperty('OPEN_DESIGN_WORKSPACE_ID');
   });
 
-  it('fails closed when the persisted workspace binding cannot be proven', async () => {
+  // This used to drive the refusal with `{ ok: false }` — an UNREADABLE
+  // directory. That now takes the authorised account-wallet fallback instead
+  // (see `project-amr-workspace-proof.test.ts`), because an authority we could
+  // not reach proved nothing. The refusal this test guards is the one that
+  // survives: the directory ANSWERED, and it does not list the binding.
+  it('fails closed when an answered directory does not prove the persisted binding', async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-amr-unavailable-scope-'));
     const db = openDatabase(tempDir);
     const now = Date.now();
@@ -219,9 +224,20 @@ describe('openDesignAmrTraceEnvForProject', () => {
       runAttempt: 0,
       projectId: 'project-unavailable',
     }, {
-      fetchWorkspaceDirectory: async () => ({ ok: false, items: [] }),
+      fetchWorkspaceDirectory: async () => ({
+        ok: true,
+        items: [{
+          workspaceId: 'workspace-other',
+          workspaceName: 'Some other workspace',
+          workspaceType: 'personal',
+          workspaceMemberId: 'member-other',
+          role: 'owner',
+          memberStatus: 'active',
+          lifecycleState: 'active',
+        }],
+      }),
     })).rejects.toEqual(expect.objectContaining({
-      name: ProjectWorkspaceScopeUnavailableError.name,
+      name: ProjectWorkspaceScopeRefusedError.name,
       projectId: 'project-unavailable',
       workspaceId: 'workspace-missing',
     }));
@@ -285,7 +301,7 @@ describe('openDesignAmrTraceEnvForProject', () => {
       fetchWorkspaceDirectory: async () => ({ ok: true, items: [] }),
       isWorkspaceTeamConfigured: () => true,
     })).rejects.toEqual(expect.objectContaining({
-      name: ProjectWorkspaceScopeUnavailableError.name,
+      name: ProjectWorkspaceScopeRefusedError.name,
       projectId: 'project-unbound-live',
       workspaceId: null,
     }));

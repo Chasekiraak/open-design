@@ -9180,6 +9180,11 @@ export async function startServer({
     let acpSession = null;
     let writePromptToChildStdin = false;
     let spawnedAgentEnv = null;
+    // Which branch of the AMR workspace-binding proof decided, so the failure
+    // path can attach a machine-readable cause. Before this, a diagnostics
+    // export could not say why a run was refused — the run record carried only
+    // the generic AGENT_EXECUTION_FAILED plus a prose sentence.
+    let amrWorkspaceScopeOutcome = null;
     let agentStdoutTail = '';
     let agentStderrTail = '';
     const agentStderrFilter = createAgentStderrVisibilityFilter(agentId);
@@ -9230,6 +9235,43 @@ export async function startServer({
           // behavior instead of refusing every unbound project.
           isWorkspaceTeamConfigured: () =>
             process.env.OD_WORKSPACE_CONTEXT_SOURCE?.trim() === 'vela',
+          // Which branch decided, to all three sinks a report can reach us
+          // through: the daemon log (what a diagnostics zip carries), the run
+          // record (what a user can hand over after logs have rotated), and
+          // telemetry (so "how often are we proceeding on an unreachable
+          // directory" is countable rather than anecdotal). Ids, counts and the
+          // branch name only — never member rows or credentials.
+          onWorkspaceScopeOutcome: (outcome) => {
+            amrWorkspaceScopeOutcome = outcome;
+            console.log(
+              `[od] amr workspace scope ${outcome.kind}`
+                + ` project=${outcome.projectId}`
+                + ` workspace=${outcome.workspaceId ?? 'none'}`
+                + ` directoryOk=${outcome.directoryOk ?? 'not-read'}`
+                + ` items=${outcome.directoryItemCount ?? 'not-read'}`
+                + ` attempts=${outcome.directoryReadAttempts}`
+                + ` run=${run.id}`,
+            );
+            const context = run.analyticsContext ?? null;
+            if (!context || !design?.analytics?.capture) return;
+            design.analytics.capture({
+              eventName: 'amr_workspace_scope_resolved',
+              context,
+              appVersion: appVersionForCapture(),
+              properties: {
+                page_name: 'chat_panel',
+                area: 'chat_panel',
+                project_id: outcome.projectId,
+                conversation_id: run.conversationId ?? null,
+                run_id: run.id,
+                workspace_scope_outcome: outcome.kind,
+                workspace_scope_directory_ok: outcome.directoryOk,
+                workspace_scope_directory_item_count:
+                  outcome.directoryItemCount,
+                workspace_scope_read_attempts: outcome.directoryReadAttempts,
+              },
+            });
+          },
         }),
         // OpenCode external-MCP injection (issue #2142). Layered AFTER
         // spawnEnvForAgent / odMediaEnv / configuredAgentEnv so the
@@ -9348,7 +9390,32 @@ export async function startServer({
       cleanupPromptFile();
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
-      send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', `spawn failed: ${err.message}`));
+      // Keep the wire error code stable, but carry the structured cause in
+      // `details` so `state.json` / `events.jsonl` identify the branch without
+      // anyone parsing the prose. `err.code` is set only by
+      // ProjectWorkspaceScopeRefusedError; everything else reports as before.
+      const spawnErrorInit =
+        err?.code === 'PROJECT_WORKSPACE_SCOPE_REFUSED'
+          ? {
+            details: {
+              cause: err.code,
+              workspaceScopeOutcome:
+                err.outcome ?? amrWorkspaceScopeOutcome?.kind ?? null,
+              projectId: err.projectId ?? null,
+              workspaceId: err.workspaceId ?? null,
+              directoryOk: amrWorkspaceScopeOutcome?.directoryOk ?? null,
+              directoryItemCount:
+                amrWorkspaceScopeOutcome?.directoryItemCount ?? null,
+              directoryReadAttempts:
+                amrWorkspaceScopeOutcome?.directoryReadAttempts ?? null,
+            },
+          }
+          : {};
+      send('error', createSseErrorPayload(
+        'AGENT_EXECUTION_FAILED',
+        `spawn failed: ${err.message}`,
+        spawnErrorInit,
+      ));
       design.runs.finish(run, 'failed', 1, null);
       return;
     }
