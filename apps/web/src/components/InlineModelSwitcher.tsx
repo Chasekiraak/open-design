@@ -418,7 +418,7 @@ export function InlineModelSwitcher({
     }
     if (result.canceled !== true) {
       const next = await refreshAmrStatus();
-      if (loginStartPending && next && !next.loginInFlight) {
+      if (loginStartPending && next?.loginInFlight !== true) {
         amrLoginCancelRequestedRef.current = true;
         return;
       }

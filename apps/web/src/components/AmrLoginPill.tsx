@@ -631,7 +631,7 @@ export function AmrLoginPill({
       if (result.canceled !== true) {
         setPending(null);
         const next = await refresh();
-        if (loginStartPending && next && !next.loginInFlight) {
+        if (loginStartPending && next?.loginInFlight !== true) {
           loginCancelRequestedRef.current = true;
           setPending('cancel');
           return;

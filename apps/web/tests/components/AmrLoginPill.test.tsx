@@ -738,7 +738,7 @@ describe('AmrLoginPill', () => {
     }
   });
 
-  it('cancels the canonical attempt when cancel is requested before login startup settles', async () => {
+  it('cancels the canonical attempt when the pre-start status refresh is non-OK', async () => {
     const canonicalAuthAttemptId = '22222222-2222-4222-8222-222222222222';
     let releaseLogin!: (response: Response) => void;
     const heldLoginResponse = new Promise<Response>((resolve) => {
@@ -753,15 +753,7 @@ describe('AmrLoginPill', () => {
       }
       if (url.endsWith('/api/integrations/vela/status')) {
         statusCalls += 1;
-        return jsonResponse({
-          body: {
-            loggedIn: false,
-            loginInFlight: false,
-            profile: 'prod',
-            user: null,
-            configPath: '/x',
-          },
-        });
+        return jsonResponse({ status: 503, body: { error: 'unavailable' } });
       }
       if (
         url.endsWith('/api/integrations/vela/login/cancel') &&

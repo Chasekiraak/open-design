@@ -1165,7 +1165,7 @@ describe('InlineModelSwitcher AMR row', () => {
     ).toBeTruthy();
   });
 
-  it('cancels the canonical attempt when cancel is requested before login startup settles', async () => {
+  it('cancels the canonical attempt when the pre-start status refresh rejects', async () => {
     const canonicalAuthAttemptId = '22222222-2222-4222-8222-222222222222';
     let releaseLogin!: (response: Response) => void;
     const heldLoginResponse = new Promise<Response>((resolve) => {
@@ -1177,6 +1177,9 @@ describe('InlineModelSwitcher AMR row', () => {
       const url = input.toString();
       if (url === '/api/integrations/vela/status') {
         statusCalls += 1;
+        if (statusCalls > 1) {
+          throw new Error('status unavailable');
+        }
         return new Response(
           JSON.stringify({
             loggedIn: false,

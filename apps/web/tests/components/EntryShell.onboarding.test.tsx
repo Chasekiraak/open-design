@@ -826,7 +826,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     expect(screen.getByRole('button', { name: /Local coding agent/i })).toBeTruthy();
   });
 
-  it('preserves a pre-start cancel until the canonical AMR login attempt exists', async () => {
+  it('preserves a pre-start cancel when the status refresh rejects', async () => {
     const canonicalAuthAttemptId = '22222222-2222-4222-8222-222222222222';
     const newerAuthAttemptId = '33333333-3333-4333-8333-333333333333';
     let releaseLogin!: (response: Response) => void;
@@ -844,6 +844,9 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
       const url = String(input);
       if (url.endsWith('/api/integrations/vela/status')) {
         statusCalls += 1;
+        if (cancelAttemptIds.length === 1) {
+          throw new Error('status unavailable');
+        }
         const newerAttemptVisible = cancelAttemptIds.length >= 2;
         return jsonResponse({
           loggedIn: false,

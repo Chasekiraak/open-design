@@ -2298,7 +2298,7 @@ function OnboardingView({
           amrAuthAttemptIdRef.current = nextStatus.authAttemptId;
         }
       }
-      if (loginStartPending && nextStatus && !nextStatus.loginInFlight) {
+      if (loginStartPending && nextStatus?.loginInFlight !== true) {
         amrLoginCancelRequestedRef.current = true;
         return;
       }
