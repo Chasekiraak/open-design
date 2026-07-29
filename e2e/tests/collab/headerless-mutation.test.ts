@@ -294,6 +294,95 @@ describe('a headerless caller can mutate a project the daemon itself owns', () =
     },
   );
 
+  // P0 INVARIANT: signed out, VISIBLE <=> UNBOUND <=> MUTABLE — the three are the
+  // same set of projects.
+  //
+  // 「未登录也可以用自己 cli 修改未登录态下的那些 project, 这个一定要保证,
+  // 不然就是 P0 事故」
+  //
+  // A signed-out client can only SEE unbound projects: the no-scope catalog
+  // (`routes/project/index.ts:2432-2443`) reads no `x-od-workspace-*` at all and
+  // joins through `listUnboundProjects`, so "every unbound (never-claimed) project
+  // must be visible (pre-workspace-isolation compatibility) while every project
+  // some workspace HAS claimed must not leak to a caller with no identity to check
+  // it against" (spec 04 §10). This case pins the other half: everything in that
+  // visible set stays WRITABLE while signed out.
+  //
+  // It holds only because `headerlessMutationAllowed` short-circuits on "no row
+  // anywhere" BEFORE it asks for an ambient identity. That ordering is the whole
+  // protection, which is why this case is mutation-tested against it rather than
+  // written red-first — it passes on the fixed branch by construction.
+  test(
+    'signed out, a client keeps write access to exactly the projects it can see',
+    { timeout: 300_000 },
+    async () => {
+      const suite = await createSmokeSuite('collab-headerless-mutation-signed-out');
+
+      // No vela session at all — not merely "no headers on the request". The real
+      // provider is selected, `readVelaControlApiContext` finds nothing, so
+      // `.current()` answers null and the daemon has NO signed-in identity.
+      await suite.with.toolsDev(
+        async ({ webUrl, runtime }) => {
+          expect(
+            (await requestJson<{ context: unknown }>(webUrl, '/api/workspace/context')).context,
+            'precondition: this daemon must have no signed-in identity',
+          ).toBeNull();
+
+          // Created in that same signed-out state — the real user sequence.
+          const draft = await createHeaderless(webUrl, 'Signed-out local draft');
+          expect(
+            (await readScope(webUrl, draft)).kind,
+            'nothing to bind to while signed out, so the draft stays unbound',
+          ).toBe('unbound');
+
+          // Visible in the no-scope catalog...
+          const listed = await requestJson<{ projects: Array<{ id: string }> }>(
+            webUrl,
+            '/api/projects',
+          );
+          expect(
+            listed.projects.some((project) => project.id === draft),
+            'an unbound project must be visible to a signed-out client',
+          ).toBe(true);
+
+          // ...and therefore writable. Rename, duplicate, and the real CLI.
+          expect(
+            await patch(webUrl, `/api/projects/${draft}`, undefined, { name: 'Renamed offline' }),
+            'a signed-out user must be able to rename their own local draft',
+          ).toBe(200);
+
+          const duplicated = await post(webUrl, `/api/projects/${draft}/duplicate`, undefined, {
+            name: 'Offline copy',
+          });
+          expect(
+            duplicated.status,
+            `a signed-out user must be able to duplicate their own local draft; got ${duplicated.text.slice(0, 200)}`,
+          ).toBe(200);
+
+          const cli = await od(`http://127.0.0.1:${runtime.daemonPort}`, [
+            'project',
+            'duplicate',
+            draft,
+            '--name',
+            'Offline CLI copy',
+            '--json',
+          ]);
+          expect(
+            cli.code,
+            `od must work signed out: ${cli.stderr || cli.stdout}`,
+          ).toBe(0);
+        },
+        {
+          // Deliberately NO VELA_API_URL / VELA_CONTROL_KEY.
+          env: {
+            AMR_HOME: await emptyAmrHome(suite.scratchDir),
+            OD_WORKSPACE_CONTEXT_SOURCE: 'vela',
+          },
+        },
+      );
+    },
+  );
+
   // The dual-track contract, pinned through the real binary rather than by
   // intent. `AGENTS.md` makes `od` the embeddability surface external agents
   // drive Open Design through, and there was no test anywhere exercising a CLI
