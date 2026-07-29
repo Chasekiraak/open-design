@@ -1408,10 +1408,11 @@ export function ProjectView({
   // A project can outlive a Design System being disabled in Settings. Keep the
   // persisted project value intact for recovery, but do not inject a disabled
   // system into a new runtime turn.
-  const projectDesignSystemId =
-    resolvedProjectDesignSystemId && (config.disabledDesignSystems ?? []).includes(resolvedProjectDesignSystemId)
+  const projectDesignSystemId = resolvedProjectDesignSystemId;
+  const runtimeDesignSystemId =
+    projectDesignSystemId && (config.disabledDesignSystems ?? []).includes(projectDesignSystemId)
       ? null
-      : resolvedProjectDesignSystemId;
+      : projectDesignSystemId;
   const projectIsDesignSystemProject = isDesignSystemProject(currentProject);
   // Website-clone turns reproduce a whole multi-page site; auto-open should
   // land on the site entry (index.html), not the last-written subpage. See
@@ -5918,7 +5919,7 @@ export function ProjectView({
           skillId: project.skillId ?? null,
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
-          designSystemId: projectDesignSystemId ?? null,
+          designSystemId: runtimeDesignSystemId ?? null,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6079,7 +6080,7 @@ export function ProjectView({
           skillId: project.skillId ?? null,
           skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
           context: runContext,
-          designSystemId: projectDesignSystemId ?? null,
+          designSystemId: runtimeDesignSystemId ?? null,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
           sessionMode: runSessionMode,
@@ -6163,6 +6164,7 @@ export function ProjectView({
       onTouchProject,
       project.id,
       projectDesignSystemId,
+      runtimeDesignSystemId,
       project.name,
       projectFiles,
       refreshProjectFiles,

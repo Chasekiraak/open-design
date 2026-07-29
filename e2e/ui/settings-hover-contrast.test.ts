@@ -124,12 +124,16 @@ async function hoverAndMeasure(page: Page, selector: string) {
   await el.waitFor({ state: 'visible' });
   await el.scrollIntoViewIfNeeded();
   await el.hover();
-  // Wait for the browser to publish the final computed hover color. This is a
-  // condition-based wait: it avoids assuming a fixed CSS timing while still
-  // catching a final contrast value below the WCAG threshold.
-  await expect
-    .poll(async () => (await measureContrast(page, selector)).ratio, { timeout: 2_000 })
-    .toBeGreaterThanOrEqual(WCAG_AA_NORMAL);
+  // Wait for any hover transition/animation to settle before measuring. A
+  // passing first sample is not evidence that the final color remains AA.
+  await el.evaluate(async (node) => {
+    const animations = node.getAnimations({ subtree: true });
+    if (!animations.length) return;
+    await Promise.race([
+      Promise.all(animations.map((animation) => animation.finished.catch(() => undefined))),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
+  });
   return measureContrast(page, selector);
 }
 

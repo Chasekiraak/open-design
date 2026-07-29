@@ -12,6 +12,7 @@ import type { Dialog, Locator, Page, Request, Response } from '@playwright/test'
 import { automatedUiScenarios } from '@/playwright/resources';
 import type { UiScenario } from '@/playwright/resources';
 import { T } from '@/timeouts';
+import { expectStableCount } from '../lib/playwright/assertions.js';
 import {
   failedRunEventBody,
   routeRunSequence,
@@ -1671,7 +1672,10 @@ test('[P1] stopping an active run sends cancel, persists canceled state, and lea
 
   await stopButton.click();
   await expect(stopButton).toHaveCount(0);
-  await expect.poll(() => cancelRequests, { timeout: T.medium }).toBe(1);
+  await expectStableCount(() => cancelRequests, 1, {
+    timeout: T.medium,
+    message: 'stopping a run should send exactly one cancel request during the settled window',
+  });
 
   await expect
     .poll(async () => {
