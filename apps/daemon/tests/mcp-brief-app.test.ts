@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
 
 import {
   MCP_SERVER_INSTRUCTIONS,
@@ -10,6 +11,172 @@ import {
 } from '../src/mcp.js';
 import { OPEN_DESIGN_BRIEF_APP_HTML } from '../src/mcp-apps/brief-resource.js';
 
+const require = createRequire(import.meta.url);
+const { JSDOM } = require('jsdom') as {
+  JSDOM: new (
+    html: string,
+    options: {
+      beforeParse(window: any): void;
+      pretendToBeVisual: boolean;
+      referrer: string;
+      runScripts: 'dangerously';
+      url: string;
+    },
+  ) => { window: any };
+};
+
+type JsonRpcMessage = {
+  jsonrpc?: string;
+  id?: string;
+  method?: string;
+  params?: Record<string, unknown>;
+};
+
+const WEBSITE_BRIEF_PAYLOAD = {
+  view: 'brief-form',
+  artifactType: 'website',
+  locale: 'en',
+  localeSource: 'provided',
+  briefDraftId: 'brief-draft-test',
+  nonce: 'brief-nonce-test',
+  questionForm: {
+    title: 'Choose the website direction',
+    description: 'Choose one option.',
+    submitLabel: 'Confirm brief',
+    questions: [
+      {
+        id: 'website.goal',
+        label: 'What should this website do?',
+        defaultValue: 'launch-product',
+        options: [
+          {
+            value: 'launch-product',
+            label: 'Launch a product',
+            description: 'Explain the value and drive sign-ups.',
+          },
+        ],
+      },
+    ],
+  },
+};
+
+async function eventually(assertion: () => void, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+  throw lastError;
+}
+
+function createBriefAppHarness(options: {
+  initialPayload?: typeof WEBSITE_BRIEF_PAYLOAD;
+  failFirstMessage?: boolean;
+} = {}) {
+  const requests: JsonRpcMessage[] = [];
+  let failNextMessage = options.failFirstMessage === true;
+  let widgetWindow: any;
+  const parent = {
+    postMessage(message: JsonRpcMessage): void {
+      requests.push(message);
+      if (!message.id || !message.method) return;
+      queueMicrotask(() => {
+        if (message.method === 'ui/message' && failNextMessage) {
+          failNextMessage = false;
+          respond(message.id!, undefined, {
+            code: -32_000,
+            message: 'Host rejected the follow-up message.',
+          });
+          return;
+        }
+        if (message.method === 'ui/initialize') {
+          respond(message.id!, {
+            hostContext: { locale: 'en' },
+            ...(options.initialPayload
+              ? { structuredContent: options.initialPayload }
+              : {}),
+          });
+          return;
+        }
+        if (message.method === 'tools/call') {
+          respond(message.id!, {
+            structuredContent: {
+              view: 'brief-confirmed',
+              artifactType: 'website',
+              briefConfirmationId: 'brief-confirmation-test',
+              summary: 'What should this website do?: Launch a product',
+            },
+          });
+          return;
+        }
+        respond(message.id!, {});
+      });
+    },
+  };
+
+  function dispatch(message: JsonRpcMessage): void {
+    widgetWindow.dispatchEvent(new widgetWindow.MessageEvent('message', {
+      data: message,
+      origin: 'https://host.test',
+      source: parent as never,
+    }));
+  }
+
+  function respond(
+    id: string,
+    result?: Record<string, unknown>,
+    error?: { code: number; message: string },
+  ): void {
+    dispatch({
+      jsonrpc: '2.0',
+      id,
+      ...(error ? { error } : { result }),
+    } as JsonRpcMessage);
+  }
+
+  const dom = new JSDOM(OPEN_DESIGN_BRIEF_APP_HTML, {
+    beforeParse(window) {
+      widgetWindow = window;
+      Object.defineProperty(window, 'parent', {
+        configurable: true,
+        value: parent,
+      });
+      Object.defineProperty(window, 'ResizeObserver', {
+        configurable: true,
+        value: class {
+          observe(): void {}
+          disconnect(): void {}
+        },
+      });
+    },
+    pretendToBeVisual: true,
+    referrer: 'https://host.test/task',
+    runScripts: 'dangerously',
+    url: 'https://widget.test/brief',
+  });
+  widgetWindow = dom.window;
+
+  return {
+    dom,
+    requests,
+    notifyToolResult(payload: typeof WEBSITE_BRIEF_PAYLOAD): void {
+      dispatch({
+        jsonrpc: '2.0',
+        method: 'ui/notifications/tool-result',
+        params: {
+          result: { structuredContent: payload },
+        },
+      });
+    },
+  };
+}
+
 describe('local Open Design MCP brief app', () => {
   it('exposes collect_brief through the canonical MCP Apps resource', () => {
     const collectBrief = localMcpToolDefinitions().find(
@@ -20,15 +187,15 @@ describe('local Open Design MCP brief app', () => {
       name: 'collect_brief',
       _meta: {
         ui: {
-          resourceUri: 'ui://open-design-cloud/artifact-card-v2.html',
+          resourceUri: 'ui://open-design-cloud/artifact-card-v3.html',
         },
-        'ui/resourceUri': 'ui://open-design-cloud/artifact-card-v2.html',
-        'openai/outputTemplate': 'ui://open-design-cloud/artifact-card-v2.html',
+        'ui/resourceUri': 'ui://open-design-cloud/artifact-card-v3.html',
+        'openai/outputTemplate': 'ui://open-design-cloud/artifact-card-v3.html',
       },
     });
     expect(localMcpResourceDefinitions()).toContainEqual(
       expect.objectContaining({
-        uri: 'ui://open-design-cloud/artifact-card-v2.html',
+        uri: 'ui://open-design-cloud/artifact-card-v3.html',
         mimeType: 'text/html;profile=mcp-app',
       }),
     );
@@ -79,6 +246,91 @@ describe('local Open Design MCP brief app', () => {
       'error instanceof Error ? error.message',
     );
     expect(OPEN_DESIGN_BRIEF_APP_HTML).not.toContain('setWidgetState');
+  });
+
+  it('keeps a confirmed brief locked and retries only Host publication', async () => {
+    const harness = createBriefAppHarness({
+      initialPayload: WEBSITE_BRIEF_PAYLOAD,
+      failFirstMessage: true,
+    });
+    const { document } = harness.dom.window;
+
+    await eventually(() => {
+      expect(document.querySelector('form')?.hidden).toBe(false);
+    });
+    const submitEvent = () => new harness.dom.window.Event('submit', {
+      bubbles: true,
+      cancelable: true,
+    });
+    document.querySelector('form')?.dispatchEvent(submitEvent());
+    document.querySelector('form')?.dispatchEvent(submitEvent());
+
+    await eventually(() => {
+      expect(document.querySelector('#continue')?.hidden)
+        .toBe(false);
+    });
+    expect(document.querySelector('#confirm')?.disabled)
+      .toBe(true);
+    expect(document.querySelector('input')?.disabled)
+      .toBe(true);
+    expect(document.querySelector('#status')?.textContent)
+      .toContain('already confirmed');
+    expect(harness.requests.filter((request) => request.method === 'tools/call'))
+      .toHaveLength(1);
+
+    document.querySelector('#continue')?.click();
+    await eventually(() => {
+      expect(document.querySelector('#continue')?.hidden)
+        .toBe(true);
+      expect(document.querySelector('#status')?.textContent)
+        .toContain('sent');
+    });
+    expect(harness.requests.filter((request) => request.method === 'tools/call'))
+      .toHaveLength(1);
+    expect(harness.requests.filter((request) => request.method === 'ui/message'))
+      .toHaveLength(2);
+
+    harness.notifyToolResult(WEBSITE_BRIEF_PAYLOAD);
+    await eventually(() => {
+      expect(document.querySelector('#confirm')?.hidden).toBe(true);
+      expect(document.querySelector('input')?.disabled).toBe(true);
+      expect(document.querySelector('#status')?.textContent)
+        .toContain('sent');
+    });
+    expect(harness.requests.filter((request) => request.method === 'tools/call'))
+      .toHaveLength(1);
+
+    harness.dom.window.close();
+  });
+
+  it('renders one compact loading instance and replaces it with a late tool result', async () => {
+    const harness = createBriefAppHarness();
+    const { document } = harness.dom.window;
+
+    await eventually(() => {
+      expect(document.querySelector('main')?.hidden).toBe(false);
+      expect(document.querySelector('form')?.hidden).toBe(true);
+      expect(document.querySelector('#status')?.textContent)
+        .toContain('Loading brief');
+    });
+
+    const originalForm = document.querySelector('form');
+    harness.notifyToolResult(WEBSITE_BRIEF_PAYLOAD);
+
+    await eventually(() => {
+      expect(document.querySelector('form')).toBe(originalForm);
+      expect(document.querySelector('form')?.hidden).toBe(false);
+      expect(document.querySelectorAll('form')).toHaveLength(1);
+      expect(document.querySelectorAll('fieldset')).toHaveLength(1);
+    });
+
+    harness.notifyToolResult(WEBSITE_BRIEF_PAYLOAD);
+    await eventually(() => {
+      expect(document.querySelectorAll('form')).toHaveLength(1);
+      expect(document.querySelectorAll('fieldset')).toHaveLength(1);
+    });
+
+    harness.dom.window.close();
   });
 
   it('lets Host context localize an otherwise language-neutral brief', async () => {

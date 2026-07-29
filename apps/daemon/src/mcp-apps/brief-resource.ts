@@ -1,4 +1,4 @@
-export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v2' as const;
+export const OPEN_DESIGN_BRIEF_APP_VERSION = 'v3' as const;
 
 /**
  * Self-contained MCP Apps resource. It intentionally has no remote assets,
@@ -35,13 +35,16 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
     </style>
   </head>
   <body>
-    <main hidden>
-      <h1 id="title"></h1>
-      <p id="description"></p>
-      <form id="brief-form" aria-describedby="description" hidden>
-        <div id="questions"></div>
-        <button id="confirm" type="submit"></button>
-      </form>
+    <main>
+      <section id="brief-content" hidden>
+        <h1 id="title"></h1>
+        <p id="description"></p>
+        <form id="brief-form" aria-describedby="description" hidden>
+          <div id="questions"></div>
+          <button id="confirm" type="submit"></button>
+          <button id="continue" type="button" hidden></button>
+        </form>
+      </section>
       <p id="status" role="status" aria-live="polite"></p>
       <template id="radio-template"><input type="radio"></template>
     </main>
@@ -50,15 +53,19 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         "use strict";
         const form = document.getElementById("brief-form");
         const main = document.querySelector("main");
+        const briefContent = document.getElementById("brief-content");
         const questions = document.getElementById("questions");
         const title = document.getElementById("title");
         const description = document.getElementById("description");
         const status = document.getElementById("status");
         const confirmButton = document.getElementById("confirm");
+        const continueButton = document.getElementById("continue");
         const radioTemplate = document.getElementById("radio-template");
         const pending = new Map();
         let requestNumber = 0;
         let draft = null;
+        let phase = "loading";
+        let confirmedPayload = null;
         let standardBridgeReady = false;
         let sizeFrame = 0;
         let lastWidth = -1;
@@ -69,9 +76,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             : navigator.language;
         const COPY = {
           en: {
+            loading: "Loading brief…",
             ready: "Ready to confirm.",
             confirming: "Confirming…",
             confirmed: "Brief confirmed.",
+            continuing: "Sending confirmed brief…",
+            delivered: "Brief confirmed and sent.",
+            confirmedPublishFailed: "Brief already confirmed, but could not continue. Try sending it again.",
+            continueSending: "Continue",
             invalidConfirmation: "The host returned an invalid confirmation.",
             publishUnavailable: "The host cannot publish the confirmed brief.",
             contextFailed: "Could not update the host context.",
@@ -79,9 +91,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             bridgeUnavailable: "The MCP Apps bridge is unavailable.",
           },
           "zh-CN": {
+            loading: "正在加载需求…",
             ready: "可以确认了。",
             confirming: "正在确认…",
             confirmed: "需求已确认。",
+            continuing: "正在发送已确认的需求…",
+            delivered: "需求已确认并已发送。",
+            confirmedPublishFailed: "需求已经确认，但未能继续发送。请重试发送。",
+            continueSending: "继续发送",
             invalidConfirmation: "宿主返回了无效的确认结果。",
             publishUnavailable: "宿主无法发布已确认的需求。",
             contextFailed: "无法更新宿主上下文。",
@@ -89,9 +106,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             bridgeUnavailable: "MCP Apps 连接不可用。",
           },
           "zh-TW": {
+            loading: "正在載入需求…",
             ready: "可以確認了。",
             confirming: "正在確認…",
             confirmed: "需求已確認。",
+            continuing: "正在傳送已確認的需求…",
+            delivered: "需求已確認並已傳送。",
+            confirmedPublishFailed: "需求已經確認，但未能繼續傳送。請重試傳送。",
+            continueSending: "繼續傳送",
             invalidConfirmation: "宿主回傳了無效的確認結果。",
             publishUnavailable: "宿主無法發佈已確認的需求。",
             contextFailed: "無法更新宿主內容。",
@@ -99,9 +121,14 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             bridgeUnavailable: "MCP Apps 連線無法使用。",
           },
           ja: {
+            loading: "ブリーフを読み込んでいます…",
             ready: "確認できます。",
             confirming: "確認中…",
             confirmed: "ブリーフを確認しました。",
+            continuing: "確認済みブリーフを送信しています…",
+            delivered: "ブリーフを確認して送信しました。",
+            confirmedPublishFailed: "ブリーフは確認済みですが、送信を続行できませんでした。もう一度送信してください。",
+            continueSending: "送信を続ける",
             invalidConfirmation: "ホストから無効な確認結果が返されました。",
             publishUnavailable: "ホストは確認済みブリーフを送信できません。",
             contextFailed: "ホストのコンテキストを更新できませんでした。",
@@ -162,6 +189,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
               render(draft);
             } else if (!draft) {
               document.documentElement.lang = effectiveLocale();
+              if (phase === "loading") applyPhase("loading");
             }
           }
         }
@@ -207,16 +235,67 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
 
         function toolPayload(message) {
           const params = message && message.params;
-          const result = params && (params.result || params);
+          const result = params
+            ? (params.result || params)
+            : message && (message.result || message);
           return result && (result.structuredContent || result);
+        }
+
+        function setInputsDisabled(disabled) {
+          for (const input of form.querySelectorAll("input")) {
+            input.disabled = disabled;
+          }
+        }
+
+        function applyPhase(nextPhase, message) {
+          phase = nextPhase;
+          const locked = phase !== "ready";
+          setInputsDisabled(locked);
+          confirmButton.hidden =
+            phase === "delivered"
+            || phase === "confirmed_publish_failed"
+            || phase === "confirmed_publishing";
+          confirmButton.disabled = locked;
+          continueButton.hidden = phase !== "confirmed_publish_failed";
+          continueButton.disabled = false;
+          continueButton.textContent = copy().continueSending;
+          if (message !== undefined) {
+            status.textContent = message;
+          } else if (phase === "loading") {
+            status.textContent = copy().loading;
+          } else if (phase === "confirming") {
+            status.textContent = copy().confirming;
+          } else if (phase === "confirmed_publishing") {
+            status.textContent = copy().continuing;
+          } else if (phase === "delivered") {
+            status.textContent = copy().delivered;
+          } else if (phase === "confirmed_publish_failed") {
+            status.textContent = copy().confirmedPublishFailed;
+          } else {
+            status.textContent = "";
+          }
+          scheduleSizeChanged();
+        }
+
+        function showLoading() {
+          if (draft) return;
+          briefContent.hidden = true;
+          form.hidden = true;
+          applyPhase("loading");
         }
 
         function render(payload) {
           if (!payload || payload.view !== "brief-form" || !payload.briefDraftId) return;
+          const sameDraft =
+            draft && draft.briefDraftId === payload.briefDraftId;
           const previousAnswers =
-            draft && draft.briefDraftId === payload.briefDraftId
+            sameDraft
               ? selections()
               : {};
+          if (!sameDraft) {
+            confirmedPayload = null;
+            phase = "ready";
+          }
           draft = payload;
           const locale = effectiveLocale();
           const localizedForms = payload.questionFormsByLocale;
@@ -266,9 +345,12 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             questions.append(fieldset);
           }
           main.hidden = false;
+          briefContent.hidden = false;
           form.hidden = false;
-          status.textContent = items.length === 0 ? copy().ready : "";
-          scheduleSizeChanged();
+          applyPhase(
+            phase,
+            phase === "ready" && items.length === 0 ? copy().ready : undefined,
+          );
         }
 
         function selections() {
@@ -318,7 +400,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         }
 
         form.addEventListener("change", () => {
-          if (!draft) return;
+          if (!draft || phase !== "ready") return;
           const context = {
             artifactType: draft.artifactType,
             answers: selections(),
@@ -336,10 +418,9 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
 
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
-          if (!draft || !form.reportValidity()) return;
-          confirmButton.disabled = true;
-          status.textContent = copy().confirming;
-          scheduleSizeChanged();
+          if (phase !== "ready" || !draft || !form.reportValidity()) return;
+          applyPhase("confirming");
+          let payload;
           try {
             const result = await callConfirm({
               briefDraftId: draft.briefDraftId,
@@ -347,15 +428,34 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
               answers: selections(),
               locale: effectiveLocale(),
             });
-            const payload = result && (result.structuredContent || (result.result && result.result.structuredContent) || result);
+            payload = result && (result.structuredContent || (result.result && result.result.structuredContent) || result);
             if (!payload || !payload.briefConfirmationId) throw new Error(copy().invalidConfirmation);
-            status.textContent = copy().confirmed;
-            scheduleSizeChanged();
-            await publishConfirmation(payload);
           } catch (error) {
-            status.textContent = publicErrorMessage(error, copy().confirmFailed);
-            confirmButton.disabled = false;
-            scheduleSizeChanged();
+            applyPhase(
+              "ready",
+              publicErrorMessage(error, copy().confirmFailed),
+            );
+            return;
+          }
+          confirmedPayload = payload;
+          applyPhase("confirmed_publishing");
+          try {
+            await publishConfirmation(confirmedPayload);
+            applyPhase("delivered");
+          } catch {
+            applyPhase("confirmed_publish_failed");
+          }
+        });
+
+        continueButton.addEventListener("click", async () => {
+          if (phase !== "confirmed_publish_failed" || !confirmedPayload) return;
+          continueButton.disabled = true;
+          applyPhase("confirmed_publishing");
+          try {
+            await publishConfirmation(confirmedPayload);
+            applyPhase("delivered");
+          } catch {
+            applyPhase("confirmed_publish_failed");
           }
         });
 
@@ -372,6 +472,7 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
             else entry.resolve(message.result);
             return;
           }
+          if (message.method === "ui/notifications/tool-input") showLoading();
           if (message.method === "ui/notifications/tool-result") render(toolPayload(message));
           if (message.method === "ui/notifications/host-context-changed") {
             updateHostLocale(message.params);
@@ -381,9 +482,10 @@ export const OPEN_DESIGN_BRIEF_APP_HTML = String.raw`<!doctype html>
         if (window.openai && window.openai.toolOutput) {
           render(window.openai.toolOutput);
         }
+        showLoading();
         request("ui/initialize", {
           protocolVersion: "2026-01-26",
-          appInfo: { name: "open-design-cloud-brief", version: "v2" },
+          appInfo: { name: "open-design-cloud-brief", version: "v3" },
           appCapabilities: {},
         }).then((result) => {
           standardBridgeReady = true;
