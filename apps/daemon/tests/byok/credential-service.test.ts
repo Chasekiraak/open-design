@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   ByokCredentialService,
+  createPlatformByokSecretBackend,
   type ByokSecretBackend,
 } from '../../src/byok/credential-service.js';
 
@@ -85,6 +86,15 @@ describe('BYOK credential service', () => {
       model: 'openrouter/free',
       apiKey: 'test-secret',
     })).rejects.toThrow(/secure credential storage is unavailable/i);
+  });
+
+  it('dispatches native Windows credentials to a DPAPI backend rooted in OD_DATA_DIR', async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), 'od-byok-windows-dispatch-'));
+    roots.push(dataDir);
+
+    const backend = createPlatformByokSecretBackend('win32', dataDir);
+
+    expect(backend.kind).toBe('windows-dpapi');
   });
 
   it('serializes concurrent metadata mutations so profiles cannot overwrite each other', async () => {
