@@ -19,6 +19,7 @@ import {
   AmrAccountControl,
   AmrLoginPill,
 } from '../../src/components/AmrLoginPill';
+import * as analyticsProvider from '../../src/analytics/provider';
 import { AMR_LOGIN_TIMEOUT_MS } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
 import type { VelaLoginStatus } from '../../src/providers/daemon';
@@ -604,6 +605,114 @@ describe('AmrLoginPill', () => {
       screen.queryByRole('link', { name: 'Open sign-in page' }),
     ).toBeNull();
     expect(screen.queryByText('EXPIRED')).toBeNull();
+  });
+
+  it('rejoins a newer in-flight attempt when a delayed cancel is stale', async () => {
+    const attemptA = '11111111-1111-4111-8111-111111111111';
+    const attemptB = '22222222-2222-4222-8222-222222222222';
+    let currentAttemptId = attemptA;
+    let resolveCancel!: (response: Response) => void;
+    const cancelResponse = new Promise<Response>((resolve) => {
+      resolveCancel = resolve;
+    });
+    const analyticsTrack = vi.fn();
+    const analyticsSpy = vi.spyOn(analyticsProvider, 'useAnalytics').mockReturnValue({
+      track: analyticsTrack,
+      setConsent: vi.fn(),
+      setIdentity: vi.fn(),
+      setConfigureGlobals: vi.fn(),
+      setUserId: vi.fn(),
+      anonymousId: 'test-anonymous-id',
+      sessionId: 'test-session-id',
+      newRequestId: () => 'test-request-id',
+    });
+    const loginStatusReasons: string[] = [];
+    const onLoginStatusChange = (event: Event) => {
+      loginStatusReasons.push(
+        (event as CustomEvent<{ reason?: string }>).detail?.reason ?? 'status-changed',
+      );
+    };
+    window.addEventListener('od:amr-login-status-change', onLoginStatusChange);
+
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/api/integrations/vela/login') && init?.method === 'POST') {
+        return jsonResponse({
+          status: 202,
+          body: { pid: 4242, authAttemptId: attemptA },
+        });
+      }
+      if (url.endsWith('/api/integrations/vela/status')) {
+        return jsonResponse({
+          body: {
+            loggedIn: false,
+            loginInFlight: true,
+            authAttemptId: currentAttemptId,
+            profile: 'prod',
+            user: null,
+            configPath: '/x',
+          },
+        });
+      }
+      if (
+        url.endsWith('/api/integrations/vela/login/cancel') &&
+        init?.method === 'POST'
+      ) {
+        expect(JSON.parse(String(init.body))).toEqual({
+          authAttemptId: attemptA,
+        });
+        currentAttemptId = attemptB;
+        return cancelResponse;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    try {
+      renderPill({
+        skipInitialRefresh: true,
+        revealPendingCancelAction: true,
+        initialStatus: {
+          loggedIn: false,
+          loginInFlight: false,
+          profile: 'prod',
+          user: null,
+          configPath: '/x',
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+      expect(await screen.findByText('Signing in…')).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/api/integrations/vela/login/cancel',
+          expect.objectContaining({ method: 'POST' }),
+        );
+      });
+
+      resolveCancel(jsonResponse({ body: { canceled: false } }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Signing in…')).toBeTruthy();
+      });
+      expect(screen.queryByText('Canceled')).toBeNull();
+      expect(loginStatusReasons).not.toContain('login-canceled');
+      expect(
+        analyticsTrack.mock.calls.some(
+          ([event, properties]) =>
+            event === 'amr_auth_result' &&
+            (properties as { result?: string }).result === 'cancelled',
+        ),
+      ).toBe(false);
+    } finally {
+      analyticsSpy.mockRestore();
+      window.removeEventListener(
+        'od:amr-login-status-change',
+        onLoginStatusChange,
+      );
+    }
   });
 
   it('only surfaces activation details from the pill when explicitly enabled', async () => {

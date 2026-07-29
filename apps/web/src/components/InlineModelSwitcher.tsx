@@ -221,6 +221,9 @@ export function InlineModelSwitcher({
 
   const refreshAmrStatus = useCallback(async () => {
     const next = await fetchVelaLoginStatus();
+    if (next?.authAttemptId) {
+      amrAuthAttemptIdRef.current = next.authAttemptId;
+    }
     const authAttemptId = amrAuthAttemptIdRef.current;
     if (next && authAttemptId) {
       observeAmrAuthTracking(analytics.track, next, authAttemptId);
@@ -273,8 +276,10 @@ export function InlineModelSwitcher({
             resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout', {
               authAttemptId,
             });
-            void cancelVelaLogin(authAttemptId).then(() =>
-              notifyAmrLoginStatusChanged('login-canceled'),
+            void cancelVelaLogin(authAttemptId).then((result) =>
+              notifyAmrLoginStatusChanged(
+                result.canceled === true ? 'login-canceled' : 'status-changed',
+              ),
             );
           }
         } else {
@@ -349,19 +354,47 @@ export function InlineModelSwitcher({
 
   const handleAmrCancelLogin = useCallback(async () => {
     const authAttemptId = amrAuthAttemptIdRef.current;
+    stopAmrPolling();
+    setAmrLoginError(null);
+    const result = authAttemptId
+      ? await cancelVelaLogin(authAttemptId)
+      : { ok: false, canceled: false };
+    if (!result.ok) {
+      amrLoginStartedAtRef.current = null;
+      setAmrLoginPending(false);
+      setAmrLoginError(t('settings.amrLoginErrorCompact'));
+      return;
+    }
+    if (result.canceled !== true) {
+      const next = await refreshAmrStatus();
+      if (next?.loginInFlight) {
+        startAmrPolling(
+          amrLoginStartedAtRef.current ?? Date.now(),
+          next.authAttemptId ?? null,
+        );
+      }
+      return;
+    }
     if (authAttemptId) {
       resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
         authAttemptId,
       });
     }
-    stopAmrPolling();
     amrLoginStartedAtRef.current = null;
-    setAmrLoginError(null);
     setAmrLoginPending(false);
-    if (authAttemptId) await cancelVelaLogin(authAttemptId);
+    setAmrStatus((current) => (
+      current
+        ? { ...current, loggedIn: false, loginInFlight: false, user: null }
+        : current
+    ));
     notifyAmrLoginStatusChanged('login-canceled');
-    await refreshAmrStatus();
-  }, [analytics.track, refreshAmrStatus, stopAmrPolling]);
+  }, [
+    analytics.track,
+    refreshAmrStatus,
+    startAmrPolling,
+    stopAmrPolling,
+    t,
+  ]);
 
   const handleAgentButtonClick = useCallback(
     async (agentId: string) => {

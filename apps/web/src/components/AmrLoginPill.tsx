@@ -392,8 +392,10 @@ export function AmrLoginPill({
             resolveAmrAuthTracking(analytics.track, 'timeout', 'login_timeout', {
               authAttemptId,
             });
-            void cancelVelaLogin(authAttemptId).then(() =>
-              notifyAmrLoginStatusChanged('login-canceled'),
+            void cancelVelaLogin(authAttemptId).then((result) =>
+              notifyAmrLoginStatusChanged(
+                result.canceled === true ? 'login-canceled' : 'status-changed',
+              ),
             );
           }
         } else {
@@ -554,25 +556,41 @@ export function AmrLoginPill({
     async (event: MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
       const authAttemptId = authAttemptIdRef.current;
-      if (authAttemptId) {
-        resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
-          authAttemptId,
-        });
-      }
       stopPolling();
       setErrorMessage(null);
       setPending('cancel');
       const result = authAttemptId
         ? await cancelVelaLogin(authAttemptId)
         : { ok: false, canceled: false };
-      closeAmrActivationWindowBestEffort();
-      loginStartedAtRef.current = null;
-      loginPendingRef.current = false;
       if (!result.ok) {
+        loginStartedAtRef.current = null;
+        loginPendingRef.current = false;
         setPending(null);
         setErrorMessage(t('settings.amrLoginErrorCompact'));
         return;
       }
+      if (result.canceled !== true) {
+        setPending(null);
+        const next = await refresh();
+        if (next?.loginInFlight) {
+          const startedAt = loginStartedAtRef.current ?? Date.now();
+          loginPendingRef.current = true;
+          setPending('login');
+          startPolling(startedAt, next.authAttemptId ?? null);
+        } else {
+          loginStartedAtRef.current = null;
+          loginPendingRef.current = false;
+        }
+        return;
+      }
+      if (authAttemptId) {
+        resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+          authAttemptId,
+        });
+      }
+      closeAmrActivationWindowBestEffort();
+      loginStartedAtRef.current = null;
+      loginPendingRef.current = false;
       setStatus((current) => (
         current
           ? { ...current, loggedIn: false, loginInFlight: false, user: null }
@@ -588,7 +606,7 @@ export function AmrLoginPill({
       setCanceledVisible(true);
       notifyAmrLoginStatusChanged('login-canceled');
     },
-    [analytics.track, stopPolling, t],
+    [analytics.track, refresh, startPolling, stopPolling, t],
   );
 
   const handleLogout = useCallback(
