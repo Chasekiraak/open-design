@@ -19,6 +19,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { AmrWalletSnapshot } from '@open-design/contracts';
+import { VisuallyHidden } from '@open-design/components';
 import { useT } from '../i18n';
 import {
   agentIdToTracking,
@@ -73,6 +74,7 @@ import {
 } from './amrLoginPolling';
 import { orderAgentsWithOpenDesignFirst } from './agentOrdering';
 import {
+  agentModelIsSelectable,
   defaultAgentModelId,
   effectiveAgentModelChoice,
   normalizeAgentModelChoice,
@@ -579,6 +581,72 @@ export function InlineModelSwitcher({
     if (currentAgent?.id !== 'amr') return models;
     return orderModelOptionsByAvailability(models);
   }, [currentAgent]);
+
+  /**
+   * The ONLY path from a model row to `onAgentModelChange` in this component.
+   * Both model lists (the compact home list and the execution-settings picker)
+   * write through here, so the availability gate cannot be forgotten by a list
+   * added later — there is no second sink to forget it in. Returns false when
+   * the pick was refused, which is the signal a row should not close the panel
+   * or report a selection that did not happen.
+   */
+  const applyAgentModel = useCallback(
+    (modelId: string, extra?: { serviceTier?: string }) => {
+      const agentId = currentAgent?.id;
+      if (!agentId) return false;
+      if (!agentModelIsSelectable(currentAgent, modelId)) return false;
+      onAgentModelChange?.(agentId, { model: modelId, ...extra });
+      return true;
+    },
+    [currentAgent, onAgentModelChange],
+  );
+
+  /**
+   * Compact-list rows carry the same verdict the sink enforces, so a locked row
+   * is rendered as locked instead of as a normal row whose click silently
+   * reverts (issue: clicking a model in the home list did nothing).
+   */
+  const compactModelRows = useMemo(
+    () =>
+      inlineAgentModelOptions.map((model) => ({
+        model,
+        selectable: agentModelIsSelectable(currentAgent, model.id),
+      })),
+    [currentAgent, inlineAgentModelOptions],
+  );
+
+  /** Where a refused model pick sends the user instead — the same plans
+   *  destination the settings picker's upgrade lock already opens. */
+  const openAmrModelUpgrade = useCallback(() => {
+    const attribution = recordAmrEntry(
+      analytics.track,
+      'inline_amr_upgrade',
+      new Date(),
+      { metricsConsent: config.telemetry?.metrics === true },
+    );
+    const deviceId = amrHandoffDeviceId({
+      metricsConsent: config.telemetry?.metrics === true,
+      resolvedDeviceId: getResolvedDeviceId(),
+      installationId: config.installationId,
+    });
+    window.open(
+      attributedAmrUrl(
+        amrPlansUrlForProfile(
+          amrStatus?.profile ?? config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE,
+        ),
+        attribution,
+        deviceId,
+      ),
+      '_blank',
+      'noopener,noreferrer',
+    );
+  }, [
+    amrStatus?.profile,
+    analytics.track,
+    config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE,
+    config.installationId,
+    config.telemetry?.metrics,
+  ]);
   const amrLoggedIn = amrStatus?.loggedIn === true;
 
   useEffect(() => {
@@ -981,21 +1049,39 @@ export function InlineModelSwitcher({
             // names (no header, no agent icons) — switching agents lives in
             // the execution settings entry below.
             <div className="inline-switcher__row">
-              {currentAgent && (currentAgent.models?.length ?? 0) > 0 ? (
+              {currentAgent && compactModelRows.length > 0 ? (
                 <div className="inline-switcher__agent-grid" role="radiogroup">
-                  {(currentAgent.models ?? []).map((m) => {
+                  {compactModelRows.map(({ model: m, selectable }) => {
                     const active = currentModelId === m.id;
+                    // A model above the caller's plan is shown, but honestly:
+                    // disabled with the reason the settings picker already uses,
+                    // never as a normal row whose click gets reverted.
+                    const lockedHint = selectable
+                      ? null
+                      : t('settings.amrModelUpgradeHint');
                     return (
                       <div key={m.id} className="inline-switcher__agent-row">
                         <button
                           type="button"
                           role="radio"
                           aria-checked={active}
+                          aria-disabled={selectable ? undefined : 'true'}
+                          title={lockedHint ?? undefined}
                           className={
-                            'inline-switcher__agent' + (active ? ' is-active' : '')
+                            'inline-switcher__agent' +
+                            (active ? ' is-active' : '') +
+                            (selectable ? '' : ' is-locked')
                           }
                           data-testid={`inline-model-switcher-compact-model-${m.id}`}
                           onClick={() => {
+                            // The sink is the authority, not the row's styling:
+                            // a refused pick routes to the plans page (same as
+                            // the settings picker's lock) instead of writing a
+                            // choice the config would revert.
+                            if (!applyAgentModel(m.id)) {
+                              if (amrCanUpgrade) openAmrModelUpgrade();
+                              return;
+                            }
                             trackExecutionSettingsPopoverClick(analytics.track, {
                               page_name: 'home',
                               area: 'execution_settings_popover',
@@ -1003,7 +1089,6 @@ export function InlineModelSwitcher({
                               execution_mode: 'local_cli',
                               model_id: modelIdForTracking(m.id),
                             });
-                            onAgentModelChange?.(currentAgent.id, { model: m.id });
                             setOpen(false);
                           }}
                         >
@@ -1028,6 +1113,15 @@ export function InlineModelSwitcher({
                           <span className="inline-switcher__agent-name">
                             {m.label}
                           </span>
+                          {lockedHint ? (
+                            <span
+                              className="inline-switcher__agent-lock"
+                              data-testid={`inline-model-switcher-compact-model-lock-${m.id}`}
+                            >
+                              <Icon name="lock" size={12} />
+                              <VisuallyHidden>{lockedHint}</VisuallyHidden>
+                            </span>
+                          ) : null}
                         </button>
                       </div>
                     );
@@ -1255,16 +1349,21 @@ export function InlineModelSwitcher({
                     groupByCompany={currentAgent?.id === 'amr'}
                     value={currentModelId ?? ''}
                     onChange={(nextValue) => {
+                      // Same sink as the compact list — `serviceTier: undefined`
+                      // is load-bearing here: `mergeAgentModelChoice` reads the
+                      // own property to DROP a stale tier from the previous
+                      // model, so the key must survive the hand-off.
+                      if (
+                        !applyAgentModel(nextValue, { serviceTier: undefined })
+                      ) {
+                        return;
+                      }
                       trackExecutionSettingsPopoverClick(analytics.track, {
                         page_name: 'home',
                         area: 'execution_settings_popover',
                         element: 'model_dropdown',
                         execution_mode: 'local_cli',
                         model_id: modelIdForTracking(nextValue),
-                      });
-                      onAgentModelChange?.(currentAgent.id, {
-                        model: nextValue,
-                        serviceTier: undefined,
                       });
                     }}
                     additionalOptions={
@@ -1289,36 +1388,7 @@ export function InlineModelSwitcher({
                     }
                     onDisabledOptionUpgrade={
                       currentAgent?.id === 'amr'
-                        ? () => {
-                            const attribution = recordAmrEntry(
-                              analytics.track,
-                              'inline_amr_upgrade',
-                              new Date(),
-                              {
-                                metricsConsent:
-                                  config.telemetry?.metrics === true,
-                              },
-                            );
-                            const deviceId = amrHandoffDeviceId({
-                              metricsConsent:
-                                config.telemetry?.metrics === true,
-                              resolvedDeviceId: getResolvedDeviceId(),
-                              installationId: config.installationId,
-                            });
-                            window.open(
-                              attributedAmrUrl(
-                                amrPlansUrlForProfile(
-                                  amrStatus?.profile ??
-                                    config.agentCliEnv?.amr
-                                      ?.OPEN_DESIGN_AMR_PROFILE,
-                                ),
-                                attribution,
-                                deviceId,
-                              ),
-                              '_blank',
-                              'noopener,noreferrer',
-                            );
-                          }
+                        ? openAmrModelUpgrade
                         : undefined
                     }
                   />

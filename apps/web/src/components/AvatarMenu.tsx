@@ -7,7 +7,11 @@ import { useT } from '../i18n';
 import { AgentIcon } from './AgentIcon';
 import { modelProviderIconSrc } from './modelProviderIcon';
 import { RemixIcon } from './RemixIcon';
-import { defaultAgentModelId, effectiveAgentModelChoice } from './agentModelSelection';
+import {
+  agentModelIsSelectable,
+  defaultAgentModelId,
+  effectiveAgentModelChoice,
+} from './agentModelSelection';
 import { orderModelOptionsByAvailability } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode, ProviderModelOption } from '../types';
 import {
@@ -404,8 +408,14 @@ export function AvatarMenu({
                           : currentAgentModelOptions
                         ).map((model) => {
                           const active = model.id === currentModelId;
-                          const locked =
-                            currentAgent.id === 'amr' && model.enabled === false;
+                          // Same gate the home composer's compact list asks —
+                          // one definition of "locked", derived from what the
+                          // config will actually keep, so the two surfaces
+                          // cannot drift apart again.
+                          const locked = !agentModelIsSelectable(
+                            currentAgent,
+                            model.id,
+                          );
                           return (
                             <button
                               key={model.id}

@@ -1870,13 +1870,29 @@
   background: var(--bg-subtle);
   color: var(--text-strong);
 }
+/* A model above the caller's plan. It stays listed (so the catalog still reads
+   as complete) but must LOOK unavailable: rendering it as a normal row was the
+   whole bug — the click was accepted and then silently reverted. Matches the
+   project composer's `.avatar-model-option.is-locked`. */
+.inline-switcher--compact .inline-switcher__agent.is-locked {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+.inline-switcher__agent-lock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
 /* Each row now leads with the provider logo, so the old leading selection dot
    is dropped — the active row reads from its tinted background alone. */
 /* Hovering an unselected model slides its label forward as a "reach". */
 .inline-switcher--compact .inline-switcher__agent-name {
   transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
 }
-.inline-switcher--compact .inline-switcher__agent:not(.is-active):hover .inline-switcher__agent-name {
+.inline-switcher--compact
+  .inline-switcher__agent:not(.is-active):not(.is-locked):hover
+  .inline-switcher__agent-name {
   transform: translateX(6px);
 }
 @media (prefers-reduced-motion: reduce) {
