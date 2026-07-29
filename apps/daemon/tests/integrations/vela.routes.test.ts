@@ -235,10 +235,6 @@ afterEach(() => {
   delete process.env.FAKE_VELA_MODEL_PRESET_JSON;
   delete process.env.FAKE_VELA_ENV_DUMP_PATH;
   delete process.env.FAKE_VELA_LOGIN_INVOCATION_LOG;
-  delete process.env.FAKE_VELA_EMIT_AUTH_STAGES;
-  delete process.env.FAKE_VELA_LOGIN_PROTOCOL_ONLY_FAIL;
-  delete process.env.FAKE_VELA_LOGIN_OVERSIZED_PROTOCOL_PRIVATE_TAIL;
-  delete process.env.FAKE_VELA_AUTH_STAGE_SPAM;
   delete process.env.FAKE_VELA_LOGIN_ACTIVATION_AFTER_PARENT_EXIT_MS;
   delete process.env.FAKE_VELA_LOGIN_PARENT_EXIT_DELAY_MS;
   delete process.env.FAKE_VELA_LOGIN_ACTIVATION_THEN_EXIT_DELAY_MS;
@@ -1389,7 +1385,7 @@ describe('POST /api/integrations/vela/login', () => {
     }
   });
 
-  it('keeps the browser auth attempt id while deferring structured Vela stages', async () => {
+  it('keeps the browser auth attempt id while withholding structured Vela stages', async () => {
     const authAttemptId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
     const dumpPath = path.join(tmpHome, 'vela-env-auth-attempt.json');
     process.env.FAKE_VELA_ENV_DUMP_PATH = dumpPath;
@@ -1422,75 +1418,6 @@ describe('POST /api/integrations/vela/login', () => {
         { stage: 'activation_ready', result: 'success', source: 'daemon' },
       ],
     });
-    await postJson(`${baseUrl}/api/integrations/vela/login/cancel`);
-    await waitForVelaLoginIdle();
-  });
-
-  it('consumes sanitized Vela stage frames without breaking legacy activation text', async () => {
-    const authAttemptId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
-    process.env.FAKE_VELA_EMIT_AUTH_STAGES = '1';
-    process.env.FAKE_VELA_LOGIN_DELAY_MS = '30000';
-
-    const login = await postJson(
-      `${baseUrl}/api/integrations/vela/login`,
-      { authAttemptId },
-    );
-    expect(login.status).toBe(202);
-    const status = await getJson<{
-      activationUrl?: string;
-      userCode?: string;
-      authStages?: Array<{
-        stage: string;
-        result: string;
-        source: string;
-        route: string;
-      }>;
-    }>(`${baseUrl}/api/integrations/vela/status`);
-
-    expect(status.body.activationUrl).toBe(
-      'https://fake-vela.example/cli/activate?deviceId=fake-device',
-    );
-    expect(status.body.userCode).toBe('FAKE-CODE');
-    expect(status.body.authStages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        stage: 'device_auth_create_result',
-        result: 'success',
-        source: 'vela',
-        route: 'direct',
-      }),
-      expect.objectContaining({
-        stage: 'activation_ready',
-        result: 'success',
-        source: 'vela',
-        route: 'direct',
-      }),
-      expect.objectContaining({
-        stage: 'browser_open_result',
-        result: 'success',
-        source: 'vela',
-        route: 'direct',
-      }),
-    ]));
-    await postJson(`${baseUrl}/api/integrations/vela/login/cancel`);
-    await waitForVelaLoginIdle();
-  });
-
-  it('caps accumulated auth stages from a noisy Vela child', async () => {
-    const authAttemptId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
-    process.env.FAKE_VELA_EMIT_AUTH_STAGES = '1';
-    process.env.FAKE_VELA_AUTH_STAGE_SPAM = '1';
-    process.env.FAKE_VELA_LOGIN_DELAY_MS = '30000';
-
-    const login = await postJson(
-      `${baseUrl}/api/integrations/vela/login`,
-      { authAttemptId },
-    );
-    expect(login.status).toBe(202);
-    const status = await getJson<{ authStages?: unknown[] }>(
-      `${baseUrl}/api/integrations/vela/status`,
-    );
-    expect(status.body.authStages).toHaveLength(32);
-
     await postJson(`${baseUrl}/api/integrations/vela/login/cancel`);
     await waitForVelaLoginIdle();
   });
@@ -1826,52 +1753,6 @@ describe('POST /api/integrations/vela/login', () => {
       delete process.env.FAKE_VELA_LOGIN_FAIL;
       await new Promise<void>((resolve) => isolatedServer.close(() => resolve()));
     }
-  });
-
-  it('never reflects protocol-only stdout frames in a login error', async () => {
-    const authAttemptId = '936da01f-9abd-4d9d-80c7-02af85c822a8';
-    process.env.FAKE_VELA_EMIT_AUTH_STAGES = '1';
-    process.env.FAKE_VELA_LOGIN_PROTOCOL_ONLY_FAIL = '1';
-
-    const { status, body } = await postJson<{
-      error?: string;
-      authAttemptId?: string;
-      authStages?: Array<{ stage: string; result: string; errorKind?: string }>;
-    }>(`${baseUrl}/api/integrations/vela/login`, { authAttemptId });
-
-    expect(status).toBe(500);
-    expect(body.authAttemptId).toBe(authAttemptId);
-    expect(body.authStages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        stage: 'device_auth_create_result',
-        result: 'failed',
-        errorKind: 'network_error',
-      }),
-    ]));
-    expect(body.error).not.toContain('OPEN_DESIGN_AMR_AUTH_STAGE');
-    expect(body.error).not.toContain(authAttemptId);
-    expect(body.error).not.toContain('schema_version');
-  });
-
-  it('discards a split oversized protocol line through its newline', async () => {
-    process.env.FAKE_VELA_LOGIN_OVERSIZED_PROTOCOL_PRIVATE_TAIL = '1';
-
-    const { status, body } = await postJson<{ error?: string }>(
-      `${baseUrl}/api/integrations/vela/login`,
-    );
-
-    expect(status).toBe(500);
-    const responseText = JSON.stringify(body);
-    expect(responseText).not.toContain('PRIVATE-AUTH-TAIL');
-    expect(responseText).not.toContain('private.example');
-    expect(responseText).not.toContain('SECRET-CODE');
-    expect(responseText).not.toContain('OPEN_DESIGN_AMR_AUTH_STAGE');
-
-    const statusResponse = await fetch(`${baseUrl}/api/integrations/vela/status`);
-    const statusText = await statusResponse.text();
-    expect(statusText).not.toContain('PRIVATE-AUTH-TAIL');
-    expect(statusText).not.toContain('private.example');
-    expect(statusText).not.toContain('SECRET-CODE');
   });
 
   it('surfaces and cancels a delayed login subprocess', async () => {

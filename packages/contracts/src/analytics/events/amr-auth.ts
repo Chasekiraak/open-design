@@ -6,10 +6,7 @@ export type AmrAuthStage =
   | 'spawn_result'
   | 'device_auth_create_result'
   | 'activation_ready'
-  | 'browser_open_result'
-  | 'device_authorization_result'
-  | 'token_exchange_result'
-  | 'credential_persist_result';
+  | 'browser_open_result';
 
 export type AmrAuthStageResult =
   | 'started'
@@ -19,15 +16,11 @@ export type AmrAuthStageResult =
 export type AmrAuthErrorKind =
   | 'network_error'
   | 'browser_open_error'
-  | 'oauth_timeout'
-  | 'oauth_denied'
-  | 'invalid_state'
-  | 'credential_persist_error'
   | 'internal_error'
   | 'unknown';
 
 export type AmrAuthNetworkPath = 'direct' | 'proxy';
-export type AmrAuthStageSource = 'web' | 'daemon' | 'vela';
+export type AmrAuthStageSource = 'web' | 'daemon';
 
 /** One sanitized lifecycle transition for an AMR device-auth attempt. */
 export interface AmrAuthStageProps {

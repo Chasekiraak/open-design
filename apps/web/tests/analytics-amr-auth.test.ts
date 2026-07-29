@@ -134,7 +134,7 @@ describe('amr-auth single-flight tracking', () => {
     expect(props).not.toHaveProperty('error_code');
   });
 
-  it('correlates and deduplicates daemon/Vela stages into the terminal result', () => {
+  it('correlates and deduplicates daemon stages into the terminal result', () => {
     const authAttemptId = beginAmrAuthTracking(attribution, Date.now() - 1000);
     expect(authAttemptId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -157,7 +157,7 @@ describe('amr-auth single-flight tracking', () => {
           sequence: 2,
           stage: 'device_auth_create_result',
           result: 'failed',
-          source: 'vela',
+          source: 'daemon',
           occurredAt: new Date().toISOString(),
           route: 'direct',
           errorKind: 'network_error',
@@ -166,7 +166,7 @@ describe('amr-auth single-flight tracking', () => {
           sequence: 3,
           stage: 'activation_ready',
           result: 'success',
-          source: 'vela',
+          source: 'daemon',
           occurredAt: new Date().toISOString(),
           route: 'proxy',
         },
@@ -182,7 +182,7 @@ describe('amr-auth single-flight tracking', () => {
           sequence: 3,
           stage: 'activation_ready',
           result: 'success',
-          source: 'vela',
+          source: 'daemon',
           occurredAt: new Date().toISOString(),
           route: 'proxy',
         },
@@ -197,7 +197,7 @@ describe('amr-auth single-flight tracking', () => {
       auth_attempt_id: authAttemptId,
       stage: 'activation_ready',
       stage_result: 'success',
-      stage_source: 'vela',
+      stage_source: 'daemon',
       network_path: 'proxy',
       fallback_used: true,
     });

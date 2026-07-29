@@ -356,65 +356,7 @@ function loginAndExit() {
       route: (env.VELA_API_URL ?? '').trim() ? 'proxy' : 'direct',
     })}\n`);
   };
-  const emitAuthStage = (stage, result, errorKind) => {
-    const authAttemptId = env.OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID || '';
-    if (
-      env.FAKE_VELA_EMIT_AUTH_STAGES !== '1' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authAttemptId)
-    ) return;
-    stdout.write(`OPEN_DESIGN_AMR_AUTH_STAGE\t${JSON.stringify({
-      schema_version: 1,
-      auth_attempt_id: authAttemptId,
-      stage,
-      result,
-      ...(errorKind ? { error_kind: errorKind } : {}),
-    })}\n`);
-  };
   logLoginLifecycle('start');
-  emitAuthStage('attempt_started', 'started');
-  if (env.FAKE_VELA_AUTH_STAGE_SPAM === '1') {
-    const stages = [
-      'device_auth_create_result',
-      'browser_open_result',
-      'device_authorization_result',
-      'token_exchange_result',
-      'credential_persist_result',
-    ];
-    const errors = [
-      'network_error',
-      'browser_open_error',
-      'oauth_timeout',
-      'oauth_denied',
-      'invalid_state',
-      'credential_persist_error',
-      'internal_error',
-      'unknown',
-    ];
-    for (const stage of stages) {
-      for (const errorKind of errors) emitAuthStage(stage, 'failed', errorKind);
-    }
-  }
-  if (env.FAKE_VELA_LOGIN_PROTOCOL_ONLY_FAIL === '1') {
-    emitAuthStage('device_auth_create_result', 'failed', 'network_error');
-    exit(1);
-  }
-  if (env.FAKE_VELA_LOGIN_OVERSIZED_PROTOCOL_PRIVATE_TAIL === '1') {
-    // Split one oversized protocol line across writes. The second write looks
-    // like human activation/error output when viewed without the first chunk;
-    // the daemon must remember that it is still discarding a protocol frame.
-    stdout.write(
-      `OPEN_DESIGN_AMR_AUTH_STAGE\t${'{"padding":"'}${'x'.repeat(5_000)}`,
-      () => {
-        setTimeout(() => {
-          stdout.write(
-            'PRIVATE-AUTH-TAIL https://private.example/device?user_code=SECRET-CODE"}\n',
-            () => exit(1),
-          );
-        }, 20);
-      },
-    );
-    return;
-  }
   if (
     env.FAKE_VELA_LOGIN_ACTIVATION_THEN_EXIT_DELAY_MS
     && !(env.VELA_API_URL ?? '').trim()
@@ -492,14 +434,12 @@ function loginAndExit() {
     const failDelayMs = Number(env.FAKE_VELA_LOGIN_FAIL_WITHOUT_API_URL_DELAY_MS) || 0;
     if (failDelayMs > 0) {
       setTimeout(() => {
-        emitAuthStage('device_auth_create_result', 'failed', 'network_error');
         stderr.write(`${env.FAKE_VELA_LOGIN_FAIL_WITHOUT_API_URL}\n`);
         logLoginLifecycle('exit');
         exit(1);
       }, failDelayMs);
       return;
     }
-    emitAuthStage('device_auth_create_result', 'failed', 'network_error');
     stderr.write(`${env.FAKE_VELA_LOGIN_FAIL_WITHOUT_API_URL}\n`);
     logLoginLifecycle('exit');
     exit(1);
@@ -537,22 +477,16 @@ function loginAndExit() {
         },
       },
     };
-    emitAuthStage('device_authorization_result', 'success');
-    emitAuthStage('token_exchange_result', 'success');
     writeFileSync(file, JSON.stringify(payload, null, 2), 'utf8');
-    emitAuthStage('credential_persist_result', 'success');
     stdout.write(`Login successful for ${userEmail}.\n`);
     exit(0);
   };
   // Print the device-auth activation block first (what real `vela login` emits
   // and what the daemon's waitForActivation keys off to detect steady state),
   // then write config after the optional delay so the in-flight window is real.
-  emitAuthStage('device_auth_create_result', 'success');
-  emitAuthStage('activation_ready', 'success');
   stdout.write('Open this URL to continue:\n');
   stdout.write('https://fake-vela.example/cli/activate?deviceId=fake-device\n\n');
   stdout.write('Code: FAKE-CODE\n');
-  emitAuthStage('browser_open_result', 'success');
   if (delayMs > 0) setTimeout(finish, delayMs);
   else finish();
 }

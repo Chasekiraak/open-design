@@ -18,21 +18,9 @@ import type {
 import { resolveAgentLaunch } from '../runtimes/launch.js';
 import { spawnEnvForAgent } from '../runtimes/env.js';
 import { getAgentDef } from '../runtimes/registry.js';
-import {
-  createVelaAuthStageStreamState,
-  isCanonicalAmrAuthAttemptId,
-  pushVelaAuthStageChunk,
-  VELA_AUTH_STAGE_LINE_MAX_BYTES,
-  VELA_AUTH_STAGE_PREFIX,
-  type VelaAuthStageStreamState,
-} from './vela-auth-stage.js';
 import { resolveAmrProfile } from './vela-profile.js';
 
 export { resolveAmrProfile } from './vela-profile.js';
-export {
-  createVelaAuthStageStreamState,
-  pushVelaAuthStageChunk,
-} from './vela-auth-stage.js';
 
 const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'onboarding_amr_card',
@@ -64,6 +52,11 @@ const AMR_ENTRY_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'artifact_success_upgrade',
   'home_artifact_upgrade',
 ]);
+
+function isCanonicalAmrAuthAttemptId(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
 
 const AMR_ONBOARDING_PROFILE_SOURCES: ReadonlySet<TrackingAmrEntrySource> = new Set([
   'onboarding_amr_card',
@@ -252,7 +245,7 @@ export interface VelaLoginAuthStage {
   sequence: number;
   stage: AmrAuthStage;
   result: AmrAuthStageResult;
-  source: 'daemon' | 'vela';
+  source: 'daemon';
   occurredAt: string;
   route: AmrAuthNetworkPath;
   errorKind?: AmrAuthErrorKind;
@@ -401,15 +394,6 @@ export function readVelaLoginStatus(
   const profile = resolveAmrProfile(mergedEnv);
   const configPath = amrConfigPath();
   const loginInFlight = isVelaLoginInFlight();
-  const recordCredentialPersisted = () => {
-    const attempt = latestLoginAttempt;
-    if (!attempt) return;
-    recordVelaAuthStage(
-      attempt,
-      { stage: 'credential_persist_result', result: 'success' },
-      'daemon',
-    );
-  };
   // Only meaningful while signing in (loggedIn becomes true once vela writes the
   // runtime key); empty otherwise so completed sessions don't echo a stale URL.
   const activationFields: Partial<VelaLoginStatus> =
@@ -429,7 +413,6 @@ export function readVelaLoginStatus(
   const runtimeKey = mergedEnv.VELA_RUNTIME_KEY?.trim() ?? '';
   const linkUrl = mergedEnv.VELA_LINK_URL?.trim() ?? '';
   if (runtimeKey && linkUrl) {
-    recordCredentialPersisted();
     return {
       loggedIn: true,
       loginInFlight,
@@ -463,7 +446,6 @@ export function readVelaLoginStatus(
         ...(typeof rawUser.plan === 'string' ? { plan: rawUser.plan } : {}),
       }
     : null;
-  recordCredentialPersisted();
   return {
     loggedIn: true,
     loginInFlight,
@@ -723,9 +705,6 @@ interface VelaLoginActivationCapture {
   activation: VelaLoginActivation;
   stdout: string;
   stderr: string;
-  stdoutLineBuffer: string;
-  stdoutDiscardingProtocolLine: boolean;
-  authStageStream: VelaAuthStageStreamState;
 }
 
 function recordVelaAuthStage(
@@ -735,7 +714,7 @@ function recordVelaAuthStage(
     result: AmrAuthStageResult;
     errorKind?: AmrAuthErrorKind;
   },
-  source: 'daemon' | 'vela',
+  source: 'daemon',
 ): void {
   const current = currentVelaLoginAttempt(attempt);
   if (!current) return;
@@ -762,41 +741,11 @@ function appendHumanVelaLoginStdout(
   capture: VelaLoginActivationCapture,
   chunk: string,
 ): void {
-  let remainingChunk = chunk;
-  if (capture.stdoutDiscardingProtocolLine) {
-    const newline = remainingChunk.indexOf('\n');
-    if (newline < 0) return;
-    remainingChunk = remainingChunk.slice(newline + 1);
-    capture.stdoutDiscardingProtocolLine = false;
-  }
-  const input = capture.stdoutLineBuffer + remainingChunk;
-  const lines = input.split('\n');
-  capture.stdoutLineBuffer = lines.pop() ?? '';
-  for (const rawLine of lines) {
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-    // Protocol frames are parsed through the bounded JSONL decoder above and
-    // never consume the human-output capture budget used for activation URL
-    // recovery or failure text.
-    if (line.startsWith(VELA_AUTH_STAGE_PREFIX)) continue;
-    if (capture.stdout.length < LOGIN_CAPTURE_LIMIT_BYTES) {
-      capture.stdout += `${line}\n`;
-    }
-  }
-  if (Buffer.byteLength(capture.stdoutLineBuffer, 'utf8') > VELA_AUTH_STAGE_LINE_MAX_BYTES) {
-    if (capture.stdoutLineBuffer.startsWith(VELA_AUTH_STAGE_PREFIX)) {
-      // Keep discarding until the newline even after dropping the oversized
-      // buffer. Otherwise a later chunk containing the tail of this protocol
-      // frame would look like ordinary human stdout and could leak a URL,
-      // device code, token, or raw error into the response detail.
-      capture.stdoutDiscardingProtocolLine = true;
-    } else {
-      capture.stdout += capture.stdoutLineBuffer.slice(
-        0,
-        Math.max(0, LOGIN_CAPTURE_LIMIT_BYTES - capture.stdout.length),
-      );
-    }
-    capture.stdoutLineBuffer = '';
-  }
+  if (capture.stdout.length >= LOGIN_CAPTURE_LIMIT_BYTES) return;
+  capture.stdout += chunk.slice(
+    0,
+    LOGIN_CAPTURE_LIMIT_BYTES - capture.stdout.length,
+  );
 }
 
 // Attach lifetime listeners that accumulate the child's stdout/stderr and keep
@@ -818,9 +767,6 @@ function beginLoginActivationCapture(
     activation,
     stdout: '',
     stderr: '',
-    stdoutLineBuffer: '',
-    stdoutDiscardingProtocolLine: false,
-    authStageStream: createVelaAuthStageStreamState(),
   };
   activeLoginActivation = activation;
   const ownsCapture = () =>
@@ -833,13 +779,6 @@ function beginLoginActivationCapture(
     // owned through normal `close`, so legitimate close-drain data still lands.
     if (!ownsCapture()) return;
     const text = String(chunk);
-    for (const signal of pushVelaAuthStageChunk(
-      capture.authStageStream,
-      text,
-      attempt.authAttemptId,
-    )) {
-      recordVelaAuthStage(attempt, signal, 'vela');
-    }
     appendHumanVelaLoginStdout(capture, text);
     const activationWasReady = Boolean(activation.activationUrl);
     const parsed = parseVelaLoginActivation(capture.stdout, capture.stderr);
@@ -1182,9 +1121,8 @@ async function spawnVelaLoginAttempt(
     // child cannot replace the correlation key selected for this attempt.
     OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID: deps.attempt.authAttemptId,
   };
-  // The currently bundled Vela CLI does not implement the structured-stage
-  // protocol. Do not let configured/base env opt an unsupported child into
-  // it; add the format back only with the compatible CLI pin.
+  // This fallback-only change does not opt the child into a structured stage
+  // protocol that the packaged Vela CLI cannot emit.
   delete env.OPEN_DESIGN_AMR_AUTH_STAGE_FORMAT;
   // Route through createCommandInvocation so an npm/Node-style `vela.cmd` or
   // `vela.bat` shim on Windows gets wrapped under `cmd.exe /d /s /c …` with
@@ -1251,9 +1189,9 @@ async function spawnVelaLoginAttempt(
           && stage.result === 'failed',
       )
     ) {
-      // The currently packaged Vela has no structured stage
-      // output. A real child exit after spawn but before activation is the
-      // strongest safe boundary we can infer without classifying raw stderr.
+      // Legacy Vela has no structured stage output. A real child exit after
+      // spawn but before activation is the strongest safe boundary we can
+      // infer without classifying raw stderr.
       recordVelaAuthStage(
         deps.attempt,
         {

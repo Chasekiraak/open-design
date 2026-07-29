@@ -58,7 +58,7 @@ interface ObservableAmrAuthStatus {
     sequence: number;
     stage: AmrAuthStage;
     result: AmrAuthStageResult;
-    source: 'web' | 'daemon' | 'vela';
+    source: 'web' | 'daemon';
     occurredAt: string;
     route: AmrAuthNetworkPath;
     errorKind?: AmrAuthErrorKind;
