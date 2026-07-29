@@ -11,6 +11,11 @@ import {
 import { createRunLifecycleTracer } from '../run-lifecycle-tracer.js';
 import { projectWorkspaceProvenance } from '../workspace-contract.js';
 import { OPEN_DESIGN_PLUGIN_ID } from '../mcp-observability.js';
+import {
+  interruptDurableRunAfterDaemonRestart,
+  RESTART_ERROR_CODE,
+  RESTART_ERROR_MESSAGE,
+} from './run-restart-recovery.js';
 
 export const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 
@@ -205,9 +210,44 @@ export function createChatRunService({
     if (!runsLogDir || typeof id !== 'string' || !id) return null;
     const statePath = path.join(runsLogDir, id, 'state.json');
     const state = readDurableRunState(statePath);
-    if (!state || state.id !== id || !TERMINAL_RUN_STATUSES.has(state.status)) return null;
+    if (!state || state.id !== id) return null;
+    const interruptedAfterRestart =
+      interruptDurableRunAfterDaemonRestart(state);
+    if (interruptedAfterRestart) atomicWriteJson(statePath, state);
+    if (!TERMINAL_RUN_STATUSES.has(state.status)) return null;
     const eventsLogPath = path.join(runsLogDir, id, 'events.jsonl');
     const events = readDurableRunEvents(eventsLogPath);
+    if (interruptedAfterRestart) {
+      const timestamp = state.updatedAt;
+      const nextEventId =
+        events.reduce((max, record) => Math.max(max, record.id), 0) + 1;
+      events.push(
+        {
+          id: nextEventId,
+          event: 'error',
+          data: {
+            error: {
+              code: RESTART_ERROR_CODE,
+              message: RESTART_ERROR_MESSAGE,
+              retryable: true,
+            },
+          },
+          timestamp,
+        },
+        {
+          id: nextEventId + 1,
+          event: 'end',
+          data: {
+            code: 1,
+            signal: null,
+            status: 'failed',
+            resumable: false,
+            endedWithUnfinishedWork: Boolean(state.endedWithUnfinishedWork),
+          },
+          timestamp,
+        },
+      );
+    }
     const run = {
       ...state,
       projectId: typeof state.projectId === 'string' ? state.projectId : null,

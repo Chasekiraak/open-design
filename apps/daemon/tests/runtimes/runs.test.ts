@@ -912,6 +912,52 @@ describe('run event log persistence', () => {
     });
   });
 
+  it('reuses an interrupted durable request instead of starting it twice after restart', () => {
+    const clientRequestId = '018f6f2e-6666-7666-8666-666666666666';
+    const requestFingerprint = 'same-cloud-request';
+    const beforeRestart = createRunsWithLog(tmpDir);
+    const original = beforeRestart.create({
+      agentId: 'amr',
+      clientRequestId,
+      projectId: 'p1',
+      requestFingerprint,
+    });
+    const statePath = path.join(tmpDir, original.id, 'state.json');
+    const runningState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    fs.writeFileSync(
+      statePath,
+      `${JSON.stringify({ ...runningState, status: 'running' })}\n`,
+      'utf8',
+    );
+
+    const afterRestart = createRunsWithLog(tmpDir);
+    const reused = afterRestart.createOrReuse({
+      agentId: 'amr',
+      clientRequestId,
+      projectId: 'p1',
+      requestFingerprint,
+    });
+
+    expect(reused.kind).toBe('reused');
+    expect(reused.run).toMatchObject({
+      id: original.id,
+      status: 'failed',
+      errorCode: 'DAEMON_RESTARTED',
+      error: 'Run interrupted because the daemon restarted.',
+    });
+    expect(reused.run.events.slice(-2)).toMatchObject([
+      { event: 'error', data: { error: { code: 'DAEMON_RESTARTED' } } },
+      { event: 'end', data: { status: 'failed' } },
+    ]);
+    expect(fs.readdirSync(tmpDir)).toEqual([original.id]);
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toMatchObject({
+      id: original.id,
+      status: 'failed',
+      errorCode: 'DAEMON_RESTARTED',
+      terminalRecoveryReason: 'daemon_restart',
+    });
+  });
+
   it('persists native session recovery diagnostics in the run event log', async () => {
     const runs = createRunsWithLog(tmpDir);
     const run = runs.create({ projectId: 'p1' });
