@@ -48,6 +48,10 @@ import { reconcileLibrary, type ReconcileLibraryResult } from '../library-sync.j
 import { fetchExternalBrandAsset } from '../brands/safe-fetch.js';
 import { ensureProjectSubdir } from '../projects.js';
 import {
+  bindCreatedProjectToWorkspace,
+  type CreatedProjectWorkspaceResolver,
+} from '../collab/created-project-workspace.js';
+import {
   confirmPairing,
   libraryConnectionStatus,
   startPairing,
@@ -57,7 +61,15 @@ import {
 export interface RegisterLibraryRoutesDeps
   extends RouteDeps<
     'db' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'auth'
-  > {}
+  > {
+  /**
+   * Where a capture opened as an editable project belongs. Verifies an asserted
+   * workspace identity, then degrades to the daemon's own signed-in workspace
+   * rather than refusing — see `createdProjectWorkspaceHome` in
+   * `collab/created-project-workspace.ts`.
+   */
+  resolveCreatedProjectHome?: CreatedProjectWorkspaceResolver;
+}
 
 const MAX_REMOTE_BYTES = 25 * 1024 * 1024;
 
@@ -162,7 +174,7 @@ export function registerLibraryRoutes(app: Express, ctx: RegisterLibraryRoutesDe
   const { sendApiError, createSseResponse, requireLocalDaemonRequest, isLocalSameOrigin, resolvedPortRef } =
     ctx.http;
   const { LIBRARY_DIR, PROJECTS_DIR, USER_DESIGN_SYSTEMS_DIR } = ctx.paths;
-  const { getProject, insertProject } = ctx.projectStore;
+  const { getProject, insertProject, ensureWorkspaceProject } = ctx.projectStore;
   const { writeProjectFile } = ctx.projectFiles;
   const { insertConversation } = ctx.conversations;
   const { authorizeToolRequest } = ctx.auth;
@@ -634,6 +646,15 @@ export function registerLibraryRoutes(app: Express, ctx: RegisterLibraryRoutesDe
         createdAt: now,
         updatedAt: now,
       });
+      // A capture opened as an editable page is a project the user will
+      // immediately chat into, so it needs the same home workspace every other
+      // created project gets — an unbound one is denied its first run outright.
+      bindCreatedProjectToWorkspace(
+        (input) => ensureWorkspaceProject(db, input),
+        ctx.resolveCreatedProjectHome ? await ctx.resolveCreatedProjectHome(req) : null,
+        projectId,
+        now,
+      );
       // writeProjectFile ensures the project dir; write the capture as the
       // editable entry file. No artifact manifest — a plain HTML file avoids
       // the publication/stub guards (a captured page is arbitrary markup) while

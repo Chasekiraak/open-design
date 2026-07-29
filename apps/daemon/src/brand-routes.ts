@@ -26,6 +26,7 @@ import {
   listProjectsAwaitingInput,
   type insertProject,
 } from './db.js';
+import type { CreatedProjectWorkspaceResolver } from './collab/created-project-workspace.js';
 import { resolveProjectDir } from './projects.js';
 import {
   continueBrandExtraction,
@@ -41,7 +42,6 @@ import {
   startBrandExtraction,
 } from './brands/index.js';
 import { patchMeta } from './brands/store.js';
-import { headerValue, workspaceResourceContext } from './collab/workspace-resource-mutation.js';
 import type { BrandDetailResponse, BrandMeta, BrandSummary } from '@open-design/contracts';
 
 export interface BrandRoutesDeps {
@@ -57,6 +57,13 @@ export interface BrandRoutesDeps {
   resolveDesignSystemWorkspaceId?: () => Promise<string | null>;
   /** `<dataDir>/projects` — backing brand-extraction projects. */
   projectsRoot: string;
+  /**
+   * Where a brand-extraction project belongs. Verifies an asserted workspace
+   * identity, then degrades to the daemon's own signed-in workspace rather than
+   * refusing — see `createdProjectWorkspaceHome` in
+   * `collab/created-project-workspace.ts`.
+   */
+  resolveCreatedProjectHome?: CreatedProjectWorkspaceResolver;
   /** Skills root — the agent-driven kit page is rendered from the bundled
    *  `brand-extract` template under here. */
   skillsRoot: string;
@@ -127,16 +134,18 @@ export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): vo
    * spec 04 §9.3's asset sync depends on — because their own first chat turn
    * 403s before the agent ever runs.
    *
-   * Scoped to an ACTIVE member only, matching `POST /api/projects`: a caller
-   * with no workspace context at all (signed out / single-player) leaves the
-   * project unbound, exactly as before this fix — unbound-and-headerless is
-   * the case `enforceWorkspaceResourceMutation` already passes straight
-   * through (see its `requestCtx === null` branch).
+   * Scoped to an ACTIVE member only, matching `POST /api/projects`. A request
+   * with no workspace headers falls back to the workspace this daemon is signed
+   * in to; only a daemon that has resolved no workspace at all leaves the
+   * project unbound, which is the honest answer for a signed-out/single-player
+   * install — unbound-and-headerless is the case
+   * `enforceWorkspaceResourceMutation` already passes straight through (see its
+   * `requestCtx === null` branch).
    */
-  function bindBrandProjectIntoRequestWorkspace(req: Request, projectId: string, now: number): void {
-    const workspaceIdForCreate = headerValue(req, 'x-od-workspace-id');
-    if (!workspaceIdForCreate) return;
-    const ctx = workspaceResourceContext(req, workspaceIdForCreate);
+  async function bindBrandProjectIntoRequestWorkspace(req: Request, projectId: string, now: number): Promise<void> {
+    const ctx = deps.resolveCreatedProjectHome
+      ? await deps.resolveCreatedProjectHome(req)
+      : null;
     if (!ctx || ctx.memberStatus !== 'active') return;
     ensureWorkspaceProject(db, {
       projectId,
@@ -312,7 +321,7 @@ export function registerBrandRoutes(app: Application, deps: BrandRoutesDeps): vo
       const transcriptAgent = await deps.resolveTranscriptAgent?.().catch(() => null);
       if (transcriptAgent) startOptions.transcriptAgent = transcriptAgent;
       const result = await startBrandExtraction(startOptions);
-      bindBrandProjectIntoRequestWorkspace(req, result.projectId, Date.now());
+      await bindBrandProjectIntoRequestWorkspace(req, result.projectId, Date.now());
       const backgroundExtraction = backgroundExtractionRef.current;
       trackProgrammaticBrandExtraction(result.id, programmaticAbortController, backgroundExtraction);
       res.json(result);
