@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntryShell } from '../../src/components/EntryShell';
 import {
   AMR_LOGIN_POLL_INTERVAL_MS,
+  AMR_LOGIN_STATUS_EVENT,
   AMR_LOGIN_TIMEOUT_MS,
 } from '../../src/components/amrLoginPolling';
 import { I18nProvider } from '../../src/i18n';
@@ -827,19 +828,27 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
 
   it('preserves a pre-start cancel until the canonical AMR login attempt exists', async () => {
     const canonicalAuthAttemptId = '22222222-2222-4222-8222-222222222222';
+    const newerAuthAttemptId = '33333333-3333-4333-8333-333333333333';
     let releaseLogin!: (response: Response) => void;
     const heldLoginResponse = new Promise<Response>((resolve) => {
       releaseLogin = resolve;
     });
     let statusCalls = 0;
     const cancelAttemptIds: string[] = [];
+    const statusEvents: string[] = [];
+    const onStatusEvent = ((event: CustomEvent) => {
+      statusEvents.push(event.detail?.reason);
+    }) as EventListener;
+    window.addEventListener(AMR_LOGIN_STATUS_EVENT, onStatusEvent);
     const fetchMock = vi.fn(async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/integrations/vela/status')) {
         statusCalls += 1;
+        const newerAttemptVisible = cancelAttemptIds.length >= 2;
         return jsonResponse({
           loggedIn: false,
-          loginInFlight: false,
+          loginInFlight: newerAttemptVisible,
+          authAttemptId: newerAttemptVisible ? newerAuthAttemptId : undefined,
           profile: 'prod',
           user: null,
           configPath: '/x',
@@ -851,9 +860,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
       if (url.endsWith('/api/integrations/vela/login/cancel') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as { authAttemptId: string };
         cancelAttemptIds.push(body.authAttemptId);
-        return cancelAttemptIds.length === 1
-          ? jsonResponse({ canceled: false, pids: [] })
-          : jsonResponse({ canceled: true, pids: [123] });
+        return jsonResponse({ canceled: false, pids: [] });
       }
       throw new Error(`unexpected fetch: ${url}`);
     });
@@ -892,6 +899,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
       await Promise.resolve();
     });
     await vi.advanceTimersByTimeAsync(AMR_LOGIN_POLL_INTERVAL_MS);
+    window.removeEventListener(AMR_LOGIN_STATUS_EVENT, onStatusEvent);
 
     expect(cancelAttemptIds).toEqual([
       expect.stringMatching(
@@ -899,8 +907,15 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
       ),
       canonicalAuthAttemptId,
     ]);
-    expect(statusCalls).toBe(statusCallsAfterEarlyCancel);
-    expect(screen.queryByText('Signing in…')).toBeNull();
+    expect(statusCalls).toBeGreaterThan(statusCallsAfterEarlyCancel + 1);
+    expect(screen.getByText('Signing in…')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Cancel sign-in/i })).toBeTruthy();
+    expect(statusEvents).not.toContain('login-canceled');
+    expect(analyticsMocks.track).not.toHaveBeenCalledWith(
+      'amr_auth_result',
+      expect.objectContaining({ result: 'cancelled' }),
+      expect.anything(),
+    );
   });
 
   it('cancels AMR login and re-enables onboarding after the login timeout', async () => {

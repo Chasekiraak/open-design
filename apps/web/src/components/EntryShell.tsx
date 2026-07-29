@@ -2207,31 +2207,58 @@ function OnboardingView({
         amrLoginPollCancelledRef.current
         || amrLoginCancelRequestedRef.current
       ) {
-        resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
-          authAttemptId,
-        });
         if (loginResult.ok || loginResult.alreadyRunning) {
           const cancelResult = await cancelVelaLogin(authAttemptId);
-          closeAmrActivationWindowBestEffort();
           if (!cancelResult.ok) {
             amrLoginCancelRequestedRef.current = false;
             setAmrLoginCancelPending(false);
             setAmrLoginError(t('settings.amrLoginErrorCompact'));
             return;
           }
-          notifyAmrLoginStatusChanged('login-canceled');
+          if (cancelResult.canceled !== true) {
+            const nextStatus = await fetchVelaLoginStatus();
+            if (nextStatus) {
+              setAmrStatus(nextStatus);
+              if (nextStatus.authAttemptId) {
+                amrAuthAttemptIdRef.current = nextStatus.authAttemptId;
+              }
+            }
+            amrLoginCancelRequestedRef.current = false;
+            amrLoginPollCancelledRef.current = false;
+            setAmrLoginCancelPending(false);
+            if (!nextStatus?.loginInFlight) return;
+          } else {
+            resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+              authAttemptId,
+            });
+            closeAmrActivationWindowBestEffort();
+            notifyAmrLoginStatusChanged('login-canceled');
+            amrLoginCancelRequestedRef.current = false;
+            amrLoginPollCancelledRef.current = true;
+            setAmrLoginCancelPending(false);
+            setAmrStatus((current) => (
+              current
+                ? { ...current, loggedIn: false, loginInFlight: false, user: null }
+                : current
+            ));
+            return;
+          }
+        } else {
+          resolveAmrAuthTracking(analytics.track, 'cancelled', undefined, {
+            authAttemptId,
+          });
+          if (amrLoginCancelRequestedRef.current) {
+            amrLoginCancelRequestedRef.current = false;
+            amrLoginPollCancelledRef.current = true;
+            setAmrLoginCancelPending(false);
+            setAmrStatus((current) => (
+              current
+                ? { ...current, loggedIn: false, loginInFlight: false, user: null }
+                : current
+            ));
+          }
+          return;
         }
-        if (amrLoginCancelRequestedRef.current) {
-          amrLoginCancelRequestedRef.current = false;
-          amrLoginPollCancelledRef.current = true;
-          setAmrLoginCancelPending(false);
-          setAmrStatus((current) => (
-            current
-              ? { ...current, loggedIn: false, loginInFlight: false, user: null }
-              : current
-          ));
-        }
-        return;
       }
       if (!loginResult.ok && !loginResult.alreadyRunning) {
         resolveAmrAuthTracking(analytics.track, 'failed', 'spawn_failed', {
