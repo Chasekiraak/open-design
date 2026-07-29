@@ -20,7 +20,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { WorkspaceCollabContext } from '@open-design/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EntryNavRail, resetWorkspaceDirectoryCache } from '../../src/components/EntryNavRail';
+import {
+  EntryNavRail,
+  resetWorkspaceDirectoryCache,
+  workspaceDirectoryForIdentity,
+} from '../../src/components/EntryNavRail';
 import { I18nProvider } from '../../src/i18n';
 
 /**
@@ -146,6 +150,22 @@ afterEach(() => {
 });
 
 describe('workspace switcher directory — account scope', () => {
+  it("rejects the previous identity's in-memory list during the incoming render", () => {
+    const accountB = {
+      ...contextFor('wm-b-team'),
+      workspaceName: 'Shared Team renamed for B',
+      teamName: 'Shared Team renamed for B',
+    } as unknown as WorkspaceCollabContext;
+
+    // This pure render-time decision is the frame-before-effects contract.
+    // Account A and B share the same workspace id, so matching by workspace id
+    // alone would render A's old name for one committed frame under B.
+    expect(workspaceDirectoryForIdentity(ACCOUNT_A_DIRECTORY, accountB)).toEqual([]);
+    expect(workspaceDirectoryForIdentity(ACCOUNT_B_DIRECTORY, accountB)).toBe(
+      ACCOUNT_B_DIRECTORY,
+    );
+  });
+
   it("never paints the previous account's workspaces after an account change", async () => {
     let directory: unknown[] = ACCOUNT_A_DIRECTORY;
     const gate = installGatedFetch(() => directory);
@@ -182,7 +202,8 @@ describe('workspace switcher directory — account scope', () => {
   // straight into both the module cache and component state, repopulating
   // account A's names after the identity-change effect had cleared them.
   it("discards an in-flight read that lands after the account changed", async () => {
-    const gate = installGatedFetch(() => ACCOUNT_A_DIRECTORY);
+    let directory: unknown[] = ACCOUNT_A_DIRECTORY;
+    const gate = installGatedFetch(() => directory);
 
     const view = renderRail(contextFor('wm-a-team'));
     fireEvent.click(screen.getByTestId('workspace-switcher'));
@@ -201,6 +222,7 @@ describe('workspace switcher directory — account scope', () => {
         />
       </I18nProvider>,
     );
+    directory = ACCOUNT_B_DIRECTORY;
 
     // Now let A's request answer, after the identity has already moved.
     await act(async () => {

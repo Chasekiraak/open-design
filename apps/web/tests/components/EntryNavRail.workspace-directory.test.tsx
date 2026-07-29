@@ -111,9 +111,10 @@ afterEach(() => {
 describe('workspace switcher directory', () => {
   it('keeps actions outside the scrollable workspace list when the directory exceeds five items', async () => {
     const manyWorkspaces = Array.from({ length: 7 }, (_, index) => ({
-      workspaceId: `ws-${index + 1}`,
+      workspaceId: index === 0 ? 'ws-team' : `ws-${index + 1}`,
       workspaceName: `Workspace ${index + 1}`,
       workspaceType: index === 0 ? 'personal' : 'team',
+      workspaceMemberId: index === 0 ? 'wm-1' : `wm-${index + 1}`,
       role: 'owner',
     }));
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

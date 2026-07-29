@@ -46,9 +46,16 @@ import {
 import { resetCoalescedGet } from '../../src/lib/coalesced-get';
 
 vi.mock('../../src/components/EntryView', () => ({
-  EntryView: ({ skills }: { skills: Array<{ id: string }> }) => (
+  EntryView: ({
+    skills,
+    skillsLoading,
+  }: {
+    skills: Array<{ id: string }>;
+    skillsLoading: boolean;
+  }) => (
     <main>
       <div data-testid="entry-home-surface" />
+      <div data-testid="entry-skills-loading">{String(skillsLoading)}</div>
       {skills.map((skill) => (
         <div key={skill.id} data-testid={`entry-skill-${skill.id}`} />
       ))}
@@ -322,6 +329,64 @@ describe('App skills list — workspace scope', () => {
 
     expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy();
     expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
+  });
+
+  // A commit-time guard only prevents a late A response from overwriting B.
+  // It does not make the already-committed A snapshot safe to render while B's
+  // replacement request is pending. Workspace-scoped resources must carry the
+  // identity they belong to so the render that first observes B fails closed:
+  // no A skill reaches EntryView/ProjectView, and B is visibly loading.
+  it('hides a warm catalog synchronously while the replacement identity is loading', async () => {
+    let memberId = 'member-a';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input), 'http://d.local').pathname;
+        return {
+          ok: true,
+          json: async () =>
+            pathname.endsWith('/workspace/context')
+              ? workspaceContextPayload('ws-shared-team', memberId)
+              : {},
+        } as Response;
+      }),
+    );
+
+    const readB = deferred<SkillSummary[]>();
+    vi.mocked(fetchSkills).mockImplementation((context) =>
+      context?.workspaceMemberId === 'member-b'
+        ? readB.promise
+        : Promise.resolve([skill('skill-from-a')]),
+    );
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId('entry-skill-skill-from-a')).toBeTruthy());
+    expect(screen.getByTestId('entry-skills-loading').textContent).toBe('false');
+
+    memberId = 'member-b';
+    await act(async () => {
+      notifyWorkspaceContextRefresh();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(
+        vi.mocked(fetchSkills).mock.calls.some(
+          ([c]) => c?.workspaceMemberId === 'member-b',
+        ),
+      ).toBe(true),
+    );
+
+    // B's request is deliberately still pending. The previous identity's
+    // successful catalog must already be invisible and cannot make B look done.
+    expect(screen.queryByTestId('entry-skill-skill-from-a')).toBeNull();
+    expect(screen.getByTestId('entry-skills-loading').textContent).toBe('true');
+
+    await act(async () => {
+      readB.resolve([skill('skill-from-b')]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByTestId('entry-skill-skill-from-b')).toBeTruthy());
+    expect(screen.getByTestId('entry-skills-loading').textContent).toBe('false');
   });
 
   // A guard that discards without guaranteeing a successor is worse than the

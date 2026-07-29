@@ -123,7 +123,10 @@ export function resetWorkspaceDirectoryCache(): void {
  * membership — that is, to have been read by this very account.
  */
 function workspaceDirectoryBelongsTo(
-  items: WorkspaceDirectoryItem[] | null,
+  items: ReadonlyArray<{
+    workspaceId: string;
+    workspaceMemberId?: string | null;
+  }> | null,
   context: WorkspaceCollabContext | null,
 ): boolean {
   if (!items || items.length === 0 || !context) return false;
@@ -133,6 +136,26 @@ function workspaceDirectoryBelongsTo(
     (item) =>
       item.workspaceId === context.workspaceId && item.workspaceMemberId?.trim() === memberId,
   );
+}
+
+/**
+ * Return only directory state attributable to the identity being rendered.
+ *
+ * This check must happen during render. Clearing stale component state from an
+ * identity-change effect is one commit too late: when two accounts share a
+ * workspace id, the incoming account otherwise paints the outgoing account's
+ * cached workspace name for one frame before the effect runs.
+ */
+export function workspaceDirectoryForIdentity<
+  T extends {
+    workspaceId: string;
+    workspaceMemberId?: string | null;
+  },
+>(
+  items: readonly T[],
+  context: WorkspaceCollabContext | null,
+): readonly T[] {
+  return workspaceDirectoryBelongsTo(items, context) ? items : [];
 }
 
 /** The cached switcher list, or null when it cannot be attributed to `context`. */
@@ -690,6 +713,7 @@ export function EntryNavRail({
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceDirectoryItem[]>(
     () => attributableWorkspaceDirectory(context) ?? [],
   );
+  const railIdentity = workspaceIdentityCacheKey(context);
   const [workspaceDirectoryLoading, setWorkspaceDirectoryLoading] = useState(false);
   const [workspaceSwitchingId, setWorkspaceSwitchingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -721,8 +745,9 @@ export function EntryNavRail({
   const canUpgrade =
     Boolean(billingUpgradeUrl && permissions?.canManageBilling)
     && canUpgradeFromPlanTier(labelTier);
+  const identityWorkspaceItems = workspaceDirectoryForIdentity(workspaceItems, context);
   const currentWorkspaceItem = context
-    ? workspaceItems.find((item) => item.workspaceId === context.workspaceId) ?? null
+    ? identityWorkspaceItems.find((item) => item.workspaceId === context.workspaceId) ?? null
     : null;
   // Name the CURRENT workspace from whatever real source has already answered,
   // never from a read of our own. `context` is the startup context the shell
@@ -739,8 +764,8 @@ export function EntryNavRail({
     (context?.workspaceType === 'personal' ? 'Personal workspace' : '');
   const workspaceInitial = workspaceName.charAt(0).toUpperCase() || 'W';
   const visibleWorkspaceItems =
-    workspaceItems.length > 0
-      ? workspaceItems
+    identityWorkspaceItems.length > 0
+      ? identityWorkspaceItems
       : context
         ? [{
             workspaceId: context.workspaceId,
@@ -789,7 +814,11 @@ export function EntryNavRail({
       if (!read.isStillCurrent(contextRef.current)) return;
       if (attributableWorkspaceDirectory(read.context) === null) setWorkspaceItems([]);
     } finally {
-      setWorkspaceDirectoryLoading(false);
+      // A request for identity A can finish after identity B has started its
+      // own load. It must not mark B as complete.
+      if (read.isStillCurrent(contextRef.current)) {
+        setWorkspaceDirectoryLoading(false);
+      }
     }
   }
 
@@ -851,7 +880,7 @@ export function EntryNavRail({
   useEffect(() => {
     if (!teamOpen) return;
     void loadWorkspaceDirectory();
-  }, [teamOpen]);
+  }, [teamOpen, railIdentity]);
 
   // This rail can outlive the identity that filled its list: an account swap
   // (sign out, sign in as someone else) does not necessarily unmount it, and
@@ -864,7 +893,6 @@ export function EntryNavRail({
   // dropped, and the next open refetches. Re-deriving on the identity edge — not
   // on every render where attribution happens to fail — is what keeps a freshly
   // read list stable afterwards instead of being cleared again on the next pass.
-  const railIdentity = workspaceIdentityCacheKey(context);
   const lastRailIdentityRef = useRef(railIdentity);
   useEffect(() => {
     if (lastRailIdentityRef.current === railIdentity) return;

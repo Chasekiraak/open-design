@@ -688,6 +688,7 @@ function AppInner() {
     context: workspaceContext,
     loading: workspaceContextLoading,
   } = workspaceContextState;
+  const currentWorkspaceIdentity = workspaceIdentityCacheKey(workspaceContext);
   const workspaceBilling = useWorkspaceBilling();
   const workspaceContextRef = useRef<WorkspaceCollabContext | null>(null);
   const workspaceContextStateRef = useRef(workspaceContextState);
@@ -787,7 +788,22 @@ function AppInner() {
   >({});
   // Functional skills (capabilities the agent invokes mid-task) — stays
   // small and lives under the Settings → Skills surface.
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [workspaceSkills, setWorkspaceSkills] = useState<{
+    identity: string;
+    items: SkillSummary[];
+  }>(() => ({
+    identity: currentWorkspaceIdentity,
+    items: [],
+  }));
+  // A workspace-scoped response is safe to render only under the exact
+  // identity it was fetched for. The replacement read starts in an effect, so
+  // clearing in that effect would still paint one frame of A's skills under B.
+  // Derive the visible catalog during render instead: an identity mismatch is
+  // a fail-closed empty list until B's own response commits.
+  const skills =
+    workspaceSkills.identity === currentWorkspaceIdentity
+      ? workspaceSkills.items
+      : [];
   // Design templates (rendering catalogue: decks, prototypes, image/video/
   // audio templates) — sourced from /api/design-templates and shown in the
   // EntryView Templates tab. See specs/current/skills-and-design-templates.md.
@@ -1775,7 +1791,10 @@ function AppInner() {
     // Skipping the gate too is deliberate: this response is not an answer about
     // the current identity, and the newer read that replaced it will mark it.
     if (!read.isStillCurrent(workspaceContextRef.current)) return;
-    setSkills(list);
+    setWorkspaceSkills({
+      identity: workspaceIdentityCacheKey(read.context),
+      items: list,
+    });
     markSkillRegistryReady('functional');
   }, [markSkillRegistryReady]);
 
@@ -1802,7 +1821,7 @@ function AppInner() {
   // startup, or holding A's list later. "Discarded and never replaced" is a
   // worse outcome than the staleness it replaced, so every transition that
   // invalidates a response must also start its successor.
-  const skillsReadIdentity = workspaceIdentityCacheKey(workspaceContext);
+  const skillsReadIdentity = currentWorkspaceIdentity;
   const skillsReadIdentityRef = useRef<string | null>(null);
   useEffect(() => {
     if (workspaceContextLoading) return;
@@ -2935,7 +2954,10 @@ function AppInner() {
       const skillsRead = beginWorkspaceScopedRead(workspaceContextRef.current);
       void fetchSkills(skillsRead.context).then((list) => {
         if (!skillsRead.isStillCurrent(workspaceContextRef.current)) return;
-        setSkills(list);
+        setWorkspaceSkills({
+          identity: workspaceIdentityCacheKey(skillsRead.context),
+          items: list,
+        });
       });
       void fetchDesignTemplates().then((list) => setDesignTemplates(list));
       iframeKeepAlivePool.evictMatching(
@@ -3553,7 +3575,9 @@ function AppInner() {
         onSkillsRefresh={refreshSkills}
         onSkillsChanged={handleSkillsChanged}
         onRefreshAgents={refreshAgents}
-        skillsLoading={skillsLoading}
+        skillsLoading={
+          workspaceSkills.identity !== currentWorkspaceIdentity || skillsLoading
+        }
         designSystemsLoading={dsLoading}
         projectsLoading={projectsLoading}
         promptTemplatesLoading={promptTemplatesLoading}
