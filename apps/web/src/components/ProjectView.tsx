@@ -7070,9 +7070,11 @@ export function ProjectView({
       commentAttachments: ChatCommentAttachment[],
       images: File[] = [],
     ): Promise<CommentSendResult> => {
-      if (currentConversationQueueDisabled) return { status: 'rejected' };
+      if (currentConversationQueueDisabled) {
+        return { status: 'rejected', commentIds: [] };
+      }
       if (commentAttachments.length === 0 && images.length === 0) {
-        return { status: 'rejected' };
+        return { status: 'rejected', commentIds: [] };
       }
       setWorkspaceFocused(false);
       setCommentInspectorActive(false);
@@ -7082,15 +7084,21 @@ export function ProjectView({
       let uploaded: ChatAttachment[] = [];
       if (images.length > 0) {
         const result = await uploadProjectFiles(project.id, images, undefined, workspaceContext);
-        if (result.uploaded.length !== images.length) return { status: 'rejected' };
+        if (result.uploaded.length !== images.length) {
+          return { status: 'rejected', commentIds: [] };
+        }
         uploaded = result.uploaded;
       }
       if (commentAttachments.length === 0) {
         const queued = uploaded.length > 0
           ? await handleSend('', uploaded, [], { queueOnly: true, entryFrom: 'comment' })
           : false;
-        return { status: queued ? 'queued' : 'rejected' };
+        return {
+          status: queued ? 'queued' : 'rejected',
+          commentIds: [],
+        };
       }
+      const queuedCommentIds: string[] = [];
       for (let i = 0; i < commentAttachments.length; i++) {
         const commentAttachment = commentAttachments[i]!;
         const savedImages = chatAttachmentsFromPreviewCommentImages(commentAttachment.imageAttachments);
@@ -7103,9 +7111,12 @@ export function ProjectView({
           [commentTaskContextAttachment(commentAttachment)],
           { queueOnly: true, entryFrom: 'comment' },
         );
-        if (!queued) return { status: 'rejected' };
+        if (!queued) {
+          return { status: 'rejected', commentIds: queuedCommentIds };
+        }
+        queuedCommentIds.push(commentAttachment.id);
       }
-      return { status: 'queued' };
+      return { status: 'queued', commentIds: queuedCommentIds };
     },
     [handleSend, project.id, currentConversationQueueDisabled, workspaceContext],
   );

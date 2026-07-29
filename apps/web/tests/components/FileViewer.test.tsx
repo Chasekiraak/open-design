@@ -6706,6 +6706,7 @@ describe('FileViewer tweaks toolbar', () => {
   it('lets element comments queue to chat while a task is running', async () => {
     const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
       status: 'queued',
+      commentIds: ['hero-board-1'],
     });
     render(
       <FileViewer
@@ -6753,6 +6754,7 @@ describe('FileViewer tweaks toolbar', () => {
   it('keeps the comment draft when chat queueing declines the send', async () => {
     const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
       status: 'rejected',
+      commentIds: [],
     });
     render(
       <FileViewer
@@ -7123,8 +7125,8 @@ describe('FileViewer tweaks toolbar', () => {
       updatedAt: Date.now(),
     };
     const onSendBoardCommentAttachments = vi.fn()
-      .mockResolvedValueOnce({ status: 'rejected' })
-      .mockResolvedValueOnce({ status: 'queued' });
+      .mockResolvedValueOnce({ status: 'rejected', commentIds: [] })
+      .mockResolvedValueOnce({ status: 'queued', commentIds: [comment.id] });
     const onRemovePreviewComment = vi.fn().mockResolvedValue(true);
 
     render(
@@ -7156,6 +7158,126 @@ describe('FileViewer tweaks toolbar', () => {
     await waitFor(() => expect(onSendBoardCommentAttachments).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(onRemovePreviewComment).toHaveBeenCalledWith(comment.id));
     await waitFor(() => expect(screen.queryByTestId('comment-popover')).toBeNull());
+  });
+
+  it('keeps a queued saved comment visible when no persistence removal callback exists', async () => {
+    const comment: PreviewComment = {
+      id: 'comment-send-without-removal',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-send-without-removal',
+      selector: '[data-od-pin="pin-send-without-removal"]',
+      label: 'pin-send-without-removal',
+      text: '',
+      htmlHint: '',
+      position: { x: 40, y: 52, width: 18, height: 18 },
+      note: 'Keep until persistence can remove me',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
+      status: 'queued',
+      commentIds: [comment.id],
+    });
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+        previewComments={[comment]}
+        onSendBoardCommentAttachments={onSendBoardCommentAttachments}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open comment for pin-send-without-removal',
+    }));
+    fireEvent.click(screen.getByTestId('comment-add-send'));
+
+    await waitFor(() => expect(onSendBoardCommentAttachments).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('comment-popover-input')).toBeTruthy();
+    expect(screen.getByTestId('comment-saved-marker-pin-send-without-removal')).toBeTruthy();
+  });
+
+  it('removes only comments that were queued before a later selected send is rejected', async () => {
+    const comments: PreviewComment[] = [
+      {
+        id: 'comment-partial-first',
+        projectId: 'project-1',
+        conversationId: 'conversation-1',
+        filePath: 'preview.html',
+        elementId: 'pin-partial-first',
+        selector: '[data-od-pin="pin-partial-first"]',
+        label: 'pin-partial-first',
+        text: '',
+        htmlHint: '',
+        position: { x: 20, y: 24, width: 18, height: 18 },
+        note: 'First queued comment',
+        status: 'open',
+        createdAt: 10,
+        updatedAt: 10,
+      },
+      {
+        id: 'comment-partial-second',
+        projectId: 'project-1',
+        conversationId: 'conversation-1',
+        filePath: 'preview.html',
+        elementId: 'pin-partial-second',
+        selector: '[data-od-pin="pin-partial-second"]',
+        label: 'pin-partial-second',
+        text: '',
+        htmlHint: '',
+        position: { x: 48, y: 24, width: 18, height: 18 },
+        note: 'Second rejected comment',
+        status: 'open',
+        createdAt: 20,
+        updatedAt: 20,
+      },
+    ];
+    const removed: string[] = [];
+    const onSendBoardCommentAttachments = vi.fn().mockResolvedValue({
+      status: 'rejected',
+      commentIds: [comments[0]!.id],
+    });
+
+    function Harness() {
+      const [previewComments, setPreviewComments] = useState(comments);
+      return (
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={htmlPreviewFile()}
+          liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+          previewComments={previewComments}
+          onSendBoardCommentAttachments={onSendBoardCommentAttachments}
+          onRemovePreviewComment={async (commentId) => {
+            removed.push(commentId);
+            setPreviewComments((current) => (
+              current.filter((comment) => comment.id !== commentId)
+            ));
+            return true;
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const selectButtons = screen.getAllByRole('button', { name: 'Select' });
+    expect(selectButtons).toHaveLength(2);
+    for (const button of selectButtons) fireEvent.click(button);
+    fireEvent.click(screen.getByTestId('comment-side-send-claude'));
+
+    await waitFor(() => expect(onSendBoardCommentAttachments).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(removed).toEqual([comments[0]!.id]));
+    expect(screen.queryByText('First queued comment')).toBeNull();
+    expect(screen.getByText('Second rejected comment')).toBeTruthy();
+    expect(screen.getByTestId('comment-side-selectbar').textContent).toContain('1 selected');
   });
 
   it('moves focus between comment side panel toggles when collapsing and expanding without a pre-focused click target', async () => {

@@ -29,6 +29,7 @@ import {
 import { useT } from '../i18n';
 import type { Dict } from '../i18n/types';
 import {
+  commentSendCompleted,
   commentSendSucceeded,
   type CommentSendResult,
 } from './comment-send-result';
@@ -2292,11 +2293,10 @@ export function DesignBrowserPanel({
         const result = await onSendBoardCommentAttachments(
           commentsToAttachments([activeSavedComment]),
         );
-        if (!commentSendSucceeded(result)) return;
-        if (onRemovePreviewComment) {
-          const removed = await onRemovePreviewComment(activeSavedComment.id);
-          if (!removed) return;
-        }
+        if (!commentSendCompleted(result, activeSavedComment.id)) return;
+        if (!onRemovePreviewComment) return;
+        const removed = await onRemovePreviewComment(activeSavedComment.id);
+        if (!removed) return;
         clearBrowserTool();
       } finally {
         setSendingComment(false);
@@ -2323,8 +2323,19 @@ export function DesignBrowserPanel({
         attachments,
         browserImages,
       );
-      if (!commentSendSucceeded(result)) return;
-      clearBrowserTool();
+      const completedIds = new Set(result.commentIds);
+      const pending = attachments.filter(
+        (attachment) => !completedIds.has(attachment.id),
+      );
+      if (pending.length === 0 && commentSendSucceeded(result)) {
+        clearBrowserTool();
+        return;
+      }
+      if (completedIds.size === 0) return;
+      setQueuedCommentNotes(pending.map((attachment) => attachment.comment));
+      setCommentDraft('');
+      setBrowserImages([]);
+      setBrowserPreviewIndex(null);
     } finally {
       setSendingComment(false);
     }

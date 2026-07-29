@@ -4,6 +4,7 @@ import { Button, Input, Select } from '@open-design/components';
 import { CenteredLoader } from './Loading';
 import { APP_CHROME_FILE_ACTIONS_ID, APP_CHROME_FILE_ACTIONS_SELECTOR } from './AppChromeHeader';
 import {
+  commentSendCompleted,
   commentSendSucceeded,
   type CommentSendResult,
 } from './comment-send-result';
@@ -11536,11 +11537,10 @@ function HtmlViewer({
         const result = await onSendBoardCommentAttachments(
           commentsToAttachments([existingComment]),
         );
-        if (!commentSendSucceeded(result)) return;
-        if (onRemovePreviewComment) {
-          const removed = await onRemovePreviewComment(existingComment.id);
-          if (!removed) return;
-        }
+        if (!commentSendCompleted(result, existingComment.id)) return;
+        if (!onRemovePreviewComment) return;
+        const removed = await onRemovePreviewComment(existingComment.id);
+        if (!removed) return;
         clearBoardComposer();
       } finally {
         setSendingBoardBatch(false);
@@ -11567,8 +11567,18 @@ function HtmlViewer({
         attachments,
         boardImages,
       );
-      if (!commentSendSucceeded(result)) return;
-      clearBoardComposer();
+      const completedIds = new Set(result.commentIds);
+      const pending = attachments.filter(
+        (attachment) => !completedIds.has(attachment.id),
+      );
+      if (pending.length === 0 && commentSendSucceeded(result)) {
+        clearBoardComposer();
+        return;
+      }
+      if (completedIds.size === 0) return;
+      setQueuedBoardNotes(pending.map((attachment) => attachment.comment));
+      setCommentDraft('');
+      setBoardImages([]);
     } finally {
       setSendingBoardBatch(false);
     }
@@ -12757,38 +12767,33 @@ function HtmlViewer({
         );
         if (selected.length === 0) return;
         fireCommentPopoverClick('send_to_chat');
-        const sentIds = new Set(selected.map((comment) => comment.id));
         setSendingBoardBatch(true);
         try {
           const result = await onSendBoardCommentAttachments(
             commentsToAttachments(selected),
           );
-          if (!commentSendSucceeded(result)) return;
+          const completedIds = new Set(result.commentIds);
+          if (completedIds.size === 0 || !onRemovePreviewComment) return;
           const removedIds = new Set<string>();
-          if (onRemovePreviewComment) {
-            const removals = await Promise.all(
-              selected.map(async (comment) => ({
+          const removals = await Promise.all(
+            selected
+              .filter((comment) => completedIds.has(comment.id))
+              .map(async (comment) => ({
                 id: comment.id,
                 removed: await onRemovePreviewComment(comment.id),
               })),
-            );
-            for (const removal of removals) {
-              if (removal.removed) removedIds.add(removal.id);
-            }
-            if (removedIds.size !== selected.length) {
-              setSelectedSideCommentIds((current) => {
-                const next = new Set(current);
-                for (const id of removedIds) next.delete(id);
-                return next;
-              });
-              setActivePreviewCommentId((current) => (
-                current && removedIds.has(current) ? null : current
-              ));
-              return;
-            }
+          );
+          for (const removal of removals) {
+            if (removal.removed) removedIds.add(removal.id);
           }
-          setSelectedSideCommentIds(new Set());
-          setActivePreviewCommentId((current) => current && sentIds.has(current) ? null : current);
+          setSelectedSideCommentIds((current) => {
+            const next = new Set(current);
+            for (const id of removedIds) next.delete(id);
+            return next;
+          });
+          setActivePreviewCommentId((current) => (
+            current && removedIds.has(current) ? null : current
+          ));
         } finally {
           setSendingBoardBatch(false);
         }

@@ -776,6 +776,7 @@ describe('DesignBrowserPanel <webview> navigation', () => {
   it('does not start browser element comments from the external browser toolbar', () => {
     const onSendBoardCommentAttachments = vi.fn(async (_attachments: unknown[], _images?: File[]) => ({
       status: 'queued' as const,
+      commentIds: [],
     }));
     const { container } = render(
       <DesignBrowserPanel
