@@ -1025,7 +1025,7 @@ function legacyByokMigrationSource(config: AppConfig): AppConfig {
   }
 }
 
-function clearLegacyByokSecrets(
+export function applySavedByokCredentialProfile(
   config: AppConfig,
   selectedProfile: ByokCredentialProfile,
 ): AppConfig {
@@ -1095,7 +1095,7 @@ export async function migrateLegacyByokCredentialsToDaemon(
     if (!selectedProfile?.configured) {
       throw new Error('Secure credential migration did not produce a usable profile.');
     }
-    const migrated = clearLegacyByokSecrets(config, selectedProfile);
+    const migrated = applySavedByokCredentialProfile(config, selectedProfile);
     saveConfig(migrated);
     return { status: 'migrated', config: migrated };
   } catch (error) {
@@ -1368,24 +1368,55 @@ function sanitizeAgentCliEnv(agentCliEnv: AppConfig['agentCliEnv']): AppConfig['
   return sanitized;
 }
 
+function preserveLegacyByokSecrets(
+  config: AppConfig,
+  stored: AppConfig,
+): AppConfig {
+  const apiProtocolConfigs = {
+    ...(config.apiProtocolConfigs ?? {}),
+  };
+  for (const [protocol, storedEntry] of Object.entries(stored.apiProtocolConfigs ?? {})) {
+    if (!storedEntry?.apiKey?.trim()) continue;
+    apiProtocolConfigs[protocol as ApiProtocol] = {
+      ...storedEntry,
+      ...(apiProtocolConfigs[protocol as ApiProtocol] ?? {}),
+      apiKey: storedEntry.apiKey,
+    };
+  }
+
+  const byokProviderConfigDrafts = {
+    ...(config.byokProviderConfigDrafts ?? {}),
+  };
+  for (const [key, storedDraft] of Object.entries(stored.byokProviderConfigDrafts ?? {})) {
+    if (!storedDraft.apiConfig.apiKey?.trim()) continue;
+    const currentDraft = byokProviderConfigDrafts[key];
+    byokProviderConfigDrafts[key] = {
+      ...storedDraft,
+      ...currentDraft,
+      apiConfig: {
+        ...storedDraft.apiConfig,
+        ...(currentDraft?.apiConfig ?? {}),
+        apiKey: storedDraft.apiConfig.apiKey,
+      },
+    };
+  }
+
+  return {
+    ...config,
+    ...(stored.apiKey?.trim() ? { apiKey: stored.apiKey } : {}),
+    apiProtocolConfigs,
+    byokProviderConfigDrafts,
+  };
+}
+
 export function saveConfig(config: AppConfig): void {
-  let storedLegacySecret = false;
+  let storedConfig: AppConfig | null = null;
   try {
-    const stored = JSON.parse(
+    storedConfig = JSON.parse(
       localStorage.getItem(STORAGE_KEY) ?? '{}',
     ) as AppConfig;
-    storedLegacySecret = hasLegacyByokSecret(stored);
   } catch {
     // A malformed old record cannot be preserved as a usable credential.
-  }
-  if (
-    storedLegacySecret
-    && !(config.byokProfileId && config.byokCredentialConfigured)
-  ) {
-    // A legacy plaintext key may be the user's only credential. General
-    // settings autosaves must not sanitize and overwrite that browser record
-    // until a daemon-owned secure profile has been confirmed.
-    return;
   }
   const apiProtocolConfigs = config.apiProtocolConfigs
     ? Object.fromEntries(Object.entries(config.apiProtocolConfigs).map(([protocol, entry]) => [
@@ -1402,7 +1433,7 @@ export function saveConfig(config: AppConfig): void {
         },
       ]))
     : config.byokProviderConfigDrafts;
-  const sanitized: AppConfig = {
+  let sanitized: AppConfig = {
     ...config,
     apiKey: '',
     apiProtocolConfigs,
@@ -1411,6 +1442,16 @@ export function saveConfig(config: AppConfig): void {
   };
   for (const key of DAEMON_OWNED_KEYS) {
     delete (sanitized as unknown as Record<string, unknown>)[key];
+  }
+  if (
+    storedConfig
+    && hasLegacyByokSecret(storedConfig)
+    && !(config.byokProfileId && config.byokCredentialConfigured)
+  ) {
+    // A legacy plaintext key may be the user's only credential. Keep only
+    // those secret projections until secure migration succeeds, while still
+    // allowing unrelated settings (mode, model, theme, etc.) to persist.
+    sanitized = preserveLegacyByokSecrets(sanitized, storedConfig);
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
 }

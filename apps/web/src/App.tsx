@@ -2563,6 +2563,7 @@ function AppInner() {
         onApiProtocolChange={handleApiProtocolChange}
         onApiModelChange={handleApiModelChange}
         onConfigPersist={handleConfigPersist}
+        onPersistByokCredential={persistByokCredentialProfileToDaemon}
         daemonAppConfigReady={daemonAppConfigReady}
         onSilentUpdatePreferenceChange={handleSilentUpdatePreferenceChange}
         onSkillsRefresh={refreshSkills}

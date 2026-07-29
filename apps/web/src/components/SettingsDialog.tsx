@@ -76,6 +76,7 @@ import {
   BYOK_PROVIDER_PRESETS,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_ORBIT,
+  applySavedByokCredentialProfile,
   defaultKnownProviderModel,
   isStoredMediaProviderEntryEmpty,
   isStoredMediaProviderEntryPresent,
@@ -1179,42 +1180,6 @@ export function updateCurrentApiProtocolConfig(
     protocol,
     nextApiConfig,
   );
-}
-
-export function applySavedByokCredentialProfile(
-  config: AppConfig,
-  profile: ByokCredentialProfile,
-): AppConfig {
-  const apiProtocolConfigs = Object.fromEntries(
-    Object.entries(config.apiProtocolConfigs ?? {}).map(([protocol, entry]) => [
-      protocol,
-      entry ? { ...entry, apiKey: '' } : entry,
-    ]),
-  ) as AppConfig['apiProtocolConfigs'];
-  const byokProviderConfigDrafts = Object.fromEntries(
-    Object.entries(config.byokProviderConfigDrafts ?? {}).map(([key, draft]) => [
-      key,
-      {
-        ...draft,
-        apiConfig: { ...draft.apiConfig, apiKey: '' },
-      },
-    ]),
-  );
-  const next = updateCurrentApiProtocolConfig(
-    {
-      ...config,
-      apiKey: '',
-      apiProtocolConfigs,
-      byokProviderConfigDrafts,
-    },
-    { apiKey: '' },
-  );
-  return {
-    ...next,
-    byokProfileId: profile.id,
-    byokCredentialConfigured: profile.configured,
-    byokCredentialTail: profile.keyTail,
-  };
 }
 
 export function updateAgentCliEnvValue(

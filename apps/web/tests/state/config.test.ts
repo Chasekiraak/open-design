@@ -1598,8 +1598,14 @@ describe('secure BYOK profiles', () => {
     saveConfig({
       ...result.config,
       theme: 'dark',
+      mode: 'daemon',
+      agentId: 'codex',
     });
-    expect(store.get('open-design:config')).toContain('legacy-secret');
+    const saved = JSON.parse(store.get('open-design:config') ?? '{}');
+    expect(saved.apiKey).toBe('legacy-secret');
+    expect(saved.theme).toBe('dark');
+    expect(saved.mode).toBe('daemon');
+    expect(saved.agentId).toBe('codex');
   });
 
   it('hydrates only an explicitly selected secure profile reference', async () => {
