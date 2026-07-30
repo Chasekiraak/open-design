@@ -150,6 +150,10 @@ test('[P0] manual edit undo and redo restore a saved style without reloading the
   await page.getByTestId('manual-edit-mode-toggle').click();
   const frame = artifactPreviewFrame(page);
   await selectPreviewElementThroughBridge(page, frame, '[data-od-id="hero-title"]', 'TYPOGRAPHY');
+  let previewNavigations = 0;
+  page.on('framenavigated', (navigated) => {
+    if (navigated.parentFrame() === page.mainFrame()) previewNavigations += 1;
+  });
 
   const fontSizeInput = inspectorSection(page, 'TYPOGRAPHY').locator('.cc-row').filter({ hasText: 'Size' }).locator('input');
   await fontSizeInput.fill('42');
@@ -168,6 +172,7 @@ test('[P0] manual edit undo and redo restore a saved style without reloading the
   await redo.click();
   await expectFileSource(page, projectId, 'manual-edit-history.html', ['font-size: 42px']);
   await expect(frame.getByRole('heading', { name: 'Original Hero' })).toBeVisible();
+  expect(previewNavigations).toBe(0);
 });
 
 test('[P0] manual edit keeps a mixed canvas and speaker-notes history chain', async ({ page }) => {
