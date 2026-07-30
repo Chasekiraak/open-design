@@ -30,7 +30,7 @@ import { describe, expect, test } from 'vitest';
 
 import { requestJson } from '@/vitest/http';
 import { listMessages } from '@/vitest/messages';
-import { startRun, waitForRunStatus } from '@/vitest/runs';
+import { readRunEvents, startRun, waitForRunStatus } from '@/vitest/runs';
 import { createSmokeSuite } from '@/vitest/suite';
 
 type ProjectResponse = {
@@ -287,6 +287,15 @@ describe('AMR chat-run end-to-end', () => {
         timeoutMs: 30_000,
       });
       expect(finalStatus.status).toBe('succeeded');
+
+      const runEvents = await readRunEvents(webUrl, run.runId);
+      expect(runEvents).toContain('"type":"usage"');
+      expect(runEvents).toContain('input_tokens');
+      expect(runEvents).toContain('output_tokens');
+      // This suite opts out of content telemetry. The ACP transport still
+      // persists the assistant transcript for the product, but the run event
+      // stream must not leak the user's raw prompt to telemetry consumers.
+      expect(runEvents).not.toContain(PROMPT);
 
       const messages = await listMessages(webUrl, projectId, conversationId);
       const assistantMessage = messages.find((m) => m.id === assistantMessageId);

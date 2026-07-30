@@ -629,6 +629,7 @@ describe("packaged launcher payload update loop", () => {
       const config = fakePackagedConfig(root, testCase);
       const paths = resolvePackagedNamespacePaths(config);
       const runtime = await resolvePackagedLauncherRuntime(config, paths);
+      const launchRequests: Array<{ launchPath: string; root: string }> = [];
       const updater = createDesktopUpdater({
         arch: testCase.arch,
         currentVersion: testCase.currentVersion,
@@ -648,12 +649,21 @@ describe("packaged launcher payload update loop", () => {
       }, {
         extractLauncherPayloadArchive: async (input: { destinationRoot: string }) =>
           await testCase.writePayload(input.destinationRoot, testCase),
+        launchAppAfterQuit: async (input: { launchPath: string; root: string }) => {
+          launchRequests.push({ launchPath: input.launchPath, root: input.root });
+          return {};
+        },
       });
 
       const checked = await updater.checkForUpdates();
       expect(checked.availableVersion).toBe(testCase.promotedVersion);
       expect(checked.artifact?.type).toBe("payload");
       expect(checked.reinstall).toBeUndefined();
+
+      const installed = await updater.installUpdate();
+      expect(installed.state).toBe(UPDATE_DOWNLOADED);
+      expect(installed.installResult?.dryRun).toBe(false);
+      expect(launchRequests).toHaveLength(1);
     } finally {
       await fixture.close();
       await rm(root, { force: true, recursive: true });
