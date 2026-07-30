@@ -135,6 +135,28 @@ async function openExecutionSettingsWithAgents(
   await page.route('**/api/health', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
+  if (typeof config.byokProfileId === 'string') {
+    await page.route('**/api/byok/profiles', async (route) => {
+      await route.fulfill({
+        json: {
+          available: true,
+          backend: 'test',
+          profiles: [{
+            id: config.byokProfileId,
+            label: 'OpenAI',
+            protocol: config.apiProtocol ?? 'openai',
+            baseUrl: config.baseUrl ?? '',
+            model: config.model ?? '',
+            requiresApiKey: true,
+            configured: true,
+            keyTail: config.byokCredentialTail ?? 'test',
+            createdAt: 1,
+            updatedAt: 1,
+          }],
+        },
+      });
+    });
+  }
   await routeAgents(page, agents);
 
   await gotoEntryHome(page);
@@ -253,7 +275,7 @@ test('[P0] @critical BYOK quick fill provider updates fields and saved settings 
     .toMatchObject({
       mode: 'api',
       apiProtocol: 'openai',
-      apiKey: 'sk-openai-test',
+      apiKey: '',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-flash',
       apiProviderBaseUrl: 'https://api.deepseek.com',
@@ -266,7 +288,7 @@ test('[P0] @critical BYOK quick fill provider updates fields and saved settings 
   expect(savedConfig).toMatchObject({
     mode: 'api',
     apiProtocol: 'openai',
-    apiKey: 'sk-openai-test',
+    apiKey: '',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-v4-flash',
     apiProviderBaseUrl: 'https://api.deepseek.com',
@@ -474,7 +496,7 @@ test('[P0] BYOK save stays disabled until required fields are valid', async ({ p
   await expect(closeButton).toBeEnabled();
 
   await dialog.getByLabel('API key').fill('sk-openai-test');
-  await expect.poll(async () => readSavedConfig(page)).toMatchObject({ apiKey: 'sk-openai-test' });
+  await expect.poll(async () => readSavedConfig(page)).toMatchObject({ apiKey: '' });
 
   const baseUrlInput = dialog.getByLabel('Base URL');
   // A non-http scheme is still rejected client-side. (An internal-IP URL is no
@@ -485,7 +507,7 @@ test('[P0] BYOK save stays disabled until required fields are valid', async ({ p
 
   await baseUrlInput.fill('http://localhost:11434/v1');
   await expect.poll(async () => readSavedConfig(page)).toMatchObject({
-    apiKey: 'sk-openai-test',
+    apiKey: '',
     baseUrl: 'http://localhost:11434/v1',
   });
 });
@@ -659,7 +681,7 @@ test('[P0] @critical BYOK clearing the API key restores the suggested OpenAI mod
   await apiKeyInput.blur();
   await expect.poll(() => providerModelRequests.length).toBe(1);
   await expect.poll(async () => readSavedConfig(page)).toMatchObject({
-    apiKey: 'sk-openai-test',
+    apiKey: '',
   });
 
   await modelSelect.click();
@@ -1012,12 +1034,15 @@ test('[P0] @critical Settings keeps Local CLI and BYOK model choices isolated af
     page,
     {
       mode: 'api',
-      apiKey: 'sk-openai-test',
+      apiKey: '',
       apiProtocol: 'openai',
       apiVersion: '',
       baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       apiProviderBaseUrl: 'https://api.openai.com/v1',
+      byokProfileId: 'byok-settings-model-isolation',
+      byokCredentialConfigured: true,
+      byokCredentialTail: 'test',
       agentId: null,
       skillId: null,
       designSystemId: null,
