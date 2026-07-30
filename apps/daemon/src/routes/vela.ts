@@ -12,6 +12,10 @@ import {
 import { readAnalyticsContext } from '../analytics.js';
 import { agentCliEnvForAgent, type AppConfigPrefs, writeAppConfig } from '../app-config.js';
 import {
+  validateExternalPluginContext,
+  validatePluginWorkflowId,
+} from '../mcp-observability.js';
+import {
   cancelVelaLogin,
   forgetVelaLogin,
   mergeVelaEnv,
@@ -75,6 +79,48 @@ interface AmrModelProbe {
 
 function velaApiProxyBaseUrl(req: Request, getPublicBaseUrl: PublicBaseUrlResolver): string {
   return `${getPublicBaseUrl(req)}${AMR_API_PROXY_PREFIX}`;
+}
+
+function pluginLoginCorrelationEnv(input: {
+  body: unknown;
+  analyticsContext: ReturnType<typeof readAnalyticsContext>;
+  metricsEnabled: boolean;
+}): Record<string, string> {
+  const { analyticsContext } = input;
+  if (
+    !input.metricsEnabled
+    || !analyticsContext
+    || analyticsContext.clientType !== 'external_mcp'
+    || analyticsContext.entrySurface !== 'external_mcp'
+  ) {
+    return {};
+  }
+  const body =
+    input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+      ? input.body as Record<string, unknown>
+      : {};
+  try {
+    const context = validateExternalPluginContext({
+      id: analyticsContext.externalPluginId,
+      version: analyticsContext.externalPluginVersion,
+      distributionMechanism: analyticsContext.distributionMechanism,
+      publisherClass: analyticsContext.publisherClass,
+    });
+    const pluginWorkflowId = validatePluginWorkflowId(body.pluginWorkflowId);
+    return {
+      OD_INSTALLATION_ID: analyticsContext.deviceId,
+      OPEN_DESIGN_PLUGIN_WORKFLOW_ID: pluginWorkflowId,
+      OPEN_DESIGN_EXTERNAL_PLUGIN_ID: context.id,
+      OPEN_DESIGN_EXTERNAL_PLUGIN_VERSION: context.version,
+      OPEN_DESIGN_DISTRIBUTION_MECHANISM: context.distributionMechanism,
+      OPEN_DESIGN_PUBLISHER_CLASS: context.publisherClass,
+    };
+  } catch {
+    // Login must remain functional when analytics metadata is absent or
+    // malformed. Invalid self-reported attribution is dropped rather than
+    // being trusted or turned into an authentication dependency.
+    return {};
+  }
 }
 
 function velaProxyRequestBody(req: Request): Buffer | null {
@@ -456,6 +502,11 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
       const configuredEnv = agentCliEnvForAgent(appConfig.agentCliEnv, 'amr');
       const analyticsContext = readAnalyticsContext(req);
       const attribution = parseVelaLoginAttribution(req.body);
+      const correlationEnv = pluginLoginCorrelationEnv({
+        body: req.body,
+        analyticsContext,
+        metricsEnabled: appConfig.telemetry?.metrics === true,
+      });
       let loginAttribution = attribution;
       if (attribution) {
         if (analyticsContext && appConfig.telemetry?.metrics === true) {
@@ -481,6 +532,7 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
         spawned = await spawnVelaLogin({
           configuredEnv,
           attribution: loginAttribution,
+          correlationEnv,
           // Block until the direct attempt reaches device-auth steady state or
           // exits/errors before it, so a direct failure that arrives AFTER the
           // 250ms startup grace (the common shape on a broken edge path) still
@@ -494,6 +546,7 @@ export function registerVelaRoutes(app: Express, deps: RegisterVelaRoutesDeps): 
         spawned = await spawnVelaLogin({
           configuredEnv,
           attribution: loginAttribution,
+          correlationEnv,
           defaultApiUrl: velaApiProxyBaseUrl(req, getPublicBaseUrl),
           waitForActivation: true,
         });
