@@ -8,6 +8,10 @@ import { createCommandInvocation, createPackageManagerInvocation } from "@open-d
 
 import { hashJson, hashPath, ToolPackCache } from "../cache.js";
 import type { ToolPackConfig } from "../config.js";
+import {
+  prepareNodePtyRuntime,
+  validateNodePtyRuntime,
+} from "../node-pty-runtime.js";
 import { hashPackageSourcePath } from "../package-source-hash.js";
 import { electronBuilderVersionForAppVersion } from "../versions.js";
 import {
@@ -111,6 +115,16 @@ async function validateNativeRebuildOutput(appRoot: string): Promise<string | nu
   } catch {
     return `native module output is missing: ${nativePath}`;
   }
+}
+
+async function validateWinPackagedAppRuntime(appRoot: string): Promise<string | null> {
+  const nativeValidationError = await validateNativeRebuildOutput(appRoot);
+  if (nativeValidationError != null) return nativeValidationError;
+  return validateNodePtyRuntime({
+    appRoot,
+    arch: "x64",
+    platform: "win32",
+  });
 }
 
 async function buildWorkspaceArtifacts(config: ToolPackConfig): Promise<void> {
@@ -408,7 +422,7 @@ export async function createWinPackagedAppCacheKey(
     packedTarballs,
     platform: "win32",
     prebundle: shouldUseWinStandalonePrebundle(config.webOutputMode),
-    schemaVersion: 2,
+    schemaVersion: 3,
     tarballsKey,
     webOutputMode: config.webOutputMode,
   });
@@ -430,7 +444,7 @@ export async function prepareWinPackagedApp(
     key,
     outputs: ["app"],
     invalidate: async ({ entryRoot }: { entryRoot: string }) => {
-      const nativeValidationError = await validateNativeRebuildOutput(join(entryRoot, "app"));
+      const nativeValidationError = await validateWinPackagedAppRuntime(join(entryRoot, "app"));
       return nativeValidationError == null ? null : { reason: nativeValidationError };
     },
     build: async ({ entryRoot }: { entryRoot: string }): Promise<PackagedAppCacheMetadata> => {
@@ -447,8 +461,13 @@ export async function prepareWinPackagedApp(
         await buildPrebundledStandaloneRuntime(config, appPaths);
       }
       await runNpmInstall(appRoot);
+      await prepareNodePtyRuntime({
+        appRoot,
+        arch: "x64",
+        platform: "win32",
+      });
       await runElectronRebuild(config, appRoot);
-      const nativeValidationError = await validateNativeRebuildOutput(appRoot);
+      const nativeValidationError = await validateWinPackagedAppRuntime(appRoot);
       if (nativeValidationError != null) throw new Error(nativeValidationError);
       return { packagedVersion };
     },

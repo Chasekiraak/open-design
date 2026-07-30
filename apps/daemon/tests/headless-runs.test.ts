@@ -80,7 +80,9 @@ describe('POST /api/runs headless fallbacks', () => {
         await expect(runResponse.json()).resolves.toMatchObject({
           error: {
             code: 'VALIDATION_FAILED',
-            message: expect.stringContaining('provider, API key, and model'),
+            message: expect.stringMatching(
+              /secure credential profile|raw BYOK credentials are not accepted/iu,
+            ),
           },
         });
       }

@@ -9,6 +9,11 @@ import type { PageViewProps } from './page-view.js';
 import type { ArtifactDeployResultProps, ArtifactExportResultProps, AssistantFeedbackClickProps, AssistantFeedbackReasonClickProps, AssistantFeedbackReasonSubmitProps, AssistantFeedbackReasonViewProps, ByokPreflightBlockedProps, ContextLinkResultProps, FeedbackSubmitResultProps, FileUploadResultProps, FileVersionRestoreResultProps, LangfuseReportResultProps, MediaGenerationResultProps, PackagedRuntimeFailedProps, PluginImportResultProps, PluginReplacementResultProps, ProjectCreateResultProps, RunCreatedProps, RunFinishedProps, RunRetryAttemptedProps, RunRetryFinishedProps, SettingsByokModelsFetchResultProps, SettingsByokTestResultProps, SettingsCliTestResultProps, SettingsConnectorAuthResultProps, SettingsViewProps, SketchExportResultProps, SketchSaveResultProps, SpeakerNotesSaveResultProps, UpdateApplyObservedProps, UpdateCheckResultProps, UpdateInstallResultProps } from './result-events.js';
 import type { SurfaceViewProps } from './surface-view.js';
 import type { AmrAuthResultProps, UiClickProps } from './ui-click.js';
+import type {
+  McpSessionInitializedProps,
+  McpToolFinishedProps,
+  McpToolStartedProps,
+} from './mcp.js';
 // ---- Discriminated union of all event payloads ---------------------------
 
 export type AnalyticsEventPayload =
@@ -24,6 +29,9 @@ export type AnalyticsEventPayload =
   | { event: 'langfuse_report_result'; props: LangfuseReportResultProps }
   | { event: 'run_retry_attempted'; props: RunRetryAttemptedProps }
   | { event: 'run_retry_finished'; props: RunRetryFinishedProps }
+  | { event: 'mcp_session_initialized'; props: McpSessionInitializedProps }
+  | { event: 'mcp_tool_started'; props: McpToolStartedProps }
+  | { event: 'mcp_tool_finished'; props: McpToolFinishedProps }
   | { event: 'media_generation_result'; props: MediaGenerationResultProps }
   | { event: 'update_install_result'; props: UpdateInstallResultProps }
   | { event: 'update_check_result'; props: UpdateCheckResultProps }

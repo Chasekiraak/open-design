@@ -1069,6 +1069,87 @@ describe('POST /api/integrations/vela/login', () => {
     }
   });
 
+  it('passes bounded external plugin correlation to vela login when metrics consent is enabled', async () => {
+    const dataDir = process.env.OD_DATA_DIR as string;
+    const previous = await readAppConfig(dataDir);
+    const dumpPath = path.join(tmpHome, 'vela-env-plugin-correlation.json');
+    process.env.FAKE_VELA_ENV_DUMP_PATH = dumpPath;
+    await writeAppConfig(dataDir, {
+      ...previous,
+      telemetry: { ...(previous.telemetry ?? {}), metrics: true },
+    });
+
+    try {
+      const { status } = await postJson(
+        `${baseUrl}/api/integrations/vela/login`,
+        {
+          pluginWorkflowId: '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
+        },
+        {
+          'x-od-analytics-device-id': 'od-install-plugin',
+          'x-od-analytics-client-type': 'external_mcp',
+          'x-od-analytics-entry-surface': 'external_mcp',
+          'x-od-analytics-external-plugin-id': 'open-design',
+          'x-od-analytics-external-plugin-version': '0.4.0',
+          'x-od-analytics-distribution-mechanism': 'git_marketplace',
+          'x-od-analytics-publisher-class': 'open_design_first_party',
+        },
+      );
+      expect(status).toBe(202);
+
+      await waitForFile(dumpPath);
+      const env = JSON.parse(readFileSync(dumpPath, 'utf8'));
+      expect(env.OD_INSTALLATION_ID).toBe('od-install-plugin');
+      expect(env.OPEN_DESIGN_PLUGIN_WORKFLOW_ID).toBe(
+        '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
+      );
+      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID).toBe('open-design');
+      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_VERSION).toBe('0.4.0');
+      expect(env.OPEN_DESIGN_DISTRIBUTION_MECHANISM).toBe('git_marketplace');
+      expect(env.OPEN_DESIGN_PUBLISHER_CLASS).toBe('open_design_first_party');
+    } finally {
+      await writeAppConfig(dataDir, previous as unknown as Record<string, unknown>);
+    }
+  });
+
+  it('omits external plugin correlation when metrics consent is disabled', async () => {
+    const dataDir = process.env.OD_DATA_DIR as string;
+    const previous = await readAppConfig(dataDir);
+    const dumpPath = path.join(tmpHome, 'vela-env-plugin-correlation-off.json');
+    process.env.FAKE_VELA_ENV_DUMP_PATH = dumpPath;
+    await writeAppConfig(dataDir, {
+      ...previous,
+      telemetry: { ...(previous.telemetry ?? {}), metrics: false },
+    });
+
+    try {
+      const { status } = await postJson(
+        `${baseUrl}/api/integrations/vela/login`,
+        {
+          pluginWorkflowId: '019f9414-85e8-7f20-8d8f-7f868b2d4b5f',
+        },
+        {
+          'x-od-analytics-device-id': 'od-install-plugin',
+          'x-od-analytics-client-type': 'external_mcp',
+          'x-od-analytics-entry-surface': 'external_mcp',
+          'x-od-analytics-external-plugin-id': 'open-design',
+          'x-od-analytics-external-plugin-version': '0.4.0',
+          'x-od-analytics-distribution-mechanism': 'git_marketplace',
+          'x-od-analytics-publisher-class': 'open_design_first_party',
+        },
+      );
+      expect(status).toBe(202);
+
+      await waitForFile(dumpPath);
+      const env = JSON.parse(readFileSync(dumpPath, 'utf8'));
+      expect(env.OPEN_DESIGN_PLUGIN_WORKFLOW_ID).toBeUndefined();
+      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_ID).toBeUndefined();
+      expect(env.OPEN_DESIGN_EXTERNAL_PLUGIN_VERSION).toBeUndefined();
+    } finally {
+      await writeAppConfig(dataDir, previous as unknown as Record<string, unknown>);
+    }
+  });
+
   it('omits Open Design attribution device id without analytics consent headers', async () => {
     const dataDir = process.env.OD_DATA_DIR as string;
     const previous = await readAppConfig(dataDir);
