@@ -23,6 +23,32 @@ async function stubCatalogsEmpty(page: Page): Promise<void> {
 const STORAGE_KEY = 'open-design:config';
 const ACTIVE_ARTIFACT_PREVIEW_SELECTOR = '[data-testid="artifact-preview-frame"]:visible, [data-testid="artifact-preview-frame-url-load"]:visible, [data-testid="artifact-preview-frame-srcdoc"]:visible, [data-testid="live-artifact-preview-frame"]:visible';
 
+async function routeByokProfile(
+  page: Page,
+  config: Record<string, unknown>,
+): Promise<void> {
+  await page.route('**/api/byok/profiles', async (route) => {
+    await route.fulfill({
+      json: {
+        available: true,
+        backend: 'test',
+        profiles: [{
+          id: config.byokProfileId,
+          label: 'OpenAI',
+          protocol: config.apiProtocol,
+          baseUrl: config.baseUrl,
+          model: config.model,
+          requiresApiKey: true,
+          configured: true,
+          keyTail: config.byokCredentialTail,
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      },
+    });
+  });
+}
+
 const AGENTS = [
   {
     id: 'codex',
@@ -1422,12 +1448,15 @@ test('[P0] @critical project detail composer BYOK model switch persists from the
   test.setTimeout(60_000);
   const config = {
     mode: 'daemon',
-    apiKey: 'sk-openai-test',
+    apiKey: '',
     apiProtocol: 'openai',
     apiVersion: '',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-2024-05-13',
     apiProviderBaseUrl: 'https://api.openai.com/v1',
+    byokProfileId: 'byok-project-model-switch',
+    byokCredentialConfigured: true,
+    byokCredentialTail: 'test',
     agentId: 'codex',
     skillId: null,
     designSystemId: null,
@@ -1461,6 +1490,7 @@ test('[P0] @critical project detail composer BYOK model switch persists from the
       body: JSON.stringify({ config }),
     });
   });
+  await routeByokProfile(page, config);
 
   await page.goto('/');
   await createProject(page, 'Composer BYOK model switch');
@@ -1492,12 +1522,15 @@ test('[P0] @critical project detail composer keeps Local CLI and BYOK model choi
   test.setTimeout(60_000);
   const config = {
     mode: 'daemon',
-    apiKey: 'sk-openai-test',
+    apiKey: '',
     apiProtocol: 'openai',
     apiVersion: '',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-2024-05-13',
     apiProviderBaseUrl: 'https://api.openai.com/v1',
+    byokProfileId: 'byok-project-model-isolation',
+    byokCredentialConfigured: true,
+    byokCredentialTail: 'test',
     agentId: 'codex',
     skillId: null,
     designSystemId: null,
@@ -1531,6 +1564,7 @@ test('[P0] @critical project detail composer keeps Local CLI and BYOK model choi
       body: JSON.stringify({ config }),
     });
   });
+  await routeByokProfile(page, config);
 
   await page.goto('/');
   await createProject(page, 'Composer model mode isolation');
