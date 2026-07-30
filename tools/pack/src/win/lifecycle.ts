@@ -63,7 +63,7 @@ import type {
 } from "./types.js";
 
 const PACKAGED_CONFIG_PATH_ENV = "OD_PACKAGED_CONFIG_PATH";
-const DESKTOP_EVAL_TIMEOUT_MS = 15_000;
+const DESKTOP_EVAL_TIMEOUT_MS = 60_000;
 const UPDATE_ACTION_TIMEOUT_MS = 10 * 60 * 1000;
 
 function desktopStamp(config: ToolPackConfig): SidecarStamp {

@@ -165,7 +165,7 @@ describe("inspectPackedWinApp", () => {
       expect(requestJsonIpc).toHaveBeenCalledWith(
         expect.any(String),
         { input: { expression: "document.title" }, type: SIDECAR_MESSAGES.EVAL },
-        { timeoutMs: 15_000 },
+        { timeoutMs: 60_000 },
       );
       expect(result.launcher.exists).toBe(false);
       expect(result.updateCache.releaseCount).toBe(0);
