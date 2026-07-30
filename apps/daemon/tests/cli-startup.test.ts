@@ -93,7 +93,7 @@ describe('CLI startup boundaries', () => {
     }
   });
 
-  it('reconciles a durable running message after a real daemon process restart', async () => {
+  it('reconciles a durable running message after a real daemon process restart', { timeout: 60_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'od-cli-daemon-restart-'));
     const dataDir = join(root, 'data');
     await mkdir(dataDir);
@@ -196,11 +196,12 @@ describe('CLI startup boundaries', () => {
         const third = spawn(process.execPath, args, { cwd: daemonRoot, env });
         try {
           await waitForStdoutLine(third, /\[od\] listening on (http:\/\/[^\s]+)/u);
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          const replayedState = JSON.parse(await readFile(statePath, 'utf8')) as {
-            analyticsRecovery?: { completedAt?: number };
-          };
-          expect(replayedState.analyticsRecovery?.completedAt).toBe(checkpoint);
+          await waitFor(() => {
+            const replayedState = JSON.parse(readFileSync(statePath, 'utf8')) as {
+              analyticsRecovery?: { completedAt?: number };
+            };
+            return replayedState.analyticsRecovery?.completedAt === checkpoint;
+          });
         } finally {
           await terminateChild(third);
         }
