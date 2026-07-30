@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { describe, expect, test } from 'vitest';
 
@@ -60,7 +60,8 @@ describe('tools-dev sandbox mode smoke', () => {
       join(suite.scratchDir, 'fake-opencode'),
     );
 
-    await suite.with.toolsDev(
+    await suite.with.pathEntry(dirname(opencodeBin), async () => {
+      await suite.with.toolsDev(
       async ({ status, webUrl }) => {
         expect(status.namespace).toBe(suite.namespace);
 
@@ -79,7 +80,9 @@ describe('tools-dev sandbox mode smoke', () => {
 
         await requestJson(webUrl, '/api/app-config', {
           body: {
-            agentCliEnv: { opencode: { OPENCODE_BIN: opencodeBin } },
+            agentCliEnv: {
+              opencode: { OPENCODE_BIN: opencodeBin },
+            },
             agentId: 'opencode',
             agentModels: { opencode: { model: 'default', reasoning: 'default' } },
             designSystemId: null,
@@ -150,7 +153,7 @@ describe('tools-dev sandbox mode smoke', () => {
         ) as CapturedOpenCodeRun;
         const roots = daemonStatus.sandbox?.roots ?? {};
         expect(capture.argv).toEqual(expect.arrayContaining(['run', '--format', 'json']));
-        expect(capture.cwd.startsWith(`${suite.dataDir}/projects/`)).toBe(true);
+        expect(capture.cwd.startsWith(join(suite.dataDir, 'projects'))).toBe(true);
         expect(capture.hasToolToken).toBe(true);
         expect(capture.promptLength).toBeGreaterThan(0);
         expect(capture.env.OD_SANDBOX_MODE).toBe('1');
@@ -191,6 +194,7 @@ describe('tools-dev sandbox mode smoke', () => {
         },
       },
     );
+    });
   }, 180_000);
 });
 
@@ -199,6 +203,11 @@ async function writeFakeOpenCodeBin(root: string): Promise<string> {
   const bin = join(root, 'opencode-sandbox-smoke.cjs');
   await writeFile(bin, renderFakeOpenCodeScript(), 'utf8');
   await chmod(bin, 0o755);
+  if (process.platform === 'win32') {
+    const cmdBin = join(root, 'opencode-sandbox-smoke.cmd');
+    await writeFile(cmdBin, `@echo off\r\nnode "${bin}" %*\r\n`, 'utf8');
+    return cmdBin;
+  }
   return bin;
 }
 
@@ -282,7 +291,7 @@ function expectPathUnder(
   const actualPath = actual as string;
   const rootPath = root as string;
   expect(
-    actualPath === rootPath || actualPath.startsWith(`${rootPath}/`),
+    actualPath === rootPath || actualPath.startsWith(`${rootPath}\\`) || actualPath.startsWith(`${rootPath}/`),
     `${label}=${actualPath} should be under ${rootPath}`,
   ).toBe(true);
 }

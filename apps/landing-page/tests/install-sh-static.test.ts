@@ -21,13 +21,13 @@ function runInstall(args: string[], pathDir: string) {
 test('landing page serves install.sh as a shell script, not the HTML app fallback', () => {
   const body = readFileSync(installScript, 'utf8');
 
-  assert.match(body, /^#!\/usr\/bin\/env sh\n/);
+  assert.match(body.replace(/\r/g, ''), /^#!\/usr\/bin\/env sh\n/);
   assert.match(body, /od mcp install/);
   assert.doesNotMatch(body, /<!doctype html/i);
   assert.doesNotMatch(body, /<html/i);
 });
 
-test('install.sh delegates to the Open Design CLI installer with the requested agent', () => {
+test('install.sh delegates to the Open Design CLI installer with the requested agent', { skip: process.platform === 'win32' }, () => {
   const tmp = mkdtempSync(join(tmpdir(), 'od-install-sh-'));
   const argvOut = join(tmp, 'argv.txt');
   const fakeOd = join(tmp, 'od');
@@ -58,7 +58,7 @@ printf '%s\\n' "$@" > "${argvOut}"
   }
 });
 
-test('install.sh rejects a shadowed od binary even when its help exits successfully', () => {
+test('install.sh rejects a shadowed od binary even when its help exits successfully', { skip: process.platform === 'win32' }, () => {
   const tmp = mkdtempSync(join(tmpdir(), 'od-install-sh-shadow-success-'));
   const argvOut = join(tmp, 'argv.txt');
   const fakeOd = join(tmp, 'od');
@@ -93,7 +93,7 @@ exit 0
   }
 });
 
-test('install.sh rejects a non-Open-Design od binary instead of calling coreutils od', () => {
+test('install.sh rejects a non-Open-Design od binary instead of calling coreutils od', { skip: process.platform === 'win32' }, () => {
   const tmp = mkdtempSync(join(tmpdir(), 'od-install-sh-shadow-'));
   const fakeOd = join(tmp, 'od');
   writeFileSync(

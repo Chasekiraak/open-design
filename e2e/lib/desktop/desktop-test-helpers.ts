@@ -187,7 +187,9 @@ export async function waitFor(
 }
 
 async function runToolsDev(args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('pnpm', ['tools-dev', ...args], {
+  const command = process.execPath;
+  const commandArgs = [join(repoRoot, 'tools/dev/bin/tools-dev.mjs'), ...args];
+  const { stdout } = await execFileAsync(command, commandArgs, {
     cwd: repoRoot,
     env: process.env,
     maxBuffer: 10 * 1024 * 1024,

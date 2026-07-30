@@ -34,9 +34,11 @@ const jsExtensions = new Set([".js", ".cjs", ".mjs"]);
 function resolvePackageManagerInvocation() {
   const pnpmExecPath = process.env.npm_execpath;
   if (pnpmExecPath != null && pnpmExecPath.length > 0) {
-    if (jsExtensions.has(extname(pnpmExecPath).toLowerCase())) {
+    const ext = extname(pnpmExecPath).toLowerCase();
+    if (jsExtensions.has(ext)) {
       return { argsPrefix: [pnpmExecPath], command: process.execPath };
     }
+    console.error("DEBUG: pnpmExecPath is", pnpmExecPath, "ext is", ext, "jsExtensions has ext?", jsExtensions.has(ext));
     return { argsPrefix: [], command: pnpmExecPath };
   }
 

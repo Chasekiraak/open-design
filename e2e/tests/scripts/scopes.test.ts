@@ -546,7 +546,11 @@ test("certain rules must name a guard that resolves to a real guard check", asyn
   // guard.ts must run through tsx (its check modules use .js-suffixed TS-ESM
   // specifiers), so go through the root guard script exactly like CI does.
   const guardCheckNames = new Set(
-    execFileSync("pnpm", ["--silent", "guard", "--list-checks"], { cwd: repoRoot, encoding: "utf8" })
+    execFileSync("pnpm", ["--silent", "guard", "--list-checks"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    })
       .split("\n")
       .filter(Boolean),
   );

@@ -1173,7 +1173,11 @@ describe("wellKnownUserToolchainBins", () => {
       const fnmBin = join(home, ".local", "share", "fnm", "node-versions", "v20.11.1", "installation", "bin");
       mkdirSync(miseBin, { recursive: true });
       mkdirSync(miseNpmCodexVersionBin, { recursive: true });
-      symlinkSync("0.1.0", join(home, ".local", "share", "mise", "installs", "npm-openai-codex", "latest"), "dir");
+      symlinkSync(
+        join(home, ".local", "share", "mise", "installs", "npm-openai-codex", "0.1.0"),
+        join(home, ".local", "share", "mise", "installs", "npm-openai-codex", "latest"),
+        "junction"
+      );
       mkdirSync(newestNvmBin, { recursive: true });
       mkdirSync(olderNvmBin, { recursive: true });
       mkdirSync(fnmBin, { recursive: true });

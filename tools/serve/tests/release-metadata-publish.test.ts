@@ -243,7 +243,7 @@ describe("shared release metadata publisher", () => {
     } finally {
       await server.close();
     }
-  });
+  }, 30000);
 
   it("rejects a launcher version floor above the release version", async () => {
     // A floor the published release cannot satisfy would make the updater's

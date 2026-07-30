@@ -32,9 +32,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang='en' suppressHydrationWarning>
       {/* eslint-disable-next-line @next/next/no-sync-scripts */}
-      <head>
+      <head suppressHydrationWarning>
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: intentional theme-init inline script to prevent FOUC */}
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body suppressHydrationWarning>
         <I18nProvider>

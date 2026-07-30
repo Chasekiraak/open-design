@@ -64,7 +64,7 @@ describe("buildRunEventLogSources", () => {
     const runsDir = join(tempDir, "runs");
     await touch(join(runsDir, "safe-run_1.2", "events.jsonl"), "safe");
     await touch(join(runsDir, "unsafe run", "events.jsonl"), "space");
-    await touch(join(runsDir, "unsafe:run", "events.jsonl"), "colon");
+    await touch(join(runsDir, "unsafe@run", "events.jsonl"), "at-sign");
 
     const sources = await buildRunEventLogSources(runsDir, { maxRuns: 5 });
     expect(sources.map((source) => source.name)).toEqual([

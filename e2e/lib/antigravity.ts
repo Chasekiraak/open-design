@@ -13,6 +13,11 @@ export async function writeFakeAgyBin(
   const bin = join(root, 'agy');
   await writeFile(bin, renderFakeAgyScript(options), 'utf8');
   await chmod(bin, 0o755);
+  if (process.platform === 'win32') {
+    const cmdBin = join(root, 'agy.cmd');
+    await writeFile(cmdBin, `@echo off\r\nnode "${bin}" %*\r\n`, 'utf8');
+    return cmdBin;
+  }
   return bin;
 }
 

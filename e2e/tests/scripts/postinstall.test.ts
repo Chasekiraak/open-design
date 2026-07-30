@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -153,33 +153,71 @@ function writeTarget(
 
 function writePnpmStub(sandbox: string): string {
   const invocationLog = join(sandbox, "invocations.jsonl");
+  const bin = join(sandbox, "pnpm-stub.mjs");
   writeFileSync(
-    join(sandbox, "pnpm-stub.mjs"),
+    bin,
     [
-      'import { appendFileSync } from "node:fs";',
-      'import { setTimeout as delay } from "node:timers/promises";',
-      "const args = process.argv.slice(2);",
-      'const targetFlagIndex = args.indexOf("-C");',
-      'const target = targetFlagIndex >= 0 ? args[targetFlagIndex + 1] ?? "" : "";',
-      `const logPath = ${JSON.stringify(invocationLog)};`,
-      'appendFileSync(logPath, JSON.stringify({ event: "start", target, args }) + "\\n");',
-      'if (target === "packages/release") await delay(50);',
-      'appendFileSync(logPath, JSON.stringify({ event: "done", target, args }) + "\\n");',
-    ].join("\n"),
+      'import { appendFileSync, mkdirSync, rmdirSync } from "node:fs";',
+      'import { execSync } from "node:child_process";',
+      'try {',
+      '  const args = process.argv.slice(2);',
+      '  const targetFlagIndex = args.indexOf("-C");',
+      '  const target = targetFlagIndex >= 0 ? args[targetFlagIndex + 1] ?? "" : "";',
+      `  const logPath = ${JSON.stringify(invocationLog)};`,
+      '  const lockPath = logPath + ".lock";',
+      '  function writeLog(eventStr) {',
+      '    let retries = 500;',
+      '    while (retries > 0) {',
+      '      try { mkdirSync(lockPath); break; } catch (e) { if (e.code === "EEXIST") { const s = Date.now(); while(Date.now() - s < 10){} retries--; } else throw e; }',
+      '    }',
+      '    if (retries === 0) throw new Error("Lock timeout");',
+      '    try { appendFileSync(logPath, eventStr + "\\n"); } finally { try { rmdirSync(lockPath); } catch(err){} }',
+      '  }',
+      '  writeLog(JSON.stringify({ event: "start", target, args }));',
+      '  if (target === "packages/release") { const s = Date.now(); while(Date.now() - s < 50){} }',
+      '  writeLog(JSON.stringify({ event: "done", target, args }));',
+      '} catch (err) {',
+      `  require("node:fs").writeFileSync(${JSON.stringify(join(sandbox, "stub-error.log"))} + "." + process.pid, err.stack);`,
+      '  process.exit(1);',
+      '}',
+      '',
+    ].join('\n'),
+    "utf8",
   );
+  chmodSync(bin, 0o755);
+  if (process.platform === "win32") {
+    writeFileSync(join(sandbox, "pnpm-stub.cmd"), `@echo off\r\nnode "${bin}" %*\r\n`, "utf8");
+  }
   return invocationLog;
 }
 
 function runFixturePostinstall(sandbox: string, env: Record<string, string | undefined>): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [join(sandbox, "scripts", "postinstall.mjs")], {
+  const cleanEnv = { ...process.env };
+  for (const key of Object.keys(cleanEnv)) {
+    if (key.toLowerCase() === "npm_execpath") {
+      delete cleanEnv[key];
+    }
+  }
+
+  const result = spawnSync(process.execPath, [join(sandbox, "scripts", "postinstall.mjs")], {
     cwd: sandbox,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...cleanEnv,
       npm_execpath: join(sandbox, "pnpm-stub.mjs"),
       ...env,
     },
   });
+  const files = readdirSync(sandbox);
+  for (const file of files) {
+    if (file.startsWith("stub-error.log")) {
+      console.log(`STUB ERROR (${file}):\n` + readFileSync(join(sandbox, file), "utf8"));
+    }
+  }
+  if (result.error) {
+    throw new Error("spawnSync failed: " + result.error.message);
+  }
+  return result;
 }
 
 function readStubEvents(invocationLog: string): StubEvent[] {
@@ -269,7 +307,10 @@ describe("postinstall script contract", () => {
       const invocationLog = writePnpmStub(sandbox);
 
       const result = runFixturePostinstall(sandbox, { OPEN_DESIGN_POSTINSTALL_CONCURRENCY: "" });
-      expect(result.status, String(result.stderr)).toBe(0);
+      if (result.status !== 0) {
+        throw new Error("Test 1 Failed! " + JSON.stringify({ status: result.status, stderr: result.stderr, stdout: result.stdout }));
+      }
+      expect(result.status).toBe(0);
       expect(result.stdout).not.toContain("dependency-aware parallel build enabled");
       expect(result.stdout).toContain("postinstall: skipping apps/daemon (no tsconfig.json in this context)");
 
@@ -300,7 +341,10 @@ describe("postinstall script contract", () => {
       const invocationLog = writePnpmStub(sandbox);
 
       const result = runFixturePostinstall(sandbox, { OPEN_DESIGN_POSTINSTALL_CONCURRENCY: "2" });
-      expect(result.status, String(result.stderr)).toBe(0);
+      if (result.status !== 0) {
+        throw new Error("Test 2 Failed! " + JSON.stringify({ status: result.status, stderr: result.stderr, stdout: result.stdout }));
+      }
+      expect(result.status).toBe(0);
       expect(result.stdout).toContain("postinstall: dependency-aware parallel build enabled (concurrency=2)");
 
       const events = readStubEvents(invocationLog);

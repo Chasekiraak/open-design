@@ -176,6 +176,11 @@ async function writeFakeVelaBin(root: string): Promise<string> {
   const bin = join(root, 'vela');
   await writeFile(bin, FAKE_VELA_SCRIPT, 'utf8');
   await chmod(bin, 0o755);
+  if (process.platform === 'win32') {
+    const cmdBin = join(root, 'vela.cmd');
+    await writeFile(cmdBin, `@echo off\r\nnode "${bin}" %*\r\n`, 'utf8');
+    return cmdBin;
+  }
   return bin;
 }
 

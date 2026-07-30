@@ -10,7 +10,7 @@ function read(path: string) {
 }
 
 function frontmatter(markdown: string): Record<string, string> {
-  const match = markdown.match(/^---\n([\s\S]*?)\n---/);
+  const match = markdown.replace(/\r/g, '').match(/^---\n([\s\S]*?)\n---/);
   assert.ok(match, 'expected frontmatter block');
   return Object.fromEntries(
     match[1]

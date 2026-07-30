@@ -24,5 +24,5 @@ function expandCssFile(filePath: string, seen = new Set<string>()): string {
 }
 
 export function readExpandedIndexCss(): string {
-  return expandCssFile(join(process.cwd(), 'src/index.css'));
+  return expandCssFile(join(process.cwd(), 'src/index.css')).replace(/\r/g, '');
 }

@@ -92,7 +92,7 @@ async function startFixture(
         etag: '"fixture-etag"',
       });
       response.write(payload.subarray(0, options.failFirstBytes));
-      setTimeout(() => response.destroy(), 5);
+      setTimeout(() => response.destroy(), 50);
       return;
     }
 

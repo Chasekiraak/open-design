@@ -76,6 +76,7 @@ describe("scripts guard library", () => {
     const names = execFileSync("pnpm", ["--silent", "guard", "--list-checks"], {
       cwd: repoRoot,
       encoding: "utf8",
+      shell: process.platform === "win32",
     }).trim().split("\n");
     expect(names).toContain("scripts library architecture");
     expect(names).toContain("daemon core boundary");
