@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { Button, VisuallyHidden } from '@open-design/components';
-import type { AmrWalletSnapshot } from '@open-design/contracts';
+import type {
+  AmrWalletSnapshot,
+  ByokCredentialProfile,
+  UpsertByokCredentialProfileRequest,
+} from '@open-design/contracts';
 import { validateBaseUrl } from '@open-design/contracts/api/connectionTest';
 import {
   agentIdToTracking,
@@ -72,6 +76,7 @@ import {
   BYOK_PROVIDER_PRESETS,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_ORBIT,
+  applySavedByokCredentialProfile,
   defaultKnownProviderModel,
   isStoredMediaProviderEntryEmpty,
   isStoredMediaProviderEntryPresent,
@@ -124,7 +129,11 @@ import type {
   ProviderModelsResponse,
   SkillSummary,
 } from '../types';
-import { testAgent, testApiProvider } from '../providers/connection-test';
+import {
+  testAgent,
+  testApiProvider,
+  testSavedByokProfile,
+} from '../providers/connection-test';
 import { fetchProviderModels } from '../providers/provider-models';
 import {
   fetchConnectors,
@@ -421,6 +430,14 @@ interface Props {
    * "Save key" button rather than the autosave channel.
    */
   onPersistComposioKey: (composio: AppConfig['composio']) => Promise<void> | void;
+  /**
+   * Explicitly moves the current BYOK key draft into the daemon's OS-backed
+   * credential store. The returned profile is non-secret and becomes the only
+   * credential reference retained by the UI.
+   */
+  onPersistByokCredential?: (
+    input: UpsertByokCredentialProfileRequest,
+  ) => Promise<ByokCredentialProfile>;
   /**
    * True while the daemon-backed Composio config is still hydrating on
    * first paint after a dev-server / app restart. The Connectors section
@@ -1353,7 +1370,11 @@ export function shouldEnableSettingsSave(
       cfg.agentId && agents.find((a) => a.id === cfg.agentId)?.available,
     );
   }
-  return Boolean(cfg.apiKey.trim() && cfg.model.trim() && isBaseUrlValid);
+  return Boolean(
+    (cfg.apiKey.trim() || (cfg.byokProfileId && cfg.byokCredentialConfigured))
+    && cfg.model.trim()
+    && isBaseUrlValid,
+  );
 }
 
 /**
@@ -1388,6 +1409,9 @@ export function sanitizeSettingsSavePayload(
     ...cfg,
     mode: initial.mode,
     apiKey: initial.apiKey,
+    byokProfileId: initial.byokProfileId,
+    byokCredentialConfigured: initial.byokCredentialConfigured,
+    byokCredentialTail: initial.byokCredentialTail,
     apiProtocol: initial.apiProtocol,
     apiVersion: initial.apiVersion,
     apiProtocolConfigs: initial.apiProtocolConfigs,
@@ -1418,7 +1442,7 @@ export function switchApiProtocolConfig(
     },
     protocol,
   );
-  return applyApiProtocolConfig(
+  const switched = applyApiProtocolConfig(
     {
       ...config,
       mode: 'api',
@@ -1427,6 +1451,14 @@ export function switchApiProtocolConfig(
     protocol,
     nextApiConfig,
   );
+  return currentProtocol === protocol
+    ? switched
+    : {
+        ...switched,
+        byokProfileId: undefined,
+        byokCredentialConfigured: false,
+        byokCredentialTail: undefined,
+      };
 }
 
 export function SettingsDialog({
@@ -1441,6 +1473,7 @@ export function SettingsDialog({
   onPersist,
   onSilentUpdatePreferenceChange,
   onPersistComposioKey,
+  onPersistByokCredential,
   composioConfigLoading = false,
   onClose,
   onRefreshAgents,
@@ -1775,6 +1808,7 @@ export function SettingsDialog({
   const providerTestRevisionRef = useRef(0);
   const providerModelsRevisionRef = useRef(0);
   const providerTestFirstResetRef = useRef(true);
+  const providerTestSkipNextResetRef = useRef(false);
   const providerModelsFirstResetRef = useRef(true);
   const providerModelsSkipNextResetRef = useRef(false);
   const deferAfterKeyCleanRef = useRef(false);
@@ -2040,6 +2074,10 @@ export function SettingsDialog({
       providerTestFirstResetRef.current = false;
       return;
     }
+    if (providerTestSkipNextResetRef.current) {
+      providerTestSkipNextResetRef.current = false;
+      return;
+    }
     providerTestRevisionRef.current += 1;
     providerAutoTestKeyRef.current = null;
     setByokPreconditionNotice(null);
@@ -2140,6 +2178,14 @@ export function SettingsDialog({
         ? (current.apiProviderBaseUrl ?? null) !== null
         : currentProtocol !== provider.protocol ||
           (current.apiProviderBaseUrl ?? null) !== nextProviderBaseUrl;
+      const finalizeProviderSwitch = (next: AppConfig): AppConfig => providerChanged
+        ? {
+            ...next,
+            byokProfileId: undefined,
+            byokCredentialConfigured: false,
+            byokCredentialTail: undefined,
+          }
+        : next;
       const switched = switchApiProtocolConfig(current, provider.protocol);
       const fallbackApiConfig = currentApiProtocolConfig(switched);
       const customDraftKey = provider.custom
@@ -2170,7 +2216,7 @@ export function SettingsDialog({
       };
       if (savedDraft) {
         applyDraftUiState(savedDraft);
-        return applyApiProtocolConfig(
+        return finalizeProviderSwitch(applyApiProtocolConfig(
           persistByokProviderConfigDraft(
             {
               ...switched,
@@ -2181,11 +2227,11 @@ export function SettingsDialog({
           ),
           provider.protocol,
           savedDraft.apiConfig,
-        );
+        ));
       }
       if (persistedDraft) {
         applyDraftUiState(undefined);
-        return applyApiProtocolConfig(
+        return finalizeProviderSwitch(applyApiProtocolConfig(
           persistByokProviderConfigDraft(
             {
               ...switched,
@@ -2196,7 +2242,7 @@ export function SettingsDialog({
           ),
           provider.protocol,
           persistedDraft.apiConfig,
-        );
+        ));
       }
       const switchedWithCurrentDraft = persistByokProviderConfigDraft(
         switched,
@@ -2205,22 +2251,42 @@ export function SettingsDialog({
       );
       if (provider.custom) {
         applyDraftUiState(undefined);
-        return updateCurrentApiProtocolConfig(switchedWithCurrentDraft, {
+        return finalizeProviderSwitch(updateCurrentApiProtocolConfig(switchedWithCurrentDraft, {
           apiProviderBaseUrl: null,
           ...(providerChanged ? { model: '' } : {}),
-        });
+        }));
       }
       applyDraftUiState(undefined);
-      return updateCurrentApiProtocolConfig(switchedWithCurrentDraft, {
+      return finalizeProviderSwitch(updateCurrentApiProtocolConfig(switchedWithCurrentDraft, {
         ...(providerChanged ? { apiKey: '' } : {}),
         baseUrl: provider.baseUrl,
         model: provider.preferredModels[0] ?? '',
         apiProviderBaseUrl: provider.baseUrl,
-      });
+      }));
     });
   };
   const updateApiConfig = (patch: Partial<ApiProtocolConfig>) =>
-    setCfg((c) => updateCurrentApiProtocolConfig(c, patch));
+    setCfg((c) => {
+      const next = updateCurrentApiProtocolConfig(c, patch);
+      const invalidatesProfile = (
+        (patch.apiKey !== undefined && Boolean(patch.apiKey.trim()))
+        || (patch.baseUrl !== undefined && patch.baseUrl !== c.baseUrl)
+        || (patch.model !== undefined && patch.model !== c.model)
+        || (patch.apiVersion !== undefined && patch.apiVersion !== c.apiVersion)
+      );
+      return invalidatesProfile
+        ? {
+            ...next,
+            // Keep the id so a confirmed replacement updates the existing
+            // secure-store entry instead of leaking orphaned keychain items.
+            // The configured marker is cleared so runs remain blocked until
+            // the edited draft is tested and saved again.
+            byokProfileId: c.byokProfileId,
+            byokCredentialConfigured: false,
+            byokCredentialTail: undefined,
+          }
+        : next;
+    });
   const updateMaxTokensInput = (raw: string) => {
     setMaxTokensInput(raw);
     const trimmed = raw.trim();
@@ -2514,23 +2580,56 @@ export function SettingsDialog({
       }
     };
     try {
-      const result = await testApiProvider(
-        {
-          protocol: apiProtocol,
-          baseUrl: cfg.baseUrl,
-          apiKey: cleanByokApiKey(cfg.apiKey),
-          model: cfg.model,
-          apiVersion:
-            apiProtocol === 'azure'
-              ? cfg.apiVersion?.trim() || undefined
-              : undefined,
-        },
-        controller.signal,
+      const testingSavedProfile = Boolean(
+        cfg.byokProfileId
+        && cfg.byokCredentialConfigured
+        && !cfg.apiKey.trim(),
       );
+      const result = testingSavedProfile && cfg.byokProfileId
+        ? await testSavedByokProfile(cfg.byokProfileId, controller.signal)
+        : await testApiProvider(
+            {
+              protocol: apiProtocol,
+              baseUrl: cfg.baseUrl,
+              apiKey: cleanByokApiKey(cfg.apiKey),
+              model: cfg.model,
+              apiVersion:
+                apiProtocol === 'azure'
+                  ? cfg.apiVersion?.trim() || undefined
+                  : undefined,
+            },
+            controller.signal,
+          );
       if (controller.signal.aborted) return;
       if (providerTestRevisionRef.current !== revision) {
         clearIfStale();
         return;
+      }
+      if (result.ok && apiProtocol !== 'bedrock' && !testingSavedProfile) {
+        if (!onPersistByokCredential) {
+          throw new Error('Secure BYOK credential storage is unavailable');
+        }
+        const profile = await onPersistByokCredential({
+          ...(cfg.byokProfileId ? { id: cfg.byokProfileId } : {}),
+          label: selectedProvider?.label ?? API_PROTOCOL_LABELS[apiProtocol],
+          protocol: apiProtocol,
+          baseUrl: cfg.baseUrl.trim(),
+          model: cfg.model.trim(),
+          ...(apiProtocol === 'azure' && cfg.apiVersion?.trim()
+            ? { apiVersion: cfg.apiVersion.trim() }
+            : {}),
+          requiresApiKey: byokRequiresApiKey,
+          ...(cfg.apiKey.trim()
+            ? { apiKey: cleanByokApiKey(cfg.apiKey) }
+            : {}),
+        });
+        if (controller.signal.aborted) return;
+        if (providerTestRevisionRef.current !== revision) {
+          clearIfStale();
+          return;
+        }
+        providerTestSkipNextResetRef.current = true;
+        setCfg((current) => applySavedByokCredentialProfile(current, profile));
       }
       setProviderTestState({ status: 'done', result });
       if (!result.ok && result.kind === 'not_found_model') {
@@ -3289,6 +3388,13 @@ export function SettingsDialog({
     cfg.baseUrl,
   );
   const byokProviderConfigured = (provider: ByokProviderPreset): boolean => {
+    if (
+      selectedByokProvider?.id === provider.id
+      && cfg.byokProfileId
+      && cfg.byokCredentialConfigured
+    ) {
+      return true;
+    }
     if (provider.custom) {
       return canRunProviderConnectionTest(currentApiProtocolConfig(cfg), {
         requiresApiKey: byokRequiresApiKey,
@@ -3334,6 +3440,9 @@ export function SettingsDialog({
       },
       {
         requiresApiKey: byokRequiresApiKey,
+        credentialConfigured: Boolean(
+          cfg.byokProfileId && cfg.byokCredentialConfigured,
+        ),
         keyValidationBaseUrl: byokKeyValidationBaseUrl,
       },
     ),
@@ -3343,6 +3452,8 @@ export function SettingsDialog({
       byokRequiresApiKey,
       cfg.apiKey,
       cfg.baseUrl,
+      cfg.byokCredentialConfigured,
+      cfg.byokProfileId,
       cfg.model,
     ],
   );
@@ -3357,6 +3468,8 @@ export function SettingsDialog({
       cfg.apiProtocol,
       cfg.apiProviderBaseUrl,
       cfg.baseUrl,
+      cfg.byokCredentialConfigured,
+      cfg.byokProfileId,
       cfg.model,
     ],
   );
@@ -3373,6 +3486,9 @@ export function SettingsDialog({
       },
       {
         requiresApiKey: byokRequiresApiKey,
+        credentialConfigured: Boolean(
+          cfg.byokProfileId && cfg.byokCredentialConfigured,
+        ),
         requireModel: false,
         keyValidationBaseUrl: byokKeyValidationBaseUrl,
       },
@@ -3383,6 +3499,8 @@ export function SettingsDialog({
       byokRequiresApiKey,
       cfg.apiKey,
       cfg.baseUrl,
+      cfg.byokCredentialConfigured,
+      cfg.byokProfileId,
       cfg.model,
     ],
   );
@@ -3674,7 +3792,8 @@ export function SettingsDialog({
     focusByokRequiredFieldAfterProtocolSwitchRef.current = false;
     focusByokRequiredField(
       missingByokConnectionFields(cfg, {
-        requiresApiKey: byokRequiresApiKey,
+        requiresApiKey: byokRequiresApiKey
+          && !(cfg.byokProfileId && cfg.byokCredentialConfigured),
       })[0],
     );
   }, [apiModelCustomActive, cfg, apiProtocol, byokRequiresApiKey]);
