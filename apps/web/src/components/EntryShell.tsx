@@ -96,6 +96,7 @@ import { BrandsTab } from './BrandsTab';
 import { EntryNavRail, type EntryView as EntryViewKind } from './EntryNavRail';
 import { ProjectSearchModal } from './ProjectSearchModal';
 import { CloudSignInTip, RailAccountSyncTip } from './CloudSignInTip';
+import { resolveEntryRailAccountFooterState } from './entry-rail-account-state';
 import { LibrarySection } from './LibrarySection';
 import { UpdaterPopup } from './UpdaterPopup';
 import { WhatsNewPopup } from './WhatsNewPopup';
@@ -416,6 +417,10 @@ interface Props {
   // uses this to show the AMR cloud card in a detecting/skeleton state
   // instead of hiding it during the seconds AMR's probe takes to settle.
   agentsLoading?: boolean;
+  // Local credential state is independent from the remote workspace read.
+  // During a transient Cloud outage it prevents the rail from presenting a
+  // still-signed-in user as signed out.
+  amrLoggedIn?: boolean | null;
   daemonLive: boolean;
   onModeChange: (mode: ExecMode) => void;
   onAgentChange: (id: string) => void;
@@ -540,6 +545,7 @@ export function EntryShell({
   onProviderModelsCacheChange,
   agents,
   agentsLoading = false,
+  amrLoggedIn = null,
   daemonLive,
   onModeChange,
   onAgentChange,
@@ -586,6 +592,10 @@ export function EntryShell({
   // unresolved or unavailable authority into an anonymous, unbound create.
   const workspaceContextState = useWorkspaceContext();
   const { context: workspaceContext, loading: workspaceLoading } = workspaceContextState;
+  const accountFooterState = resolveEntryRailAccountFooterState(
+    workspaceContextState,
+    amrLoggedIn,
+  );
   const workspaceContextRef = useRef(workspaceContext);
   workspaceContextRef.current = workspaceContext;
   const workspaceBillingResponse = useWorkspaceBillingResponse();
@@ -1405,18 +1415,16 @@ export function EntryShell({
           onInvite={() => changeView('members')}
           onSignInCloud={() => navigate({ kind: 'home', view: 'onboarding' })}
           updaterSlot={updaterSlot}
-          // recvqgpXSYFNTq: `workspaceLoading` is only ever true while
-          // `workspaceContext` is null (see `useWorkspaceContext`'s
-          // `markLoading`, which promotes "no context" to "loading" and never
-          // touches an already-resolved context) — so this is the exact
-          // window between a just-finished sign-in and the re-read landing.
-          // Swap the callout for a same-slot loading state there instead of
-          // rendering nothing, which used to read as the rail silently
-          // forgetting the user just signed in.
+          // A loading or unavailable workspace read is not proof of sign-out.
+          // Keep the account slot neutral until Cloud answers successfully;
+          // only a successful null context (or known local sign-out) may show
+          // the sign-in card.
           footerNotice={
-            !workspaceContext ? (
-              workspaceLoading ? <RailAccountSyncTip /> : <CloudSignInTip />
-            ) : null
+            accountFooterState === 'syncing'
+              ? <RailAccountSyncTip />
+              : accountFooterState === 'sign-in'
+                ? <CloudSignInTip />
+                : null
           }
         />
         {projectSearchOpen ? (

@@ -115,6 +115,74 @@ describe('EntryShell AMR workspace precheck race', () => {
     resetTeamProjectsCache();
   });
 
+  it('keeps a locally signed-in account in syncing state while Cloud is unavailable', async () => {
+    window.history.replaceState(null, '', '/');
+    const contextFailure = deferred<Response>();
+    let contextReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/workspace/context')) {
+        contextReads += 1;
+        return contextFailure.promise;
+      }
+      if (url.endsWith('/api/plugins')) return jsonResponse({ plugins: [] });
+      if (url.endsWith('/api/mcp/servers')) return jsonResponse({ servers: [] });
+      if (url.endsWith('/api/community/discord')) return jsonResponse({ stale: true });
+      if (url.endsWith('/api/github/open-design')) return jsonResponse({ stale: true });
+      return jsonResponse({});
+    }) as typeof fetch;
+
+    render(
+      <I18nProvider initial="en">
+        <EntryShell
+          skills={[]}
+          designTemplates={[]}
+          designSystems={[]}
+          projects={[]}
+          templates={[]}
+          promptTemplates={[]}
+          defaultDesignSystemId={null}
+          connectors={[]}
+          connectorsLoading={false}
+          config={amrConfig()}
+          agents={[amrAgent()]}
+          amrLoggedIn
+          daemonLive
+          onModeChange={vi.fn()}
+          onAgentChange={vi.fn()}
+          onAgentModelChange={vi.fn()}
+          onApiProtocolChange={vi.fn()}
+          onApiModelChange={vi.fn()}
+          onConfigPersist={vi.fn()}
+          onRefreshAgents={vi.fn(() => [amrAgent()])}
+          onCreateProject={vi.fn()}
+          onCreatePluginShareProject={vi.fn()}
+          onImportClaudeDesign={vi.fn()}
+          onOpenProject={vi.fn()}
+          onOpenLiveArtifact={vi.fn()}
+          onDeleteProject={vi.fn()}
+          onRenameProject={vi.fn()}
+          onChangeDefaultDesignSystem={vi.fn()}
+          onPersistComposioKey={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onCompleteOnboarding={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByTestId('entry-rail-account-sync-tip')).toBeTruthy();
+    expect(contextReads).toBe(1);
+
+    await act(async () => {
+      contextFailure.resolve(new Response(null, { status: 503 }));
+      await contextFailure.promise;
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId('entry-cloud-signin-tip')).toBeNull();
+    expect(screen.getByTestId('entry-rail-account-sync-tip')).toBeTruthy();
+  });
+
   it('rechecks workspace B when the workspace switches after workspace A passes the gate', async () => {
     window.history.replaceState(null, '', '/');
     const workspaceA = teamContext('workspace-a', 'member-a');
