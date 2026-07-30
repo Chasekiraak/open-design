@@ -729,6 +729,7 @@ export interface SpawnVelaLoginDeps {
   configuredEnv?: Record<string, string>;
   baseEnv?: NodeJS.ProcessEnv;
   attribution?: AmrEntryAttribution | null;
+  correlationEnv?: Record<string, string>;
   defaultApiUrl?: string | null;
   // When set, block until the direct attempt reaches device-auth steady state
   // (prints its activation URL) or exits/errors before that, so the login route
@@ -880,6 +881,7 @@ export async function spawnVelaLogin(
   const env = {
     ...spawnEnvForAgent('amr', baseEnv, configuredEnv),
     ...velaLoginAttributionEnv(deps.attribution),
+    ...(deps.correlationEnv ?? {}),
   };
   // Route through createCommandInvocation so an npm/Node-style `vela.cmd` or
   // `vela.bat` shim on Windows gets wrapped under `cmd.exe /d /s /c …` with
