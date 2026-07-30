@@ -120,6 +120,19 @@ function renderOnboarding(
     onRenameProject: vi.fn(),
     onChangeDefaultDesignSystem: vi.fn(),
     onPersistComposioKey: vi.fn(),
+    onPersistByokCredential: vi.fn(async (input) => ({
+      id: input.id ?? 'byok-onboarding-test',
+      label: input.label,
+      protocol: input.protocol,
+      baseUrl: input.baseUrl,
+      model: input.model,
+      apiVersion: input.apiVersion,
+      requiresApiKey: input.requiresApiKey ?? true,
+      configured: true,
+      keyTail: input.apiKey?.slice(-4),
+      createdAt: 1,
+      updatedAt: 1,
+    })),
     onOpenSettings: vi.fn(),
     onCompleteOnboarding: vi.fn(),
     ...overrides,
@@ -793,7 +806,7 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     expect(screen.queryByText('Signing in…')).toBeNull();
   });
 
-  it('clears AMR login pending when the cloud sign-in is canceled', async () => {
+  it('clears AMR login pending when canceled and allows a fresh sign-in attempt', async () => {
     const fetchMock = vi.fn(async (input, init) => {
       const url = String(input);
       if (url.endsWith('/api/integrations/vela/status')) {
@@ -824,6 +837,15 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     });
     expect(cloudButton.hasAttribute('disabled')).toBe(false);
     expect(screen.getByRole('button', { name: /Local coding agent/i })).toBeTruthy();
+
+    fireEvent.click(cloudButton);
+    await act(async () => {});
+    expect(screen.getByText('Signing in…')).toBeTruthy();
+    const loginCalls = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input).endsWith('/api/integrations/vela/login') && init?.method === 'POST',
+    );
+    expect(loginCalls).toHaveLength(2);
   });
 
   it('preserves a pre-start cancel when the status refresh rejects', async () => {
@@ -1713,6 +1735,12 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
 
     expect(props.onModeChange).toHaveBeenCalledWith('api');
     expect(props.onApiModelChange).toHaveBeenCalledWith('claude-opus-4-8');
+    expect(props.onPersistByokCredential).toHaveBeenCalledWith(expect.objectContaining({
+      protocol: 'anthropic',
+      apiKey: 'test-api-key',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-opus-4-8',
+    }));
     expect(props.onConfigPersist).toHaveBeenCalled();
     await waitFor(() => {
       expect(props.onCompleteOnboarding).toHaveBeenCalledTimes(1);
@@ -1720,10 +1748,13 @@ describe('EntryShell onboarding Open Design AMR runtime', () => {
     expect((props.onConfigPersist as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]).toMatchObject({
       mode: 'api',
       apiProtocol: 'anthropic',
-      apiKey: 'test-api-key',
+      apiKey: '',
       baseUrl: 'https://api.anthropic.com',
       model: 'claude-opus-4-8',
       apiProviderBaseUrl: null,
+      byokProfileId: 'byok-onboarding-test',
+      byokCredentialConfigured: true,
+      byokCredentialTail: '-key',
     });
   });
 

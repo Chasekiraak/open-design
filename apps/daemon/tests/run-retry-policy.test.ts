@@ -181,6 +181,22 @@ describe('decideSafeRunRetry', () => {
       shouldRetry: false,
       retrySuppressedReason: 'unsafe_failure_stage',
     });
+
+    for (const failure_stage of ['tool_outstanding', 'post_tool_resume'] as const) {
+      expect(
+        decide({
+          failure: {
+            failure_category: 'timeout',
+            failure_detail: 'inactivity_timeout',
+            failure_stage,
+            retryable: true,
+          },
+        }),
+      ).toMatchObject({
+        shouldRetry: false,
+        retrySuppressedReason: 'unsafe_failure_stage',
+      });
+    }
   });
 
   it('does not retry successful or cancelled terminal results', () => {

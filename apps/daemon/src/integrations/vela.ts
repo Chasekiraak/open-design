@@ -900,6 +900,7 @@ export interface SpawnVelaLoginDeps {
   configuredEnv?: Record<string, string>;
   baseEnv?: NodeJS.ProcessEnv;
   attribution?: AmrEntryAttribution | null;
+  correlationEnv?: Record<string, string>;
   defaultApiUrl?: string | null;
   // When set, block until the direct attempt reaches device-auth steady state
   // (prints its activation URL) or exits/errors before that, so the login route
@@ -1117,6 +1118,7 @@ async function spawnVelaLoginAttempt(
   const env: NodeJS.ProcessEnv = {
     ...spawnEnvForAgent('amr', baseEnv, configuredEnv),
     ...velaLoginAttributionEnv(deps.attribution),
+    ...(deps.correlationEnv ?? {}),
     // The UUID is daemon-owned and written after configured/base env so a
     // child cannot replace the correlation key selected for this attempt.
     OPEN_DESIGN_AMR_AUTH_ATTEMPT_ID: deps.attempt.authAttemptId,
@@ -1303,6 +1305,7 @@ export async function spawnVelaLoginWithFallback(
     ...(deps.configuredEnv ? { configuredEnv: deps.configuredEnv } : {}),
     ...(deps.baseEnv ? { baseEnv: deps.baseEnv } : {}),
     ...(deps.attribution !== undefined ? { attribution: deps.attribution } : {}),
+    ...(deps.correlationEnv ? { correlationEnv: deps.correlationEnv } : {}),
     ...(deps.waitForActivation !== undefined
       ? { waitForActivation: deps.waitForActivation }
       : {}),

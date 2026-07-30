@@ -15,9 +15,12 @@ test.beforeEach(async ({ page }) => {
       JSON.stringify({
         mode: 'api',
         apiProtocol: 'openai',
-        apiKey: 'sk-test',
+        apiKey: '',
         baseUrl: 'https://api.deepseek.com',
         model: 'deepseek-v4-flash',
+        byokProfileId: 'byok-api-empty-response',
+        byokCredentialConfigured: true,
+        byokCredentialTail: 'test',
         agentId: null,
         skillId: null,
         designSystemId: null,
@@ -59,6 +62,26 @@ test.beforeEach(async ({ page }) => {
         models: [{ id: 'default', label: 'Default' }],
       },
     ]);
+  });
+  await page.route('**/api/byok/profiles', async (route) => {
+    await route.fulfill({
+      json: {
+        available: true,
+        backend: 'test',
+        profiles: [{
+          id: 'byok-api-empty-response',
+          label: 'DeepSeek',
+          protocol: 'openai',
+          baseUrl: 'https://api.deepseek.com',
+          model: 'deepseek-v4-flash',
+          requiresApiKey: true,
+          configured: true,
+          keyTail: 'test',
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      },
+    });
   });
 });
 

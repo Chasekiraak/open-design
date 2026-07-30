@@ -19,6 +19,10 @@ export type AnalyticsEventName =
   | 'langfuse_report_result'
   | 'run_retry_attempted'
   | 'run_retry_finished'
+  // Local MCP / external-plugin lifecycle (schema v3).
+  | 'mcp_session_initialized'
+  | 'mcp_tool_started'
+  | 'mcp_tool_finished'
   // Paid media provider request outcome and bounded response retry.
   | 'media_generation_result'
   // Packaged updater lifecycle
