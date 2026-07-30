@@ -8,6 +8,7 @@ import { T } from '@/timeouts';
 
 const STORAGE_KEY = 'open-design:config';
 const ACTIVE_ARTIFACT_PREVIEW_SELECTOR = '[data-testid="artifact-preview-frame"]:visible, [data-testid="artifact-preview-frame-url-load"]:visible, [data-testid="artifact-preview-frame-srcdoc"]:visible, [data-testid="live-artifact-preview-frame"]:visible';
+const SHORTCUT_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 test.describe.configure({ timeout: T.long });
 
@@ -350,8 +351,9 @@ test('[P1] manual edit duplicates and deletes a selected element', async ({ page
 
   await page.getByTestId('manual-edit-duplicate').click();
   await expectFileSourceMatches(page, projectId, 'manual-edit-structure.html', /<img\b[\s\S]*<img\b/);
+  await selectInsertedImageForDelete(frame);
   await page.getByTestId('manual-edit-delete').click();
-  await expectFileSource(page, projectId, 'manual-edit-structure.html', ['src="/hero.png"']);
+  await expectFileSource(page, projectId, 'manual-edit-structure.html', ['data-od-id="hero-image"', 'src="/hero.png"']);
   await expectFileSourceCount(page, projectId, 'manual-edit-structure.html', /<img\b/gi, 1);
 });
 
@@ -365,11 +367,12 @@ test('[P1] manual edit copies and pastes a selected element as a new block', asy
   await page.getByTestId('manual-edit-mode-toggle').click();
   const frame = artifactPreviewFrame(page);
   await selectPreviewElementWithoutInspector(page, frame, '[data-od-id="hero-image"]');
-  await frame.locator('body').press('Control+c');
-  await frame.locator('body').press('Control+v');
+  await frame.locator('body').press(`${SHORTCUT_MODIFIER}+c`);
+  await frame.locator('body').press(`${SHORTCUT_MODIFIER}+v`);
   await expectFileSourceMatches(page, projectId, 'manual-edit-copy-paste.html', /<img\b[\s\S]*<img\b/);
+  await selectInsertedImageForDelete(frame);
   await page.getByTestId('manual-edit-delete').click();
-  await expectFileSource(page, projectId, 'manual-edit-copy-paste.html', ['src="/hero.png"']);
+  await expectFileSource(page, projectId, 'manual-edit-copy-paste.html', ['data-od-id="hero-image"', 'src="/hero.png"']);
   await expectFileSourceCount(page, projectId, 'manual-edit-copy-paste.html', /<img\b/gi, 1);
 });
 
@@ -435,6 +438,14 @@ async function selectPreviewElementWithoutInspector(
     await expect(frame.locator(`${selector}[data-od-edit-selected="true"]`)).toHaveCount(1, { timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
   await expect(page.getByTestId('manual-edit-selection-frame')).toBeVisible();
+}
+
+async function selectInsertedImageForDelete(frame: ReturnType<Page['frameLocator']>) {
+  const images = frame.locator('img');
+  await expect(images).toHaveCount(2);
+  await images.nth(1).click();
+  await expect(images.nth(1)).toHaveAttribute('data-od-edit-selected', 'true');
+  await expect(images.nth(0)).not.toHaveAttribute('data-od-edit-selected', 'true');
 }
 
 test('[P0] @critical preview toolbar keeps share, download, comment, and zoom actions reachable', async ({ page }) => {
