@@ -224,6 +224,9 @@ export type RuntimeAgentDef = {
   // default. Operators can still override per-process via
   // `OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS` — that env wins.
   inactivityTimeoutMs?: number;
+  // Opt-in compatibility for ACP adapters that terminate a prompt with a
+  // `turn_end` session update rather than a session/prompt RPC response.
+  acpTurnEndCompletesPrompt?: boolean;
   // Declarative authentication probe. When set, detection spawns
   // `<bin> <args>` after the version check and classifies the combined
   // stdout/stderr to derive `authStatus`. This replaces the previous
